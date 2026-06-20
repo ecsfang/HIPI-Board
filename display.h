@@ -4,20 +4,13 @@
 #include <queue>
 #include "hpil.h"
 
-class CDisplay {
-    IL_Status_e     status;
-    IL_ADDR_t       addr;
-    bool            sai;
-    char            *sdi;
+class CDisplay : public CDevice {
     std::queue<unsigned char> fifo;
 public:
-    CDisplay() {
-        status = STAT_NONE;
-        addr = 31;
-        sai = false;
-        sdi = NULL;
+    CDisplay(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) : CDevice(name, _sai, _aau) {
     }
     IL_CMD_t hpil(IL_CMD_t cmd);
+    void clear(void);
 };
 
 #endif//__DISPLAY_H__

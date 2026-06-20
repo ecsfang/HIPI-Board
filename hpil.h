@@ -1,24 +1,24 @@
 #ifndef __HPIL_H__
 #define __HPIL_H__
 
-#define DOE     0x400
-#define SDC     0x404
+#define DOE     0x400   // Data byte (0-255)
+#define SDC     0x404   // Selected device clear
 #define DCL     0x414
 #define LAD     0x420
 #define UNL     0x43F
 #define TAD     0x440
 #define UNT     0x45F
 #define IFC     0x490
-#define AAU     0x49A
-#define DDL     0x4A0
-#define DDT     0x4C0
+#define AAU     0x49A   // Auto Address Unconfigure
+#define DDL     0x4A0   // Device dependent listener (0-31)
+#define DDT     0x4C0   // Device dependent talker (0-31)
 #define ETO     0x540
 #define ETE     0x541
 #define NRD     0x542
-#define SDA     0x560
-#define SST     0x561
-#define SDI     0x562
-#define SAI     0x563
+#define SDA     0x560   // Send data
+#define SST     0x561   // Send status
+#define SDI     0x562   // Send device ID
+#define SAI     0x563   // Send accessory identification
 #define AAD     0x580
 
 #define MAX_ADDR    0x1F
@@ -38,5 +38,29 @@ typedef enum {
     MODE_NONE,
     P_MODE
 } IL_Mode_e;
+
+class CDevice {
+protected:
+    IL_Status_e     status;
+    IL_ADDR_t       addr;
+    const char      *devName;
+    bool            sai;
+    IL_ADDR_t       nSai;
+    IL_ADDR_t       nAau;
+    const char      *sdi;
+public:
+    CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) {
+        devName = name;
+        status = STAT_NONE;
+        addr = 31;
+        sai = false;
+        sdi = NULL;
+        nSai = _sai;
+        nAau = _aau;
+    }
+    bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
+    virtual IL_CMD_t hpil(IL_CMD_t cmd) = 0;
+    virtual void clear() = 0;
+};
 
 #endif//__HPIL_H__

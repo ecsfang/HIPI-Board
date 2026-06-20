@@ -1,48 +1,41 @@
 #include <stdio.h>
+#include <cstring>
 #include "drive.h"
 
-static char *devName = "CDRIVE";
+void CDrive::clear(void)
+{
+    //if self.check():
+    //    self.tape.seek(0)
+    mode = MODE_NONE;
+}
 
 IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 {
-    IL_CMD_t  rtn = cmd;
+    IL_CMD_t rtn = cmd;
 
     if( ddl == 5 ) {
         //Busy formatting
-        //if self.check():
-        //    self.tape.write(self.buf0)
-        //    if self.tape.tell()>=131072:
-        //        self.end=True
-        //        self.ddl=31
-        //        self.sst=0
-        //        self.tape.close()
-        //        self.tape=open(share.Tape,'+b')
+        if( check() ) {
+            tape.write(buf0);
+            if( tape.tell() >= 131072 ) {
+                end = true;
+                ddl = 31;
+                sst = 0;
+                tape.close();
+                //tape = open(share.Tape,'+b');
+            }
+        }
     }
+
+    if( base(cmd, &rtn) )
+        return rtn;
+
     if( cmd == IFC) {
         status = STAT_NONE;
         mode = MODE_NONE;
         ddl=31;
         ddt=31;
         sst=0;
-    } else if( (cmd == DCL) || ((cmd == SDC) && (status == LISTENER)) ) {
-        //if self.check():
-        //    self.tape.seek(0)
-        status = STAT_NONE;
-        mode = MODE_NONE;
-    } else if( cmd == AAU ) {
-        addr = 2;
-    } else if( cmd == (LAD+addr) ) {
-        status = LISTENER;
-    } else if( inAddrRange(cmd, TAD) ) {
-        if( cmd == (TAD + addr) ) {
-            status = TALKER;
-            end = true;
-        } else {
-            status = STAT_NONE;
-        }
-    } else if( inAddrRange(cmd, AAD) ) {
-        addr = cmd - AAD;
-        rtn = cmd+1;
     } else if( status == TALKER ) {
         if( cmd == UNT ) {
             status = STAT_NONE;
@@ -51,13 +44,13 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
         } else {
             if( cmd == SDA ) {
                 if( ddt > 4 )
-                    rtn = 0x540;
+                    rtn = ETO;
                 else {
                     end = false;
                     rtn = next(cmd);
                 }
             } else if( cmd == SAI ) {
-                rtn = 0x10;
+                rtn = nSai;
                 end = true;
             } else if( cmd == SST ) {
                 //self.check()
@@ -98,10 +91,10 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
             } else if( cmd < DOE ) {
                 // Data
                 if( cmd != last )
-                    rtn = 0x541;
+                    rtn = ETE;      // Error
                 else {
                     if( end )
-                        rtn = 0x540;
+                        rtn = ETO;  // OK!
                     else
                         rtn = next(cmd);
                 }
@@ -145,26 +138,25 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
                     switch( n ) {
                     case 5:
                         //Format
-                        //mode = MODE_NONE;
-                        //self.sst=32
-                        //for i in range(256):
-                        //    self.buf0[i]=255
+                        mode = MODE_NONE;
+                        sst = 32;
+                        memset(buf0, 255, 256);
                         break;
                     case 6:
                         //Partial write
-                        //self.readblock()
-                        //if self.check():
-                        //    self.tape.seek(self.tape.tell()-256)
+                        readblock();
+                        if( check() )
+                            tape.seek(tape.tell()-256);
                         mode = P_MODE;
                         break;
                     case 4:
                         //Seek
-                        //self.tmp=0
+                        tmp = 0;
                         mode = MODE_NONE;
                         break;
                     case 2:
                         //Write
-                        //self.pt=0
+                        pt = 0;
                         mode = MODE_NONE;
                         break;
                     }
@@ -178,3 +170,155 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
     }
     return rtn;
 }
+
+IL_CMD_t CDrive::next(IL_CMD_t cmd) {
+    IL_CMD_t rtn = cmd;
+    if( status == TALKER ) {
+        if( sdi ) {
+            rtn = (IL_CMD_t)*sdi;
+            sdi++;
+            if( !*sdi ) {
+                end = true;
+                sdi = NULL;
+            } else if( ddt == 3 ) {
+                // Send position
+                if( check() ) {
+                    if( tmp == 0 ) {
+                        rtn = (tape.tell() / 256) / 256;
+                    } else if( tmp == 1 ) {
+                        rtn = (tape.tell() / 256) % 256;
+                    } else {
+                        rtn = pt;
+                        ddt = 31;
+                        end = true;
+                    }
+                    tmp++;
+                } else {
+                    rtn = 0x541;
+                    ddt = 31;
+                }
+            } else if( ddt < 3 ) {
+                if( ddt == 1 ) {
+                    // Send buffer 1
+                    rtn = buf1[pt];
+                } else {
+                    // send Buffer 0 or Read
+                    rtn = buf0[pt];
+                }
+                pt = (pt+1) % 256;
+                if( pt == 0 ) {
+                    if( ddt == 1 ) {
+                        // Send buffer 1
+                        end = true;
+                        ddt = 31;
+                    } else {
+                        // send Buffer 0 or Read
+                        if( check() ) {
+                            if( tape.tell() >= size*256 ) {
+                                end = true;
+                                ddt = 31;
+                            } else {
+                                readblock();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if( status == LISTENER ) {
+        if( ddl == 3 ) {
+            // Set byte pointer
+            pt = cmd % 256;
+        } else if( ddl == 4 ) {
+            // Seek
+            if( tmp == 0 ) {
+                tmp = 1+(cmd % 256);
+            } else {
+                if( check() ) {
+                    unsigned int b = 256*(tmp-1)+(cmd % 256);
+                    if( b < size ) {
+                        tape.seek(256*b);
+                        sst = 0;
+                    } else {
+                        sst = 0x1c;
+                    }
+                }
+                tmp = 0;
+                ddl = 31;
+            }
+        } else if( ddl == 1 ) {
+            // Write buffer 1
+            buf1[pt] = cmd % 256;
+            pt = (pt+1) % 256;
+        } else {
+            buf0[pt] = cmd % 256;
+            pt = (pt+1) % 256;
+            if( (cmd & 0x200) != 0 ) {
+                writeblock();
+                if( (mode == P_MODE) && check() ) {
+                    if( pt == 0 ) {
+                        readblock();
+                    }
+                    tape.seek(tape.tell()-256);
+                }
+            } else if( pt == 0 ) {
+                writeblock();
+                if( (mode == P_MODE) && check() ) {
+                    readblock();
+                    tape.seek(tape.tell()-256);
+                }
+            }
+        }
+    }
+    return rtn;
+}
+void CDrive::readblock()
+{
+    if( check() ) {
+        // Read 256 bytes from tape
+        // If less than 256 fill with 256 ...
+    }
+}
+void CDrive::writeblock()
+{
+    if( check() ) {
+        // Write buf0 to tape
+        // ... and flush!
+    }
+}
+bool CDrive::check()
+{
+    return false;
+}
+#if 0
+    def readblock(self):
+        if self.check():
+            buf=bytearray(self.tape.read(256))
+            self.buf0[:len(buf)]=buf
+            for i in range(len(buf),256):
+                self.buf0[i]=255
+        
+
+    def writeblock(self):
+        if self.check():
+            self.tape.write(self.buf0)
+            self.tape.flush()
+        
+    def check(self):
+        if share.TapeOK:
+            return True
+        else:
+            if share.SDOK[0]:
+                self.tape=open(share.Tape,'+b')
+                self.tape.seek(24)
+                self.size=int.from_bytes(self.tape.read(4))*int.from_bytes(self.tape.read(4))*int.from_bytes(self.tape.read(4))
+                if self.size==0:
+                    self.size=512
+                self.tape.seek(0)                
+                self.sst=0x17
+                share.TapeOK=True
+                return True
+            else:
+                self.sst=0x14
+                return False
+#endif

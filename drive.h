@@ -4,28 +4,38 @@
 #include <queue>
 #include "hpil.h"
 
-class CDrive {
-    IL_Status_e     status;
+class CTape {
+public:
+    CTape() {}
+    unsigned int tell(void) { return 1; }
+    void write(unsigned char *buf) {}
+    void seek(unsigned int s) {}
+    void close() {}
+};
+
+class CDrive : public CDevice {
     IL_Mode_e       mode;
-    IL_ADDR_t       addr;
     IL_ADDR_t       ddl;
     IL_ADDR_t       ddt;
     IL_ADDR_t       sst;
     IL_CMD_t        last;
-    bool            sai;
     bool            end;
-    char            *sdi;
     unsigned int    tmp;
     std::queue<unsigned char> fifo;
+    unsigned int pt;
+    CTape           tape;
+    unsigned char   buf0[256];
+    unsigned char   buf1[256];
+    size_t          size;
 public:
-    CDrive() {
-        status = STAT_NONE;
-        addr = 31;
-        sai = false;
-        sdi = NULL;
+    CDrive(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) : CDevice(name, _sai, _aau) {
     }
     IL_CMD_t hpil(IL_CMD_t cmd);
-    IL_CMD_t next(IL_CMD_t cmd) { return cmd; }
+    IL_CMD_t next(IL_CMD_t cmd);
+    void clear(void);
+    bool check();
+    void readblock();
+    void writeblock();
 };
 
 #endif//__DRIVE_H__

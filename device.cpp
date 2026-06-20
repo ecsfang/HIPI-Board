@@ -1,42 +1,59 @@
 #include <stdio.h>
-#include "display.h"
+#include "hpil.h"
 
-void CDisplay::clear(void)
+bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
-    /* Clear device 
-        video.clear()
-    */
-    fifo = std::queue<unsigned char>();
-}
-
-IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
-{
-    IL_CMD_t rtn = cmd;
-    if( base(cmd, &rtn) )
-        return rtn;
-
-    if( cmd == IFC  ) {
+    if( ((cmd == UNL) && (status == LISTENER))
+            || ((cmd == UNT) && (status == TALKER)) ) {
         status = STAT_NONE;
-    } else if( (cmd == SAI) && (status == TALKER) ) {
-        rtn = nSai;
-        sai = true;
-    } else if( (cmd == SDI) && (status == TALKER) ) {
-        rtn = 'J';
-        sdi = devName;
-    } else if( (cmd < DOE) && (status == LISTENER) ) {
-        // Data
-        fifo.push(cmd & 0xFF);
-    } else if( sai ) {
-        rtn = (cmd == nSai) ? ETO : ETE;
-        sai = false;
-    } else if( sdi ) {
-        rtn = *devName++;
-        if( rtn == 0 ) {
-            rtn = ETO;
-            sdi = NULL;
-        }
+        return true;
     }
-    return rtn;
+    if ((cmd == DCL) || ((cmd == SDC) && (status == LISTENER)) ) {
+        clear();
+        status = STAT_NONE;
+        return true;
+    }
+    if( cmd == AAU ) {
+        addr = nAau;
+        return true;
+    }
+    if( cmd == (LAD+addr) ) {
+        status = LISTENER;
+        return true;
+    }
+    if( inAddrRange(cmd, TAD) ) {
+        if( cmd == (TAD + addr) )
+            status = TALKER;
+        else
+            status = STAT_NONE;
+        return true;
+    }
+    if( inAddrRange(cmd, AAD) ) {
+        addr = cmd - AAD;
+        *rtn = cmd + 1;
+        return true;
+    }
+//     else if( (cmd == SAI) && (status == TALKER) ) {
+//        rtn = nSai;
+//        sai = true;
+//    } else if( (cmd == SDI) && (status == TALKER) ) {
+//        rtn = 'J';
+//        sdi = devName;
+//    } else if( (cmd < DOE) && (status == LISTENER) ) {
+//        // Data
+//        fifo.push(cmd & 0xFF);
+//    } else if( sai ) {
+//        rtn = (cmd == nSai) ? ETO : ETE;
+//        sai = false;
+//    } else if( sdi ) {
+//        rtn = *devName++;
+//        if( rtn == 0 ) {
+//            rtn = ETO;
+//            sdi = NULL;
+//        }
+//    }
+//    return rtn;
+    return false;
 }
 
 #if 0
