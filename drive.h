@@ -36,6 +36,8 @@ public:
     bool check();
     void readblock();
     void writeblock();
+    void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn);
+    void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);
 };
 
 #endif//__DRIVE_H__

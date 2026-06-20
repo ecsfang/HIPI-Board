@@ -27,9 +27,11 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
         }
     }
 
+    // Handle all base commands
     if( base(cmd, &rtn) )
         return rtn;
 
+    // Otherwise handle device specific commands
     if( cmd == IFC) {
         status = STAT_NONE;
         mode = MODE_NONE;
@@ -37,138 +39,148 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
         ddt=31;
         sst=0;
     } else if( status == TALKER ) {
-        if( cmd == UNT ) {
-            status = STAT_NONE;
-        } else if( cmd == NRD ) {
-            end = true;
-        } else {
-            if( cmd == SDA ) {
-                if( ddt > 4 )
-                    rtn = ETO;
-                else {
-                    end = false;
-                    rtn = next(cmd);
-                }
-            } else if( cmd == SAI ) {
-                rtn = nSai;
-                end = true;
-            } else if( cmd == SST ) {
-                //self.check()
-                //y=self.sst
-                end = true;
-            } else if( cmd == SDI ) {
-                rtn = 'J';
-                sdi = devName;
-                end = false;
-            } else if( inAddrRange(cmd, DDT) ) {
-                IL_ADDR_t n = cmd & MAX_ADDR;
-                if( n == 4 ) {
-                    //Exchange buffers
-                    //for i in range(256):
-                    //    u=self.buf0[i]
-                    //    self.buf0[i]=self.buf1[i]
-                    //    self.buf1[i]=u
-                    //self.pt=0
-                } else {
-                    ddt = n;
-                    end = false;
-                    switch (n) {
-                    case 3:
-                        // Send Position
-                        tmp=0;
-                        break;
-                    case 2:
-                        // Read
-                        //self.readblock()
-                        //self.pt=0
-                        mode = MODE_NONE;
-                        break;
-                    case 0:
-                        // Send Buffer 0
-                        mode = MODE_NONE;
-                    }
-                }
-            } else if( cmd < DOE ) {
-                // Data
-                if( cmd != last )
-                    rtn = ETE;      // Error
-                else {
-                    if( end )
-                        rtn = ETO;  // OK!
-                    else
-                        rtn = next(cmd);
-                }
-            }
-            last = rtn;
-        }
+        doTalker(cmd, &rtn);
     } else if( status == LISTENER ) {
-        if( inAddrRange(cmd, DDL) ) {
-            IL_ADDR_t n = cmd & MAX_ADDR;
-            if( n > 10 ) {
-                mode = MODE_NONE;
-            } else {
-                switch( n ) {
-                case 10:
-                    //Exchange buffers
-                    //for i in range(256):
-                    //    u=self.buf0[i]
-                    //    self.buf0[i]=self.buf1[i]
-                    //    self.buf1[i]=u
-                    //self.pt=0
-                    break;
-                case 9:
-                    // Transfer buffer
-                    //for i in range(256):
-                    //    self.buf1[i]=self.buf0[i]
-                    //self.pt=0
-                    break;
-                case 8:
-                    //Close record
-                    //self.writeblock()
-                    //if (self.mode=="P") and self.check():
-                    //    self.tape.seek(self.tape.tell()-256)
-                    break;
-                case 7:
-                    //Rewind (incomplete)
-                    //if self.check():
-                    //    self.tape.seek(0)
-                    break;
-                default:
-                    ddl = n;
-                    switch( n ) {
-                    case 5:
-                        //Format
-                        mode = MODE_NONE;
-                        sst = 32;
-                        memset(buf0, 255, 256);
-                        break;
-                    case 6:
-                        //Partial write
-                        readblock();
-                        if( check() )
-                            tape.seek(tape.tell()-256);
-                        mode = P_MODE;
-                        break;
-                    case 4:
-                        //Seek
-                        tmp = 0;
-                        mode = MODE_NONE;
-                        break;
-                    case 2:
-                        //Write
-                        pt = 0;
-                        mode = MODE_NONE;
-                        break;
-                    }
-                }
-            }
-        } else if( cmd == UNL ) {
-            status = STAT_NONE;
-        } else if( cmd < DOE ) {
-            rtn = next(cmd);
-        }
+        doListener(cmd, &rtn);
     }
     return rtn;
+}
+
+void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
+{
+    if( cmd == UNT ) {
+        status = STAT_NONE;
+    } else if( cmd == NRD ) {
+        end = true;
+    } else {
+        if( cmd == SDA ) {
+            if( ddt > 4 )
+                *rtn = ETO;
+            else {
+                end = false;
+                *rtn = next(cmd);
+            }
+        } else if( cmd == SAI ) {
+            *rtn = nSai;
+            end = true;
+        } else if( cmd == SST ) {
+            //self.check()
+            //y=self.sst
+            end = true;
+        } else if( cmd == SDI ) {
+            *rtn = 'J';
+            sdi = devName;
+            end = false;
+        } else if( inAddrRange(cmd, DDT) ) {
+            IL_ADDR_t n = cmd & MAX_ADDR;
+            if( n == 4 ) {
+                //Exchange buffers
+                //for i in range(256):
+                //    u=self.buf0[i]
+                //    self.buf0[i]=self.buf1[i]
+                //    self.buf1[i]=u
+                //self.pt=0
+            } else {
+                ddt = n;
+                end = false;
+                switch (n) {
+                case 3:
+                    // Send Position
+                    tmp=0;
+                    break;
+                case 2:
+                    // Read
+                    //self.readblock()
+                    //self.pt=0
+                    mode = MODE_NONE;
+                    break;
+                case 0:
+                    // Send Buffer 0
+                    mode = MODE_NONE;
+                }
+            }
+        } else if( cmd < DOE ) {
+            // Data
+            if( cmd != last )
+                *rtn = ETE;      // Error
+            else {
+                if( end )
+                    *rtn = ETO;  // OK!
+                else
+                    *rtn = next(cmd);
+            }
+        }
+        last = *rtn;
+    }
+}
+
+void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
+{
+    if( inAddrRange(cmd, DDL) ) {
+        IL_ADDR_t n = cmd & MAX_ADDR;
+        if( n > 10 ) {
+            mode = MODE_NONE;
+        } else {
+            switch( n ) {
+            case 10:
+                //Exchange buffers
+                //for i in range(256):
+                //    u=self.buf0[i]
+                //    self.buf0[i]=self.buf1[i]
+                //    self.buf1[i]=u
+                //self.pt=0
+                break;
+            case 9:
+                // Transfer buffer
+                //for i in range(256):
+                //    self.buf1[i]=self.buf0[i]
+                //self.pt=0
+                break;
+            case 8:
+                //Close record
+                //self.writeblock()
+                //if (self.mode=="P") and self.check():
+                //    self.tape.seek(self.tape.tell()-256)
+                break;
+            case 7:
+                //Rewind (incomplete)
+                //if self.check():
+                //    self.tape.seek(0)
+                break;
+            default:
+                ddl = n;
+                switch( n ) {
+                case 5:
+                    //Format
+                    mode = MODE_NONE;
+                    sst = 32;
+                    memset(buf0, 255, 256);
+                    break;
+                case 6:
+                    //Partial write
+                    readblock();
+                    if( check() )
+                        tape.seek(tape.tell()-256);
+                    mode = P_MODE;
+                    break;
+                case 4:
+                    //Seek
+                    tmp = 0;
+                    mode = MODE_NONE;
+                    break;
+                case 2:
+                    //Write
+                    pt = 0;
+                    mode = MODE_NONE;
+                    break;
+                }
+            }
+        }
+    } else if( cmd == UNL ) {
+        status = STAT_NONE;
+    } else if( cmd < DOE ) {
+        *rtn = next(cmd);
+    }
 }
 
 IL_CMD_t CDrive::next(IL_CMD_t cmd) {
