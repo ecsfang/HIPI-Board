@@ -12,9 +12,12 @@ void CDisplay::clear(void)
 IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
+
+    // Handle all base commands
     if( base(cmd, &rtn) )
         return rtn;
 
+    // Otherwise handle device specific commands
     if( cmd == IFC  ) {
         status = STAT_NONE;
     } else if( (cmd == SAI) && (status == TALKER) ) {

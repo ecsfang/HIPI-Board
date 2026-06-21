@@ -61,6 +61,7 @@ public:
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
     virtual IL_CMD_t hpil(IL_CMD_t cmd) = 0;
     virtual void clear() = 0;
+    void show(void);
 };
 
 #endif//__HPIL_H__

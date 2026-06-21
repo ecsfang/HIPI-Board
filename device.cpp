@@ -1,6 +1,11 @@
 #include <stdio.h>
 #include "hpil.h"
 
+void CDevice::show(void)
+{
+    printf("%s: status:%c addr:%d", devName, status==2?'T':((status==1)?'L':'-'), addr);
+}
+
 bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     if( ((cmd == UNL) && (status == LISTENER))
