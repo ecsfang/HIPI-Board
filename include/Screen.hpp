@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// HIPI video-display emulator — Screen class
+// HP82163 video-display emulator — Screen class
 // Ported from MicroPython to C++17.
 //
 // Original MicroPython code: J. Chilla, March 2026.
@@ -10,13 +10,13 @@
 //
 //   #include "RA8875.hpp"
 //   #include "Screen.hpp"
-//   hipi::MySpiTransport t;        // your platform-specific transport
-//   hipi::RA8875        display(t);
+//   hp82163::MySpiTransport t;        // your platform-specific transport
+//   hp82163::RA8875        display(t);
 //   display.begin();                  // initialise display + upload CGRAM font
-//   hipi::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/200);
+//   hp82163::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/200);
 //   for (uint8_t c : "Hello, world!")  screen.pr_char(c);
 //
-// The Screen class consumes HIPI (HP-IL HP-41 video) byte streams and
+// The Screen class consumes HP82163 (HP-IL HP-41 video) byte streams and
 // renders them on the RA8875 display.  See README.md for details.
 
 #pragma once
@@ -25,7 +25,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace hipi {
+namespace hp82163 {
 
 class Screen {
 public:
@@ -44,9 +44,9 @@ public:
            std::uint8_t size,
            std::uint8_t brightness);
 
-    // Process a single HIPI input byte.  This is the main entry point
+    // Process a single HP82163 input byte.  This is the main entry point
     // for an HP-41 display stream.  Recognised bytes include ASCII printable
-    // characters, BS, LF, CR, ESC, and the HIPI escape sequences.
+    // characters, BS, LF, CR, ESC, and the HP82163 escape sequences.
     void pr_char(std::uint8_t c);
 
     // ----- High-level commands used by pr_char but also useful externally ---
@@ -58,7 +58,7 @@ public:
     // Useful after changing size or restoring the layer.
     void full();
 
-    // Scroll / roll helpers matching the HIPI commands.
+    // Scroll / roll helpers matching the HP82163 commands.
     //   roll=true  -> also draw the new bottom line from the buffer
     //   cmd=true   -> also rotate the line buffer (true for ESC-83/84)
     void up(bool roll = false, bool cmd = true);
@@ -84,10 +84,10 @@ public:
     std::uint8_t size()    const { return size_; }
     std::uint16_t color()  const { return color_; }
 
-    // Cursor-mode commands (HIPI ESC-60/62, 81/82, 65..68, 72, 37).
+    // Cursor-mode commands (HP82163 ESC-60/62, 81/82, 65..68, 72, 37).
     void cursor(std::uint8_t cur);
 
-    // ESC % row col: direct cursor addressing (matches HIPI protocol).
+    // ESC % row col: direct cursor addressing (matches HP82163 protocol).
     //   row, col — 1-based byte values from the HP-41 stream.
     void cursor_pos(std::uint8_t row, std::uint8_t col);
 
@@ -137,5 +137,5 @@ private:
     std::uint8_t cp_;        // cursor position within current physical line
 };
 
-}  // namespace hipi
+}  // namespace hp82163
 

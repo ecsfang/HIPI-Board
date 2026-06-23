@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-namespace hipi {
+namespace hp82163 {
 
 // -----------------------------------------------------------------------
 // Construction & init
@@ -149,7 +149,7 @@ void RA8875::pllInit() {
 }
 
 // -----------------------------------------------------------------------
-// HIPI-specific configuration
+// HP82163-specific configuration
 // -----------------------------------------------------------------------
 
 void RA8875::set8Bpp() {
@@ -512,5 +512,5 @@ void RA8875::triangleHelper(std::int16_t x1, std::int16_t y1,
     waitPoll(DCR, DCR_LNSQTR_STATUS);
 }
 
-}  // namespace hipi
+}  // namespace hp82163
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// HIPI video-display emulator — Screen class.
+// HP82163 video-display emulator — Screen class.
 // C++17 port of the MicroPython class by J. Chilla, March 2026.
 
 #include "Screen.hpp"
@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace hipi {
+namespace hp82163 {
 
 // -----------------------------------------------------------------------
 // Construction
@@ -310,7 +310,7 @@ void Screen::cursor_pos(std::uint8_t row, std::uint8_t col) {
 }
 
 // -----------------------------------------------------------------------
-// pr_char — main HIPI byte dispatcher
+// pr_char — main HP82163 byte dispatcher
 // -----------------------------------------------------------------------
 
 void Screen::pr_char(std::uint8_t c) {
@@ -553,6 +553,6 @@ void Screen::fon_write(const char* s) {
 // Special-case cursor command 37 ("ESC %" with row, col already in pos_)
 namespace {
 }  // namespace
-}  // namespace hipi
+}  // namespace hp82163
 
 

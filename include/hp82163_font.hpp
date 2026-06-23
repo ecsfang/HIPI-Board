@@ -3,7 +3,7 @@
 #pragma once
 #include <cstdint>
 
-namespace hipi {
+namespace hp82163 {
 
 // Each character is 8 pixels wide and 16 pixels tall.
 // Bitmap layout: 16 bytes per character, one byte per row.
@@ -113,4 +113,4 @@ inline constexpr std::uint8_t font[FONT_CHAR_COUNT][FONT_BYTES_PER_CHAR] = {
     { 115, 219, 206, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },  //  94 ASCII 126 '~'
 };
 
-}  // namespace hipi
+}  // namespace hp82163

@@ -12,7 +12,7 @@
 
 #include "PicoSpiTransport.hpp"
 
-namespace hipi {
+namespace hp82163 {
 
 PicoSpiTransport::PicoSpiTransport(spi_inst_t* spi_inst,
                                    std::uint32_t baudrate,
@@ -66,4 +66,4 @@ void PicoSpiTransport::delayMs(std::uint32_t ms) {
     sleep_ms(ms);
 }
 
-}  // namespace hipi
+}  // namespace hp82163

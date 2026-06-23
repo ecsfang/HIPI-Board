@@ -8,10 +8,10 @@
 #pragma once
 
 #include "RA8875Transport.hpp"
-#include "hipi_font.hpp"
+#include "hp82163_font.hpp"
 #include <cstdint>
 
-namespace hipi {
+namespace hp82163 {
 
 class RA8875 {
 public:
@@ -141,7 +141,7 @@ public:
     //
     // Pass `nullptr` or omit the argument to skip the CGRAM upload (you can
     // do it later via uploadCgramChar()).  Pass a custom font to override
-    // the bundled 8x16 HIPI bitmap.
+    // the bundled 8x16 HP82163 bitmap.
     void begin();
     void begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
                std::size_t fontChars);
@@ -217,7 +217,7 @@ public:
     void line    (std::int16_t x1, std::int16_t y1, std::int16_t x2, std::int16_t y2, std::uint16_t color);
 
     // -----------------------------------------------------------------------
-    // HIPI-specific configuration (called by Screen / share.py setup)
+    // HP82163-specific configuration (called by Screen / share.py setup)
     // -----------------------------------------------------------------------
 
     // Switch the controller to 8-bit colour depth (256 colours).
@@ -266,6 +266,6 @@ private:
     const char*   mode_;        // "gfx", "txt", "fon", or nullptr
 };
 
-}  // namespace hipi
+}  // namespace hp82163
 
 

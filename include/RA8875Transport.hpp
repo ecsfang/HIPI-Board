@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace hipi {
+namespace hp82163 {
 
 class RA8875Transport {
 public:
@@ -34,4 +34,4 @@ public:
     virtual void delayMs(std::uint32_t ms) = 0;
 };
 
-}  // namespace hipi
+}  // namespace hp82163

@@ -13,7 +13,7 @@
 #include <filesystem>
 #include <string>
 
-namespace hipi {
+namespace hp82163 {
 
 class LinuxSpiDevTransport : public RA8875Transport {
 public:
@@ -49,4 +49,4 @@ private:
     std::string rst_path_;
 };
 
-}  // namespace hipi
+}  // namespace hp82163

@@ -1,78 +1,109 @@
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.2.0)
+set(toolchainVersion 14_2_Rel1)
+set(picotoolVersion 2.2.0-a4)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
+set(PICO_BOARD pico2 CACHE STRING "Board type")
+
+# SPDX-License-Identifier: MIT
+#
+# CMakeLists.txt for the hp82163_cpp project, structured to build under
+# the "Raspberry Pi Pico" VS Code extension.
+#
+# The VS Code extension invokes cmake with a toolchain file that already
+# sets PICO_SDK_PATH, PICO_BOARD, PICO_PLATFORM, and the ARM cross-compiler.
+# We just need to call pico_sdk_init() and add our targets.
+
 cmake_minimum_required(VERSION 3.16)
-project(hipi_cpp LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
+# ----------------------------------------------------------------------
+# Locate & initialise the Pico SDK.
+#
+# The VS Code extension pre-sets PICO_SDK_PATH via its toolchain file.
+# If you're building from the command line without the extension, either:
+#   - export PICO_SDK_PATH=/path/to/pico-sdk, or
+#   - pass -DPICO_SDK_PATH=/path/to/pico-sdk on the cmake command line.
+# ----------------------------------------------------------------------
+if(DEFINED ENV{PICO_SDK_PATH} AND NOT DEFINED PICO_SDK_PATH)
+    set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
 endif()
 
+if(NOT DEFINED PICO_SDK_PATH)
+    message(FATAL_ERROR
+        "PICO_SDK_PATH is not set.  Set it as an env var or pass "
+        "-DPICO_SDK_PATH=/path/to/pico-sdk to cmake.")
+endif()
+
+get_filename_component(PICO_SDK_PATH "${PICO_SDK_PATH}" ABSOLUTE)
+
+# This file lives inside the pico-sdk checkout and brings in all the
+# helper functions (pico_enable_stdio_usb, pico_add_extra_outputs, etc.).
+include("${PICO_SDK_PATH}/pico_sdk_init.cmake")
+
+project(hp82163_pico C CXX)
+
+# Initialise the Raspberry Pi Pico SDK
+pico_sdk_init()
+
+# ----------------------------------------------------------------------
+# Project-wide compile flags.
+# ----------------------------------------------------------------------
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 # ----------------------------------------------------------------------
-# Core library
+# Core library — RA8875 driver + HP82163 Screen class (platform-neutral).
 # ----------------------------------------------------------------------
-add_library(hipi_core
+add_library(hp82163_core STATIC
     src/RA8875.cpp
     src/Screen.cpp
 )
-target_include_directories(hipi_core PUBLIC include)
+target_include_directories(hp82163_core PUBLIC include)
 
 # ----------------------------------------------------------------------
-# Linux spidev example
+# Pico-specific transport — links against pico-sdk's SPI/GPIO hw libs.
 # ----------------------------------------------------------------------
-option(HIPI_BUILD_LINUX_EXAMPLE "Build the Linux spidev example" ON)
-if(HIPI_BUILD_LINUX_EXAMPLE)
-    add_executable(hipi_linux_demo
-        examples/main.cpp
+add_library(hp82163_pico_transport STATIC
+    src/PicoSpiTransport.cpp
+)
+target_link_libraries(hp82163_pico_transport PUBLIC
+    hp82163_core
+    pico_stdlib
+    hardware_spi
+    hardware_gpio
+)
+target_include_directories(hp82163_pico_transport PUBLIC include)
+
+# ----------------------------------------------------------------------
+# Demo executable — flashed by the VS Code extension.
+# ----------------------------------------------------------------------
+add_executable(hp82163_pico_demo
+    src/pico_main.cpp
+)
+target_link_libraries(hp82163_pico_demo PRIVATE
+    hp82163_core
+    hp82163_pico_transport
+)
+pico_enable_stdio_usb(hp82163_pico_demo 1)
+pico_enable_stdio_uart(hp82163_pico_demo 0)
+pico_add_extra_outputs(hp82163_pico_demo)
+
+# ----------------------------------------------------------------------
+# Optional: Linux spidev demo (off by default for Pico-focused work).
+# ----------------------------------------------------------------------
+option(HP82163_BUILD_LINUX_EXAMPLE "Build the Linux spidev demo" OFF)
+if(HP82163_BUILD_LINUX_EXAMPLE)
+    add_executable(hp82163_linux_demo
         src/LinuxSpiDevTransport.cpp
+        src/linux_main.cpp
     )
-    target_include_directories(hipi_linux_demo PRIVATE include)
-    target_link_libraries(hipi_linux_demo PRIVATE hipi_core)
+    target_link_libraries(hp82163_linux_demo PRIVATE hp82163_core)
 endif()
-
-# ----------------------------------------------------------------------
-# Raspberry Pico 2 (RP2350) — requires pico-sdk
-# ----------------------------------------------------------------------
-option(HIPI_BUILD_PICO_EXAMPLE "Build the Raspberry Pico 2 example" OFF)
-if(HIPI_BUILD_PICO_EXAMPLE)
-    # Initialize the pico-sdk from the parent project if not already done.
-    if(NOT PICO_SDK_PATH AND NOT DEFINED PICO_SDK_FETCH_FROM_GIT)
-        message(FATAL_ERROR
-            "HIPI_BUILD_PICO_EXAMPLE is ON but pico-sdk is not available. "
-            "Set PICO_SDK_PATH or build this target from a pico project tree.")
-    endif()
-
-    if(NOT TARGET pico_stdlib)
-        include(pico_sdk_import.cmake)
-        pico_sdk_init()
-    endif()
-
-    add_library(hipi_pico_transport STATIC src/PicoSpiTransport.cpp)
-    target_include_directories(hipi_pico_transport PUBLIC include)
-    target_link_libraries(hipi_pico_transport PUBLIC
-        pico_stdlib hardware_spi hardware_gpio
-    )
-
-    add_executable(hipi_pico_demo
-        examples/pico_main.cpp
-    )
-    target_link_libraries(hipi_pico_demo
-        PRIVATE
-            hipi_core
-            hipi_pico_transport
-    )
-    pico_enable_stdio_usb(hipi_pico_demo 1)
-    pico_enable_stdio_uart(hipi_pico_demo 0)
-
-    # Produce UF2 for drag-and-drop flashing.
-    pico_add_extra_outputs(hipi_pico_demo)
-endif()
-
-# ----------------------------------------------------------------------
-# Install
-# ----------------------------------------------------------------------
-install(TARGETS hipi_core ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
-install(DIRECTORY include/ DESTINATION include)
