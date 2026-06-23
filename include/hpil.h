@@ -22,22 +22,20 @@
 #define AAD     0x580
 
 #define MAX_ADDR    0x1F
+#define MAX_CMD     0x1F
+
 #define inAddrRange(a,x) ((a) >= (x) && (a) <= ((x)+MAX_ADDR))
 
 
 typedef unsigned short int IL_CMD_t;
 typedef unsigned char      IL_ADDR_t;
+typedef unsigned char      IL_DATA_t;
 
 typedef enum {
     STAT_NONE,
     LISTENER,
     TALKER
 } IL_Status_e;
-
-typedef enum {
-    MODE_NONE,
-    P_MODE
-} IL_Mode_e;
 
 class CDevice {
 protected:

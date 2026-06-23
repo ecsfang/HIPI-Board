@@ -3,7 +3,7 @@
 
 void CDevice::show(void)
 {
-    printf("%s: status:%c addr:%d", devName, status==2?'T':((status==1)?'L':'-'), addr);
+    printf("%s: status:%c addr:%2d", devName, status==2?'T':((status==1)?'L':'-'), addr);
 }
 
 bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
@@ -38,26 +38,6 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
         *rtn = cmd + 1;
         return true;
     }
-//     else if( (cmd == SAI) && (status == TALKER) ) {
-//        rtn = nSai;
-//        sai = true;
-//    } else if( (cmd == SDI) && (status == TALKER) ) {
-//        rtn = 'J';
-//        sdi = devName;
-//    } else if( (cmd < DOE) && (status == LISTENER) ) {
-//        // Data
-//        fifo.push(cmd & 0xFF);
-//    } else if( sai ) {
-//        rtn = (cmd == nSai) ? ETO : ETE;
-//        sai = false;
-//    } else if( sdi ) {
-//        rtn = *devName++;
-//        if( rtn == 0 ) {
-//            rtn = ETO;
-//            sdi = NULL;
-//        }
-//    }
-//    return rtn;
     return false;
 }
 
