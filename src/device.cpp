@@ -8,22 +8,27 @@ void CDevice::show(void)
 
 bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
+    printf("[");
     if( ((cmd == UNL) && (status == LISTENER))
             || ((cmd == UNT) && (status == TALKER)) ) {
         status = STAT_NONE;
+        printf("1] ");
         return true;
     }
     if ((cmd == DCL) || ((cmd == SDC) && (status == LISTENER)) ) {
         clear();
         status = STAT_NONE;
+        printf("2] ");
         return true;
     }
     if( cmd == AAU ) {
         addr = nAau;
+        printf("3] ");
         return true;
     }
     if( cmd == (LAD+addr) ) {
         status = LISTENER;
+        printf("4] ");
         return true;
     }
     if( inAddrRange(cmd, TAD) ) {
@@ -31,13 +36,32 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
             status = TALKER;
         else
             status = STAT_NONE;
+        printf("5] ");
         return true;
     }
     if( inAddrRange(cmd, AAD) ) {
         addr = cmd - AAD;
         *rtn = cmd + 1;
+        printf("6] ");
         return true;
     }
+    if( sai ) {
+        *rtn = (cmd == nSai) ? ETO : ETE;
+        sai = false;
+        printf("7] ");
+        return true;
+    }
+    if( sdi ) {
+        *rtn = *sdi++;
+        if( *rtn == 0 ) {
+            *rtn = ETO;
+            sdi = NULL;
+        }
+        printf("8] ");
+        return true;
+    }
+
+    printf("-] ");
     return false;
 }
 

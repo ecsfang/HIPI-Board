@@ -13,6 +13,8 @@
 //   cmake --build build
 //   picotool load -f build/hp82163_pico_demo.uf2
 
+#include <stdlib.h>
+
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"
@@ -20,8 +22,21 @@
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
+#include "pico/time.h"
 
 #include <cstdio>
+
+#define PICO_DEFAULT_LED
+
+#ifdef PICO_DEFAULT_LED
+    // Pico 2 W — använd CYW43-HAL:en
+    #include "pico/cyw43_arch.h"
+    #define BLINK_LED_TYPE_WIFI
+#else
+    // Pico 2 (utan W) — använd den inbyggda GPIO-LED:en på GP25
+    constexpr uint LED_PIN = 25;
+    #define BLINK_LED_TYPE_GPIO
+#endif
 
 namespace {
 constexpr std::uint8_t FONT_COLOR  = 0xFF;  // foreground index in 8BPP mode
@@ -29,8 +44,100 @@ constexpr std::uint8_t TEXT_SIZE   = 0;     // 0..3 = built-in CGRAM modes
 constexpr std::uint8_t BRIGHTNESS  = 200;
 }  // namespace
 
+extern void hipi(void);
+
+void led_on() {
+#ifdef BLINK_LED_TYPE_WIFI
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+#else
+        gpio_put(LED_PIN, 1);
+#endif
+}
+void led_off() {
+#ifdef BLINK_LED_TYPE_WIFI
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
+#else
+        gpio_put(LED_PIN, 0);
+#endif
+}
+
+void blink_led(int t=250, int n=1) {
+    for( int i=0; i<n; ++i) {
+        // LED PÅ
+        led_on();
+        sleep_ms(t);
+
+        // LED AV
+        led_off();
+        sleep_ms(t);
+    }
+}
+
+static const uint16_t pattern[] = {
+    60,  80,   // blink
+    60, 300,   // blink
+    120, 70,   // blink
+    40,  900,  // lång paus
+    50,  50,   // dubbelblink
+    50,  500
+};
+
+static uint8_t state = 0;
+static uint32_t next_time = 0;
+static bool led_state = false;
+
+void led_task(uint32_t now_ms)
+{
+    if (now_ms < next_time)
+        return;
+
+    led_state = !led_state;
+
+    if (led_state)
+        led_on();
+    else
+        led_off();
+
+    next_time = now_ms + pattern[state] + (rand() % 40);
+
+    state++;
+    if (state >= sizeof(pattern)/sizeof(pattern[0]))
+        state = 0;
+}
+
+static bool usb_connected = false;
+
 int main() {
     stdio_init_all();
+
+#ifdef BLINK_LED_TYPE_WIFI
+    if (cyw43_arch_init() != 0) {
+        // Init misslyckades — blinka med en utprintad felkod istället
+        while (true) {
+            printf("CYW43 init failed\n");
+            sleep_ms(1000);
+        }
+    }
+#else
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+#endif
+
+    // Blink LED:en 5 ggr Snabbt = "boot OK"
+    blink_led(50, 10);
+
+
+    absolute_time_t timeout = make_timeout_time_ms(1000);
+
+    // Vänta tills USB-CDC är ansluten (max 3 sekunder)
+    while (!time_reached(timeout)) {
+        if (stdio_usb_connected()) {
+            usb_connected = true;
+            break;
+        }
+
+        blink_led(250);
+        tight_loop_contents();
+    }
 
     // SPI0: SCK=GP2, MOSI=GP3, MISO=GP0 (matches share.py)
     gpio_set_function(2, GPIO_FUNC_SPI);   // SCK
@@ -38,6 +145,11 @@ int main() {
     gpio_set_function(0, GPIO_FUNC_SPI);   // MISO
 
     // CS=GP1 and RST=GP4 are configured by PicoSpiTransport's constructor.
+    if( usb_connected ) {
+        printf("HIPI Board v0.1\n");
+        printf("======================\n");
+        printf("* Init display ...\n");
+    }
 
     hp82163::PicoSpiTransport transport(spi0,
                                         /*baudrate=*/6'000'000,
@@ -65,5 +177,19 @@ int main() {
         screen.pr_char('\n');
     }
 
-    while (true) tight_loop_contents();
+    if( usb_connected ) {
+        printf("Up and running ...\n");
+        printf("Run HPIL tests ...\n");
+    }
+
+    hipi();
+
+    if( usb_connected ) {
+        printf("Done!\n");
+    }
+
+    while (true) {
+        led_task(to_ms_since_boot(get_absolute_time()));
+        tight_loop_contents();
+    }
 }

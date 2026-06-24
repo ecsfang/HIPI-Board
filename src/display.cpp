@@ -13,6 +13,8 @@ IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
 
+    printf("DSP:%3X ", cmd);
+
     // Handle all base commands
     if( base(cmd, &rtn) )
         return rtn;
@@ -24,20 +26,20 @@ IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
         rtn = nSai;
         sai = true;
     } else if( (cmd == SDI) && (status == TALKER) ) {
-        rtn = 'J';
         sdi = devName;
+        rtn = *sdi++;
     } else if( (cmd < DOE) && (status == LISTENER) ) {
         // Data
         fifo.push(cmd & 0xFF);
-    } else if( sai ) {
-        rtn = (cmd == nSai) ? ETO : ETE;
-        sai = false;
-    } else if( sdi ) {
-        rtn = *devName++;
-        if( rtn == 0 ) {
-            rtn = ETO;
-            sdi = NULL;
-        }
+//    } else if( sai ) {
+//        rtn = (cmd == nSai) ? ETO : ETE;
+//        sai = false;
+//    } else if( sdi ) {
+//        rtn = *sdi++;
+//        if( rtn == 0 ) {
+//            rtn = ETO;
+//            sdi = NULL;
+//        }
     }
     return rtn;
 }

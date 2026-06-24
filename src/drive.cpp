@@ -13,8 +13,11 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
 
+    printf("DRV:%3X ", cmd);
+
     if( ddl == 5 ) {
         //Busy formatting
+#if 0
         printf("Formatting ... (%d)\n", tape.tell());
         if( check() ) {
             tape.write(buf0);
@@ -26,11 +29,18 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
                 tape.open();
             }
         }
+#else
+        printf("Formatting ... (xxx)\n");
+        end = true;
+        ddl = 31;
+        sst = DRV_IDLE;
+#endif
     }
 
     // Handle all base commands
-    if( base(cmd, &rtn) )
+    if( base(cmd, &rtn) ) {
         return rtn;
+    }
 
     // Otherwise handle device specific commands
     if( cmd == IFC) {
@@ -63,15 +73,15 @@ void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
             }
         } else if( cmd == SAI ) {
             *rtn = nSai;
-            end = true;
+            sai = true;
         } else if( cmd == SST ) {
             check();
             *rtn = sst;
             end = true;
         } else if( cmd == SDI ) {
-            *rtn = 'J';
             sdi = devName;
-            end = false;
+            *rtn = *sdi++;
+            //end = false;
         } else if( inAddrRange(cmd, DDT) ) {
             IL_ADDR_t n = cmd & MAX_ADDR;
             if( n == 4 ) {
@@ -158,7 +168,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                     printf("Do FORMAT ...\n");
                     mode = WRITE_MODE;
                     sst = DRV_BUSY;
-                    memset(buf0, 255, BUF_SIZE);
+                    //memset(buf0, 255, BUF_SIZE);
                     break;
                 case 6:
                     //Partial write
@@ -316,7 +326,7 @@ void CDrive::writeblock()
     }
 }
 bool TapeOK = false;
-bool SDOK = true;
+bool SDOK = false;
 const char *share_Tape = "tape.bin";
 
 bool CDrive::check()
@@ -329,11 +339,12 @@ bool CDrive::check()
             size=tape.readInt()*tape.readInt()*tape.readInt();
             if( size == 0 )
                 size = 512;
-            printf("size=%ld\n", size);
+            printf("size=%d\n", size);
             tape.seek(0);
             sst = DRV_NEW_TAPE_ERROR;
             TapeOK = true;
         } else {
+            printf("No tape file!\n");
             sst = DRV_NO_TAPE_ERROR;
         }
     }

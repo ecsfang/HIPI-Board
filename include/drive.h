@@ -29,7 +29,9 @@ public:
     CTape() {
         open();
     }
-    unsigned int tell(void) { return ftell(_tape); }
+    unsigned int tell(void) {
+        return ftell(_tape);
+    }
     void read(unsigned char *buf) {
         int n = fread(buf, 1, BUF_SIZE, _tape);
         // If less than BUF_SIZE fill with 255 ...
@@ -52,9 +54,11 @@ public:
         fseek(_tape, s, SEEK_SET);
     }
     void open(const char *name = "tape.bin") {
+        printf("Opening tape file: [%s]\n", name);
         _tape = fopen(name, "r+b");
     }
     void close() {
+        printf("Closing tape file: [%s]\n", _tape ? "tape.bin" : "NULL");
         if( _tape )
             fclose(_tape);
         _tape = NULL;

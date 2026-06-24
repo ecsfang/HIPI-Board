@@ -12,7 +12,7 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico2 CACHE STRING "Board type")
+set(PICO_BOARD pico2_w CACHE STRING "Board type")
 
 # SPDX-License-Identifier: MIT
 #
@@ -85,16 +85,24 @@ target_include_directories(hp82163_pico_transport PUBLIC include)
 # ----------------------------------------------------------------------
 # Demo executable — flashed by the VS Code extension.
 # ----------------------------------------------------------------------
-add_executable(hp82163_pico_demo
+add_executable(hp82163_pico
     src/pico_main.cpp
+    src/hipi.cpp
+    src/device.cpp
+    src/drive.cpp
+    src/display.cpp
 )
-target_link_libraries(hp82163_pico_demo PRIVATE
+target_link_libraries(hp82163_pico PRIVATE
     hp82163_core
+    hardware_spi
+    hardware_gpio
     hp82163_pico_transport
+    pico_stdlib
+    pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
 )
-pico_enable_stdio_usb(hp82163_pico_demo 1)
-pico_enable_stdio_uart(hp82163_pico_demo 0)
-pico_add_extra_outputs(hp82163_pico_demo)
+pico_enable_stdio_usb(hp82163_pico 1)
+pico_enable_stdio_uart(hp82163_pico 0)
+pico_add_extra_outputs(hp82163_pico)
 
 # ----------------------------------------------------------------------
 # Optional: Linux spidev demo (off by default for Pico-focused work).
