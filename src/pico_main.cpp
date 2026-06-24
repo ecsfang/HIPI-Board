@@ -18,6 +18,7 @@
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"
+#include "ff.h"
 
 #include "hardware/gpio.h"
 #include "hardware/spi.h"

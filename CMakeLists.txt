@@ -74,12 +74,18 @@ target_include_directories(hp82163_core PUBLIC include)
 add_library(hp82163_pico_transport STATIC
     src/PicoSpiTransport.cpp
 )
+
+add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
+
+
 target_link_libraries(hp82163_pico_transport PUBLIC
     hp82163_core
     pico_stdlib
     hardware_spi
     hardware_gpio
+    no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
 )
+
 target_include_directories(hp82163_pico_transport PUBLIC include)
 
 # ----------------------------------------------------------------------
