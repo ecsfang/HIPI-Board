@@ -15,6 +15,8 @@
 
 #include <stdlib.h>
 
+#include "hpil_pio.hpp"
+
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"

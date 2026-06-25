@@ -1,0 +1,53 @@
+; src/hpil.pio
+
+.program frame_rx
+restart:
+    set x, 10
+    wait 1 pin 1
+    wait 0 pin 1 [2]
+bitloop:
+    set y, 31
+wait_high:
+    jmp pin, go_on
+    jmp y--, wait_high
+    jmp restart
+go_on:
+    wait 0 pin 1 [1]
+    in pins, 1
+    jmp x--, bitloop
+    push block
+
+
+.program frame_tx
+.sideset 2 opt          ; ← 2 sideset-pinnar, optionalomotiverat
+
+.wrap_target
+    set y, 10
+    pull
+    out null, 21
+    out x, 1
+    jmp !x, send_zero
+    nop side 2 [3]
+    nop side 1 [1]
+    jmp bitloop
+
+send_zero:
+    nop side 1 [3]
+    nop side 2 [2]
+
+bitloop:
+    jmp !x, send_zero_bit
+    nop side 2 [3]
+    nop side 1 [2]
+    jmp bit_end
+
+send_zero_bit:
+    nop side 1 [3]
+    nop side 2 [3]
+
+bit_end:
+    nop side 0            ; ← "0" = båda pinnarna låga
+    nop [3]
+    out x, 1
+    jmp y--, bitloop
+.wrap

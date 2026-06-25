@@ -54,6 +54,14 @@ project(hp82163_pico C CXX)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+# 1. Inkludera helper-filen
+include(${PICO_SDK_PATH}/tools/Findpioasm.cmake)
+
+# 2. Den letar upp pioasm — sätt variabeln PIOASM
+# (Findpioasm.cmake gör detta automatiskt om pioasm finns i PATH)
+# Annars sökväg explicit:
+set(PIOASM ${PICO_SDK_PATH}/tools/pioasm/pioasm)    # justera sökvägenISCO
+
 # ----------------------------------------------------------------------
 # Project-wide compile flags.
 # ----------------------------------------------------------------------
@@ -107,6 +115,12 @@ target_link_libraries(hp82163_pico PRIVATE
     pico_stdlib
     pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
 )
+
+# 3. Generera header från .pio-filen
+pico_generate_pio_header(hp82163_pico
+    ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
+)
+
 pico_enable_stdio_usb(hp82163_pico 1)
 pico_enable_stdio_uart(hp82163_pico 0)
 pico_add_extra_outputs(hp82163_pico)
