@@ -18,7 +18,13 @@
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"
+
+// SD-card support
 #include "ff.h"
+#include "f_util.h"
+#include "hw_config.h"
+//#include "pico/rtc.h"
+extern void init_spi(void);
 
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
@@ -45,7 +51,7 @@ constexpr std::uint8_t TEXT_SIZE   = 0;     // 0..3 = built-in CGRAM modes
 constexpr std::uint8_t BRIGHTNESS  = 200;
 }  // namespace
 
-extern void hipi(void);
+extern void hipi_tests(void);
 
 void led_on() {
 #ifdef BLINK_LED_TYPE_WIFI
@@ -148,8 +154,8 @@ int main() {
     // CS=GP1 and RST=GP4 are configured by PicoSpiTransport's constructor.
     if( usb_connected ) {
         printf("HIPI Board v0.1\n");
-        printf("======================\n");
-        printf("* Init display ...\n");
+        printf("======================");
+        printf("\n * Init display ...");
     }
 
     hp82163::PicoSpiTransport transport(spi0,
@@ -178,12 +184,31 @@ int main() {
         screen.pr_char('\n');
     }
 
+    // Init SD-card ...
     if( usb_connected ) {
-        printf("Up and running ...\n");
+        printf("\n * Init SD-card ...");
+    }
+    init_spi();
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        printf(" PANIC: f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+    }
+
+    // Init touch sensor ...
+    if( usb_connected ) {
+        printf("\n * Init touch sensor ...");
+        printf(" TBD!");
+    }
+
+    // Done! Start the HPIL monoitoring ...
+    if( usb_connected ) {
+        printf("\n-----------------------------");
+        printf("\nUp and running ...\n");
         printf("Run HPIL tests ...\n");
     }
 
-    hipi();
+    hipi_tests();
 
     if( usb_connected ) {
         printf("Done!\n");

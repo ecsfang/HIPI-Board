@@ -40,7 +40,7 @@ IL_CMD_t tests[] = {
     0
 };
 
-void hipi(void)
+void hipi_tests(void)
 {
     IL_CMD_t cmd, rtn;
     cmd = rtn = 0;
@@ -76,5 +76,5 @@ void hipi(void)
         show(cmd, rtn);
     }
     drive.close();
-    printf("Done.\n");
+    printf("Done with tests ....\n");
 }

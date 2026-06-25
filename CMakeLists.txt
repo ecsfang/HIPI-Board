@@ -97,6 +97,7 @@ add_executable(hp82163_pico
     src/device.cpp
     src/drive.cpp
     src/display.cpp
+    src/hw_config.cpp
 )
 target_link_libraries(hp82163_pico PRIVATE
     hp82163_core
