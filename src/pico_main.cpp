@@ -43,9 +43,245 @@ extern void init_spi(void);
 
 #include <cstdio>
 
-#define PICO_DEFAULT_LED
+//#define PICO_DEFAULT_LED
 
-constexpr uint LED_PIN = 22;
+//constexpr uint LED_PIN = 22;
+
+/*
+ * alien_startup.cpp
+ *
+ * Drives 5 LEDs through a dramatic "alien intelligence" boot sequence.
+ *
+ * Usage example (Arduino-Pico / Arduino IDE):
+ * -----------------------------------------------
+ *   #include "alien_startup.cpp"   // or add to your sketch directly
+ *
+ *   void setup() {
+ *       alienBegin();          // configure all LED pins as OUTPUT
+ *       alienStartup(2000);    // run the boot sequence for ~2 s
+ *   }
+ *
+ *   void loop() {
+ *       // your main code here
+ *   }
+ *
+ * Usage example (Pico SDK):
+ * -----------------------------------------------
+ *   int main() {
+ *       stdio_init_all();
+ *       alienBegin();
+ *       alienStartup(2000);
+ *       while (true) { tight_loop_contents(); }
+ *   }
+ *
+ * Wiring: connect LEDs (+ series resistor ~220 Ω) from each pin to GND.
+ */
+
+// ─── Compatibility shim ───────────────────────────────────────────────────────
+#if defined(ARDUINO)
+  #include <Arduino.h>
+  static inline uint32_t ms_now()              { return millis(); }
+  static inline void     ms_sleep(uint32_t ms) { delay(ms); }
+#else
+  #include "pico/stdlib.h"
+  static inline uint32_t ms_now()              { return to_ms_since_boot(get_absolute_time()); }
+  static inline void     ms_sleep(uint32_t ms) { sleep_ms(ms); }
+#endif
+
+// ─── Pin definitions (edit here) ─────────────────────────────────────────────
+constexpr uint LED_PIN_1 = 4;
+constexpr uint LED_PIN_2 = 5;
+constexpr uint LED_PIN_3 = 6;
+constexpr uint LED_PIN_4 = 21;
+constexpr uint LED_PIN_5 = 22;
+
+// Physical order: index 0 = leftmost … 4 = rightmost
+constexpr uint8_t LED_PINS[5] = {
+    LED_PIN_1, LED_PIN_2, LED_PIN_3, LED_PIN_4, LED_PIN_5
+};
+
+// ─── Tiny xorshift32 PRNG (no seed needed – deterministic but visually random)
+static uint32_t xr32_state = 0xDEADBEEFUL;
+
+static uint32_t xr32_next() {
+    xr32_state ^= xr32_state << 13;
+    xr32_state ^= xr32_state >> 17;
+    xr32_state ^= xr32_state << 5;
+    return xr32_state;
+}
+
+// Returns a pseudo-random value in [lo, hi] (inclusive).
+static uint32_t xr32_range(uint32_t lo, uint32_t hi) {
+    return lo + (xr32_next() % (hi - lo + 1));
+}
+
+// ─── Helper: configure all LED pins as digital outputs ───────────────────────
+/**
+ * alienBegin()
+ *
+ * Initialises every LED pin as a digital output and turns all LEDs off.
+ * Call this once from setup() / main() before alienStartup().
+ */
+void alienBegin() {
+    for (uint8_t i = 0; i < 5; ++i) {
+#if defined(ARDUINO)
+        pinMode(LED_PINS[i], OUTPUT);
+        digitalWrite(LED_PINS[i], LOW);
+#else
+        gpio_init(LED_PINS[i]);
+        gpio_set_dir(LED_PINS[i], GPIO_OUT);
+        gpio_put(LED_PINS[i], 0);
+#endif
+    }
+}
+
+// ─── Helper: turn all LEDs off ────────────────────────────────────────────────
+/**
+ * allOff()
+ *
+ * Drives all five LED pins LOW.
+ */
+void allOff() {
+    for (uint8_t i = 0; i < 5; ++i) {
+#if defined(ARDUINO)
+        digitalWrite(LED_PINS[i], LOW);
+#else
+        gpio_put(LED_PINS[i], 0);
+#endif
+    }
+}
+
+// ─── Helper: apply a 5-bit bitmask to the LEDs ───────────────────────────────
+/**
+ * setPattern(uint8_t bits)
+ *
+ * Sets each LED according to the corresponding bit in `bits` (bits 0–4).
+ * Bit 0 → LED_PIN_1 (leftmost), bit 4 → LED_PIN_5 (rightmost).
+ *
+ * @param bits  5-bit pattern, range 0–31.
+ */
+void setPattern(uint8_t bits) {
+    for (uint8_t i = 0; i < 5; ++i) {
+        bool on = (bits >> i) & 0x01;
+#if defined(ARDUINO)
+        digitalWrite(LED_PINS[i], on ? HIGH : LOW);
+#else
+        gpio_put(LED_PINS[i], on ? 1 : 0);
+#endif
+    }
+}
+
+// ─── Main boot sequence ───────────────────────────────────────────────────────
+/**
+ * alienStartup(uint32_t durationMs)
+ *
+ * Runs a five-phase "alien intelligence" LED boot animation that lasts
+ * approximately `durationMs` milliseconds in total.
+ *
+ * Phase 1 – Wake-up pulse:
+ *   The centre LED blinks three times, signalling system power-on.
+ *
+ * Phase 2 – Scanner sweep:
+ *   A single lit LED bounces left↔right like a sensor calibrating itself.
+ *
+ * Phase 3 – Binary count:
+ *   The LEDs count in binary from 1 to 31, simulating the CPU initialising.
+ *
+ * Phase 4 – Chaotic thinking:
+ *   Random patterns (never 0, always ≥1 LED lit) flicker rapidly,
+ *   representing active neural/computation bursts.
+ *
+ * Phase 5 – Login cascade:
+ *   All LEDs illuminate together, then extinguish outward-to-inward in a
+ *   smooth cascade — the system is ready.
+ *
+ * Time budget: each phase receives 1/5 of durationMs, checked every
+ * iteration so the total stays within ±one iteration of durationMs.
+ *
+ * @param durationMs  Total desired duration in milliseconds (default 2000).
+ */
+void alienStartup(uint32_t durationMs) {
+    const uint32_t start     = ms_now();
+    const uint32_t phaseMs   = durationMs / 5;   // budget per phase
+    uint32_t       phaseEnd  = start + phaseMs;
+
+    // ── Phase 1: Centre wake-up pulse ────────────────────────────────────────
+    // Bit pattern for centre LED only: bit 2 set → 0b00100 = 4
+    for (int blink = 0; blink < 3 && ms_now() < phaseEnd; ++blink) {
+        setPattern(0b00100);
+        ms_sleep(80);
+        allOff();
+        ms_sleep(60);
+    }
+
+    // ── Phase 2: Scanner sweep left ↔ right ──────────────────────────────────
+    phaseEnd = start + phaseMs * 2;
+    {
+        // Sweep positions: LED index 0..4, then 3..1 (bounce)
+        const uint8_t sweep[] = {0, 1, 2, 3, 4, 3, 2, 1};
+        const uint8_t sweepLen = sizeof(sweep);
+        uint8_t idx = 0;
+
+        while (ms_now() < phaseEnd) {
+            setPattern(static_cast<uint8_t>(1 << sweep[idx]));
+            ms_sleep(55);
+            idx = (idx + 1) % sweepLen;
+        }
+        allOff();
+    }
+
+    // ── Phase 3: Binary count 1..31 ──────────────────────────────────────────
+    phaseEnd = start + phaseMs * 3;
+    {
+        uint8_t val = 1;
+        while (ms_now() < phaseEnd) {
+            setPattern(val);
+            ms_sleep(50);
+            val = (val % 31) + 1;   // 1, 2, … 31, 1, 2, …
+        }
+        allOff();
+    }
+
+    // ── Phase 4: Chaotic blinking (never 0) ──────────────────────────────────
+    phaseEnd = start + phaseMs * 4;
+    {
+        // Vary the delay for organic-looking bursts.
+        while (ms_now() < phaseEnd) {
+            uint8_t pattern = static_cast<uint8_t>(xr32_range(1, 31));
+            setPattern(pattern);
+            ms_sleep(static_cast<uint32_t>(xr32_range(20, 80)));
+        }
+    }
+
+    // ── Phase 5: All on, then cascade off outward→inward ─────────────────────
+    // Total time left from now until start + durationMs.
+    phaseEnd = start + durationMs;
+    {
+        setPattern(0b11111);
+        ms_sleep(180);
+
+        // Cascade order: outermost pair first (0,4), then (1,3), then centre (2)
+        const uint8_t cascade[][2] = {{0, 4}, {1, 3}, {2, 2}};
+        const uint32_t stepMs = 120;
+
+        uint8_t litBits = 0b11111;
+        for (uint8_t step = 0; step < 3 && ms_now() < phaseEnd; ++step) {
+            litBits &= ~(1 << cascade[step][0]);
+            litBits &= ~(1 << cascade[step][1]);
+            setPattern(litBits);
+            ms_sleep(stepMs);
+        }
+        allOff();
+
+        // Hold dark for the remainder of the phase budget.
+        uint32_t now = ms_now();
+        if (now < phaseEnd) {
+            ms_sleep(phaseEnd - now);
+        }
+    }
+
+    allOff();
+}
 
 #ifdef PICO_DEFAULT_LED
     // Pico 2 W — använd CYW43-HAL:en
@@ -53,7 +289,6 @@ constexpr uint LED_PIN = 22;
 //    #define BLINK_LED_TYPE_WIFI
 #else
     // Pico 2 (utan W) — använd den inbyggda GPIO-LED:en på GP25
-    constexpr uint LED_PIN = 25;
     #define BLINK_LED_TYPE_GPIO
 #endif
 
@@ -69,14 +304,14 @@ void led_on() {
 #ifdef BLINK_LED_TYPE_WIFI
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
 #else
-        gpio_put(LED_PIN, 1);
+        gpio_put(LED_PIN_1, 1);
 #endif
 }
 void led_off() {
 #ifdef BLINK_LED_TYPE_WIFI
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
 #else
-        gpio_put(LED_PIN, 0);
+        gpio_put(LED_PIN_1, 0);
 #endif
 }
 
@@ -232,6 +467,16 @@ int main() {
     stdio_init_all();
     sleep_ms(2000);
 #define OUT_PIN 15
+
+    alienBegin();
+    alienStartup(2000);
+
+    //    // Initiera GP22 som output
+//    gpio_init(LED_PIN_1);
+//    gpio_set_dir(LED_PIN_1, GPIO_OUT);
+//    // Blink LED:en 5 ggr Snabbt = "boot OK"
+//    blink_led(50, 10);
+
 #if 0
     printf("Blinking LED on GP22\n");
     
@@ -297,9 +542,6 @@ int main() {
 //    gpio_set_dir(LED_PIN, GPIO_OUT);
 //#endif
 //
-    // Blink LED:en 5 ggr Snabbt = "boot OK"
-    blink_led(50, 10);
-
 
     absolute_time_t timeout = make_timeout_time_ms(1000);
 
