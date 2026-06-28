@@ -163,19 +163,41 @@ void RA8875::set2LayerConfig() {
 }
 
 void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
-    // Matches the per-character loop in share.py:
-    //   display._write_reg(0x23, i+32)   ; CGRAM character index
-    //   display._write_reg(0x21, 0x00)   ; clear FNCR0 (DDRAM/text mode off)
-    //   display._write_data((display._read_reg(0x41) & ~(1<<3)) | (1<<2))
-    //   display._write_cmd(MRWC)
-    //   display._write_data(bytearray(f[i]), True)
+    // Step 1: Sätt CGRAM char index (0x23 = CCR register)
     writeReg(0x23, ascii);
+    
+    // Step 2: Sätt FNCR0 till text mode (0x21 = 0x00 för text-mode enable)
     writeReg(0x21, 0x00);
+    
+    // Step 3: Aktivera CGRAM mode via MWCR0 (0x41)
+    // Bit 3 = 0 (CGRAM mode off → on)
+    // Bit 2 = 1 (font select: CGRAM)
     const std::uint8_t mwcr0 = readReg(0x41);
     writeData(static_cast<std::uint8_t>((mwcr0 & ~(1 << 3)) | (1 << 2)));
+    
+    // Step 4: Skriv bitmap till CGRAM
     writeCmd(MRWC);
     writeData(bitmap, 16);
+    
+    // Step 5: Viktigt! Återställ MWCR0 till 0 (grafik-mode) 
+    // så efterföljande writes går till DDRAM, inte CGRAM
+    writeReg(0x41, 0x00);
 }
+
+//void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
+//    // Matches the per-character loop in share.py:
+//    //   display._write_reg(0x23, i+32)   ; CGRAM character index
+//    //   display._write_reg(0x21, 0x00)   ; clear FNCR0 (DDRAM/text mode off)
+//    //   display._write_data((display._read_reg(0x41) & ~(1<<3)) | (1<<2))
+//    //   display._write_cmd(MRWC)
+//    //   display._write_data(bytearray(f[i]), True)
+//    writeReg(0x23, ascii);
+//    writeReg(0x21, 0x00);
+//    const std::uint8_t mwcr0 = readReg(0x41);
+//    writeData(static_cast<std::uint8_t>((mwcr0 & ~(1 << 3)) | (1 << 2)));
+//    writeCmd(MRWC);
+//    writeData(bitmap, 16);
+//}
 
 // -----------------------------------------------------------------------
 // Register access

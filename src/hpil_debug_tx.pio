@@ -1,0 +1,58 @@
+; src/hpil_debug_tx.pio
+;
+; TX-debug: skickar kontinuerligt data på OUT+/OUT-
+; Detta verifierar att TX-PIO:n och pinnarna fungerar.
+;
+; Pin-mappings:
+;   out_pins (bit 0) = minus_out  ← GP14
+;   side_set bit 0   = plus_out   ← GP15
+;
+; Skickar växlande mönster varje gång:
+;   - Först 32-bitars ord med 0xAA...AA (alla udda bitar)
+;   - Sedan 32-bitars ord med 0x55...55 (alla jämna bitar)
+;
+; Detta gör att du kan mäta med multimeter/logikanalysator.
+
+.program hpil_debug_tx
+.side_set 2 opt            ; 2 sideset-pinnar
+
+.wrap_target
+    pull                    ; hämta 32-bitars data från TX-FIFO behöver vs PULL-block
+    ; Om du inte har data: skicka default-mönster istället
+    out null, 0              ; 32 bitar till x
+    out x, 32                ; hela ordet till x
+
+    jmp !x, send_zero_pattern
+
+    ; Skicka 0xAAAA-mönster (bit 1 = 0xA = 1010)
+    ; För varje bit: side 2 om bit=1, side 1 om bit=0
+    set y, 32                ; 32 bitar
+
+bit_loop_one:
+    out x, 1                 ; läs nästa bit
+    jmp !x, send_zero_bit
+    nop side 2               ; bit=1: minus HIGH, plus LOW
+    jmp bit_end
+send_zero_bit:
+    nop side 1               ; bit=0: minus LOW, plus HIGH
+bit_end:
+    jmp y--, bit_loop_one
+    jmp end_pattern
+
+send_zero_pattern:
+    set y, 32
+bit_loop_zero:
+    out x, 1
+    jmp !x, send_zero_bit2
+    nop side 2
+    jmp bit_end2
+send_zero_bit2:
+    nop side 1
+bit_end2:
+    jmp y--, bit_loop_zero
+
+end_pattern:
+    ; Bit-spacing mellan mönster
+    nop side 0
+    jmp wrap_target
+.wrap

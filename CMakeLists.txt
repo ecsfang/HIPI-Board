@@ -11,6 +11,9 @@ set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # ====================================================================================
 set(PICO_BOARD pico2_w CACHE STRING "Board type")
 
@@ -113,13 +116,23 @@ target_link_libraries(hp82163_pico PRIVATE
     hardware_gpio
     hp82163_pico_transport
     pico_stdlib
-    pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
+    # pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
 )
 
 # 3. Generera header från .pio-filen
 pico_generate_pio_header(hp82163_pico
     ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
 )
+pico_generate_pio_header(hp82163_pico
+    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_debug.pio
+)
+pico_generate_pio_header(hp82163_pico
+    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_debug_simple.pio
+)
+pico_generate_pio_header(hp82163_pico
+    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_debug_1hz.pio
+)
+
 
 pico_enable_stdio_usb(hp82163_pico 1)
 pico_enable_stdio_uart(hp82163_pico 0)

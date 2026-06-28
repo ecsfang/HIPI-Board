@@ -1,53 +1,73 @@
 ; src/hpil.pio
+;
+; HP-IL Frame Receiver
+; Läser 11-bitars frames från HP-IL-bussen (1 start + 8 data + 1 stop + 1 sync)
+; in_shiftdir = SHIFT_LEFT, no autopush
+; jmp_pin = plus input
 
 .program frame_rx
-restart:
-    set x, 10
-    wait 1 pin 1
-    wait 0 pin 1 [2]
-bitloop:
-    set y, 31
-wait_high:
-    jmp pin, go_on
-    jmp y--, wait_high
-    jmp restart
-go_on:
-    wait 0 pin 1 [1]
-    in pins, 1
-    jmp x--, bitloop
-    push block
 
+restart:
+    set x, 10                       ; counter för 11 bitar (10 ned till 0)
+    wait 1 pin 1 [2]                ; vänta på plus HIGH (först halvan av sync)
+    wait 0 pin 1                    ; vänta på plus LOW (sync-biten klar)
+
+bitloop:
+    set y, 31                       ; timeout-counter (32 cycles)
+
+wait_loop:
+    jmp pin, go_on                  ; nästa bit: plus går HIGH
+    jmp y--, wait_loop              ; försök igen om timeout
+    jmp restart                     ; timeout - börja om från början
+
+go_on:
+    wait 0 pin 1 [1]                ; vänta på plus LOW
+    in pins, 1                      ; läs minus-data
+    jmp x--, bitloop                ; loop till nästa bit
+    push block                      ; 32-bitars data till RX FIFO
+
+
+; HP-IL Frame Transmitter
+; Skickar 11-bitars frames (1 start + 8 data + 1 stop + 1 sync)
+; out_shiftdir = SHIFT_LEFT, no autopush
+; sideset 2 (minus_out + plus_out), sideset_init = 0b00
 
 .program frame_tx
-.sideset 2 opt          ; ← 2 sideset-pinnar, optionalomotiverat
+.side_set 2 opt                    ; 2 sideset-pinnar (minus_out, plus_out)
 
 .wrap_target
-    set y, 10
-    pull
-    out null, 21
-    out x, 1
-    jmp !x, send_zero
-    nop side 2 [3]
-    nop side 1 [1]
-    jmp bitloop
+    set y, 10                       ; bit-counter (11 bitar)
+    pull                            ; hämta 32-bitars data från FIFO
+    out null, 21                    ; kasta 21 bitar (vi skickar bara 11)
+    out x, 1                        ; läs första databit
+    jmp !x, send_zero_first        ; är första bit 0 eller 1?
 
-send_zero:
-    nop side 1 [3]
-    nop side 2 [2]
+    ; Första bit = 1: positiv swing först
+    nop side 2 [3]                  ; minus=high, plus=low
+    nop side 1 [1]                  ; minus=low, plus=high
+    jmp bitloop2                    ; hoppa till huvudloop
 
-bitloop:
-    jmp !x, send_zero_bit
+send_zero_first:
+    ; Första bit = 0: negativ swing först
+    nop side 1 [3]                  ; minus=low, plus=high
+    nop side 2 [2]                  ; minus=high, plus=low
+
+bitloop2:
+    jmp !x, send_zero_bit           ; är nästa bit 0 eller 1?
+
+    ; Bit = 1: positiv swing
     nop side 2 [3]
     nop side 1 [2]
     jmp bit_end
 
 send_zero_bit:
+    ; Bit = 0: negativ swing
     nop side 1 [3]
     nop side 2 [3]
 
 bit_end:
-    nop side 0            ; ← "0" = båda pinnarna låga
+    nop side 0                      ; bit-spacing (båda LOW)
     nop [3]
-    out x, 1
-    jmp y--, bitloop
+    out x, 1                        ; läs nästa bit
+    jmp y--, bitloop2               ; loop till nästa bit
 .wrap

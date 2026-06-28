@@ -1,0 +1,14 @@
+.program hpil_debug_slow
+.wrap_target
+    ; HIGH
+    set y, 31
+high_loop:
+        set pins, 1 [31]   ; 31 cycles delay
+        jmp y--, high_loop
+
+    ; LOW
+    set y, 31
+low_loop:
+        set pins, 0 [31]
+        jmp y--, low_loop
+.wrap
