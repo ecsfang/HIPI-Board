@@ -20,19 +20,25 @@
 #define SDI     0x562   // Send device ID
 #define SAI     0x563   // Send accessory identification
 #define AAD     0x580
+#define RFC     0x500
+#define IDY     0x600
+#define LLO     0x411
+#define LPD     0x49D
 
 #define MAX_ADDR    0x1F
 #define MAX_CMD     0x1F
+#define GET_ADDR(x) (x&MAX_ADDR)
 
 #define inAddrRange(a,x) ((a) >= (x) && (a) <= ((x)+MAX_ADDR))
-
 
 typedef unsigned short int IL_CMD_t;
 typedef unsigned char      IL_ADDR_t;
 typedef unsigned char      IL_DATA_t;
 
+extern void ilMnemonic(IL_CMD_t frame, char *buf);
+
 typedef enum {
-    STAT_NONE,
+    STAT_IDLE,
     LISTENER,
     TALKER
 } IL_Status_e;
@@ -46,19 +52,22 @@ protected:
     IL_ADDR_t       nSai;
     IL_ADDR_t       nAau;
     const char      *sdi;
+    bool            _bPrt;
 public:
     CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) {
         devName = name;
-        status = STAT_NONE;
+        status = STAT_IDLE;
         addr = 31;
         sai = false;
         sdi = NULL;
         nSai = _sai;
         nAau = _aau;
+        _bPrt = false;
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
     virtual IL_CMD_t hpil(IL_CMD_t cmd) = 0;
     virtual void clear() = 0;
+    virtual void idle(void) {}
     void show(void);
 };
 

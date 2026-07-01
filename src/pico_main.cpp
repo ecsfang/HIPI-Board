@@ -16,12 +16,17 @@
 //#define TEST_DISPLAY
 
 #include <stdlib.h>
+#include "pico/stdlib.h"
+#include <stdio.h>
+#include <pico/stdio.h>
+#include <cstdint>
 
 #include "hpil_pio.hpp"
 
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"
+#include "touch.h"
 #ifdef TEST_DISPLAY
 #include "display_test.hpp"
 #endif
@@ -32,12 +37,14 @@
 #include "ff.h"
 #include "f_util.h"
 #include "hw_config.h"
-//#include "pico/rtc.h"
+#include "hpil.h"
+
 extern void init_spi(void);
 
+#include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
-#include "pico/stdlib.h"
+#include "hardware/pwm.h"
 #include "pico/time.h"
 //#include "hardware/regs/io_bank0.h"   // för GPIO-register-adresser
 
@@ -46,6 +53,9 @@ extern void init_spi(void);
 //#define PICO_DEFAULT_LED
 
 //constexpr uint LED_PIN = 22;
+
+extern bool SDOK;
+extern void sd_dir();
 
 /*
  * alien_startup.cpp
@@ -78,22 +88,16 @@ extern void init_spi(void);
  */
 
 // ─── Compatibility shim ───────────────────────────────────────────────────────
-#if defined(ARDUINO)
-  #include <Arduino.h>
-  static inline uint32_t ms_now()              { return millis(); }
-  static inline void     ms_sleep(uint32_t ms) { delay(ms); }
-#else
-  #include "pico/stdlib.h"
-  static inline uint32_t ms_now()              { return to_ms_since_boot(get_absolute_time()); }
-  static inline void     ms_sleep(uint32_t ms) { sleep_ms(ms); }
-#endif
+#include "pico/stdlib.h"
+static inline uint32_t ms_now()              { return to_ms_since_boot(get_absolute_time()); }
+static inline void     ms_sleep(uint32_t ms) { sleep_ms(ms); }
 
 // ─── Pin definitions (edit here) ─────────────────────────────────────────────
 constexpr uint LED_PIN_1 = 4;
 constexpr uint LED_PIN_2 = 5;
 constexpr uint LED_PIN_3 = 6;
-constexpr uint LED_PIN_4 = 21;
-constexpr uint LED_PIN_5 = 22;
+constexpr uint LED_PIN_4 = 22;
+constexpr uint LED_PIN_5 = 21;
 
 // Physical order: index 0 = leftmost … 4 = rightmost
 constexpr uint8_t LED_PINS[5] = {
@@ -124,14 +128,9 @@ static uint32_t xr32_range(uint32_t lo, uint32_t hi) {
  */
 void alienBegin() {
     for (uint8_t i = 0; i < 5; ++i) {
-#if defined(ARDUINO)
-        pinMode(LED_PINS[i], OUTPUT);
-        digitalWrite(LED_PINS[i], LOW);
-#else
         gpio_init(LED_PINS[i]);
         gpio_set_dir(LED_PINS[i], GPIO_OUT);
         gpio_put(LED_PINS[i], 0);
-#endif
     }
 }
 
@@ -143,11 +142,7 @@ void alienBegin() {
  */
 void allOff() {
     for (uint8_t i = 0; i < 5; ++i) {
-#if defined(ARDUINO)
-        digitalWrite(LED_PINS[i], LOW);
-#else
         gpio_put(LED_PINS[i], 0);
-#endif
     }
 }
 
@@ -163,11 +158,7 @@ void allOff() {
 void setPattern(uint8_t bits) {
     for (uint8_t i = 0; i < 5; ++i) {
         bool on = (bits >> i) & 0x01;
-#if defined(ARDUINO)
-        digitalWrite(LED_PINS[i], on ? HIGH : LOW);
-#else
         gpio_put(LED_PINS[i], on ? 1 : 0);
-#endif
     }
 }
 
@@ -283,14 +274,99 @@ void alienStartup(uint32_t durationMs) {
     allOff();
 }
 
-#ifdef PICO_DEFAULT_LED
-    // Pico 2 W — använd CYW43-HAL:en
-//    #include "pico/cyw43_arch.h"
-//    #define BLINK_LED_TYPE_WIFI
-#else
-    // Pico 2 (utan W) — använd den inbyggda GPIO-LED:en på GP25
-    #define BLINK_LED_TYPE_GPIO
-#endif
+
+namespace breathing_led {
+
+static constexpr uint     PWM_WRAP     = 1000;
+static constexpr uint     PWM_MAX      = PWM_WRAP;
+static constexpr uint32_t BREATH_MS    = 1500;       // 1.5 s cykel — tydligare
+static constexpr uint32_t HOLD_US      = 1'000'000;  // 1 s efter senaste 0x6C0
+
+static uint16_t _breath_lut[256];
+
+static uint     _slice_num;
+static uint     _channel;
+static uint32_t _x_last_time   = 0;
+static uint32_t _breath_start  = 0;
+static bool     _is_breathing  = false;
+
+void init(uint gpio) {
+    // Förberäkna smoothstep (256 entries, 0..PWM_MAX)
+    for (int i = 0; i < 256; i++) {
+        float t = (float)i / 255.0f;
+        float s = t * t * (3.0f - 2.0f * t);
+        _breath_lut[i] = (uint16_t)(s * PWM_MAX);
+    }
+
+    gpio_set_function(gpio, GPIO_FUNC_PWM);
+    _slice_num = pwm_gpio_to_slice_num(gpio);
+    _channel   = pwm_gpio_to_channel(gpio);
+
+    // RP2350 default clk_sys = 150 MHz.
+    // f_pwm = 150e6 / (clkdiv × (wrap+1))
+    // Vi vill ha ~100 kHz PWM: 150e6 / 100e3 / 1001 ≈ 1.499
+    pwm_set_wrap(_slice_num, PWM_WRAP);
+    pwm_set_clkdiv(_slice_num, 1.5f);
+    pwm_set_chan_level(_slice_num, _channel, 0);
+    pwm_set_enabled(_slice_num, true);
+}
+
+static void set_brightness(uint16_t level) {
+    pwm_set_chan_level(_slice_num, _channel, level);
+}
+
+static void update_breath(uint32_t now) {
+    uint32_t phase_ms = (now - _breath_start) % BREATH_MS;
+    int idx = (int)((uint32_t)phase_ms * 256u / BREATH_MS);
+    uint16_t level = _breath_lut[idx];
+
+    // DEBUG — skriv ut 5 ggr/sekund
+    static uint32_t last_dbg = 0;
+    if ((uint32_t)(now - last_dbg) > 200'000) {
+        printf("    breath: phase=%u idx=%d level=%u\n",
+               (unsigned)phase_ms, idx, level);
+        last_dbg = now;
+    }
+
+    set_brightness(level);
+}
+
+void update(int value) {
+    const uint32_t now = time_us_32();
+
+    // DEBUG
+    static int last_v = -1;
+    if (value != last_v) {
+        printf("v=0x%X now=%u _is_breathing=%d\n",
+               value, (unsigned)now, (int)_is_breathing);
+        last_v = value;
+    }
+    // /DEBUG
+
+    if (value == 0x6C0) {
+        _x_last_time = now;
+        if (!_is_breathing) {
+            _is_breathing = true;
+            _breath_start = now;
+            printf("  start breathing, _breath_start=%u\n", (unsigned)_breath_start);
+        }
+    }
+
+    if (_is_breathing) {
+        if ((uint32_t)(now - _x_last_time) >= HOLD_US) {
+            _is_breathing = false;
+            set_brightness(0);
+        } else {
+            update_breath(now);
+        }
+    }
+}
+
+
+} // namespace
+
+
+
 
 namespace {
 constexpr std::uint8_t FONT_COLOR  = 0xFF;  // foreground index in 8BPP mode
@@ -299,30 +375,24 @@ constexpr std::uint8_t BRIGHTNESS  = 200;
 }  // namespace
 
 extern void hipi_tests(void);
+extern void hipi_init(void);
+extern IL_CMD_t hipi_loop(HpIlLoop& loop);
 
-void led_on() {
-#ifdef BLINK_LED_TYPE_WIFI
-        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-#else
-        gpio_put(LED_PIN_1, 1);
-#endif
+void led_on(int n) {
+    gpio_put(n, 1);
 }
-void led_off() {
-#ifdef BLINK_LED_TYPE_WIFI
-        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
-#else
-        gpio_put(LED_PIN_1, 0);
-#endif
+void led_off(int n) {
+    gpio_put(n, 0);
 }
 
-void blink_led(int t=250, int n=1) {
+void blink_led(int led, int t=250, int n=1) {
     for( int i=0; i<n; ++i) {
         // LED PÅ
-        led_on();
+        led_on(led);
         sleep_ms(t);
 
         // LED AV
-        led_off();
+        led_off(led);
         sleep_ms(t);
     }
 }
@@ -340,7 +410,7 @@ static uint8_t state = 0;
 static uint32_t next_time = 0;
 static bool led_state = false;
 
-void led_task(uint32_t now_ms)
+void led_task(int led, uint32_t now_ms)
 {
     if (now_ms < next_time)
         return;
@@ -348,9 +418,9 @@ void led_task(uint32_t now_ms)
     led_state = !led_state;
 
     if (led_state)
-        led_on();
+        led_on(led);
     else
-        led_off();
+        led_off(led);
 
     next_time = now_ms + pattern[state] + (rand() % 40);
 
@@ -359,189 +429,32 @@ void led_task(uint32_t now_ms)
         state = 0;
 }
 
-inline void runLoopbackTest() {
-    printf("\n=== HP-IL PIO Loopback Test ===\n");
-    printf("Wiring: GP14→GP12, GP15→GP13\n\n");
-
-    // Initiera HP-IL med dina pin-numbers
-    HpIlLoop hpil(/*minus_in=*/13, /*plus_in=*/12,
-                  /*minus_out=*/15, /*plus_out=*/14);
-
-    printf("1. Initialized\n");
-    printf("   RX SM: %u, TX SM: %u\n", hpil.sm_rx(), hpil.sm_tx());
-
-    // Hjälpfunktion för att testa
-    auto test_roundtrip = [&](uint32_t value, const char* label) -> bool {
-        printf("\n2. Test '%s': sending 0x%08X\n", label, value);
-        
-        // Skicka
-        if (!hpil.try_write(value)) {
-            printf("   FAIL: TX FIFO full\n");
-            return false;
-        }
-        printf("   TX: wrote 0x%08X to FIFO\n", value);
-        
-        // Vänta lite
-        sleep_ms(50);
-        
-        // Läs
-        uint32_t rx = 0;
-        if (!hpil.try_read(rx)) {
-            printf("   FAIL: RX FIFO empty (no loopback)\n");
-            return false;
-        }
-        
-        printf("   RX: got 0x%08X\n", rx);
-        
-        bool match = (rx == value);
-        printf("   %s: %s\n",
-               label,
-               match ? "PASS ✓" : "FAIL ✗ (data mismatch)");
-        return match;
-    };
-
-    // Test 1: enkelt värde
-    bool ok1 = test_roundtrip(0x12345678, "Simple value");
-
-    // Test 2: alla ettor
-    bool ok2 = test_roundtrip(0xFFFFFFFF, "All ones");
-
-    // Test 3: alla nollor
-    bool ok3 = test_roundtrip(0x00000000, "All zeros");
-
-    // Test 4: växlande mönster
-    bool ok4 = test_roundtrip(0xAAAAAAAA, "Alternating");
-    bool ok5 = test_roundtrip(0x55555555, "Anti-alternating");
-
-    // Test 5: Kontinuerlig data (för logikanalysator)
-    printf("\n3. Stress test: sending 16 frames...\n");
-    int success = 0;
-    for (int i = 0; i < 16; i++) {
-        uint32_t value = 0x10000000 | (i << 16) | i;
-        hpil.try_write(value);
-        sleep_ms(20);
-        
-        uint32_t rx;
-        if (hpil.try_read(rx)) {
-            if (rx == value) {
-                printf("   Frame %2d: 0x%08X ↔ 0x%08X ✓\n", i, value, rx);
-                success++;
-            } else {
-                printf("   Frame %2d: TX=0x%08X RX=0x%08X ✗\n", i, value, rx);
-            }
-        } else {
-            printf("   Frame %2d: TX=0x%08X (no RX) ✗\n", i, value);
-        }
-    }
-    printf("   Success: %d/16\n", success);
-
-    printf("\n=== Summary ===\n");
-    printf("Test 1 (simple):   %s\n", ok1 ? "PASS" : "FAIL");
-    printf("Test 2 (ones):     %s\n", ok2 ? "PASS" : "FAIL");
-    printf("Test 3 (zeros):    %s\n", ok3 ? "PASS" : "FAIL");
-    printf("Test 4 (alt):      %s\n", ok4 && ok5 ? "PASS" : "FAIL");
-    printf("Stress test:       %d/16 passed\n", success);
-
-    if (!ok1 && !ok2 && !ok3 && !ok4) {
-        printf("\n*** No RX data at all ***\n");
-        printf("Likely causes:\n");
-        printf("  - Wiring: GP14→GP12, GP15→GP13\n");
-        printf("  - TX PIO doesn't run: check pio_sm_get_pc(pio0, sm_tx)\n");
-        printf("  - RX PIO doesn't run: check pio_sm_get_pc(pio0, sm_rx)\n");
-        printf("  - Pin config wrong: check pio_gpio_init order\n");
-    } else if (!ok1) {
-        printf("\n*** Some RX but mismatches ***\n");
-        printf("Likely causes:\n");
-        printf("  - Bit-order mismatch (shift direction?)\n");
-        printf("  - Timing: PIO is too slow/fast\n");
-        printf("  - Pull-ups: maybe GP12/13 need pull-downs\n");
-    } else {
-        printf("\n*** All PASS — HP-IL PIO works! ***\n");
-    }
-}
-
 
 static bool usb_connected = false;
 
+void SetPinDriveStrength(uint pin, uint mA) {
+    // gpio_set_drive_strength() är pico-SDK:s API för detta
+    // Värdetypen heter 'gpio_drive_strength' (inte _t)
+    
+    if (mA <= 2) {
+        gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_2MA);
+    } else if (mA <= 4) {
+        gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
+    } else if (mA <= 8) {
+        gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_8MA);
+    } else {
+        gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
+    }
+}
+
+hp82163::Screen *screen;
+
 int main() {
     stdio_init_all();
-    sleep_ms(2000);
-#define OUT_PIN 15
+    sleep_ms(500);
 
     alienBegin();
     alienStartup(2000);
-
-    //    // Initiera GP22 som output
-//    gpio_init(LED_PIN_1);
-//    gpio_set_dir(LED_PIN_1, GPIO_OUT);
-//    // Blink LED:en 5 ggr Snabbt = "boot OK"
-//    blink_led(50, 10);
-
-#if 0
-    printf("Blinking LED on GP22\n");
-    
-    // Initiera GP22 som output
-    gpio_init(22);
-    gpio_set_dir(22, GPIO_OUT);
-    
-    // Blink forever
-    while (true) {
-        gpio_put(22, 1);   // LED ON
-        sleep_ms(500);
-        gpio_put(22, 0);   // LED OFF
-        sleep_ms(500);
-    }
-#else
-    printf("PIO test on GP2 (SPI SCK)\n");
-    printf("Connect LED+resistor from GP2 to GND\n");
-    printf("Expected: LED blinks\n\n");
-    
-    // Använd GP2 (SPI SCK) — lätt att testa
-    HpIlDebug1Hz debug(22);
-    
-    printf("TX SM: %u\n", debug.sm());
-    
-    // Skriv ut PC varje sekund
-    for (int i = 0; i < 10; i++) {
-        printf("PC t+%d: %d\n", i, pio_sm_get_pc(pio0, debug.sm()));
-        sleep_ms(1000);
-    }
-    printf("GP14 function: %d (should be 6 = PIO)\n", gpio_get_function(22));
-
-    printf("\nDone. LED should have blinked.\n");
-    
-    while (true) {
-        tight_loop_contents();
-    }
-#endif
-#if 0
-    HpIlDebug1Hz debug(/*out_pin=*/15);
-    
-    printf("SM: %u, PC: %d\n", debug.sm(), 
-           pio_sm_get_pc(pio0, debug.sm()));
-    
-    for (int i = 0; i < 10; i++) {
-        sleep_ms(1000);
-        printf("PC t+%d: %d\n", i, 
-               pio_sm_get_pc(pio0, debug.sm()));
-    }
-    
-    while (true) {
-        tight_loop_contents();
-    }
-#endif
-//#ifdef BLINK_LED_TYPE_WIFI
-//    if (cyw43_arch_init() != 0) {
-//        // Init misslyckades — blinka med en utprintad felkod istället
-//        while (true) {
-//            printf("CYW43 init failed\n");
-//            sleep_ms(1000);
-//        }
-//    }
-//#else
-//    gpio_set_dir(LED_PIN, GPIO_OUT);
-//#endif
-//
 
     absolute_time_t timeout = make_timeout_time_ms(1000);
 
@@ -552,14 +465,26 @@ int main() {
             break;
         }
 
-        blink_led(250);
+        blink_led(LED_PIN_1, 250);
         tight_loop_contents();
+    }
+#define LED_PIN LED_PIN_5
+    breathing_led::init(LED_PIN);
+    for (int i = 0; i < 10; i++) {
+        pwm_set_chan_level(pwm_gpio_to_slice_num(LED_PIN),
+                           pwm_gpio_to_channel(LED_PIN), 0);
+        sleep_ms(500);
+        pwm_set_chan_level(pwm_gpio_to_slice_num(LED_PIN),
+                           pwm_gpio_to_channel(LED_PIN), 1000);
+        sleep_ms(500);
     }
 
     // SPI0: SCK=GP2, MOSI=GP3, MISO=GP0 (matches share.py)
     gpio_set_function(2, GPIO_FUNC_SPI);   // SCK
     gpio_set_function(3, GPIO_FUNC_SPI);   // MOSI
     gpio_set_function(0, GPIO_FUNC_SPI);   // MISO
+
+    breathing_led::init(LED_PIN_3); 
 
     // CS=GP1 and RST=GP4 are configured by PicoSpiTransport's constructor.
     if( usb_connected ) {
@@ -592,7 +517,7 @@ int main() {
     display.set8Bpp();
     display.set2LayerConfig();
 
-    hp82163::Screen screen(display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
+    screen = new hp82163::Screen(display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
 
     const char* lines[] = {
         "HELLO, WORLD!",
@@ -600,27 +525,92 @@ int main() {
         "PICO 2 + RA8875",
     };
     for (const char* line : lines) {
-        for (const char* p = line; *p; ++p) screen.pr_char(*p);
-        screen.pr_char('\n');
+        for (const char* p = line; *p; ++p) screen->pr_char(*p);
+        screen->pr_char('\r');
+        screen->pr_char('\n');
     }
+#ifdef DISP_TEST
+    for (int r=0; r<32; r++) {
+        const char *line = "This is row #";
+        for (const char* p = line; *p; ++p) screen->pr_char(*p);
+        if( r >= 10 )
+            screen->pr_char((r/10)+'0');
+        screen->pr_char((r%10)+'0');
+        screen->pr_char('\r');
+        screen->pr_char('\n');
+        ms_sleep(500);
+    }
+    for(int i=0; i<5;i++) {
+        screen->pr_char(27);
+        screen->pr_char('A');
+        ms_sleep(500);
+    }
+    for(int i=0; i<5;i++) {
+        screen->pr_char(27);
+        screen->pr_char('C');
+        ms_sleep(500);
+    }
+    for(int i=0; i<5;i++) {
+        screen->pr_char(27);
+        screen->pr_char('B');
+        ms_sleep(500);
+    }
+    for(int i=0; i<5;i++) {
+        screen->pr_char(27);
+        screen->pr_char('D');
+        ms_sleep(500);
+    }
+    screen->pr_char(27);
+    screen->pr_char('S');
+    ms_sleep(500);
+    screen->pr_char(27);
+    screen->pr_char('T');
+    ms_sleep(500);
+    screen->pr_char(27);
+    screen->pr_char('H');
+    ms_sleep(500);
+    for(int i=0; i<10;i++) {
+        screen->pr_char(27);
+        screen->pr_char('B');
+        ms_sleep(500);
+    }
+    screen->pr_char(27);
+    screen->pr_char('J');
+    ms_sleep(500);
+    screen->pr_char(27);
+    screen->pr_char('%');
+    screen->pr_char(15);
+    screen->pr_char(15);
+    screen->pr_char(64);
+    screen->pr_char(64);
+    screen->pr_char(64);
+    ms_sleep(500);
+#endif
 
 #endif
 
     // Init SD-card ...
     if( usb_connected ) {
-        printf("\n * Init SD-card ...");
+        printf("\n * Init SD-card ... ");
     }
     init_spi();
     FATFS fs;
     FRESULT fr = f_mount(&fs, "", 1);
     if (FR_OK != fr) {
         printf(" PANIC: f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+        SDOK = false;
+    } else {
+        if( usb_connected ) {
+            printf(" SD-card mounted!");
+            sd_dir();
+        }
+        SDOK = true;
     }
 
     // Init touch sensor ...
     if( usb_connected ) {
         printf("\n * Init touch sensor ...");
-        printf(" TBD!");
+        touchTest();
     }
 
     // Init HPIL scanner ...
@@ -628,8 +618,9 @@ int main() {
         printf("\n * Init HPIL interface ...");
     }
 
-//    HpIlLoop hpil(/*minus_in=*/13, /*plus_in=*/12,
-  //                /*minus_out=*/15, /*plus_out=*/14);
+    HpIlLoop hpil(IN_M_PIN, IN_P_PIN, OUT_M_PIN, OUT_P_PIN);
+
+    hipi_init();
 
     if( usb_connected ) {
         printf(" HP-IL initialized");
@@ -638,22 +629,16 @@ int main() {
     if( usb_connected ) {
         printf("\n-----------------------------");
         printf("\nUp and running ...\n");
-        printf("Run HPIL tests ...\n");
     }
 
-    runLoopbackTest();
-
-    while(1) {}
-
-
-    //   hipi_tests();
+    while (true) {
+        int cmd = hipi_loop(hpil);
+        breathing_led::update(cmd);
+        tight_loop_contents();
+    }
 
     if( usb_connected ) {
         printf("Done!\n");
     }
 
-    while (true) {
-        led_task(to_ms_since_boot(get_absolute_time()));
-        tight_loop_contents();
-    }
 }

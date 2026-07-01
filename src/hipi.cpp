@@ -1,80 +1,66 @@
 #include <stdio.h>
+#include <ctype.h>
+
+#include "hpil_pio.hpp"
 
 #include "display.h"
 #include "drive.h"
 
+std::vector<CDevice*> devices;
 
-CDisplay    disp("TFDISPLAY", 0x3E, 31);
-CDrive      drive("TFDRIVE", 0x10, 2);
 
-void show(IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
+void show(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 {
-    if( cmd != 0)
-        printf("cmd: 0x%03X --> ", cmd);
-    else
-        printf("               ");
-    disp.show();
-    printf(" | ");
-    drive.show();
+    char buf[32];
+    if( cmd != 0) {
+        ilMnemonic(cmd, buf);
+        printf("%-6.6s --> ", buf);
+    } else
+        printf("\t   ");
+    dev->show();
     if( rtn != 0) {
-        printf(" -> cmd: 0x%03X", rtn);
+        ilMnemonic(rtn, buf);
+        printf(" -> %s", buf);
         if( rtn>='A' && rtn <= 'Z' )
-            printf(" '%c'", rtn);
+            printf(" '%c'", isprint(rtn) ? rtn : '.');
     }
     printf("\n");
 }
 
-IL_CMD_t loop(IL_CMD_t cmd)
+void hipi_init()
 {
-    cmd = disp.hpil(cmd);
-    cmd = drive.hpil(cmd);
-    return cmd;
+    devices.push_back(new CDisplay("TFDISPLAY", 0x3E, 31));
+    devices.push_back(new CDrive("TFDRIVE"));
 }
 
-IL_CMD_t tests[] = {
-    AAD+1,
-    LAD+2,
-    DDL+5,
-    TAD+2,
-    SST,
-    0
-};
+bool bDebug = true;
 
-void hipi_tests(void)
-{
-    IL_CMD_t cmd, rtn;
-    cmd = rtn = 0;
-    show();
-    for( int i=0; tests[i] != 0; i++ ) {
-        cmd = tests[i];
-        rtn = loop(cmd);
-        show(cmd, rtn);
+IL_CMD_t hipi_loop(HpIlLoop& loop) {
+    uint32_t rx_word;
+    uint32_t rtn;
+    char buf[32];
+    int n = 0;
+    if (loop.receiveFrame(rtn)) {
+        rx_word = rtn;
+        for (CDevice* dev : devices) {
+            rtn = dev->hpil(rx_word);
+            if (bDebug && rtn != 0x6C0) {
+                //for(int i=0; i<n; i++) printf("\t");
+                show(dev, n?0:rx_word, rtn);
+                n++;
+            }
+            rx_word = rtn;
+        }
+        if (bDebug && rtn != 0x6C0) {
+            ilMnemonic(rtn, buf);
+            printf("\t   --> %s\n", buf);
+        }
+        loop.sendFrame(rtn);
+        return rtn;
+    } else {
+        for (CDevice* dev : devices) {
+            dev->idle();
+        }
+        return 0;
     }
-    cmd = SST;
-    do {
-        rtn = loop(cmd);
-        show(cmd, rtn);
-    } while( rtn != ETO && rtn != DRV_IDLE && rtn != DRV_NO_TAPE_ERROR && rtn != DRV_NEW_TAPE_ERROR );
-
-    printf("\nGet name ...\n");
-
-    for( int n=1; n<3; n++ ) {
-        cmd = TAD+n;
-        rtn = loop(cmd);
-        show(cmd, rtn);
-
-        cmd = SDI;
-        rtn = loop(cmd);
-        show(cmd, rtn);
-        cmd = SST;
-        do {
-            rtn = loop(cmd);
-            show(cmd, rtn);
-        } while( rtn != ETO && rtn != DRV_IDLE && rtn != DRV_NO_TAPE_ERROR && rtn != DRV_NEW_TAPE_ERROR );
-        cmd = UNT;
-        rtn = loop(cmd);
-        show(cmd, rtn);
-    }
-    drive.close();
-    printf("Done with tests ....\n");
 }

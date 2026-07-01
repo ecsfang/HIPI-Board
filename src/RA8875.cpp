@@ -184,21 +184,6 @@ void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) 
     writeReg(0x41, 0x00);
 }
 
-//void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
-//    // Matches the per-character loop in share.py:
-//    //   display._write_reg(0x23, i+32)   ; CGRAM character index
-//    //   display._write_reg(0x21, 0x00)   ; clear FNCR0 (DDRAM/text mode off)
-//    //   display._write_data((display._read_reg(0x41) & ~(1<<3)) | (1<<2))
-//    //   display._write_cmd(MRWC)
-//    //   display._write_data(bytearray(f[i]), True)
-//    writeReg(0x23, ascii);
-//    writeReg(0x21, 0x00);
-//    const std::uint8_t mwcr0 = readReg(0x41);
-//    writeData(static_cast<std::uint8_t>((mwcr0 & ~(1 << 3)) | (1 << 2)));
-//    writeCmd(MRWC);
-//    writeData(bitmap, 16);
-//}
-
 // -----------------------------------------------------------------------
 // Register access
 // -----------------------------------------------------------------------

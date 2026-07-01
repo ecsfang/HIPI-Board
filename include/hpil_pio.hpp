@@ -1,11 +1,19 @@
 // src/hpil_pio.hpp
 #pragma once
 
+#include <stdio.h>
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "pico/time.h"
 #include "hpil.pio.h"
+
+#define IN_M_PIN  13
+#define IN_P_PIN  12
+#define OUT_M_PIN 15
+#define OUT_P_PIN 14
+
+#define WORD_SHIFT  0
 
 class HpIlLoop {
 public:
@@ -15,7 +23,21 @@ public:
           plus_in_pin_(plus_in_pin),
           minus_out_pin_(minus_out_pin),
           plus_out_pin_(plus_out_pin) {
-        init();
+/*            if (plus_out_pin_ != minus_out_pin_ + 1) {
+                printf("ERROR: TX pins not adjacent: minus=%u plus=%u (expected plus=minus+1)\n",
+                    minus_out_pin_, plus_out_pin_);
+                while (true) tight_loop_contents();  // stoppa tydligt
+            }
+            if (plus_in_pin_ != minus_in_pin_ + 1) {
+                printf("ERROR: RX pins not adjacent: minus=%u plus=%u\n",
+                    minus_in_pin_, plus_in_pin_);
+                while (true) tight_loop_contents();
+            }
+            if (minus_out_pin_ == minus_in_pin_) {
+                printf("ERROR: TX and RX share pin: %u\n", minus_in_pin_);
+                while (true) tight_loop_contents();
+            }**/
+            init();
     }
 
     ~HpIlLoop() {
@@ -43,6 +65,7 @@ public:
             return false;
         }
         out_word = pio_sm_get(pio0, sm_rx_);
+        out_word >>= WORD_SHIFT;
         return true;
     }
 
@@ -61,6 +84,7 @@ public:
         
         // FIFO har data — läs
         out_word = pio_sm_get(pio0, sm_rx_);
+        out_word >>= WORD_SHIFT;
         return true;
     }
 
@@ -70,6 +94,7 @@ public:
         if (pio_sm_is_tx_fifo_full(pio0, sm_tx_)) {
             return false;
         }
+        word <<= WORD_SHIFT;
         pio_sm_put(pio0, sm_tx_, word);
         return true;
     }
@@ -83,6 +108,7 @@ public:
             }
             tight_loop_contents();
         }
+        word <<= WORD_SHIFT;
         pio_sm_put(pio0, sm_tx_, word);
         return true;
     }
@@ -116,38 +142,54 @@ private:
     void init() {
         sm_rx_ = pio_claim_unused_sm(pio0, true);
         sm_tx_ = pio_claim_unused_sm(pio0, true);
-
         uint rx_offset = pio_add_program(pio0, &frame_rx_program);
         uint tx_offset = pio_add_program(pio0, &frame_tx_program);
 
-        // RX
+        // Plattformsoberoende PIO-frekvens (125 MHz på RP2040, 150 MHz på RP2350)
+        const float pio_freq = 4000000.0f;
+        const float clkdiv = (float)clock_get_hz(clk_sys) / pio_freq;
+
+        // ============ RX ============
+        pio_sm_set_enabled(pio0, sm_rx_, false);
+        pio_sm_set_enabled(pio0, sm_tx_, false);
+
         pio_sm_config rx_cfg = frame_rx_program_get_default_config(rx_offset);
         sm_config_set_in_pins(&rx_cfg, minus_in_pin_);
         sm_config_set_jmp_pin(&rx_cfg, plus_in_pin_);
-        sm_config_set_in_shift(&rx_cfg, true, false, 32);
+        sm_config_set_in_shift(&rx_cfg, false, false, 32);
         sm_config_set_fifo_join(&rx_cfg, PIO_FIFO_JOIN_RX);
+        sm_config_set_clkdiv(&rx_cfg, clkdiv);
+        sm_config_set_wrap(&rx_cfg, rx_offset + frame_rx_wrap_target, rx_offset + frame_rx_wrap);
         pio_sm_init(pio0, sm_rx_, rx_offset, &rx_cfg);
+        //pio_sm_set_wrap(pio0, sm_rx_, 0, 10);
 
-        // TX
-        pio_sm_config tx_cfg = frame_tx_program_get_default_config(tx_offset);
-        sm_config_set_out_pins(&tx_cfg, minus_out_pin_, 1);
-        sm_config_set_sideset_pins(&tx_cfg, plus_out_pin_);
-        sm_config_set_out_shift(&tx_cfg, true, false, 32);
-        sm_config_set_fifo_join(&tx_cfg, PIO_FIFO_JOIN_TX);
-        pio_sm_init(pio0, sm_tx_, tx_offset, &tx_cfg);
-
-        // Pin directions
         pio_gpio_init(pio0, minus_in_pin_);
         pio_gpio_init(pio0, plus_in_pin_);
+        // 2 pinnar, input: minus_in_pin och plus_in_pin (minus=base, plus=base+1)
+        pio_sm_set_consecutive_pindirs(pio0, sm_rx_, minus_in_pin_,  2, false);
+        gpio_set_pulls(minus_in_pin_, false, false);
+        gpio_set_pulls(plus_in_pin_,  false, false);
+
+        // ============ TX ============
+        pio_sm_config tx_cfg = frame_tx_program_get_default_config(tx_offset);
+        sm_config_set_out_pins(&tx_cfg, plus_out_pin_, 1);
+        sm_config_set_sideset_pins(&tx_cfg, plus_out_pin_);
+        sm_config_set_out_shift(&tx_cfg, false, false, 32);
+        sm_config_set_fifo_join(&tx_cfg, PIO_FIFO_JOIN_TX);
+        sm_config_set_clkdiv(&tx_cfg, clkdiv);
+        sm_config_set_wrap(&tx_cfg, tx_offset + frame_tx_wrap_target, tx_offset + frame_tx_wrap);
+        pio_sm_init(pio0, sm_tx_, tx_offset, &tx_cfg);
+        pio_sm_set_wrap(pio0, sm_tx_, tx_offset, tx_offset + frame_tx_wrap);
+
         pio_gpio_init(pio0, minus_out_pin_);
         pio_gpio_init(pio0, plus_out_pin_);
+        pio_sm_set_consecutive_pindirs(pio0, sm_tx_, plus_out_pin_, 2, true);
 
-        SetPinDriveStrength(minus_out_pin_, 12); // Set drive strenth to 12mA
-        SetPinDriveStrength(plus_out_pin_, 12); // Set drive strenth to 12mA
+        SetPinDriveStrength(plus_out_pin_, 12);
+        SetPinDriveStrength(minus_out_pin_,  12);
 
-        gpio_set_pulls(minus_in_pin_, false, true);
-        gpio_set_pulls(plus_in_pin_, false, true);
-
+        // Starta båda SM:er — RX börjar lyssna, TX pull:ar direkt och blockerar
+        // tills första write() skickar data.
         pio_sm_set_enabled(pio0, sm_rx_, true);
         pio_sm_set_enabled(pio0, sm_tx_, true);
     }
@@ -173,74 +215,3 @@ private:
     uint sm_rx_;
     uint sm_tx_;
 };
-
-
-// I hpil_pio.hpp, lägg till:
-
-#include "hpil_debug.pio.h"
-
-class HpIlDebug {
-public:
-    HpIlDebug(uint minus_in_pin, uint plus_in_pin) {
-        sm_ = pio_claim_unused_sm(pio0, true);
-        uint offset = pio_add_program(pio0, &hpil_debug_program);
-        
-        pio_sm_config cfg = hpil_debug_program_get_default_config(offset);
-        sm_config_set_in_pins(&cfg, minus_in_pin);
-        sm_config_set_jmp_pin(&cfg, plus_in_pin);
-        sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_RX);
-        pio_sm_init(pio0, sm_, offset, &cfg);
-        
-        pio_gpio_init(pio0, minus_in_pin);
-        pio_gpio_init(pio0, plus_in_pin);
-        gpio_set_pulls(minus_in_pin, false, true);
-        gpio_set_pulls(plus_in_pin, false, true);
-        
-        pio_sm_set_enabled(pio0, sm_, true);
-    }
-    
-    // Läs ett ord (icke-blockerande)
-    bool read(uint32_t& out) {
-        if (pio_sm_is_rx_fifo_empty(pio0, sm_)) return false;
-        out = pio_sm_get(pio0, sm_);
-        return true;
-    }
-    
-    uint sm() const { return sm_; }
-    
-private:
-    uint sm_;
-};
-
-#if 1
-#include "hpil_debug_1hz.pio.h"
-// För Pico 2 W (inbyggd LED på CYW43):
-//#include "pico/cyw43_arch.h"
-
-class HpIlDebug1Hz {
-public:
-    HpIlDebug1Hz(uint out_pin) {
-        sm_ = pio_claim_unused_sm(pio0, true);
-        uint offset = pio_add_program(pio0, &hpil_debug_1hz_program);
-        
-        pio_sm_config cfg = hpil_debug_1hz_program_get_default_config(offset);
-        sm_config_set_out_pins(&cfg, out_pin, 1);
-        sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_TX);
-        sm_config_set_clkdiv(&cfg, 250.0f);
-        
-        pio_sm_init(pio0, sm_, offset, &cfg);
-        pio_gpio_init(pio0, out_pin);
-        // gpio_set_dir behövs inte — PIO:n sätter direction via 'set pindirs'
-        
-        pio_sm_set_enabled(pio0, sm_, true);
-    }
-    
-    uint sm() const { return sm_; }
-
-private:
-    uint sm_;
-};
-
-
-
-#endif

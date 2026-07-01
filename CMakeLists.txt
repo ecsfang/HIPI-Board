@@ -105,14 +105,18 @@ target_include_directories(hp82163_pico_transport PUBLIC include)
 add_executable(hp82163_pico
     src/pico_main.cpp
     src/hipi.cpp
+    src/hpil.cpp
     src/device.cpp
     src/drive.cpp
     src/display.cpp
+    src/touch.cpp
     src/hw_config.cpp
 )
 target_link_libraries(hp82163_pico PRIVATE
     hp82163_core
+    hardware_i2c
     hardware_spi
+    hardware_pwm
     hardware_gpio
     hp82163_pico_transport
     pico_stdlib

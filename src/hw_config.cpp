@@ -50,7 +50,7 @@ static sd_card_t sd_card;
 };*/
 
 void init_spi(void) {
-    spi.hw_inst = spi0;
+    spi.hw_inst = spi1;
     spi.miso_gpio = 8;
     spi.mosi_gpio = 11;
     spi.sck_gpio = 10;

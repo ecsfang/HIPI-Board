@@ -5,27 +5,34 @@
 ; in_shiftdir = SHIFT_LEFT, no autopush
 ; jmp_pin = plus input
 
-.program frame_rx
+.define IN_PLUS_GPIO   12
+.define IN_MINUS_GPIO  13
+.define OUT_PLUS_GPIO  14
+.define OUT_MINUS_GPIO 15
 
+; pin_base = plus
+;   pin 0 = plus   (jmp_pin, wait)
+
+
+.program frame_rx
+.wrap_target
 restart:
-    set x, 10                       ; counter för 11 bitar (10 ned till 0)
-    wait 1 pin 1 [2]                ; vänta på plus HIGH (först halvan av sync)
-    wait 0 pin 1                    ; vänta på plus LOW (sync-biten klar)
+    set x, 10
+    wait 1 gpio IN_PLUS_GPIO [2]    ; ★ plus HIGH
+    wait 0 gpio IN_PLUS_GPIO        ; ★ plus LOW
 
 bitloop:
-    set y, 31                       ; timeout-counter (32 cycles)
-
+    set y, 31
 wait_loop:
-    jmp pin, go_on                  ; nästa bit: plus går HIGH
-    jmp y--, wait_loop              ; försök igen om timeout
-    jmp restart                     ; timeout - börja om från början
-
+    jmp pin, go_on                  ; ★ jmp_pin = pin 0 = plus
+    jmp y--, wait_loop
+    jmp restart
 go_on:
-    wait 0 pin 1 [1]                ; vänta på plus LOW
-    in pins, 1                      ; läs minus-data
-    jmp x--, bitloop                ; loop till nästa bit
-    push block                      ; 32-bitars data till RX FIFO
-
+    wait 0 gpio IN_PLUS_GPIO [1]    ; ★ plus LOW
+    in pins, 1                      ; ★ pin 1 = minus
+    jmp x--, bitloop
+    push block
+.wrap
 
 ; HP-IL Frame Transmitter
 ; Skickar 11-bitars frames (1 start + 8 data + 1 stop + 1 sync)
@@ -43,27 +50,27 @@ go_on:
     jmp !x, send_zero_first        ; är första bit 0 eller 1?
 
     ; Första bit = 1: positiv swing först
-    nop side 2 [3]                  ; minus=high, plus=low
-    nop side 1 [1]                  ; minus=low, plus=high
+    nop side 1 [3]                  ; minus=high, plus=low
+    nop side 2 [1]                  ; minus=low, plus=high
     jmp bitloop2                    ; hoppa till huvudloop
 
 send_zero_first:
     ; Första bit = 0: negativ swing först
-    nop side 1 [3]                  ; minus=low, plus=high
-    nop side 2 [2]                  ; minus=high, plus=low
+    nop side 2 [3]                  ; minus=low, plus=high
+    nop side 1 [2]                  ; minus=high, plus=low
 
 bitloop2:
     jmp !x, send_zero_bit           ; är nästa bit 0 eller 1?
 
     ; Bit = 1: positiv swing
-    nop side 2 [3]
-    nop side 1 [2]
+    nop side 1 [3]
+    nop side 2 [2]
     jmp bit_end
 
 send_zero_bit:
     ; Bit = 0: negativ swing
-    nop side 1 [3]
     nop side 2 [3]
+    nop side 1 [3]
 
 bit_end:
     nop side 0                      ; bit-spacing (båda LOW)

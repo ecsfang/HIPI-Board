@@ -92,9 +92,9 @@ void Screen::up(bool roll, bool cmd) {
 
     // BTE scroll screen content up by one line.
     d_.BTE(0xC2, 0, 0,
-           static_cast<std::uint16_t>(COLS_ * width_),
-           static_cast<std::uint16_t>(height_ * (ROWS_ - 1)),
-           0, height_);
+           static_cast<std::uint16_t>(COLS_ * width()),
+           static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
+           0, height());
 
     if (roll) {
         set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
@@ -113,9 +113,9 @@ void Screen::up(bool roll, bool cmd) {
         }
     } else {
         if (cmd) {
-            d_.BTE(0x06, 0, static_cast<std::uint16_t>(height_ * (ROWS_ - 1)),
-                   static_cast<std::uint16_t>(width_ * COLS_),
-                   height_);   // blank last line
+            d_.BTE(0x06, 0, static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
+                   static_cast<std::uint16_t>(width() * COLS_),
+                   height());   // blank last line
             lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
             if (lines_.size() > max_) lines_.pop_back();
         } else {
@@ -135,10 +135,10 @@ void Screen::down(bool cmd) {
     if (!cmd && offset_ >= lines_.size() - ROWS_) return;
 
     for (int row = ROWS_; row > 0; --row) {
-        d_.BTE(0xC2, 0, static_cast<std::uint16_t>(row * height_),
-               static_cast<std::uint16_t>(COLS_ * width_),
-               height_,
-               0, static_cast<std::uint16_t>((row - 1) * height_));
+        d_.BTE(0xC2, 0, static_cast<std::uint16_t>(row * height()),
+               static_cast<std::uint16_t>(COLS_ * width()),
+               height(),
+               0, static_cast<std::uint16_t>((row - 1) * height()));
     }
     set_cursor(0, 0);
     d_.writeReg(0x40, 0x80);
@@ -171,16 +171,16 @@ void Screen::inschar() {
     std::uint8_t last = line.back();
     line.pop_back();
 
-    d_.BTE(0xC2, 0, 0x8000, 800, static_cast<std::uint16_t>(height_), 0,
-           static_cast<std::uint16_t>(row_ * height_));   // store line
+    d_.BTE(0xC2, 0, 0x8000, 800, static_cast<std::uint16_t>(height()), 0,
+           static_cast<std::uint16_t>(row_ * height()));   // store line
 
     if (col_ != COLS_ - 1) {
         d_.BTE(0xC2,
-               static_cast<std::uint16_t>((col_ + 1) * width_),
-               static_cast<std::uint16_t>(row_ * height_),
-               static_cast<std::uint16_t>(800 - (col_ + 1) * width_),
-               height_,
-               static_cast<std::uint16_t>(col_ * width_),
+               (col() + 1) * width(),
+               row() * height(),
+               800 - (col() + 1) * width(),
+               height(),
+               col() * width(),
                0x8000);                                    // restore shifted line
         for (std::size_t i = COLS_ - 1 - row_; i < lines_.size(); ++i) {
             // shift within logical buffer
@@ -203,14 +203,14 @@ void Screen::inschar() {
         prev.insert(prev.begin(), last);
         std::uint8_t prev_last = prev.back();
         prev.pop_back();
-        d_.BTE(0xC2, 0, 0x8000, width_, height_,
-               static_cast<std::uint16_t>(800 - width_), 0x8000);
-        d_.BTE(0xC2, width_, 0x8000,
-               static_cast<std::uint16_t>(800 - width_),
-               height_, 0,
-               static_cast<std::uint16_t>((row_ + 1) * height_));
-        d_.BTE(0xC2, 0, static_cast<std::uint16_t>((row_ + 1) * height_),
-               800, height_, 0, 0x8000);
+        d_.BTE(0xC2, 0, 0x8000, width(), height(),
+               static_cast<std::uint16_t>(800 - width()), 0x8000);
+        d_.BTE(0xC2, width(), 0x8000,
+               static_cast<std::uint16_t>(800 - width()),
+               height(), 0,
+               static_cast<std::uint16_t>((row_ + 1) * height()));
+        d_.BTE(0xC2, 0, static_cast<std::uint16_t>((row_ + 1) * height()),
+               800, height(), 0, 0x8000);
         last = prev_last;
     }
     cnt_ = static_cast<std::uint8_t>(cnt_ + 1);
@@ -340,33 +340,33 @@ void Screen::pr_char(std::uint8_t c) {
                 lines_[ROWS_ - 1 - row_][cc] = 32;
             }
             d_.BTE(0x06,
-                   static_cast<std::uint16_t>(col_ * width_),
-                   static_cast<std::uint16_t>(row_ * height_),
-                   static_cast<std::uint16_t>(width_ * (COLS_ - col_)),
-                   height_);
+                   col_ * width(),
+                   row_ * height(),
+                   width() * (COLS_ - col_),
+                   height());
             if (c == 74) {
                 for (std::uint8_t i = 0; i < ROWS_ - 1 - row_; ++i) {
                     lines_[i].assign(COLS_, 32);
                 }
                 if (row_ != ROWS_ - 1) {
                     d_.BTE(0x06, 0,
-                           static_cast<std::uint16_t>(height_ * (row_ + 1)),
-                           static_cast<std::uint16_t>(width_ * COLS_),
-                           static_cast<std::uint16_t>(height_ * (ROWS_ - row_ - 1)));
+                           height() * (row_ + 1),
+                           width() * COLS_,
+                           height() * (ROWS_ - row_ - 1));
                 }
             }
         } else if (c == 76) {            // ESC L -> insert line
             if (row_ != ROWS_ - 1) {
                 d_.BTE(0xC2, 0, 0x8000, 800,
-                       static_cast<std::uint16_t>((ROWS_ - 1 - row_) * height_),
-                       0, static_cast<std::uint16_t>(height_ * row_));
+                       (ROWS_ - 1 - row_) * height(),
+                       0, height() * row_);
                 d_.BTE(0xC2, 0,
-                       static_cast<std::uint16_t>(height_ * (row_ + 1)), 800,
-                       static_cast<std::uint16_t>((ROWS_ - 1 - row_) * height_),
+                       height() * (row_ + 1), 800,
+                       (ROWS_ - 1 - row_) * height(),
                        0, 0x8000);
             }
-            d_.BTE(0x06, 0, static_cast<std::uint16_t>(height_ * row_),
-                   static_cast<std::uint16_t>(width_ * COLS_), height_);
+            d_.BTE(0x06, 0, height() * row(),
+                   width() * cols(), height());
             lines_.insert(lines_.begin() + (ROWS_ - 1 - row_),
                           std::vector<std::uint8_t>(COLS_, 32));
             if (lines_.size() > 0) lines_.erase(lines_.begin());
@@ -374,13 +374,13 @@ void Screen::pr_char(std::uint8_t c) {
             set_cursor(col_, row_);
         } else if (c == 77) {            // ESC M -> delete line
             if (row_ != ROWS_ - 1) {
-                d_.BTE(0xC2, 0, static_cast<std::uint16_t>(row_ * height_),
-                       static_cast<std::uint16_t>(COLS_ * width_),
-                       static_cast<std::uint16_t>(height_ * (ROWS_ - 1 - row_)),
-                       0, static_cast<std::uint16_t>(height_ * (row_ + 1)));
+                d_.BTE(0xC2, 0, row_ * height(),
+                       COLS_ * width(),
+                       height() * (ROWS_ - 1 - row_),
+                       0, height() * (row_ + 1));
             }
-            d_.BTE(0x06, 0, static_cast<std::uint16_t>(height_ * (ROWS_ - 1)),
-                   static_cast<std::uint16_t>(width_ * COLS_), height_);
+            d_.BTE(0x06, 0, height() * (ROWS_ - 1),
+                   width() * COLS_, height());
             lines_.erase(lines_.begin() + (ROWS_ - 1 - row_));
             lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
         } else if (c == 78) {            // ESC N -> enter insert mode
@@ -388,49 +388,50 @@ void Screen::pr_char(std::uint8_t c) {
         } else if (c == 79) {            // ESC O -> delete character
             {
                 auto& line = lines_[ROWS_ - 1 - row_];
-                if (static_cast<std::size_t>(col_ + 1) < line.size()) {
+                if ((uint8_t)(col_ + 1) < line.size()) {
                     line.erase(line.begin() + col_, line.begin() + col_ + 1);
                 }
             }
             if (col_ != COLS_ - 1) {
                 d_.BTE(0xC2,
-                       static_cast<std::uint16_t>(col_ * width_),
-                       static_cast<std::uint16_t>(row_ * height_),
-                       static_cast<std::uint16_t>(width_ * (COLS_ - col_ - 1)),
-                       height_,
-                       static_cast<std::uint16_t>((col_ + 1) * width_),
-                       static_cast<std::uint16_t>(row_ * height_));
+                       col_ * width(),
+                       row_ * height(),
+                       width() * (COLS_ - col_ - 1),
+                       height(),
+                       (col_ + 1) * width(),
+                       row_ * height());
             }
             if ((cnt_ < COLS_) || (cp_ > COLS_)) {
                 lines_[ROWS_ - 1 - row_].push_back(32);
                 d_.BTE(0x06,
-                       static_cast<std::uint16_t>((COLS_ - 1) * width_),
-                       static_cast<std::uint16_t>(row_ * height_),
-                       width_, height_);
+                       (COLS_ - 1) * width(),
+                       row_ * height(),
+                       width(), height());
             } else {
                 lines_[ROWS_ - 1 - row_].push_back(lines_[ROWS_ - 2 - row_][0]);
                 d_.BTE(0xC2,
-                       static_cast<std::uint16_t>((COLS_ - 1) * width_),
-                       static_cast<std::uint16_t>(row_ * height_),
-                       width_, height_,
-                       0, static_cast<std::uint16_t>((row_ + 1) * height_));
+                       (COLS_ - 1) * width(),
+                       row_ * height(),
+                       width(), height(),
+                       0, (row_ + 1) * height());
                 {
                     auto& prev = lines_[ROWS_ - 2 - row_];
                     prev.erase(prev.begin());
                 }
-                d_.BTE(0xC2, 0, static_cast<std::uint16_t>((row_ + 1) * height_),
-                       static_cast<std::uint16_t>(width_ * (COLS_ - 1)),
-                       height_,
-                       width_, static_cast<std::uint16_t>((row_ + 1) * height_));
+                d_.BTE(0xC2, 0, (row_ + 1) * height(),
+                       width() * (COLS_ - 1),
+                       height(),
+                       width(), (row_ + 1) * height());
                 lines_[ROWS_ - 2 - row_].push_back(32);
                 d_.BTE(0x06,
-                       static_cast<std::uint16_t>((COLS_ - 1) * width_),
-                       static_cast<std::uint16_t>((row_ + 1) * height_),
-                       width_, height_);
+                       (COLS_ - 1) * width(),
+                       (row_ + 1) * height(),
+                       width(), height());
             }
-            if (cp_ != cnt_) cnt_ = (cnt_ > 0) ? static_cast<std::uint8_t>(cnt_ - 1) : 0;
+            if (cp_ != cnt_)
+                cnt_ = (cnt_ > 0) ? cnt_ - 1 : 0;
         } else if (c == 91 || c == 93) {  // ESC [ / ] -> size 0/1
-            screen_pars(static_cast<std::uint8_t>((c - 91) / 2));
+            screen_pars((c - 91) / 2);
             clear();
         }
     } else {
@@ -443,17 +444,19 @@ void Screen::pr_char(std::uint8_t c) {
                 if (c == 8) {
                     nline_ = false;
                     if (col_ != 0) {
-                        col_ = static_cast<std::uint8_t>(col_ - 1);
+                        col_--;
                     } else if (row_ != 0) {
-                        row_ = static_cast<std::uint8_t>(row_ - 1);
-                        col_ = static_cast<std::uint8_t>(COLS_ - 1);
+                        row_--;
+                        col_ = COLS_ - 1;
                     }
                 } else if (c == 10) {
                     cnt_ = 0;
                     cp_  = 0;
                     if (!nline_) {
-                        if (row_ == ROWS_ - 1) up();
-                        else row_ = static_cast<std::uint8_t>(row_ + 1);
+                        if (row_ == ROWS_ - 1)
+                            up();
+                        else
+                            row_++;
                         nline_ = false;
                     }
                 } else if (c == 13) {
@@ -464,18 +467,20 @@ void Screen::pr_char(std::uint8_t c) {
         } else {
             // printable character
             nline_ = false;
-            if (escN_) inschar();
+            if (escN_)
+                inschar();
             lines_[ROWS_ - 1 - row_][col_] = c;
             draw_letter(c);
-            col_ = static_cast<std::uint8_t>(col_ + 1);
-            if (cp_ == cnt_) cnt_ = static_cast<std::uint8_t>(cnt_ + 1);
-            cp_  = static_cast<std::uint8_t>(cp_ + 1);
+            col_++;
+            if (cp_ == cnt_)
+                cnt_++;
+            cp_++;
             if (col_ == COLS_) {
                 col_ = 0;
-                row_ = static_cast<std::uint8_t>(row_ + 1);
+                row_++;
                 nline_ = true;
                 if (row_ == ROWS_) {
-                    row_ = static_cast<std::uint8_t>(ROWS_ - 1);
+                    row_ = ROWS_ - 1;
                     up();
                 }
             }
@@ -489,8 +494,8 @@ void Screen::pr_char(std::uint8_t c) {
 // -----------------------------------------------------------------------
 
 void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
-    d_.writeReg16(0x2A, static_cast<std::uint16_t>(c * width_ + ofx_));
-    d_.writeReg16(0x2C, static_cast<std::uint16_t>(r * height_ + ofy_));
+    d_.writeReg16(0x2A, static_cast<std::uint16_t>(c * width() + ofx_));
+    d_.writeReg16(0x2C, static_cast<std::uint16_t>(r * height() + ofy_));
 }
 
 void Screen::set_cur() {
@@ -511,10 +516,10 @@ void Screen::draw_letter(std::uint8_t c) {
             d_.txtColor(0, color_);
             d_.txtWriteChar(static_cast<std::uint8_t>(c & 0x7F));
         } else {
-            d_.fillRect(static_cast<std::int16_t>(col_ * width_),
-                        static_cast<std::int16_t>(row_ * height_),
-                        static_cast<std::int16_t>(width_),
-                        static_cast<std::int16_t>(height_),
+            d_.fillRect(static_cast<std::int16_t>(col_ * width()),
+                        static_cast<std::int16_t>(row_ * height()),
+                        static_cast<std::int16_t>(width()),
+                        static_cast<std::int16_t>(height()),
                         color_);
             d_.txtColor(0, color_);
             const char tmp[2] = { static_cast<char>(c & 0x7F), 0 };

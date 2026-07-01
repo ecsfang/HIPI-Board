@@ -13,11 +13,11 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
 
-    printf("DRV:%3X ", cmd);
+    if( bPrt ) printf("DRV:%3X ", cmd);
 
     if( ddl == 5 ) {
         //Busy formatting
-#if 0
+#if 1
         printf("Formatting ... (%d)\n", tape.tell());
         if( check() ) {
             tape.write(buf0);
@@ -27,6 +27,7 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
                 sst = DRV_IDLE;
                 tape.close();
                 tape.open();
+                printf("Done with formatting!\n");
             }
         }
 #else
@@ -44,7 +45,7 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 
     // Otherwise handle device specific commands
     if( cmd == IFC) {
-        status = STAT_NONE;
+        status = STAT_IDLE;
         mode = WRITE_MODE;
         ddl = 31;
         ddt = 31;
@@ -60,7 +61,7 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     if( cmd == UNT ) {
-        status = STAT_NONE;
+        status = STAT_IDLE;
     } else if( cmd == NRD ) {
         end = true;
     } else {
@@ -81,7 +82,6 @@ void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
         } else if( cmd == SDI ) {
             sdi = devName;
             *rtn = *sdi++;
-            //end = false;
         } else if( inAddrRange(cmd, DDT) ) {
             IL_ADDR_t n = cmd & MAX_ADDR;
             if( n == 4 ) {
@@ -168,7 +168,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                     printf("Do FORMAT ...\n");
                     mode = WRITE_MODE;
                     sst = DRV_BUSY;
-                    //memset(buf0, 255, BUF_SIZE);
+                    memset(buf0, 255, BUF_SIZE);
                     break;
                 case 6:
                     //Partial write
@@ -181,7 +181,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
             }
         }
     } else if( cmd == UNL ) {
-        status = STAT_NONE;
+        status = STAT_IDLE;
     } else if( cmd < DOE ) {
         if( status == LISTENER )
             *rtn = doNextListener(cmd);
@@ -313,6 +313,7 @@ void CDrive::readblock()
 {
     if( check() ) {
         // Read BUF_SIZE bytes from tape
+        printf("Read block ...\n");
         tape.read(buf0);
     }
 }
@@ -320,6 +321,7 @@ void CDrive::writeblock()
 {
     if( check() ) {
         // Write buf0 to tape
+        printf("Write block ...\n");
         tape.write(buf0);
         // ... and flush!
         // tape.flush();
@@ -351,35 +353,45 @@ bool CDrive::check()
     return TapeOK;
 }
 
-#if 0
-    def readblock(self):
-        if self.check():
-            buf=bytearray(self.tape.read(256))
-            self.buf0[:len(buf)]=buf
-            for i in range(len(buf),256):
-                self.buf0[i]=255
-        
 
-    def writeblock(self):
-        if self.check():
-            self.tape.write(self.buf0)
-            self.tape.flush()
-        
-    def check(self):
-        if share.TapeOK:
-            return True
-        else:
-            if share.SDOK[0]:
-                self.tape=open(share.Tape,'+b')
-                self.tape.seek(24)
-                self.size=int.from_bytes(self.tape.read(4))*int.from_bytes(self.tape.read(4))*int.from_bytes(self.tape.read(4))
-                if self.size==0:
-                    self.size=512
-                self.tape.seek(0)                
-                self.sst=0x17
-                share.TapeOK=True
-                return True
-            else:
-                self.sst=0x14
-                return False
-#endif
+#include <stdio.h>
+#include "ff.h"
+
+static FATFS fs;
+
+static void list_dir(const char* path, int depth) {
+    DIR dir;
+    FILINFO fno;
+    FRESULT fr = f_opendir(&dir, path);
+    if (fr != FR_OK) {
+        printf("%*s[opendir %s: %s]\n", depth*2, "", path, FRESULT_str(fr));
+        return;
+    }
+
+    while (true) {
+        fr = f_readdir(&dir, &fno);
+        if (fr != FR_OK || fno.fname[0] == 0) break;   // 0 = slut på katalogen
+
+        const char* kind = (fno.fattrib & AM_DIR) ? "DIR " : "FILE";
+        printf("\t%*s%-4s %8lu  %s\n",
+               depth*2, "",
+               kind,
+               (unsigned long)fno.fsize,
+               fno.fname);
+
+        // Rekursera ned i underkataloger (men inte "." och "..")
+        if (fno.fattrib & AM_DIR) {
+            char subpath[256];
+            snprintf(subpath, sizeof(subpath), "%s/%s", path, fno.fname);
+            list_dir(subpath, depth + 1);
+        }
+    }
+    f_closedir(&dir);
+}
+
+void sd_dir() {
+    printf("\n\t=== SD card contents ===\n");
+    list_dir("", 0);
+    printf("\t=== done ===\n");
+}
+

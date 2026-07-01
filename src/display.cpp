@@ -1,19 +1,33 @@
 #include <stdio.h>
+#include <cctype>
 #include "display.h"
+
+#include "PicoSpiTransport.hpp"
+#include "RA8875.hpp"
+#include "Screen.hpp"
+
+extern hp82163::Screen *screen;
 
 void CDisplay::clear(void)
 {
-    /* Clear device 
-        video.clear()
-    */
+    // Clear device 
+    screen->clear();
     fifo = std::queue<unsigned char>();
+}
+
+void CDisplay::idle(void)
+{
+    if( !fifo.empty() ) {
+        screen->pr_char(fifo.front());
+        fifo.pop();
+    }
 }
 
 IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
 
-    printf("DSP:%3X ", cmd);
+    if( bPrt ) printf("DSP:%3X ", cmd);
 
     // Handle all base commands
     if( base(cmd, &rtn) )
@@ -21,7 +35,7 @@ IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
 
     // Otherwise handle device specific commands
     if( cmd == IFC  ) {
-        status = STAT_NONE;
+        status = STAT_IDLE;
     } else if( (cmd == SAI) && (status == TALKER) ) {
         rtn = nSai;
         sai = true;
@@ -30,61 +44,10 @@ IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
         rtn = *sdi++;
     } else if( (cmd < DOE) && (status == LISTENER) ) {
         // Data
+        //printf("DSP:%3X (%c)\n", cmd, isprint(cmd) ? cmd : '.');
         fifo.push(cmd & 0xFF);
-//    } else if( sai ) {
-//        rtn = (cmd == nSai) ? ETO : ETE;
-//        sai = false;
-//    } else if( sdi ) {
-//        rtn = *sdi++;
-//        if( rtn == 0 ) {
-//            rtn = ETO;
-//            sdi = NULL;
-//        }
+    } else {
+        if( bPrt ) printf("~");
     }
     return rtn;
 }
-
-#if 0
-class Video(object):
-    
-    def __init__(self):
-        self.video=Screen()
-        self.address=31
-        self.status="N"
-        self.sai=False
-        self.sdi=''
-        self.q=deque((),2500)
-        self.Scroll=0
-        _thread.start_new_thread(self.handler,())
-
-    def handler(self):
-        while True:
-            share.SDcheck(share.Tape[7:])
-            share.TapeOK=share.TapeOK and share.SDOK[0]
-            if share.Scroll:
-                if self.Scroll!=0:
-                    if self.Scroll>2:
-                        self.video.store()
-                    if self.Scroll==1:
-                        self.video.down(False)
-                    elif self.Scroll==2:
-                        self.video.offset=len(self.video.lines)-self.video.ROWS
-                        self.video.full()
-                    elif self.Scroll==-1:
-                        self.video.up(False,False)
-                    share.display._write_reg(0x40,0x82)    
-                    if self.Scroll<-1:
-                        self.video.recall()
-                        self.video.offset=0
-                        self.video.set_cur()
-                        share.Scroll=False
-                    self.Scroll=0
-            elif not(share.Menu):
-                    if not len(self.q)==0:
-                        try:
-                            self.video.pr_char(self.q.popleft())
-                        except Exception as e:
-                            import sys
-                            with open("error.log", "a") as f:
-                                 sys.print_exception(e, f)
-#endif
