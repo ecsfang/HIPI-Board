@@ -110,8 +110,11 @@ add_executable(hp82163_pico
     src/drive.cpp
     src/display.cpp
     src/touch.cpp
+    src/leds.cpp
     src/hw_config.cpp
+    src/usb_descriptors.c   # ← add this
 )
+
 target_link_libraries(hp82163_pico PRIVATE
     hp82163_core
     hardware_i2c
@@ -120,6 +123,9 @@ target_link_libraries(hp82163_pico PRIVATE
     hardware_gpio
     hp82163_pico_transport
     pico_stdlib
+    tinyusb_device          # ← replace pico_stdio_usb with this
+    tinyusb_board
+    pico_bootsel_via_double_reset 
     # pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
 )
 
@@ -138,8 +144,9 @@ pico_generate_pio_header(hp82163_pico
 )
 
 
-pico_enable_stdio_usb(hp82163_pico 1)
+pico_enable_stdio_usb(hp82163_pico 0)
 pico_enable_stdio_uart(hp82163_pico 0)
+
 pico_add_extra_outputs(hp82163_pico)
 
 # ----------------------------------------------------------------------
