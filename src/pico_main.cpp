@@ -189,6 +189,14 @@ void SetPinDriveStrength(uint pin, uint mA) {
  * frame.
  */
 
+uint16_t PIL_rx_lo;                 // PILBox lo byte previously received   
+uint16_t PIL_rx_hi;                 // PILBox hi byte previously received
+uint16_t PIL_tx_lo;                 // PILBox lo byte previously sent   
+uint16_t PIL_tx_hi;                 // PILBox hi byte previously sent
+uint16_t PIL_rx_frame;              // PILBox frame just received
+uint16_t PIL_rx_prevframe;          // PILBox previous frame received
+uint16_t PIL_tx_prevframe;          // PILBox previous frame sent
+
 IL_CMD_t send2PC(IL_CMD_t cmd)
 {
     unsigned char bHi, bLo;
@@ -213,17 +221,123 @@ IL_CMD_t send2PC(IL_CMD_t cmd)
     int n = cdc1_read_timeout(&bIn[0], 2, 500);
     switch( n ) {
     case 2:
-        cdc0_printf("B1: %0xX B2: %02X\n", bIn[0], bIn[1]);
+        cdc0_printf("B1: %02X B2: %02X\r\n", bIn[0], bIn[1]);
         break;
     case 1:
-        cdc0_printf("B1: %0xX ", bIn[0]);
+        cdc0_printf("B1: %02X ", bIn[0]);
         n = cdc1_read_timeout(&bIn[0], 2, 500);
-        cdc0_printf("n = %d B2: %02X\n", n, bIn[0]);
+        cdc0_printf("n = %d B2: %02X\r\n", n, bIn[0]);
         break;
     default:
-        cdc0_printf("n = %d !!!\n", n);
+        cdc0_printf("n = %d !!!\r\n", n);
 
     }
+
+   
+    if (!tud_cdc_n_connected(1))
+    {
+        // no valid serial link, loopback mode 
+        frame = loopbackFrame;
+        loopbackFrame = 0xFFFF;             // to indicate no new frame is available
+        return frame;                       // and get out
+    }
+    else if (tud_cdc_n_available(1) == 0)
+    {
+        // no bytes available
+        return 0xFFFF;                      // return no data and get out
+    }
+    else
+    {
+        // we get here when:
+        // - there is a valid serial link
+        // - and there is data available in the serial buffer
+        // if a frame arrives we must check for a PILBox command first
+        pil_recv = tud_cdc_n_read_char(1);
+
+        // PILBox emulation received a byte from the PILBox designated serial port
+        // pil_recv contains the returned byte
+        if ((pil_recv & 0xE0) == 0x20)
+        {
+            // this is the higher byte of a transfer
+            PIL_tx_hi = pil_recv;       // save until the lower byte arrives
+            return 0xFFFF;              // and return with no data
+        }
+        if ((pil_recv & 0x80) == 0x80)
+        {
+            // this is the lower byte of an 8-bit transfer
+            PILmode8 = true;                    // set the correct mode to 8 bits
+            PIL_rx_lo = pil_recv;               
+
+            // this completes the 2-byte transfer, complete the frame
+            PIL_rx_frame = (pil_recv & 0x7F) | ((PIL_tx_hi & 0x1E) << 6);
+        }
+         if ((pil_recv & 0xC0) == 0x40)
+        {
+            // this is the lower byte of a 7-bit transfer
+            PILmode8 = false;            // set the correct mode
+            PIL_rx_lo = pil_recv;       
+              
+            // this completes the 2-byte transfer, complete the frame
+            PIL_rx_frame = (pil_recv & 0x3F) | ((PIL_tx_hi & 0x1F) << 6);
+        }
+
+        // The frame is now received, first process the PILBox commands
+        // send to our scope for debugging
+        // PILBox_scope(PIL_rx_frame, PIL_tx_hi, pil_recv, false);
+
+        switch (PIL_rx_frame)
+        {
+            case TDIS:                          // TDI: Translator DIsabled
+                PILBox_mode = TDIS;             // set mode to disabled
+                                                // frame is not forwarded to the HP-IL emulation
+                tud_cdc_n_write_char(1, pil_recv);       // return command for confirmation
+                tud_cdc_n_write_flush(1);
+                // return 0xFFFF;                  // and return with no data
+                break;
+            case CON:                           // CON: Controller ON
+                PILBox_mode = CON;              // set mode to controller ON
+                                                // default on the HP41
+                                                // frame is not forwarded to the HP-IL emulation
+                tud_cdc_n_write_char(1, pil_recv);       // return command for confirmation
+                tud_cdc_n_write_flush(1);
+                return 0xFFFF;                  // and return with no data
+                break;
+            case COFF:                          // Controller OFF
+                PILBox_mode = COFF;             // set mode to controller OFF
+                                                // the PILBox is now a device
+                                                // not used on the HP41
+                                                // frame is not forwarded to the HP-IL emulation
+                tud_cdc_n_write_char(1, pil_recv);       // return command for confirmation
+                tud_cdc_n_write_flush(1);
+                return 0xFFFF;               // and return with no data
+                break;
+            case COFI:                          // Controller OFf with IDY 
+                PILBox_mode = COFI;             // set mode to COFI
+                                                // device with sending IDY frame
+                                                // frame is not forwarded to the HP-IL emulation
+                tud_cdc_n_write_char(1, pil_recv);       // return command for confirmation
+                tud_cdc_n_write_flush(1);
+                return 0xFFFF;                  // and return with no data
+                break;
+            // default:
+
+                // all other frames are sent on to the HP-IL loop
+                // only need to check for a CMD frame
+                // should do a check if the mode is TDIS, any traffic should be ignored
+                // if (PIL_rx_frame == m_wLastFrame)
+                // {
+                    // this is a previous CMD frame, this is returned as an RFC frame
+                //     PIL_rx_frame = RFC;
+                // }
+                // else if (PIL_rx_frame == RFC)
+                // {
+                //     PIL_rx_frame = m_wLastFrame;
+                // }
+        }
+        // if we get here the frame is complete
+        return PIL_rx_frame;
+    }
+}
     return cmd;
 }
 
