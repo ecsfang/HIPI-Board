@@ -1,6 +1,42 @@
 {
     "version": "2.0.0",
     "tasks": [
+	{
+	    "label": "CMake Configure",
+	    "type": "process",
+	    "command": "cmake",
+	    "args": [
+	        "-S", "${workspaceFolder}",
+	        "-B", "${workspaceFolder}/build",
+	        "-G", "Ninja",
+	        "-DPICO_BOARD=pico2_w"
+	    ],
+	    "options": {
+	       "env": {
+       		    "PATH": "${env:HOME}/.pico-sdk/toolchain/14_2_Rel1/bin:${env:HOME}/.pico-sdk/picotool/2.2.0-a4/picotool:${env:HOME}/.pico-sdk/cmake/v3.31.5/bin:${env:HOME}/.pico-sdk/ninja/v1.12.1:${env:PATH}"
+		       }
+	   },
+	    "presentation": {
+	        "reveal": "always",
+	        "panel": "dedicated"
+	    },
+	    "problemMatcher": [],
+	    "windows": {
+	        "command": "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake.exe"
+	    }
+	},
+	{
+	    "label": "CMake Clean",
+	    "type": "process",
+	    "command": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
+	    "args": [
+	        "-E", "remove_directory",
+	        "${workspaceFolder}/build"
+	    ],
+	    "linux": {
+	        "command": "${HOME}/.pico-sdk/cmake/v3.31.5/bin/cmake"
+	    }
+	},
         {
             "label": "Compile Project",
             "type": "process",

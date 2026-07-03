@@ -1,6 +1,56 @@
 #include "leds.h"
 
 
+void led_on(int n) {
+    gpio_put(n, 1);
+}
+void led_off(int n) {
+    gpio_put(n, 0);
+}
+
+void blink_led(int led, int t, int n) {
+    for( int i=0; i<n; ++i) {
+        // LED PÅ
+        led_on(led);
+        sleep_ms(t);
+
+        // LED AV
+        led_off(led);
+        sleep_ms(t);
+    }
+}
+
+static const uint16_t pattern[] = {
+    60,  80,   // blink
+    60, 300,   // blink
+    120, 70,   // blink
+    40,  900,  // lång paus
+    50,  50,   // dubbelblink
+    50,  500
+};
+
+static uint8_t state = 0;
+static uint32_t next_time = 0;
+static bool led_state = false;
+
+void led_task(int led, uint32_t now_ms)
+{
+    if (now_ms < next_time)
+        return;
+
+    led_state = !led_state;
+
+    if (led_state)
+        led_on(led);
+    else
+        led_off(led);
+
+    next_time = now_ms + pattern[state] + (rand() % 40);
+
+    state++;
+    if (state >= sizeof(pattern)/sizeof(pattern[0]))
+        state = 0;
+}
 
 // Physical order: index 0 = leftmost … 4 = rightmost
 constexpr uint8_t LED_PINS[5] = {

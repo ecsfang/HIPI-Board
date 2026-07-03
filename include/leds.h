@@ -76,5 +76,9 @@ extern void update(int value);
 
 extern void pwm_test(int pin);
 
+extern void led_on(int n);
+extern void led_off(int n);
+extern void blink_led(int led, int t=250, int n=1);
+extern void led_task(int led, uint32_t now_ms);
 
 #endif//__LEDS_H__

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <cstring>
 #include "drive.h"
+#include "usb_serial.h"
 
 void CDrive::clear(void)
 {
@@ -13,12 +14,12 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
 
-    if( bPrt ) printf("DRV:%3X ", cmd);
+    if( bPrt ) cdc0_printf("DRV:%3X ", cmd);
 
     if( ddl == 5 ) {
         //Busy formatting
 #if 1
-        printf("Formatting ... (%d)\n", tape.tell());
+        cdc0_printf("Formatting ... (%d)\r\n", tape.tell());
         if( check() ) {
             tape.write(buf0);
             if( tape.tell() >= TAPE_SIZE ) {
@@ -27,11 +28,11 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
                 sst = DRV_IDLE;
                 tape.close();
                 tape.open();
-                printf("Done with formatting!\n");
+                cdc0_printf("Done with formatting!\r\n");
             }
         }
 #else
-        printf("Formatting ... (xxx)\n");
+        cdc0_printf("Formatting ... (xxx)\r\n");
         end = true;
         ddl = 31;
         sst = DRV_IDLE;
@@ -45,14 +46,14 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 
     // Otherwise handle device specific commands
     if( cmd == IFC) {
-        status = STAT_IDLE;
+        status(STAT_IDLE);
         mode = WRITE_MODE;
         ddl = 31;
         ddt = 31;
         sst = DRV_IDLE;
-    } else if( status == TALKER ) {
+    } else if( isTalker() ) {
         doTalker(cmd, &rtn);
-    } else if( status == LISTENER ) {
+    } else if( isListener() ) {
         doListener(cmd, &rtn);
     }
     return rtn;
@@ -61,7 +62,7 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     if( cmd == UNT ) {
-        status = STAT_IDLE;
+        status(STAT_IDLE);
     } else if( cmd == NRD ) {
         end = true;
     } else {
@@ -165,7 +166,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                     break;
                 case 5:
                     // Format
-                    printf("Do FORMAT ...\n");
+                    cdc0_printf("Do FORMAT ...\r\n");
                     mode = WRITE_MODE;
                     sst = DRV_BUSY;
                     memset(buf0, 255, BUF_SIZE);
@@ -181,11 +182,11 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
             }
         }
     } else if( cmd == UNL ) {
-        status = STAT_IDLE;
+        status(STAT_IDLE);
     } else if( cmd < DOE ) {
-        if( status == LISTENER )
+        if( isListener() )
             *rtn = doNextListener(cmd);
-        else if( status == TALKER )
+        else if( isTalker() )
             *rtn = doNextTalker(cmd);
     }
 }
@@ -313,7 +314,7 @@ void CDrive::readblock()
 {
     if( check() ) {
         // Read BUF_SIZE bytes from tape
-        printf("Read block ...\n");
+        cdc0_printf("Read block ...\r\n");
         tape.read(buf0);
     }
 }
@@ -321,7 +322,7 @@ void CDrive::writeblock()
 {
     if( check() ) {
         // Write buf0 to tape
-        printf("Write block ...\n");
+        cdc0_printf("Write block ...\r\n");
         tape.write(buf0);
         // ... and flush!
         // tape.flush();
@@ -335,18 +336,18 @@ bool CDrive::check()
 {
     if( !TapeOK ) {
         if( SDOK ) {
-            printf("Opening tape file: %s ", share_Tape);
+            cdc0_printf("Opening tape file: %s ", share_Tape);
             tape.open(share_Tape);
             tape.seek(24);
             size=tape.readInt()*tape.readInt()*tape.readInt();
             if( size == 0 )
                 size = 512;
-            printf("size=%d\n", size);
+            cdc0_printf("size=%d\r\n", size);
             tape.seek(0);
             sst = DRV_NEW_TAPE_ERROR;
             TapeOK = true;
         } else {
-            printf("No tape file!\n");
+            cdc0_printf("No tape file!\r\n");
             sst = DRV_NO_TAPE_ERROR;
         }
     }
@@ -364,7 +365,7 @@ static void list_dir(const char* path, int depth) {
     FILINFO fno;
     FRESULT fr = f_opendir(&dir, path);
     if (fr != FR_OK) {
-        printf("%*s[opendir %s: %s]\n", depth*2, "", path, FRESULT_str(fr));
+        cdc0_printf("%*s[opendir %s: %s]\r\n", depth*2, "", path, FRESULT_str(fr));
         return;
     }
 
@@ -373,7 +374,7 @@ static void list_dir(const char* path, int depth) {
         if (fr != FR_OK || fno.fname[0] == 0) break;   // 0 = slut på katalogen
 
         const char* kind = (fno.fattrib & AM_DIR) ? "DIR " : "FILE";
-        printf("\t%*s%-4s %8lu  %s\n",
+        cdc0_printf("\t%*s%-4s %8lu  %s\r\n",
                depth*2, "",
                kind,
                (unsigned long)fno.fsize,
@@ -390,8 +391,8 @@ static void list_dir(const char* path, int depth) {
 }
 
 void sd_dir() {
-    printf("\n\t=== SD card contents ===\n");
+    cdc0_printf("\r\n\t=== SD card contents ===\r\n");
     list_dir("", 0);
-    printf("\t=== done ===\n");
+    cdc0_printf("\t=== done ===\r\n");
 }
 

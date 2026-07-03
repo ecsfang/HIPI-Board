@@ -35,14 +35,14 @@ IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
 
     // Otherwise handle device specific commands
     if( cmd == IFC  ) {
-        status = STAT_IDLE;
-    } else if( (cmd == SAI) && (status == TALKER) ) {
+        status(STAT_IDLE);
+    } else if( (cmd == SAI) && isTalker() ) {
         rtn = nSai;
         sai = true;
-    } else if( (cmd == SDI) && (status == TALKER) ) {
+    } else if( (cmd == SDI) && isTalker() ) {
         sdi = devName;
         rtn = *sdi++;
-    } else if( (cmd < DOE) && (status == LISTENER) ) {
+    } else if( (cmd < DOE) && isListener() ) {
         // Data
         //printf("DSP:%3X (%c)\n", cmd, isprint(cmd) ? cmd : '.');
         fifo.push(cmd & 0xFF);

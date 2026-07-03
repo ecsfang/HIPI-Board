@@ -25,6 +25,17 @@
 #define LLO     0x411
 #define LPD     0x49D
 
+// info below from Christoph Giesselink:
+// PILBox commands
+#define TDIS   0x494  // TDIS
+#define COFI   0x495  // COFF with IDY, firmware >= v1.6, not used if no IDY frames are supported
+#define CON    0x496  // Controller ON, not used, HP41 can only be controller (check HP-IL DEVELOPMENT ROM Scope function!)
+#define COFF   0x497  // Controller OFF
+#define SSRQ   0x49C  // Set Service Request, obsolete, not used on HP41
+#define CSRQ   0x49D  // Clear Service Request, obsolete, not used on HP41
+
+#define ITF_HPIL   1
+
 #define MAX_ADDR    0x1F
 #define MAX_CMD     0x1F
 #define GET_ADDR(x) (x&MAX_ADDR)
@@ -45,8 +56,8 @@ typedef enum {
 
 class CDevice {
 protected:
-    IL_Status_e     status;
-    IL_ADDR_t       addr;
+    IL_Status_e     m_status;
+    IL_ADDR_t       m_addr;
     const char      *devName;
     bool            sai;
     IL_ADDR_t       nSai;
@@ -56,8 +67,8 @@ protected:
 public:
     CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) {
         devName = name;
-        status = STAT_IDLE;
-        addr = 31;
+        m_status = STAT_IDLE;
+        m_addr = 31;
         sai = false;
         sdi = NULL;
         nSai = _sai;
@@ -69,6 +80,15 @@ public:
     virtual void clear() = 0;
     virtual void idle(void) {}
     void show(void);
+    void addr(IL_CMD_t a) { m_addr = a; }
+    IL_CMD_t addr() { return m_addr; }
+    bool isTalker() { return m_status == TALKER; }
+    bool isListener() { return m_status == LISTENER; }
+    void status(IL_Status_e s) { m_status = s; }
+    IL_Status_e status() { return m_status; }
+    void setTalker() { m_status = TALKER; }
+    void setListener() { m_status = LISTENER; }
+    void setIdle() { m_status = STAT_IDLE; }
 };
 
 #endif//__HPIL_H__

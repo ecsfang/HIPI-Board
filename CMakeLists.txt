@@ -70,6 +70,12 @@ set(PIOASM ${PICO_SDK_PATH}/tools/pioasm/pioasm)    # justera sökvägenISCO
 # ----------------------------------------------------------------------
 add_compile_options(-Wall -Wextra -Wpedantic)
 
+## # Deklarera CFG_TUD_CDC globalt för hela bygget
+## # Tvinga CFG_TUD_CDC=2 för hela bygget, inkl. SDK:ns tinyusb_device.a
+## add_compile_definitions(CFG_TUD_CDC=2)
+## add_compile_definitions(CFG_TUD_CDC_RX_BUFSIZE=256)
+## add_compile_definitions(CFG_TUD_CDC_TX_BUFSIZE=256)
+
 # ----------------------------------------------------------------------
 # Core library — RA8875 driver + HP82163 Screen class (platform-neutral).
 # ----------------------------------------------------------------------
@@ -86,8 +92,11 @@ add_library(hp82163_pico_transport STATIC
     src/PicoSpiTransport.cpp
 )
 
-add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
+## add_compile_definitions(CFG_TUD_CDC=2)
+## add_compile_definitions(CFG_TUD_CDC_RX_BUFSIZE=256)
+## add_compile_definitions(CFG_TUD_CDC_TX_BUFSIZE=256)
 
+add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
 
 target_link_libraries(hp82163_pico_transport PUBLIC
     hp82163_core
@@ -111,9 +120,20 @@ add_executable(hp82163_pico
     src/display.cpp
     src/touch.cpp
     src/leds.cpp
+    src/pilbox.cpp
     src/hw_config.cpp
-    src/usb_descriptors.c   # ← add this
+    src/my_descriptors.c
 )
+
+# Lägg till detta EFTER pico_sdk_init() och EFTER add_executable(...).
+# Det tvingar tinyusb_device att omkompilera med rätt defines.
+
+# tinyusb_device är ett INTERFACE-bibliotek som vi ger COMPILE_DEFINITIONS via.
+# (Det skapas av SDK:ns pico_enable_* -makron. Vi når det via target name.)
+
+## set_target_properties(tinyusb_device PROPERTIES
+##     INTERFACE_COMPILE_DEFINITIONS "CFG_TUD_CDC=2;CFG_TUD_CDC_RX_BUFSIZE=256;CFG_TUD_CDC_TX_BUFSIZE=256"
+## )
 
 target_link_libraries(hp82163_pico PRIVATE
     hp82163_core
@@ -125,8 +145,12 @@ target_link_libraries(hp82163_pico PRIVATE
     pico_stdlib
     tinyusb_device          # ← replace pico_stdio_usb with this
     tinyusb_board
-    pico_bootsel_via_double_reset 
+#    pico_bootsel_via_double_reset 
     # pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
+)
+
+target_compile_definitions(hp82163_pico PRIVATE
+    PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR=0
 )
 
 # 3. Generera header från .pio-filen
