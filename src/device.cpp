@@ -4,51 +4,72 @@
 
 #define printf cdc0_printf
 
+
+IL_CMD_t CDevice::hpil(IL_CMD_t cmd)
+{
+    IL_CMD_t rtn = cmd;
+
+    // Handle all base commands
+    if( base(cmd, &rtn) ) {
+        return rtn;
+    }
+
+    // Otherwise handle device specific commands
+    if( isTalker() ) {
+        doTalker(cmd, &rtn);
+    } else if( isListener() ) {
+        doListener(cmd, &rtn);
+    }
+    return rtn;
+}
+
 void CDevice::show(void)
 {
-    printf("%s: status:%c addr:%2d", devName, isTalker()?'T':((isListener())?'L':'-'), addr());
+    printf("%s: status:%c addr:%2d", m_devName, isTalker()?'T':((isListener())?'L':'-'), addr());
 }
 
 bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     IL_ADDR_t   _addr = GET_ADDR(cmd);
-    if( _bPrt ) printf("[");
-    if( ((cmd == UNL) && isListener())
-            || ((cmd == UNT) && isTalker()) ) {
-        if( _bPrt ) {
-            printf("1] ");
-            if( isListener() )
-                printf("UNL (%d)\r\n", addr());
-            if( isTalker() )
-                printf("UNT (%d)\r\n", addr());
-        }
+
+    preProc(cmd);
+
+    if( cmd == IFC) {
+        ifc();
+    }
+    if( (cmd == UNL && isListener())
+            || (cmd == UNT && isTalker()) ) {
         setIdle();
         return true;
     }
     if ((cmd == DCL) || ((cmd == SDC) && isListener()) ) {
         clear();
         setIdle();
-        if( _bPrt ) printf("2] ");
         return true;
     }
     if( cmd == AAU ) {
-        _addr = nAau;
-        if( _bPrt ) printf("3] ");
+        _addr = m_nAau;
+        return true;
+    }
+    if( cmd == SAI && isTalker() ) {
+        *rtn = m_nSai;
+        m_sai = true;
+        return true;
+    }
+    if( cmd == SDI && isTalker() ) {
+        m_sdi = m_devName;
+        *rtn = *m_sdi++;
         return true;
     }
     if( inAddrRange(cmd, LAD) ) {
-        if( _bPrt ) printf("4] ");
         if( addr() == _addr && _addr < 31 ) {
-            if( _bPrt ) printf("LISTENER: addr=%d\r\n", addr());
             setListener();
         } else
             setIdle();
         return true;
     }
     if( inAddrRange(cmd, TAD) ) {
-        if( _bPrt ) printf("5] ");
         if( addr() == _addr ) {
-            if( _bPrt ) printf("TALKER: addr=%d\r\n", addr());
             setTalker();
         } else
             setIdle();
@@ -57,25 +78,21 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
     if( inAddrRange(cmd, AAD) ) {
         addr(cmd - AAD);
         *rtn = cmd + 1;
-        if( _bPrt ) printf("6] ");
         return true;
     }
-    if( sai ) {
-        *rtn = (cmd == nSai) ? ETO : ETE;
-        sai = false;
-        if( _bPrt ) printf("7] ");
+    if( m_sai ) {
+        *rtn = (cmd == m_nSai) ? ETO : ETE;
+        m_sai = false;
         return true;
     }
-    if( sdi ) {
-        *rtn = *sdi++;
+    if( m_sdi ) {
+        *rtn = *m_sdi++;
         if( *rtn == 0 ) {
             *rtn = ETO;
-            sdi = NULL;
+            m_sdi = NULL;
         }
-        if( _bPrt ) printf("8] ");
         return true;
     }
-
-    if( _bPrt ) printf("-] ");
+    // Command not handled here, send to the device
     return false;
 }

@@ -27,13 +27,14 @@
 
 // info below from Christoph Giesselink:
 // PILBox commands
-#define TDIS   0x494  // TDIS
-#define COFI   0x495  // COFF with IDY, firmware >= v1.6, not used if no IDY frames are supported
-#define CON    0x496  // Controller ON, not used, HP41 can only be controller (check HP-IL DEVELOPMENT ROM Scope function!)
-#define COFF   0x497  // Controller OFF
-#define SSRQ   0x49C  // Set Service Request, obsolete, not used on HP41
-#define CSRQ   0x49D  // Clear Service Request, obsolete, not used on HP41
+#define TDIS    0x494   // TDIS
+#define COFI    0x495   // COFF with IDY, firmware >= v1.6, not used if no IDY frames are supported
+#define CON     0x496   // Controller ON, not used, HP41 can only be controller (check HP-IL DEVELOPMENT ROM Scope function!)
+#define COFF    0x497   // Controller OFF
+#define SSRQ    0x49C   // Set Service Request, obsolete, not used on HP41
+#define CSRQ    0x49D   // Clear Service Request, obsolete, not used on HP41
 
+// Channel for the HP-IL port for PIL-Box interface
 #define ITF_HPIL   1
 
 #define MAX_ADDR    0x1F
@@ -58,37 +59,41 @@ class CDevice {
 protected:
     IL_Status_e     m_status;
     IL_ADDR_t       m_addr;
-    const char      *devName;
-    bool            sai;
-    IL_ADDR_t       nSai;
-    IL_ADDR_t       nAau;
-    const char      *sdi;
-    bool            _bPrt;
+    const char      *m_devName;
+    bool            m_sai;
+    IL_ADDR_t       m_nSai;
+    IL_ADDR_t       m_nAau;
+    const char      *m_sdi;
 public:
     CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) {
-        devName = name;
+        m_devName = name;
         m_status = STAT_IDLE;
         m_addr = 31;
-        sai = false;
-        sdi = NULL;
-        nSai = _sai;
-        nAau = _aau;
-        _bPrt = false;
+        m_sai = false;
+        m_sdi = NULL;
+        m_nSai = _sai;
+        m_nAau = _aau;
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
-    virtual IL_CMD_t hpil(IL_CMD_t cmd) = 0;
+    IL_CMD_t hpil(IL_CMD_t cmd);
+    virtual void doListener(IL_CMD_t cmd, IL_CMD_t *rtn) {}
+    virtual void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {}
     virtual void clear() = 0;
     virtual void idle(void) {}
+    virtual void ifc(void) {}
+    virtual void preProc(IL_CMD_t c) {}
     void show(void);
     void addr(IL_CMD_t a) { m_addr = a; }
     IL_CMD_t addr() { return m_addr; }
-    bool isTalker() { return m_status == TALKER; }
-    bool isListener() { return m_status == LISTENER; }
     void status(IL_Status_e s) { m_status = s; }
     IL_Status_e status() { return m_status; }
-    void setTalker() { m_status = TALKER; }
-    void setListener() { m_status = LISTENER; }
-    void setIdle() { m_status = STAT_IDLE; }
+    bool isStatus(IL_Status_e s) { return status() == s; }
+    void setIdle() { status(STAT_IDLE); }
+    bool isIdle() { return isStatus(STAT_IDLE); }
+    void setTalker() { status(TALKER); }
+    bool isTalker() { return isStatus(TALKER); }
+    void setListener() { status(LISTENER); }
+    bool isListener() { return isStatus(LISTENER); }
 };
 
 #endif//__HPIL_H__

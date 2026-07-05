@@ -27,13 +27,29 @@ enum {
     DRV_BUSY            = 32
 };
 
+
 class CTape {
+protected:
+    char _name[64];
+public:
+    CTape() {}
+
+    virtual unsigned int tell(void) = 0;
+    virtual void read(unsigned char *buf) = 0;
+    virtual unsigned int readInt() = 0;
+    virtual void write(unsigned char *buf) = 0;
+    virtual void seek(unsigned int s) = 0;
+    virtual void open(const char *name = "tape.bin") = 0;
+    virtual void close() = 0;
+};
+
+// CTape - file on SD-card version
+class CTapeSD : public CTape {
     FIL _tape;
     FRESULT _fr;
     bool _open = false;
-    char _name[64];
 public:
-    CTape() {
+    CTapeSD() : CTape() {
         open();
     }
     unsigned int tell(void) {
@@ -100,11 +116,12 @@ public:
 };
 
 // Internal RAM version of tape for testing without SD-card
-class CTapeMem {
+// Note - clears after each boot - so just for testing!!
+class CTapeMem : public CTape {
     unsigned char   _tape[TAPE_SIZE];
     unsigned int    _tPos;
 public:
-    CTapeMem() {
+    CTapeMem() : CTape() {
         open();
     }
     unsigned int tell(void) {
@@ -155,34 +172,39 @@ class CDrive : public CDevice {
     unsigned int    tmp;
     std::queue<IL_DATA_t> fifo;
     unsigned int    pt;
-    CTape           tape;
-    IL_DATA_t       buf0[BUF_SIZE];
-    IL_DATA_t       buf1[BUF_SIZE];
+    CTape           *tape;
+    IL_DATA_t       buffer[TRACKS][BUF_SIZE];
     size_t          size;
-    bool bPrt;
 public:
-    CDrive(const char *name, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
-        bPrt = false;
+    CDrive(CTape *_tape, const char *name, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
+        tape = _tape;
     }
-    IL_CMD_t hpil(IL_CMD_t cmd);
+    //IL_CMD_t hpil(IL_CMD_t cmd);
     IL_CMD_t next(IL_CMD_t cmd);
     void clear(void);
+    void ifc(void);
+    void preProc(IL_CMD_t cmd);
     bool check();
     void readblock();
     void writeblock();
     void exchangeBuf() {
-        for(int i=0; i<BUF_SIZE; i++) {
-            IL_DATA_t u = buf0[i];
-            buf0[i] = buf1[i];
-            buf1[i] = u;
-        }
+        IL_DATA_t tmpBuf[BUF_SIZE];
+        memcpy(tmpBuf, buffer[0], BUF_SIZE);
+        memcpy(buffer[0], buffer[1], BUF_SIZE);
+        memcpy(buffer[1], tmpBuf, BUF_SIZE);
+//
+//        for(int i=0; i<BUF_SIZE; i++) {
+//            IL_DATA_t u = buffer[0][i];
+//            buffer[0][i] = buffer[1][i];
+//            buffer[1][i] = u;
+//        }
     }
     void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn);
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);
     IL_CMD_t doNextTalker(IL_CMD_t cmd);
     IL_CMD_t doNextListener(IL_CMD_t cmd);
     void close() {
-        tape.close();
+        tape->close();
     }
 };
 

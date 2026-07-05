@@ -34,8 +34,9 @@ void show(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 // Add devices to the HP-IL loop here
 void hipi_init()
 {
+    CTape *cassette = new CTapeSD();
     devices.push_back(new CDisplay("TFDISPLAY", 0x3E, 31));
-    devices.push_back(new CDrive("TFDRIVE"));
+    devices.push_back(new CDrive(cassette, "TFDRIVE"));
 }
 
 bool bDebug = false;

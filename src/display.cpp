@@ -23,31 +23,17 @@ void CDisplay::idle(void)
     }
 }
 
-IL_CMD_t CDisplay::hpil(IL_CMD_t cmd)
+// Interface clear
+void CDisplay::ifc(void)
 {
-    IL_CMD_t rtn = cmd;
+    status(STAT_IDLE);
+}
 
-    if( bPrt ) printf("DSP:%3X ", cmd);
-
-    // Handle all base commands
-    if( base(cmd, &rtn) )
-        return rtn;
-
-    // Otherwise handle device specific commands
-    if( cmd == IFC  ) {
-        status(STAT_IDLE);
-    } else if( (cmd == SAI) && isTalker() ) {
-        rtn = nSai;
-        sai = true;
-    } else if( (cmd == SDI) && isTalker() ) {
-        sdi = devName;
-        rtn = *sdi++;
-    } else if( (cmd < DOE) && isListener() ) {
-        // Data
-        //printf("DSP:%3X (%c)\n", cmd, isprint(cmd) ? cmd : '.');
+void CDisplay::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
+{
+    *rtn = cmd;
+    if( cmd < DOE ) {
+        // Data - save in queue ...
         fifo.push(cmd & 0xFF);
-    } else {
-        if( bPrt ) printf("~");
     }
-    return rtn;
 }
