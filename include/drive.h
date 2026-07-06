@@ -10,7 +10,6 @@
 #include "hw_config.h"
 #include "f_util.h"
 #include "ff.h"
-#include "usb_serial.h"
 
 #define BUF_SIZE    256
 #define REC_SIZE    256
@@ -175,6 +174,9 @@ public:
     }
 };
 
+// Internal Flash version of tape for testing without SD-card
+// Persistent storage - limited to 128 KB (32 sectors of 4 KB each)
+// Note - not bit wear efficient - each write rewrites the entire sector!
 class CTapeFlash : public CTape {
     uint32_t        _tPos;
     uint8_t         _sectorBuf[FLASH_SECTOR_SIZE];   // 4 KB RAM buffer

@@ -118,6 +118,7 @@ add_executable(hp82163_pico
     src/device.cpp
     src/drive.cpp
     src/display.cpp
+    src/illeds.cpp
     src/touch.cpp
     src/leds.cpp
     src/pilbox.cpp

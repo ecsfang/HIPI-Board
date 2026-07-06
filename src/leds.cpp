@@ -53,7 +53,7 @@ void led_task(int led, uint32_t now_ms)
 }
 
 // Physical order: index 0 = leftmost … 4 = rightmost
-constexpr uint8_t LED_PINS[5] = {
+uint8_t LED_PINS[5] = {
     LED_PIN_1, LED_PIN_2, LED_PIN_3, LED_PIN_4, LED_PIN_5
 };
 

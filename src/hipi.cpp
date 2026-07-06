@@ -6,6 +6,7 @@
 
 #include "display.h"
 #include "drive.h"
+#include "illeds.h"
 
 #include "usb_serial.h"
 
@@ -38,6 +39,7 @@ void hipi_init()
     CTape *cassette = new CTapeSD(); // Uses SD-card for file storage
     devices.push_back(new CDisplay("TFDISPLAY", 0x3E, 31));
     devices.push_back(new CDrive(cassette, "TFDRIVE"));
+    devices.push_back(new CLed("TFLEDS", 0x3D, 31));
 }
 
 bool bDebug = false;
@@ -48,8 +50,7 @@ IL_CMD_t hipi_loop(HpIlLoop& loop) {
     uint32_t rtn;
     char buf[32];
     int n = 0;
-    if (loop.receiveFrame(rtn)) {
-        rx_word = rtn;
+    if (loop.receiveFrame(rx_word)) {
         for (CDevice* dev : devices) {
             rtn = dev->hpil(rx_word);
             if (bDebug && rtn != 0x6C0) {
@@ -59,7 +60,7 @@ IL_CMD_t hipi_loop(HpIlLoop& loop) {
             rx_word = rtn;
         }
 #ifdef PILBOX
-        rtn = ILBOX_SendFrame(rtn);
+        rtn = ILBOX_SendFrame(rx_word);
 #endif
         if (bDebug && rtn != 0x6C0) {
             ilMnemonic(rtn, buf);
@@ -69,7 +70,7 @@ IL_CMD_t hipi_loop(HpIlLoop& loop) {
         return rtn;
     } else {
         // No frame received, call idle() on all devices
-        // Check handshake with PILBox ...
+        // Also check handshake with PILBox ...
 #ifdef PILBOX
         ILBOX_ReceiveFrame();
 #endif

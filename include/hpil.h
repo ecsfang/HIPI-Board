@@ -1,6 +1,8 @@
 #ifndef __HPIL_H__
 #define __HPIL_H__
 
+#include "usb_serial.h"
+
 #define DOE     0x400   // Data byte (0-255)
 #define SDC     0x404   // Selected device clear
 #define DCL     0x414

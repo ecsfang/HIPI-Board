@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include "hpil.h"
-#include "usb_serial.h"
 
 #define printf cdc0_printf
 
