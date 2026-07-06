@@ -127,6 +127,16 @@ and groups are separated by spaces.
 | `F-` | `t` | Fade off over t ms | `2F-500` |
 | `F` | `n:t` | Fade to n % over t ms | `4F30:600` |
 
+### HP-41 Example
+This example starts to blink led 1 forever, on 100ms and off 900ms
+
+```
+01 LBL 'TEST'
+02 3
+03 SELECT
+04 '1B0:100:900'
+05 OUTA
+```
 > **Note:** `S`, `F+`, `F-`, and `F` require PWM support (`CLED_NO_PWM`
 > must not be defined). In non-PWM mode, brightness has no visible effect
 > and fade commands snap to on/off immediately.
