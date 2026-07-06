@@ -3,15 +3,28 @@
 
 #include <queue>
 #include <cstring>
+#include "hardware/flash.h"
+#include "hardware/sync.h"
+#include <cstdio>
 #include "hpil.h"
 #include "hw_config.h"
 #include "f_util.h"
 #include "ff.h"
+#include "usb_serial.h"
 
 #define BUF_SIZE    256
 #define REC_SIZE    256
 #define TRACKS      2
 #define TAPE_SIZE   (TRACKS*REC_SIZE*BUF_SIZE)
+
+// ─── Flash placement ───────────────────────────────────────────────────────────
+// Pico 2 has 4 MB of flash. Place tape data at the very top.
+// 128 KB / 4 KB = 32 sectors — must both be sector-aligned.
+static_assert(TAPE_SIZE   % FLASH_SECTOR_SIZE == 0, "TAPE_SIZE not sector-aligned");
+static_assert(BUF_SIZE    == FLASH_PAGE_SIZE,        "BUF_SIZE must be 256 (FLASH_PAGE_SIZE)");
+
+#define FLASH_TOTAL_BYTES  (4u * 1024u * 1024u)
+#define TAPE_FLASH_OFFSET  (FLASH_TOTAL_BYTES - TAPE_SIZE)   // 0x003E0000
 
 typedef enum {
     WRITE_MODE,
@@ -91,14 +104,14 @@ public:
         if (_open) {
             _fr = f_close(&_tape);
             if (_fr != FR_OK) {
-                printf("f_close error: %s (%d)\n", FRESULT_str(_fr), _fr);
+                cdc0_printf("f_close error: %s (%d)\r\n", FRESULT_str(_fr), _fr);
                 return;
             }
         }
-        printf("Opening tape file: [%s]\n", name);
+        cdc0_printf("Opening tape file: [%s]\r\n", name);
         _fr = f_open(&_tape, name, FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
         if (_fr != FR_OK) {
-            printf("f_open: %s (%d)\n", FRESULT_str(_fr), _fr);
+            cdc0_printf("f_open: %s (%d)\r\n", FRESULT_str(_fr), _fr);
             _name[0] = '\0';
             _open = false;
         } else {
@@ -108,7 +121,7 @@ public:
         }
     }
     void close() {
-        printf("Closing tape file: [%s]\n", _name);
+        cdc0_printf("Closing tape file: [%s]\r\n", _name);
         f_close(&_tape);
         _open = false;
         _name[0] = '\0';
@@ -145,7 +158,7 @@ public:
         return n;
     }
     void write(unsigned char *buf) {
-        printf("Writing %d bytes to tape at %d\n", BUF_SIZE, tell());
+        cdc0_printf("Writing %d bytes to tape at %d\r\n", BUF_SIZE, tell());
         memcpy(_tape + _tPos, buf, BUF_SIZE);
         _tPos += BUF_SIZE;
     }
@@ -153,11 +166,104 @@ public:
         _tPos = s;
     }
     void open(const char *name = "memory.bin") {
-        printf("Opening tape file: [%s]\n", name);
+        cdc0_printf("Opening tape file: [%s]\r\n", name);
         _tPos = 0;
     }
     void close() {
-        printf("Closing tape file: [%s]\n", "memory.bin");
+        cdc0_printf("Closing tape file: [%s]\r\n", "memory.bin");
+        _tPos = 0;
+    }
+};
+
+class CTapeFlash : public CTape {
+    uint32_t        _tPos;
+    uint8_t         _sectorBuf[FLASH_SECTOR_SIZE];   // 4 KB RAM buffer
+    int32_t         _loadedSector;                   // which sector is in buf (-1 = none)
+    bool            _dirty;                          // buf differs from flash
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    int sectorOf(uint32_t tapePos) const {
+        return (int)(tapePos / FLASH_SECTOR_SIZE);
+    }
+
+    // Read one sector from XIP-mapped flash into _sectorBuf (no erase needed)
+    void loadSector(int sector) {
+        if (_loadedSector == sector) return;
+        flushSector();                               // write previous sector first
+        uint32_t addr = XIP_BASE + TAPE_FLASH_OFFSET + (uint32_t)sector * FLASH_SECTOR_SIZE;
+        memcpy(_sectorBuf, reinterpret_cast<const uint8_t*>(addr), FLASH_SECTOR_SIZE);
+        _loadedSector = sector;
+        _dirty = false;
+    }
+
+    // Erase + reprogram the buffered sector back to flash
+    // NOTE: called with interrupts off; both flash_range_* run from ROM (safe)
+    void flushSector() {
+        if (_loadedSector < 0 || !_dirty) return;
+        uint32_t off = TAPE_FLASH_OFFSET + (uint32_t)_loadedSector * FLASH_SECTOR_SIZE;
+        cdc0_printf("Flush to flash at %u\r\n", off);
+        uint32_t irq = save_and_disable_interrupts();
+        flash_range_erase  (off, FLASH_SECTOR_SIZE);
+        flash_range_program(off, _sectorBuf, FLASH_SECTOR_SIZE);
+        restore_interrupts(irq);
+        _dirty = false;
+    }
+
+public:
+    CTapeFlash() : CTape(), _tPos(0), _loadedSector(-1), _dirty(false) {
+        open();
+    }
+
+    ~CTapeFlash() { flushSector(); }
+
+    // ── CTape interface ───────────────────────────────────────────────────────
+
+    unsigned int tell(void) override { return _tPos; }
+
+    void seek(unsigned int s) override { _tPos = s; }
+
+    // Reads go straight through the XIP window — no sector buffer needed
+    void read(unsigned char *buf) override {
+        int sz = BUF_SIZE;
+        if ((_tPos + BUF_SIZE) >= TAPE_SIZE)
+            sz = (int)(TAPE_SIZE - _tPos);
+        const uint8_t *src = reinterpret_cast<const uint8_t*>(
+            XIP_BASE + TAPE_FLASH_OFFSET + _tPos);
+        memcpy(buf, src, sz);
+        while (sz < BUF_SIZE) buf[sz++] = 0xFF;
+        _tPos += (uint32_t)sz;
+    }
+
+    unsigned int readInt() override {
+        const uint8_t *src = reinterpret_cast<const uint8_t*>(
+            XIP_BASE + TAPE_FLASH_OFFSET + _tPos);
+        unsigned int n;
+        memcpy(&n, src, sizeof(n));   // safe unaligned read
+        _tPos += sizeof(unsigned int);
+        return n;
+    }
+
+    // Writes go into the sector buffer; flash is only touched on sector change or close()
+    void write(unsigned char *buf) override {
+        cdc0_printf("Writing %d bytes to flash at %u\r\n", BUF_SIZE, _tPos);
+        int sector = sectorOf(_tPos);
+        loadSector(sector);                           // load if not already buffered
+        uint32_t offsetInSector = _tPos % FLASH_SECTOR_SIZE;
+        memcpy(_sectorBuf + offsetInSector, buf, BUF_SIZE);
+        _dirty = true;
+        _tPos += BUF_SIZE;
+        flushSector();   // ← always flush immediately
+    }
+
+    void open(const char *name = "FLASH_MEM") override {
+        cdc0_printf("Opening flash tape [%s] @ offset 0x%06X\r\n", name, TAPE_FLASH_OFFSET);
+        _tPos = 0;
+    }
+
+    void close() override {
+        cdc0_printf("Closing flash tape, flushing sector %d\r\n", _loadedSector);
+        flushSector();
         _tPos = 0;
     }
 };
@@ -192,12 +298,6 @@ public:
         memcpy(tmpBuf, buffer[0], BUF_SIZE);
         memcpy(buffer[0], buffer[1], BUF_SIZE);
         memcpy(buffer[1], tmpBuf, BUF_SIZE);
-//
-//        for(int i=0; i<BUF_SIZE; i++) {
-//            IL_DATA_t u = buffer[0][i];
-//            buffer[0][i] = buffer[1][i];
-//            buffer[1][i] = u;
-//        }
     }
     void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn);
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);

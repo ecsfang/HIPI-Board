@@ -258,6 +258,7 @@ int main() {
     }
 
     bool bRunning = true;
+
     while (bRunning) {
         tud_task();  // TinyUSB background task
         hipi_loop(hpil);

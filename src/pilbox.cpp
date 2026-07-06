@@ -16,8 +16,11 @@
  * Conversely, if the receiver gets only the low byte, it will use the last received high byte to rebuild the full
  * frame.
  */
+#define P_DEBUG false
 
-#define PL_MODE(x) cdc0_printf("\r\nPILBOX: " #x "\r\n")
+#define PL_MODE(x) do { if( P_DEBUG) cdc0_printf("\r\nPILBOX: " #x "\r\n"); } while(0)
+
+// Send a single byte to the PILBox serial link and flush
 #define PL_SEND(x) do { \
         tud_cdc_n_write_char(ITF_HPIL, x); \
         tud_cdc_n_write_flush(ITF_HPIL); \
@@ -67,8 +70,10 @@ static IL_CMD_t send2PILBox(IL_CMD_t cmd)
     PL_SEND_FRAME();
 
     if( frame != 0x6C0) {
-        ilMnemonic(frame, pbBuf);
-        cdc0_printf("\t   ==> %s (pilbox)\r\n", pbBuf);
+        if( P_DEBUG ) {
+            ilMnemonic(frame, pbBuf);
+            cdc0_printf("\t   ==> %s (pilbox)\r\n", pbBuf);
+        }
     }
     return frame;
 }
@@ -102,7 +107,6 @@ IL_CMD_t ILBOX_ReceiveFrame(void)
         {
             // this is the higher byte of a transfer
             PIL_tx_hi = pil_recv;       // save until the lower byte arrives
-            //cdc0_printf("PILBOX: rec 0x%03X (high)\r\n", pil_recv);
             return NO_FRAME;              // and return with no data
         }
         if ((pil_recv & 0x80) == 0x80)
@@ -126,8 +130,10 @@ IL_CMD_t ILBOX_ReceiveFrame(void)
         }
 
         if( PIL_rx_frame != 0x6C0) {
-            ilMnemonic(PIL_rx_frame, pbBuf);
-            cdc0_printf("\t   <-- %s\r\n", pbBuf);
+            if( P_DEBUG ) {
+                ilMnemonic(PIL_rx_frame, pbBuf);
+                cdc0_printf("\t   <-- %s\r\n", pbBuf);
+            }
         }
 
         // The frame is now received, first process the PILBox commands
@@ -183,22 +189,27 @@ IL_CMD_t ILBOX_SendFrame(IL_CMD_t wFrame)
     // for the HP-IL Scope
     //HPIL_scope(wFrame, false, true);
 
+    // if the PILBox is in TDIS mode, just return the frame
     if( PILBox_mode == TDIS )
-        return wFrame;  // if the PILBox is in TDIS mode, just return the frame
+        return wFrame;
 
     // CMD frame and CA (controller active) and adding RFC frame enabled
     // CMD/RFC handshaking is done in the PILBox emulation
-    if (((wFrame & 0x700) == 0x400) ) {
+    if (((wFrame & 0x700) == DOE) ) {
         m_wLastCmd = wFrame;                            // remember last CMD frame
-        ilMnemonic(m_wLastCmd, pbBuf);
-        cdc0_printf("\t   <== %s (skip)\r\n", pbBuf);
+        if( P_DEBUG ) {
+            ilMnemonic(m_wLastCmd, pbBuf);
+            cdc0_printf("\t   <== %s (skip)\r\n", pbBuf);
+        }
         return wFrame;
     }
 
     // CA (controller active) and RFC frame
     // CMD/RFC handshaking done in the PILBox emulation
     if ((wFrame == RFC)) {
-        cdc0_printf("pilbox: RFC\r\n");
+        if( P_DEBUG ) {
+            cdc0_printf("pilbox: RFC\r\n");
+        }
         wFrame = m_wLastCmd;                            // use the last CMD frame as answer
         send2PILBox(wFrame);                            // send the RFC frame
         IL_CMD_t pil_cmd;
@@ -206,7 +217,9 @@ IL_CMD_t ILBOX_SendFrame(IL_CMD_t wFrame)
             tud_task();  // TinyUSB background task
             pil_cmd = ILBOX_ReceiveFrame();
         } while( pil_cmd == NO_FRAME );
-        cdc0_printf("\t   <== RFC!\r\n");
+        if( P_DEBUG ) {
+            cdc0_printf("\t   <== RFC!\r\n");
+        }
         return RFC;
     } 
         
@@ -218,8 +231,10 @@ IL_CMD_t ILBOX_SendFrame(IL_CMD_t wFrame)
         pil_cmd = ILBOX_ReceiveFrame();
     } while( pil_cmd == NO_FRAME );
     if( pil_cmd != 0x6C0) {
-        ilMnemonic(pil_cmd, pbBuf);
-        cdc0_printf("\t   <== %s\r\n", pbBuf);
+        if( P_DEBUG ) {
+            ilMnemonic(pil_cmd, pbBuf);
+            cdc0_printf("\t   <== %s\r\n", pbBuf);
+        }
     }
     return pil_cmd;                            // return the received frame
 }

@@ -1,8 +1,5 @@
 #include <stdio.h>
-#include <cstring>
-#include "ff.h"
 #include "drive.h"
-#include "usb_serial.h"
 
 void CDrive::clear(void)
 {
@@ -306,7 +303,7 @@ bool CDrive::check()
             tape->open(share_Tape);
             tape->seek(24);
             size=tape->readInt()*tape->readInt()*tape->readInt();
-            if( size == 0 )
+            if( size <= 0 )
                 size = 512;
             cdc0_printf("size=%d\r\n", size);
             tape->seek(0);
