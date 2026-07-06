@@ -137,6 +137,7 @@ void SetPinDriveStrength(uint pin, uint mA) {
 
 hp82163::Screen *screen;
 
+extern void ledTest(void);
 
 int main() {
     //stdio_init_all();
@@ -146,8 +147,10 @@ int main() {
     //usb_init();
     sleep_ms(500);
 
-    alienBegin();
-    alienStartup(2000);
+//    alienBegin();
+//    alienStartup(2000);
+
+    ledTest();
 
     absolute_time_t timeout = make_timeout_time_ms(3000);
 

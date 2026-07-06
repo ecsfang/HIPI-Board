@@ -8,14 +8,19 @@
 
 #include "leds.h"
 
-extern uint8_t LED_PINS[5];
+//extern uint8_t LED_PINS[5];
+extern CLedParser  parser;
+
+void sendCmd(const char* str) {
+    for (const char* p = str; *p; p++)
+        parser.feed(*p);
+    parser.flush();
+}
 
 void CLed::clear(void)
 {
     // Clear device 
-    for( int i=0; i<5; ++i ) {
-        led_off(LED_PINS[i]);
-    }
+    sendCmd("0C");
 }
 
 // Interface clear
@@ -27,12 +32,5 @@ void CLed::ifc(void)
 void CLed::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     *rtn = cmd;
-    if( cmd < DOE && cmd >= 0x20) {
-        for( int i=0; i<5; ++i ) {
-            if( cmd & (1<<i) )
-                led_on(LED_PINS[i]);
-            else
-                led_off(LED_PINS[i]);
-        }
-    }
+    parser.feed(cmd);
 }

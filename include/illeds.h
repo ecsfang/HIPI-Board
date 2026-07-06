@@ -3,6 +3,7 @@
 
 #include <queue>
 #include "hpil.h"
+#include "leds.h"
 
 class CLed : public CDevice {
 public:
