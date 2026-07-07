@@ -45,31 +45,32 @@ void hipi_init()
 
 bool bDebug = false;
 
-IL_CMD_t hipi_loop(HpIlLoop& loop) {
+bool hipi_loop(HpIlLoop& loop) {
     uint32_t rx_word;
-    uint32_t rtn;
     char buf[32];
     int n = 0;
-    if (loop.receiveFrame(rx_word)) {
+
+    // Check if any HP-IL frame from the PIO interface is available
+    if( loop.receiveFrame(rx_word) ) {
+        // Got a frame, send to all devices in the loop
         for (CDevice* dev : devices) {
-            rtn = dev->hpil(rx_word);
+            IL_CMD_t rtn = dev->hpil(rx_word);
             if (bDebug && !IS_IDLE(rtn)) {
                 show(dev, n ? NO_FRAME : rx_word, rtn);
                 n++;
             }
             rx_word = rtn;
         }
-        if (bDebug && !IS_IDLE(rtn)) {
-            printf("\t   >>> %s\r\n", ilMnemonic(rtn, buf));
+        if (bDebug && !IS_IDLE(rx_word)) {
+            printf("\t   >>> %s\r\n", ilMnemonic(rx_word, buf));
         }
-        loop.sendFrame(rtn);
-        return rtn;
+        // Send the final return value back to the HP-IL loop using the PIO interface
+        loop.sendFrame(rx_word);
+        return true;    // Handled a frame
     } else {
         // No frame received, call idle() on all devices
-        // Also check handshake with PILBox ...
-        for (CDevice* dev : devices) {
+        for (CDevice* dev : devices)
             dev->idle();
-        }
-        return 0;
+        return false;   // No frame handled
     }
 }

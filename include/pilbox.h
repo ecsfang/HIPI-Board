@@ -3,10 +3,6 @@
 
 #include "hpil.h"
 
-extern IL_CMD_t ILBOX_ReceiveFrame(void);
-extern IL_CMD_t ILBOX_SendFrame(IL_CMD_t wFrame);
-
-
 class CPilBox : public CDevice {
     unsigned char PIL_rx_lo;             // PILBox lo byte previously received
     unsigned char PIL_tx_lo;             // PILBox lo byte previously sent
@@ -18,16 +14,15 @@ class CPilBox : public CDevice {
     char pbBuf[32];
     IL_CMD_t m_wLastCmd;
     IL_CMD_t loopbackFrame = NO_FRAME;     // loopback frame when no valid serial link is available
-
-    IL_CMD_t receiveFrame(void);
-    IL_CMD_t sendFrame(IL_CMD_t cmd);
-
 public:
     CPilBox(const char *name) : CDevice(name, 0, 0) {
     }
     IL_CMD_t hpil(IL_CMD_t cmd);
     void idle(void);
     void clear(void) {}
+private:
+    IL_CMD_t sendFrame(IL_CMD_t cmd);
+    IL_CMD_t receiveFrame(void);
 };
 
 

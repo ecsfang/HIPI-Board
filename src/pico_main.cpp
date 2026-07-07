@@ -113,10 +113,8 @@ constexpr std::uint8_t TEXT_SIZE   = 0;     // 0..3 = built-in CGRAM modes
 constexpr std::uint8_t BRIGHTNESS  = 200;
 }  // namespace
 
-extern void hipi_tests(void);
 extern void hipi_init(void);
-extern IL_CMD_t hipi_loop(HpIlLoop& loop);
-
+extern bool hipi_loop(HpIlLoop& loop);
 
 static bool usb_connected = false;
 
@@ -247,8 +245,10 @@ int main() {
         cdc0_printf("\r\n * Init HPIL interface ...");
     }
 
+    // Init HPIL scanner ...
     HpIlLoop hpil(IN_M_PIN, IN_P_PIN, OUT_M_PIN, OUT_P_PIN);
 
+    // Setup all devices in the HPIL loop (display, drive, LEDs, PILBox)
     hipi_init();
 
     if( usb_connected ) {
