@@ -1,6 +1,25 @@
 #include <stdio.h>
 #include "drive.h"
 
+
+typedef struct media_t {
+    const char* media;
+    unsigned short int tracks;
+    unsigned short int surfaces;
+    unsigned short int blocks;
+} Media_t;
+
+Media_t madiaInfo[] = {
+    { "HP82161A Cassette",            2, 1, 256 },
+    { "HP9114B double sided disk",   77, 2,  16 },
+    { "HDRIVE1 640K disk",           80, 2,  16 },
+    { "HDRIVE1 2MB disk",           125, 1,  64 },
+    { "HDRIVE1 4MB disk",           125, 2,  64 },
+    { "HDRIVE1 8MB disk",           125, 4,  64 },
+    { "HDRIVE1 16MB disk",          125, 8,  64 },
+    { "unknown",                      0, 0,   0 }
+};
+
 void CDrive::clear(void)
 {
     if( check() )
@@ -23,8 +42,8 @@ void CDrive::preProc(IL_CMD_t cmd)
 {
     if( ddl == 5 ) {
         //Busy formatting
-        cdc0_printf("Formatting ... (%d)\r\n", tape->tell());
         if( check() ) {
+            cdc0_printf("$$$ Formatting ... (%d)\r\n", tape->tell());
             tape->write(buffer[0]);
             if( tape->tell() >= TAPE_SIZE ) {
                 end = true;
@@ -32,7 +51,7 @@ void CDrive::preProc(IL_CMD_t cmd)
                 sst = DRV_IDLE;
                 tape->close();
                 tape->open();
-                cdc0_printf("Done with formatting!\r\n");
+                cdc0_printf("$$$ Done with formatting!\r\n");
             }
         }
     }
@@ -40,9 +59,7 @@ void CDrive::preProc(IL_CMD_t cmd)
 
 void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
-    if( cmd == UNT ) {
-        status(STAT_IDLE);
-    } else if( cmd == NRD ) {
+    if( cmd == NRD ) {
         end = true;
     } else {
         if( cmd == SDA ) {
@@ -78,7 +95,7 @@ void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
                     break;
                 case 3:
                     // Send Position
-                    tmp=0;
+                    m_tmp=0;
                 }
             }
         } else if( IS_DATA(cmd) ) {
@@ -139,12 +156,12 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                     break;
                 case 4:
                     // Seek
-                    tmp = 0;
+                    m_tmp = 0;
                     mode = WRITE_MODE;
                     break;
                 case 5:
                     // Format
-                    cdc0_printf("Do FORMAT ...\r\n");
+                    cdc0_printf("$$$ Do FORMAT ...\r\n");
                     mode = WRITE_MODE;
                     sst = DRV_BUSY;
                     memset(buffer[0], 255, BUF_SIZE);
@@ -159,8 +176,6 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                 }
             }
         }
-    } else if( cmd == UNL ) {
-        status(STAT_IDLE);
     } else if( IS_DATA(cmd) ) {
         *rtn = doNextListener(cmd);
     }
@@ -171,7 +186,7 @@ IL_CMD_t CDrive::doNextTalker(IL_CMD_t cmd) {
     if( ddt == 3 ) {
         // Send position (track+record+byte)
         if( check() ) {
-            switch( tmp++ ) {
+            switch( m_tmp++ ) {
             case 0:
                 // Return track number (0 or 1)
                 rtn = (tape->tell() / BUF_SIZE) / REC_SIZE;
@@ -238,13 +253,13 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
         // the Status Byte Definition table above). (This command also clears
         // the partial recording mode set up by the Partial Write command —
         // Device Dependent Listener 6 command.)
-        if( tmp == 0 ) {
-            // First byte is track number (0 or 1) -> tmp = 1|2
-            tmp = 1+(cmd % BUF_SIZE);
+        if( m_tmp == 0 ) {
+            // First byte is track number (0 or 1) -> m_tmp = 1|2
+            m_tmp = 1+(cmd % BUF_SIZE);
         } else {
             // Second byte is record number (0-255)
             if( check() ) {
-                unsigned int b = BUF_SIZE*(tmp-1)+(cmd % BUF_SIZE);
+                unsigned int b = BUF_SIZE*(m_tmp-1)+(cmd % BUF_SIZE);
                 if( b < size ) {
                     tape->seek(BUF_SIZE*b);
                     sst = DRV_IDLE;
@@ -252,7 +267,7 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
                     sst = DRV_SIZE_ERROR;
                 }
             }
-            tmp = 0;    // Done ...
+            m_tmp = 0;    // Done ...
             ddl = 31;
         }
         break;
@@ -277,7 +292,7 @@ void CDrive::readblock()
 {
     if( check() ) {
         // Read BUF_SIZE bytes from tape
-        cdc0_printf("Read block ...\r\n");
+        cdc0_printf("$$$ Read block ...\r\n");
         tape->read(buffer[0]);
     }
 }
@@ -285,7 +300,7 @@ void CDrive::writeblock()
 {
     if( check() ) {
         // Write buffer[0] to tape
-        cdc0_printf("Write block ...\r\n");
+        cdc0_printf("$$$ Write block ...\r\n");
         tape->write(buffer[0]);
         // ... and flush!
         // tape.flush();
@@ -299,7 +314,7 @@ bool CDrive::check()
 {
     if( !TapeOK ) {
         if( SDOK ) {
-            cdc0_printf("Opening tape file: %s ", share_Tape);
+            cdc0_printf("$$$ Opening tape file: %s ", share_Tape);
             tape->open(share_Tape);
             tape->seek(24);
             size=tape->readInt()*tape->readInt()*tape->readInt();
@@ -310,20 +325,26 @@ bool CDrive::check()
             sst = DRV_NEW_TAPE_ERROR;
             TapeOK = true;
         } else {
-            cdc0_printf("No tape file!\r\n");
+            cdc0_printf("$$$ No tape file!\r\n");
             sst = DRV_NO_TAPE_ERROR;
         }
     }
     return TapeOK;
 }
 
+void CDrive::show()
+{
+    CDevice::show();
+    cdc0_printf("$$$ Drive: mode:%d ddl:%d ddt:%d sst:%d last:%d\r\n", ddl, ddt, sst, last);
+    cdc0_printf("           tape:%p size:%d\r\n", (void*)tape, size);
+}
 
 static void list_dir(const char* path, int depth) {
     DIR dir;
     FILINFO fno;
     FRESULT fr = f_opendir(&dir, path);
     if (fr != FR_OK) {
-        cdc0_printf("%*s[opendir %s: %s]\r\n", depth*2, "", path, FRESULT_str(fr));
+        cdc0_printf("$$$ %*s[opendir %s: %s]\r\n", depth*2, "", path, FRESULT_str(fr));
         return;
     }
 
@@ -332,7 +353,7 @@ static void list_dir(const char* path, int depth) {
         if (fr != FR_OK || fno.fname[0] == 0) break;   // 0 = slut på katalogen
 
         const char* kind = (fno.fattrib & AM_DIR) ? "DIR " : "FILE";
-        cdc0_printf("\t%*s%-4s %8lu  %s\r\n",
+        cdc0_printf("$$$ \t%*s%-4s %8lu  %s\r\n",
                depth*2, "",
                kind,
                (unsigned long)fno.fsize,

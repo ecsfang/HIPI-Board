@@ -20,6 +20,7 @@ public:
     IL_CMD_t hpil(IL_CMD_t cmd);
     void idle(void);
     void clear(void) {}
+    void show(void);
 private:
     IL_CMD_t sendFrame(IL_CMD_t cmd);
     IL_CMD_t receiveFrame(void);

@@ -148,7 +148,7 @@ int main() {
 //    alienBegin();
 //    alienStartup(2000);
 
-    ledTest();
+    //ledTest();
 
     absolute_time_t timeout = make_timeout_time_ms(3000);
 
@@ -167,6 +167,7 @@ int main() {
         tud_task();
         sleep_ms(10);
     }
+
     blink_led(LED_PIN_1, 250);
 
     // SPI0: SCK=GP2, MOSI=GP3, MISO=GP0 (matches share.py)

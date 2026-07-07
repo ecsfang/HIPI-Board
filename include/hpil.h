@@ -96,7 +96,7 @@ public:
     virtual void idle(void) {}
     virtual void ifc(void) {}
     virtual void preProc(IL_CMD_t c) {}
-    void show(void);
+    virtual void show(void);
     void addr(IL_CMD_t a) { m_addr = a; }
     IL_CMD_t addr() { return m_addr; }
     void status(IL_Status_e s) { m_status = s; }
@@ -108,6 +108,7 @@ public:
     bool isTalker() { return isStatus(TALKER); }
     void setListener() { status(LISTENER); }
     bool isListener() { return isStatus(LISTENER); }
+    const char *name() { return m_devName; }
 };
 
 #endif//__HPIL_H__

@@ -1,14 +1,18 @@
 #include <stdio.h>
 #include <cctype>
-#include "illeds.h"
 
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"
 
 #include "leds.h"
+#include "illeds.h"
 
-//extern uint8_t LED_PINS[5];
+#include "tusb.h"
+#include "usb_serial.h"
+
+#define printf cdc0_printf
+
 extern CLedParser  parser;
 
 void sendCmd(const char* str) {
@@ -17,20 +21,22 @@ void sendCmd(const char* str) {
     parser.flush();
 }
 
-void CLed::clear(void)
+void CHipiLed::clear(void)
 {
     // Clear device 
     sendCmd("0C");
 }
 
 // Interface clear
-void CLed::ifc(void)
+void CHipiLed::ifc(void)
 {
     status(STAT_IDLE);
 }
 
-void CLed::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
+void CHipiLed::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     *rtn = cmd;
-    parser.feed(cmd);
+    if( IS_DATA(cmd) ) {
+        parser.feed(cmd & 0xFF);
+    }
 }

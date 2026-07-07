@@ -6,6 +6,8 @@
 #include "tusb.h" 
 #include "usb_serial.h"
 
+#define printf cdc0_printf
+
 /*
  * an improved format is using full 8-bit bytes:
  * 001c ccb0 high byte: higher 4 bits (3 control bits plus data bit 7)
@@ -18,7 +20,7 @@
  */
 #define P_DEBUG false
 
-#define PL_MODE(x) do { if( P_DEBUG) cdc0_printf("\r\nPILBOX: " #x "\r\n"); } while(0)
+#define PL_MODE(x) do { if( P_DEBUG) printf("\r\nPILBOX: " #x "\r\n"); } while(0)
 
 // Send a single byte to the PILBox serial link and flush
 #define PL_SEND(x) do { \
@@ -52,7 +54,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     if (((cmd & CMD_MASK) == CMD) ) {
         m_wLastCmd = cmd;    // remember last CMD frame to send later when RFC is received
         if( P_DEBUG ) {
-            cdc0_printf("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
+            printf("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
         }
         // Return without sending the CMD frame to PyIlPer
         return cmd;
@@ -62,7 +64,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     // CMD/RFC handshaking done in the PILBox emulation
     if ((cmd == RFC)) {
         if( P_DEBUG ) {
-            cdc0_printf("pilbox: RFC\r\n");
+            printf("pilbox: RFC\r\n");
         }
         cmd = m_wLastCmd;                            // use the last CMD frame as answer
         sendFrame(cmd);                            // send the RFC frame
@@ -71,7 +73,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
             pil_cmd = receiveFrame();
         } while( pil_cmd == NO_FRAME );
         if( P_DEBUG ) {
-            cdc0_printf("\t   <== RFC!\r\n");
+            printf("\t   <== RFC!\r\n");
         }
         return RFC;
     }
@@ -84,7 +86,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
         pil_cmd = receiveFrame();
     } while( pil_cmd == NO_FRAME );
     if(  P_DEBUG && !IS_IDLE(pil_cmd) ) {
-        cdc0_printf("\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
+        printf("\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
     }
     return pil_cmd;                            // return the received frame
 }
@@ -141,7 +143,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         }
 
         if( P_DEBUG && !IS_IDLE(PIL_rx_frame) ) {
-            cdc0_printf("\t   <-- %s\r\n", ilMnemonic(PIL_rx_frame, pbBuf));
+            printf("\t   <-- %s\r\n", ilMnemonic(PIL_rx_frame, pbBuf));
         }
 
         // The frame is now received, first process the PILBox commands
@@ -215,7 +217,7 @@ IL_CMD_t CPilBox::sendFrame(IL_CMD_t cmd)
     PL_SEND_FRAME();
 
     if( P_DEBUG && !IS_IDLE(frame) ) {
-        cdc0_printf("\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
+        printf("\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
     }
     return frame;
 }
@@ -223,4 +225,17 @@ IL_CMD_t CPilBox::sendFrame(IL_CMD_t cmd)
 void CPilBox::idle(void)
 {
     receiveFrame();
+}
+
+void CPilBox::show(void)
+{
+    printf("@@@ %s: status: ", name());
+    if( PILBox_mode == TDIS ) {
+        printf("DISABLED");
+
+    } else {
+        printf("%c addr:%2d",
+            isTalker() ? 'T' : ((isListener()) ? 'L' : '-'),
+                addr());
+    }
 }

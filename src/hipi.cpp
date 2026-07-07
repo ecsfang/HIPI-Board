@@ -39,7 +39,7 @@ void hipi_init()
     CTape *cassette = new CTapeSD(); // Uses SD-card for file storage
     devices.push_back(new CDisplay("TFDISPLAY", 0x3E));
     devices.push_back(new CDrive("TFDRIVE", cassette));
-    devices.push_back(new CLed("TFLEDS", 0x3D));
+    devices.push_back(new CHipiLed("TFLEDS", 0xEE));
     devices.push_back(new CPilBox("PILBOX"));
 }
 
@@ -62,7 +62,7 @@ bool hipi_loop(HpIlLoop& loop) {
             rx_word = rtn;
         }
         if (bDebug && !IS_IDLE(rx_word)) {
-            printf("\t   >>> %s\r\n", ilMnemonic(rx_word, buf));
+            printf("\t   <<< %s\r\n", ilMnemonic(rx_word, buf));
         }
         // Send the final return value back to the HP-IL loop using the PIO interface
         loop.sendFrame(rx_word);

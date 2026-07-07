@@ -11,9 +11,18 @@
 #include "f_util.h"
 #include "ff.h"
 
+#define MEDIUM_CASS     0
+#define MEDIUM_DISK     1
+#define MEDIUM_HDRIVE1  2
+#define MEDIUM_HDRIVE2  3
+#define MEDIUM_HDRIVE4  4
+#define MEDIUM_HDRIVE8  5
+#define MEDIUM_HDRIVE16 6
+
 #define BUF_SIZE    256
 #define REC_SIZE    256
 #define TRACKS      2
+#define SURFACES    2
 #define TAPE_SIZE   (TRACKS*REC_SIZE*BUF_SIZE)
 
 // ─── Flash placement ───────────────────────────────────────────────────────────
@@ -277,8 +286,7 @@ class CDrive : public CDevice {
     IL_ADDR_t       sst;
     IL_CMD_t        last;
     bool            end;
-    unsigned int    tmp;
-    std::queue<IL_DATA_t> fifo;
+    unsigned int    m_tmp;
     unsigned int    pt;
     CTape           *tape;
     IL_DATA_t       buffer[TRACKS][BUF_SIZE];
@@ -286,8 +294,13 @@ class CDrive : public CDevice {
 public:
     CDrive(const char *name, CTape *_tape, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
         tape = _tape;
+        mode = WRITE_MODE;
+        last = ddl = ddt = sst = 0;
+        size = 0;
+        pt = m_tmp = 0;
+        end = false;
+        memset(buffer, 0, sizeof(buffer));
     }
-    //IL_CMD_t hpil(IL_CMD_t cmd);
     IL_CMD_t next(IL_CMD_t cmd);
     void clear(void);
     void ifc(void);
@@ -308,6 +321,7 @@ public:
     void close() {
         tape->close();
     }
+    void show();
 };
 
 extern void sd_dir();

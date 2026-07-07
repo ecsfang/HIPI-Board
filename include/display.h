@@ -9,8 +9,8 @@ class CDisplay : public CDevice {
 public:
     CDisplay(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau=31) : CDevice(name, _sai, _aau) {
     }
-    //IL_CMD_t hpil(IL_CMD_t cmd);
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);
+    void show(void);
     void clear(void);
     void idle(void);
     void ifc(void);

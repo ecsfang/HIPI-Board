@@ -12,7 +12,6 @@ IL_CMD_t CDevice::hpil(IL_CMD_t cmd)
     if( base(cmd, &rtn) ) {
         return rtn;
     }
-
     // Otherwise handle device specific commands
     if( isTalker() ) {
         doTalker(cmd, &rtn);
@@ -24,7 +23,9 @@ IL_CMD_t CDevice::hpil(IL_CMD_t cmd)
 
 void CDevice::show(void)
 {
-    printf("%s: status:%c addr:%2d", m_devName, isTalker()?'T':((isListener())?'L':'-'), addr());
+    printf("\r\n@@@ Name: %s status:%c addr: %d sai: %s nSai:%d nAau:%d sdi: %p\r\n",
+        name(), isTalker() ? 'T' : ((isListener()) ? 'L' : '-'),
+        addr(), m_sai?"TRUE":"FALSE", m_nSai, m_nAau, m_sdi);
 }
 
 bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
@@ -56,7 +57,7 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
         return true;
     }
     if( cmd == SDI && isTalker() ) {
-        m_sdi = m_devName;
+        m_sdi = name();
         *rtn = *m_sdi++;
         return true;
     }
