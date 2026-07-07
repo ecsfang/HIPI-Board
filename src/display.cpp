@@ -32,7 +32,7 @@ void CDisplay::ifc(void)
 void CDisplay::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
 {
     *rtn = cmd;
-    if( cmd < DOE ) {
+    if( IS_DATA(cmd) ) {
         // Data - save in queue ...
         fifo.push(cmd & 0xFF);
     }

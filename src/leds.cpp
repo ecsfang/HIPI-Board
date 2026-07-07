@@ -299,7 +299,7 @@ void update(int value) {
     }
     // /DEBUG
 
-    if (value == 0x6C0) {
+    if (IS_IDLE(value)) {
         _x_last_time = now;
         if (!_is_breathing) {
             _is_breathing = true;

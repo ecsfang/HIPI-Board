@@ -284,7 +284,7 @@ class CDrive : public CDevice {
     IL_DATA_t       buffer[TRACKS][BUF_SIZE];
     size_t          size;
 public:
-    CDrive(CTape *_tape, const char *name, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
+    CDrive(const char *name, CTape *_tape, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
         tape = _tape;
     }
     //IL_CMD_t hpil(IL_CMD_t cmd);

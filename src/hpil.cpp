@@ -56,7 +56,7 @@ const static IL_Codes_t ilCodes[] = {
     0x700, 0x700, "ISR"
 };
 
-void ilMnemonic(IL_CMD_t frame, char *buf)
+char *ilMnemonic(IL_CMD_t frame, char *buf)
 {
 	// go through HP-IL opcode table
 	for (int i = 0; i < sizeof(ilCodes) / sizeof(ilCodes[0]); ++i)
@@ -74,4 +74,5 @@ void ilMnemonic(IL_CMD_t frame, char *buf)
 			break;
 		}
 	}
+    return buf;
 }

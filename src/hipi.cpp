@@ -14,18 +14,18 @@ std::vector<CDevice*> devices;
 
 #define printf cdc0_printf
 
+// Debug help function to show the command and return value of a device
+// Also shows the device name, status and address
 void show(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 {
     char buf[32];
-    if( cmd != 0x6C0) {
-        ilMnemonic(cmd, buf);
-        printf("%-6.6s --> ", buf);
+    if( !IS_IDLE(cmd) && cmd != NO_FRAME ) {
+        printf("%-6.6s --> ", ilMnemonic(cmd, buf));
     } else
         printf("\t   ");
-    if( rtn != 0x6C0) {
-        ilMnemonic(rtn, buf);
-        printf("--> %s ", buf);
-        if( rtn < DOE && isprint(rtn) )
+    if( !IS_IDLE(rtn) ) {
+        printf("--> %s ", ilMnemonic(rtn, buf));
+        if( IS_DATA(cmd) && isprint(rtn) )
             printf(" '%c' ", isprint(rtn) ? rtn : '.');
     }
     dev->show();
@@ -37,14 +37,14 @@ void hipi_init()
 {
     //CTape *cassette = new CTapeFlash(); // Uses internal flash for testing without SD-card
     CTape *cassette = new CTapeSD(); // Uses SD-card for file storage
-    devices.push_back(new CDisplay("TFDISPLAY", 0x3E, 31));
-    devices.push_back(new CDrive(cassette, "TFDRIVE"));
-    devices.push_back(new CLed("TFLEDS", 0x3D, 31));
+    devices.push_back(new CDisplay("TFDISPLAY", 0x3E));
+    devices.push_back(new CDrive("TFDRIVE", cassette));
+    devices.push_back(new CLed("TFLEDS", 0x3D));
+    devices.push_back(new CPilBox("PILBOX"));
 }
 
 bool bDebug = false;
 
-#define PILBOX
 IL_CMD_t hipi_loop(HpIlLoop& loop) {
     uint32_t rx_word;
     uint32_t rtn;
@@ -53,27 +53,20 @@ IL_CMD_t hipi_loop(HpIlLoop& loop) {
     if (loop.receiveFrame(rx_word)) {
         for (CDevice* dev : devices) {
             rtn = dev->hpil(rx_word);
-            if (bDebug && rtn != 0x6C0) {
-                show(dev, n?0x6C0:rx_word, rtn);
+            if (bDebug && !IS_IDLE(rtn)) {
+                show(dev, n ? NO_FRAME : rx_word, rtn);
                 n++;
             }
             rx_word = rtn;
         }
-#ifdef PILBOX
-        rtn = ILBOX_SendFrame(rx_word);
-#endif
-        if (bDebug && rtn != 0x6C0) {
-            ilMnemonic(rtn, buf);
-            printf("\t   >>> %s\r\n", buf);
+        if (bDebug && !IS_IDLE(rtn)) {
+            printf("\t   >>> %s\r\n", ilMnemonic(rtn, buf));
         }
         loop.sendFrame(rtn);
         return rtn;
     } else {
         // No frame received, call idle() on all devices
         // Also check handshake with PILBox ...
-#ifdef PILBOX
-        ILBOX_ReceiveFrame();
-#endif
         for (CDevice* dev : devices) {
             dev->idle();
         }

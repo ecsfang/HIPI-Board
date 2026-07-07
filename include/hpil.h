@@ -3,7 +3,8 @@
 
 #include "usb_serial.h"
 
-#define DOE     0x400   // Data byte (0-255)
+#define DOE     0x000   // Data byte (0-255)
+#define CMD     0x400   // Command
 #define SDC     0x404   // Selected device clear
 #define DCL     0x414
 #define LAD     0x420
@@ -27,6 +28,15 @@
 #define LLO     0x411
 #define LPD     0x49D
 
+#define DOE_MASK   0x400    // 0xx xxxx xxxx
+#define IS_DATA(x) (((x) & DOE_MASK) == DOE)
+
+#define CMD_MASK   0x700    // 100 xxxx xxxx
+#define IS_CMD(x)  (((x) & CMD_MASK) == CMD)
+
+#define IDLE_FRAME (IDY | 0xC0)
+#define IS_IDLE(x) ((x) == IDLE_FRAME)
+
 // info below from Christoph Giesselink:
 // PILBox commands
 #define TDIS    0x494   // TDIS
@@ -43,13 +53,15 @@
 #define MAX_CMD     0x1F
 #define GET_ADDR(x) (x&MAX_ADDR)
 
+#define NO_FRAME 0xFFFF
+
 #define inAddrRange(a,x) ((a) >= (x) && (a) <= ((x)+MAX_ADDR))
 
 typedef unsigned short int IL_CMD_t;
 typedef unsigned char      IL_ADDR_t;
 typedef unsigned char      IL_DATA_t;
 
-extern void ilMnemonic(IL_CMD_t frame, char *buf);
+extern char *ilMnemonic(IL_CMD_t frame, char *buf);
 
 typedef enum {
     STAT_IDLE,
@@ -77,7 +89,7 @@ public:
         m_nAau = _aau;
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
-    IL_CMD_t hpil(IL_CMD_t cmd);
+    virtual IL_CMD_t hpil(IL_CMD_t cmd);
     virtual void doListener(IL_CMD_t cmd, IL_CMD_t *rtn) {}
     virtual void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {}
     virtual void clear() = 0;

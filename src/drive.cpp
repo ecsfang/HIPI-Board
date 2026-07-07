@@ -81,7 +81,7 @@ void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
                     tmp=0;
                 }
             }
-        } else if( cmd < DOE ) {
+        } else if( IS_DATA(cmd) ) {
             // Data
             if( cmd != last )
                 *rtn = ETE;      // Error
@@ -161,7 +161,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
         }
     } else if( cmd == UNL ) {
         status(STAT_IDLE);
-    } else if( cmd < DOE ) {
+    } else if( IS_DATA(cmd) ) {
         *rtn = doNextListener(cmd);
     }
 }
