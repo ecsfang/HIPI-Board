@@ -43,16 +43,25 @@ void hipi_init()
     devices.push_back(new CPilBox("PILBOX"));
 }
 
+#define RESET           "\e[0m"
+#define HILIGHT         "\e[1;92m"       // Green highlight
+
 bool bDebug = false;
+bool bTrace = true;
 
 bool hipi_loop(HpIlLoop& loop) {
     uint32_t rx_word;
+    uint32_t lastCmd = NO_FRAME;
     char buf[32];
     int n = 0;
 
     // Check if any HP-IL frame from the PIO interface is available
     if( loop.receiveFrame(rx_word) ) {
         // Got a frame, send to all devices in the loop
+        if (bTrace && !IS_IDLE(rx_word)) {
+            printf("\r\n" HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
+            lastCmd = rx_word;
+        }
         for (CDevice* dev : devices) {
             IL_CMD_t rtn = dev->hpil(rx_word);
             if (bDebug && !IS_IDLE(rtn)) {
@@ -60,7 +69,16 @@ bool hipi_loop(HpIlLoop& loop) {
                 n++;
             }
             rx_word = rtn;
+            if (bTrace && !IS_IDLE(rx_word)) {
+                if( lastCmd != rx_word ) {
+                    printf("> " HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
+                    lastCmd = rx_word;
+                } else
+                    printf("> %-6.6s ", ilMnemonic(rx_word, buf));
+            }
         }
+        if( bTrace && IS_DATA(rx_word) )
+            printf(" '%c' ", isprint(rx_word&0xFF) ? rx_word&0xFF : '.');
         if (bDebug && !IS_IDLE(rx_word)) {
             printf("\t   <<< %s\r\n", ilMnemonic(rx_word, buf));
         }

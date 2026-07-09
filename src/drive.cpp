@@ -2,14 +2,7 @@
 #include "drive.h"
 
 
-typedef struct media_t {
-    const char* media;
-    unsigned short int tracks;
-    unsigned short int surfaces;
-    unsigned short int blocks;
-} Media_t;
-
-Media_t madiaInfo[] = {
+Media_t mediaInfo[] = {
     { "HP82161A Cassette",            2, 1, 256 },
     { "HP9114B double sided disk",   77, 2,  16 },
     { "HDRIVE1 640K disk",           80, 2,  16 },
@@ -19,6 +12,21 @@ Media_t madiaInfo[] = {
     { "HDRIVE1 16MB disk",          125, 8,  64 },
     { "unknown",                      0, 0,   0 }
 };
+
+int findMedia(unsigned int s)
+{
+    int i = 0;
+    unsigned int sz;
+    do {
+        sz = mediaInfo[i].tracks * mediaInfo[i].surfaces * mediaInfo[i].blocks;
+        if( sz == s )
+            return i;
+        if( sz == 0 )
+            return i;
+        i++;
+    } while(sz);
+    return -1;
+}
 
 void CDrive::clear(void)
 {
@@ -260,7 +268,7 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
             // Second byte is record number (0-255)
             if( check() ) {
                 unsigned int b = BUF_SIZE*(m_tmp-1)+(cmd % BUF_SIZE);
-                if( b < size ) {
+                if( b < size() ) {
                     tape->seek(BUF_SIZE*b);
                     sst = DRV_IDLE;
                 } else {
@@ -308,7 +316,7 @@ void CDrive::writeblock()
 }
 bool TapeOK = false;
 bool SDOK = false;
-const char *share_Tape = "tape.bin";
+const char *share_Tape = MEDIA_NAME;
 
 bool CDrive::check()
 {
@@ -316,11 +324,12 @@ bool CDrive::check()
         if( SDOK ) {
             cdc0_printf("$$$ Opening tape file: %s ", share_Tape);
             tape->open(share_Tape);
-            tape->seek(24);
-            size=tape->readInt()*tape->readInt()*tape->readInt();
-            if( size <= 0 )
-                size = 512;
-            cdc0_printf("size=%d\r\n", size);
+            size(tape->mediaSize());
+            int i = findMedia(size());
+            cdc0_printf("media: %s ", mediaInfo[i].media);
+            if( size() <= 0 )
+                size(512);
+            cdc0_printf("size=%dkb\r\n", (size()*BUF_SIZE)/1024);
             tape->seek(0);
             sst = DRV_NEW_TAPE_ERROR;
             TapeOK = true;
@@ -336,7 +345,7 @@ void CDrive::show()
 {
     CDevice::show();
     cdc0_printf("$$$ Drive: mode:%d ddl:%d ddt:%d sst:%d last:%d\r\n", ddl, ddt, sst, last);
-    cdc0_printf("           tape:%p size:%d\r\n", (void*)tape, size);
+    cdc0_printf("           tape:%p size:%d\r\n", (void*)tape, size());
 }
 
 static void list_dir(const char* path, int depth) {

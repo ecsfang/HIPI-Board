@@ -25,6 +25,16 @@
 #define SURFACES    2
 #define TAPE_SIZE   (TRACKS*REC_SIZE*BUF_SIZE)
 
+//#define MEDIA_NAME "HDRIVCHUU260701.DAT"
+#define MEDIA_NAME "HDRIVCHUU260708.DAT"
+
+typedef struct media_t {
+    const char* media;
+    unsigned short int tracks;
+    unsigned short int surfaces;
+    unsigned short int blocks;
+} Media_t;
+
 // ─── Flash placement ───────────────────────────────────────────────────────────
 // Pico 2 has 4 MB of flash. Place tape data at the very top.
 // 128 KB / 4 KB = 32 sectors — must both be sector-aligned.
@@ -48,6 +58,7 @@ enum {
     DRV_BUSY            = 32
 };
 
+#define SIZE_OFFS   24
 
 class CTape {
 protected:
@@ -60,8 +71,25 @@ public:
     virtual unsigned int readInt() = 0;
     virtual void write(unsigned char *buf) = 0;
     virtual void seek(unsigned int s) = 0;
-    virtual void open(const char *name = "tape.bin") = 0;
+    virtual void open(const char *name = MEDIA_NAME) = 0;
     virtual void close() = 0;
+    unsigned int mediaSize() {
+        return tracks()*surfaces()*blocks();
+
+    }
+    unsigned int readInt(int offs) {
+        seek(offs);
+        return readInt();
+    }
+    unsigned int tracks() {
+        return readInt(SIZE_OFFS);
+    }
+    unsigned int surfaces() {
+        return readInt(SIZE_OFFS+4);
+    }
+    unsigned int blocks() {
+        return readInt(SIZE_OFFS+8);
+    }
 };
 
 // CTape - file on SD-card version
@@ -80,7 +108,7 @@ public:
         unsigned int n = 0;
         _fr = f_read(&_tape, buf, BUF_SIZE, &n);
         if (FR_OK != _fr) {
-            EMSG_PRINTF("f_read error: %s (%d)\n", FRESULT_str(_fr), _fr);
+            error( "f_read" );
             n = 0;
         }
         // If less than BUF_SIZE fill with 255 ...
@@ -88,51 +116,60 @@ public:
             buf[n++] = 255;
         }
     }
-    unsigned int readInt() {
-        unsigned int n = 0;
-        _fr = f_read(&_tape, &n, sizeof(unsigned int), &n);
+    unsigned int readByte() {
+        unsigned int n;
+        unsigned char b;
+        _fr = f_read(&_tape, &b, 1, &n);
         if (FR_OK != _fr) {
-            EMSG_PRINTF("f_read error: %s (%d)\n", FRESULT_str(_fr), _fr);
+            error( "f_read" );
             return 0;
         }
-        return n;
+        return b;
+    }
+    unsigned int readInt() {
+        unsigned int w = 0;
+        for(int i=0; i<4; i++) {
+            w = (w<<8) | readByte();
+        }
+        return w;
+    }
+    void error(char *str) {
+        EMSG_PRINTF("%s error: %s (%d)\n", str, FRESULT_str(_fr), _fr);
     }
     void write(unsigned char *buf) {
         //printf("Writing %d bytes to tape at %d\n", BUF_SIZE, tell());
         unsigned int n;
         _fr = f_write(&_tape, buf, BUF_SIZE, &n);
-        if (FR_OK != _fr) {
-            EMSG_PRINTF("f_write error: %s (%d)\n", FRESULT_str(_fr), _fr);
-        }
+        if (FR_OK != _fr)
+            error("f_write");
     }
     void seek(unsigned int s) {
-        f_lseek(&_tape, s);
+        _fr = f_lseek(&_tape, (FSIZE_t)s);
+        if (_fr != FR_OK)
+            error("f_lseek");
     }
-    void open(const char *name = "tape.bin") {
-        if (_open) {
-            _fr = f_close(&_tape);
-            if (_fr != FR_OK) {
-                cdc0_printf("f_close error: %s (%d)\r\n", FRESULT_str(_fr), _fr);
-                return;
-            }
-        }
-        cdc0_printf("Opening tape file: [%s]\r\n", name);
+    void open(const char *name = MEDIA_NAME) {
+        if( _open )
+            close();
+        cdc0_printf("Opening tape SD-file: [%s]\r\n", name);
         _fr = f_open(&_tape, name, FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
         if (_fr != FR_OK) {
-            cdc0_printf("f_open: %s (%d)\r\n", FRESULT_str(_fr), _fr);
+            error("f_open");
             _name[0] = '\0';
             _open = false;
         } else {
-            _open = true;
             strncpy(_name, name, sizeof(_name) - 1);
             _name[sizeof(_name) - 1] = '\0';
+            _open = true;
         }
     }
     void close() {
-        cdc0_printf("Closing tape file: [%s]\r\n", _name);
-        f_close(&_tape);
-        _open = false;
+        cdc0_printf("Closing tape SD-file: [%s]\r\n", _name);
+        _fr = f_close(&_tape);
+        if (_fr != FR_OK)
+            error("f_close");
         _name[0] = '\0';
+        _open = false;
     }
 };
 
@@ -148,38 +185,41 @@ public:
     unsigned int tell(void) {
         return _tPos;
     }
+    unsigned char *pos(void) {
+        return _tape + tell();
+    }
     void read(unsigned char *buf) {
-        int sz = BUF_SIZE;
-        if( (_tPos + BUF_SIZE) >= TAPE_SIZE )
-            sz = TAPE_SIZE - _tPos;
-        memcpy(buf, _tape + _tPos, sz);
-        // If less than BUF_SIZE fill with 255 ...
-        while( sz < BUF_SIZE ) {
-            buf[sz++] = 255;
-        }
-        _tPos += sz;
+        // Number of bytes to read ...
+        int sz = (tell() + BUF_SIZE) >= TAPE_SIZE ? TAPE_SIZE - tell() : BUF_SIZE;
+        // If less than BUF_SIZE then fill with 255 ...
+        if( sz < BUF_SIZE )
+            memset(buf+sz, 255, BUF_SIZE-sz);
+        memcpy(buf, pos(), sz);
+        wind(sz);
     }
     unsigned int readInt() {
-        unsigned int n = 0;
-        n = *((unsigned int*)(_tape+_tPos));
-        _tPos += sizeof(unsigned int);
+        unsigned int n = *((unsigned int*)pos());
+        wind(sizeof(unsigned int));
         return n;
     }
     void write(unsigned char *buf) {
         cdc0_printf("Writing %d bytes to tape at %d\r\n", BUF_SIZE, tell());
-        memcpy(_tape + _tPos, buf, BUF_SIZE);
-        _tPos += BUF_SIZE;
+        memcpy(pos(), buf, BUF_SIZE);
+        wind(BUF_SIZE);
     }
     void seek(unsigned int s) {
         _tPos = s;
     }
+    void wind(unsigned int s) {
+        seek(tell() + s);
+    }
     void open(const char *name = "memory.bin") {
-        cdc0_printf("Opening tape file: [%s]\r\n", name);
-        _tPos = 0;
+        cdc0_printf("Opening tape in RAM\r\n");
+        seek(0);
     }
     void close() {
-        cdc0_printf("Closing tape file: [%s]\r\n", "memory.bin");
-        _tPos = 0;
+        cdc0_printf("Closing tape in RAM\r\n");
+        seek(0);
     }
 };
 
@@ -290,13 +330,13 @@ class CDrive : public CDevice {
     unsigned int    pt;
     CTape           *tape;
     IL_DATA_t       buffer[TRACKS][BUF_SIZE];
-    size_t          size;
+    size_t          m_size;
 public:
     CDrive(const char *name, CTape *_tape, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
         tape = _tape;
         mode = WRITE_MODE;
         last = ddl = ddt = sst = 0;
-        size = 0;
+        m_size = 0;
         pt = m_tmp = 0;
         end = false;
         memset(buffer, 0, sizeof(buffer));
@@ -322,6 +362,12 @@ public:
         tape->close();
     }
     void show();
+    size_t size(void) {
+        return m_size;
+    }
+    void size(size_t sz) {
+        m_size = sz;
+    }
 };
 
 extern void sd_dir();
