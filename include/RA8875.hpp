@@ -118,6 +118,15 @@ public:
     // PWM
     static constexpr std::uint8_t PWM_CLK_DIV1024 = 0x02;
 
+    enum class Layer : std::uint8_t { Layer1 = 0, Layer2 = 1 };
+
+    enum class LayerMode : std::uint8_t {
+        ShowLayer1     = 0b00,  // visa bara lager 1
+        ShowLayer2     = 0b01,  // visa bara lager 2
+        LightenOverlay = 0b10,  // visa OR av bada lagren (bra nar bakgrund = 0x00)
+        Transparent    = 0b11,  // alfablandning enligt FLDR-registret
+    };
+
     // -----------------------------------------------------------------------
     // Construction
     // -----------------------------------------------------------------------
@@ -215,7 +224,14 @@ public:
     void hline   (std::int16_t x, std::int16_t y, std::int16_t w, std::uint16_t color);
     void vline   (std::int16_t x, std::int16_t y, std::int16_t h, std::uint16_t color);
     void line    (std::int16_t x1, std::int16_t y1, std::int16_t x2, std::int16_t y2, std::uint16_t color);
-
+    void drawBitmap565(std::int16_t x, std::int16_t y,
+                    std::uint16_t w, std::uint16_t h,
+                    const std::uint16_t* data);
+    void drawBitmap332(std::int16_t x, std::int16_t y,
+                    std::uint16_t w, std::uint16_t h,
+                    const std::uint8_t* data);   // 1 byte per pixel (RGB332)
+    void setActiveWindow(std::uint16_t x0, std::uint16_t y0,
+                     std::uint16_t x1, std::uint16_t y1);
     // -----------------------------------------------------------------------
     // HP82163-specific configuration (called by Screen / share.py setup)
     // -----------------------------------------------------------------------
@@ -226,6 +242,8 @@ public:
     // Enable RA8875 2-layer configuration (DSPCTR bit 7).  Used by
     // Screen::store()/recall() to keep a backup of the visible layer.
     void set2LayerConfig();
+    void selectLayer(Layer layer);
+    void setLayerMode(LayerMode mode);
 
     // Upload a single character to the CGRAM (char code, 16-row bitmap).
     // This is the per-character version of the share.py CGRAM loop.  The
@@ -240,7 +258,7 @@ public:
     std::uint16_t height()     const { return height_; }
     std::uint16_t vertOffset() const { return vertOffset_; }
     std::uint8_t  txtScale()   const { return txtScale_; }
-    const char*   mode()       const { return mode_; }
+    //const char*   mode()       const { return mode_; }
 
 private:
     // ---- helpers ----
@@ -263,8 +281,9 @@ private:
     std::uint16_t vertOffset_;
     std::uint8_t  adcClk_;
     std::uint8_t  txtScale_;
-    const char*   mode_;        // "gfx", "txt", "fon", or nullptr
+    //const char*   mode_;        // "gfx", "txt", "fon", or nullptr
 };
+
 
 }  // namespace hp82163
 

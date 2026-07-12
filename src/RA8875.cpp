@@ -22,8 +22,8 @@ RA8875::RA8875(RA8875Transport& t,
       height_(height),
       vertOffset_(0),
       adcClk_(0x02),  // TPCR0_ADCCLK_DIV4
-      txtScale_(0),
-      mode_(nullptr) {
+      txtScale_(0) {
+      //mode_(nullptr) {
     (void)start_on;  // forwarded to begin()
 }
 
@@ -44,7 +44,7 @@ void RA8875::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     // If a previously-configured controller is connected, skip the PLL/timing
     // re-init sequence (matches the early-return in the MicroPython original).
     if (readReg(0) == 0x75) {
-        return;
+        //return;
     }
 
     std::uint8_t pixclk = 0;
@@ -162,6 +162,21 @@ void RA8875::set2LayerConfig() {
     writeReg(0x20, 0x80);
 }
 
+void RA8875::selectLayer(Layer layer) {
+    // MWCR1 (0x41), bit 0: valjer vilket lager foljande skriv-
+    // operationer (grafik OCH text) gar till.
+    const std::uint8_t mwcr1 = readReg(0x41);
+    const std::uint8_t val = static_cast<std::uint8_t>(
+        (mwcr1 & ~0x01) | (static_cast<std::uint8_t>(layer) & 0x01));
+    writeReg(0x41, val);
+}
+
+void RA8875::setLayerMode(LayerMode mode) {
+    // LTPR0 (0x52): bitarna 2:0 väljer lagervisning/blandning.
+    // 000=Lager1, 001=Lager2, 010=Lighten-overlay (OR), 011=transparent (LTPR1-ratio)
+    writeReg(0x52, static_cast<std::uint8_t>(mode) & 0x07);
+}
+
 void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
     // Step 1: Sätt CGRAM char index (0x23 = CCR register)
     writeReg(0x23, ascii);
@@ -182,6 +197,13 @@ void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) 
     // Step 5: Viktigt! Återställ MWCR0 till 0 (grafik-mode) 
     // så efterföljande writes går till DDRAM, inte CGRAM
     writeReg(0x41, 0x00);
+}
+void RA8875::setActiveWindow(std::uint16_t x0, std::uint16_t y0,
+                             std::uint16_t x1, std::uint16_t y1) {
+    writeReg16(HSAW0, x0);
+    writeReg16(HEAW0, x1);
+    writeReg16(VSAW0, static_cast<std::uint16_t>(y0 + vertOffset_));
+    writeReg16(VEAW0, static_cast<std::uint16_t>(y1 + vertOffset_));
 }
 
 // -----------------------------------------------------------------------
@@ -327,16 +349,16 @@ void RA8875::pwm1Config(bool on, std::uint8_t clock) {
 // -----------------------------------------------------------------------
 
 void RA8875::gfxMode() {
-    if (mode_ != nullptr && std::strcmp(mode_, "gfx") == 0) return;
-    writeData(static_cast<std::uint8_t>(readReg(MWCR0) & ~MWCR0_TXTMODE));
-    mode_ = "gfx";
+    //writeData(static_cast<std::uint8_t>(readReg(MWCR0) & ~MWCR0_TXTMODE));
+    writeReg(MWCR0, MWCR0_GFXMODE);
+    //mode_ = "gfx";
 }
 
 void RA8875::txtMode() {
-    if (mode_ != nullptr && std::strcmp(mode_, "txt") == 0) return;
-    writeData(static_cast<std::uint8_t>(readReg(MWCR0) | MWCR0_TXTMODE));
+    //writeData(static_cast<std::uint8_t>(readReg(MWCR0) | MWCR0_TXTMODE));
+    writeReg(MWCR0, MWCR0_TXTMODE);
     writeData(static_cast<std::uint8_t>(readReg(FNCR1) & ~((1 << 7) | (1 << 5))));
-    mode_ = "txt";
+    //mode_ = "txt";
 }
 
 // -----------------------------------------------------------------------
@@ -413,6 +435,42 @@ void RA8875::pixel(std::int16_t x, std::int16_t y, std::uint16_t color) {
         static_cast<std::uint8_t>(color & 0xFF)
     };
     writeReg(MRWC, data, 2);
+}
+
+void RA8875::drawBitmap565(std::int16_t x, std::int16_t y,
+                           std::uint16_t w, std::uint16_t h,
+                           const std::uint16_t* data) {
+    gfxMode();
+
+    // Radbuffert: 2 byte per pixel (high byte, low byte — samma format som pixel())
+    static std::uint8_t rowBuf[800 * 2];  // storsta stodda skarmbredd
+    if (w > 800) return;                  // enkel sakerhetsspärr
+
+    for (std::uint16_t row = 0; row < h; ++row) {
+        setxy(static_cast<std::uint16_t>(x),
+              static_cast<std::uint16_t>(y + row));
+        writeCmd(MRWC);
+
+        const std::uint16_t* src = data + static_cast<std::size_t>(row) * w;
+        for (std::uint16_t col = 0; col < w; ++col) {
+            rowBuf[col * 2]     = static_cast<std::uint8_t>(src[col] >> 8);
+            rowBuf[col * 2 + 1] = static_cast<std::uint8_t>(src[col] & 0xFF);
+        }
+        writeData(rowBuf, static_cast<std::size_t>(w) * 2);
+    }
+}
+
+// I RA8875.cpp:
+void RA8875::drawBitmap332(std::int16_t x, std::int16_t y,
+                           std::uint16_t w, std::uint16_t h,
+                           const std::uint8_t* data) {
+    gfxMode();
+    for (std::uint16_t row = 0; row < h; ++row) {
+        setxy(static_cast<std::uint16_t>(x),
+              static_cast<std::uint16_t>(y + row));
+        writeCmd(MRWC);
+        writeData(data + static_cast<std::size_t>(row) * w, w);  // 1 byte/pixel, ingen konvertering
+    }
 }
 
 void RA8875::fillRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,

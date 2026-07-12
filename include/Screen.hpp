@@ -40,9 +40,10 @@ public:
     //  must be uploaded *before* constructing the Screen.  See
     //  RA8875::begin() and the README.
     Screen(RA8875& display,
-           std::uint16_t color,
-           std::uint8_t size,
-           std::uint8_t brightness);
+        std::uint16_t color,
+        std::uint8_t size,
+        std::uint8_t brightness,
+        std::uint16_t textWidth = 800);
 
     // Process a single HP82163 input byte.  This is the main entry point
     // for an HP-41 display stream.  Recognised bytes include ASCII printable
@@ -118,6 +119,8 @@ private:
 
     std::uint8_t row_;
     std::uint8_t col_;
+
+    std::uint16_t textWidth_ = 800;
 
     // State for escape-sequence parsing
     bool flag_;

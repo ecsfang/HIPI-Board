@@ -26,7 +26,8 @@
 #define TAPE_SIZE   (TRACKS*REC_SIZE*BUF_SIZE)
 
 //#define MEDIA_NAME "HDRIVCHUU260701.DAT"
-#define MEDIA_NAME "HDRIVCHUU260708.DAT"
+//#define MEDIA_NAME "HDRIVCHUU260708.DAT"
+#define MEDIA_NAME "cass1.dat"
 
 typedef struct media_t {
     const char* media;

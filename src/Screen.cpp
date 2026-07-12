@@ -17,10 +17,12 @@ namespace hp82163 {
 Screen::Screen(RA8875& display,
                std::uint16_t color,
                std::uint8_t size,
-               std::uint8_t brightness)
+               std::uint8_t brightness,
+               std::uint16_t textWidth)
     : d_(display),
       color_(color),
       size_(size),
+      textWidth_(textWidth),
       ROWS_(0),
       COLS_(0),
       width_(0),
@@ -52,10 +54,9 @@ Screen::Screen(RA8875& display,
 // -----------------------------------------------------------------------
 // Public API
 // -----------------------------------------------------------------------
-
 void Screen::clear() {
     d_.writeReg(RA8875::MCLR,
-                static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_FULL));
+                static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));  // <-- ACTIVE, inte FULL
     lines_.clear();
     lines_.reserve(ROWS_);
     for (std::uint8_t i = 0; i < ROWS_; ++i) {
@@ -232,14 +233,14 @@ void Screen::screen_pars(std::uint8_t size) {
     if (size < 4) {
         const std::uint8_t k = static_cast<std::uint8_t>(1 + size);
         width_  = static_cast<std::uint16_t>(8 * k);
-        COLS_   = static_cast<std::uint8_t>(100 / k);
+        COLS_   = static_cast<std::uint8_t>(textWidth_ / width_);   // <-- var: 100 / k
         height_ = static_cast<std::uint16_t>(16 * k);
         ROWS_   = static_cast<std::uint8_t>(30 / k);
         ofx_ = 0;
         ofy_ = 0;
     } else {
         width_  = 10;
-        COLS_   = 80;
+        COLS_   = static_cast<std::uint8_t>(textWidth_ / width_);   // <-- var: 80
         height_ = 20;
         ROWS_   = 24;
         ofx_ = 0;
@@ -537,7 +538,7 @@ void Screen::draw_letter(std::uint8_t c) {
 }
 
 void Screen::fon_mode() {
-    if (d_.mode() != nullptr && std::strcmp(d_.mode(), "fon") == 0) return;
+//    if (d_.mode() != nullptr && std::strcmp(d_.mode(), "fon") == 0) return;
     d_.writeReg(0x40, 0x80);  // MWCR0: text mode
     d_.writeReg(0x21, 0x80);  // FNCR0: CGRAM
     d_.writeReg(0x2E, 2);     // horizontal char spacing
@@ -559,5 +560,3 @@ void Screen::fon_write(const char* s) {
 namespace {
 }  // namespace
 }  // namespace hp82163
-
-

@@ -30,7 +30,7 @@
 #include <cstdio>
 
 namespace {
-constexpr std::uint8_t FONT_COLOR  = 0xFF;  // foreground index in 8BPP mode
+constexpr std::uint8_t FONT_COLOR  = 0xFFFF;  // foreground index in 8BPP mode
 constexpr std::uint8_t BG_COLOR    = 0x00;
 constexpr std::uint8_t TEXT_SIZE   = 2;     // 0..3 = built-in CGRAM modes
 constexpr std::uint8_t BRIGHTNESS  = 200;
