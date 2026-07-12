@@ -27,7 +27,6 @@
 #include "PicoSpiTransport.hpp"
 #include "RA8875.hpp"
 #include "Screen.hpp"
-//#include "buttons.h"
 #include "touch.h"
 #include "leds.h"
 #ifdef TEST_DISPLAY
@@ -183,12 +182,9 @@ int main() {
 
     blink_led(LED_PIN_1, 250);
 
-    sleep_ms(2000);
-
     gpio_set_function(2, GPIO_FUNC_SPI);   // SCK
     gpio_set_function(3, GPIO_FUNC_SPI);   // MOSI
     gpio_set_function(0, GPIO_FUNC_SPI);   // MISO
-
 
     if( usb_connected ) {
         cdc0_printf("HIPI Board v0.1\r\n");
@@ -215,15 +211,6 @@ int main() {
     }
     tud_task();
 
-    // Interface 1 — new second port
-    //const char* msg = "Hello from CDC1 (/dev/ttyACM1)\r\n";
-    //cdc1_write(msg, strlen(msg));
-
-
-    for(int i=0; i<10; i++) {
-        tud_task();
-        sleep_ms(20);
-    }
 
     hp82163::PicoSpiTransport transport(spi0,
                                         /*baudrate=*/6'000'000,

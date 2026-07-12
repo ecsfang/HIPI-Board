@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 
+
 namespace hp82163 {
 
 class UiDialog {
@@ -17,6 +18,8 @@ public:
 
     // Anropas fran huvudloopen nar en knapp-touch upptäcks.
     void handleButton(Button b) {
+        cdc0_printf("State: %d Button: %d\r\n", state_, b);
+
         switch (state_) {
             case State::Closed:
                 if (b == Button::Ok) openMainMenu();
