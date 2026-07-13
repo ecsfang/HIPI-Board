@@ -13,6 +13,10 @@ Media_t mediaInfo[] = {
     { "unknown",                      0, 0,   0 }
 };
 
+//bool TapeOK = false;
+bool SDOK = false;
+const char *share_Tape = MEDIA_NAME;
+
 int findMedia(unsigned int s)
 {
     int i = 0;
@@ -314,31 +318,40 @@ void CDrive::writeblock()
         // tape.flush();
     }
 }
-bool TapeOK = false;
-bool SDOK = false;
-const char *share_Tape = MEDIA_NAME;
 
 bool CDrive::check()
 {
-    if( !TapeOK ) {
+    if( !tape->ok() ) {
         if( SDOK ) {
-            cdc0_printf("$$$ Opening tape file: %s ", share_Tape);
-            tape->open(share_Tape);
-            size(tape->mediaSize());
-            int i = findMedia(size());
-            cdc0_printf("media: %s ", mediaInfo[i].media);
-            if( size() <= 0 )
-                size(512);
-            cdc0_printf("size=%dkb\r\n", (size()*BUF_SIZE)/1024);
-            tape->seek(0);
-            sst = DRV_NEW_TAPE_ERROR;
-            TapeOK = true;
+            if( tape->media() && *tape->media() ) {
+                cdc0_printf("$$$ Opening tape file: %s ", tape->media());
+                tud_cdc_n_write_flush(0);
+                tud_task();
+                //tape->select(share_Tape);
+                tape->open();
+                size(tape->mediaSize());
+                int i = findMedia(size());
+                cdc0_printf("media: %s ", mediaInfo[i].media);
+                if( size() <= 0 )
+                    size(512);
+                cdc0_printf("size=%dkb\r\n", (size()*BUF_SIZE)/1024);
+                tape->seek(0);
+                sst = DRV_NEW_TAPE_ERROR;
+            } else {
+                cdc0_printf("$$$ No tape selected!\r\n");
+                tud_cdc_n_write_flush(0);
+                tud_task();
+                sst = DRV_NO_TAPE_ERROR;
+            }
+            //TapeOK = true;
         } else {
             cdc0_printf("$$$ No tape file!\r\n");
+            tud_cdc_n_write_flush(0);
+            tud_task();
             sst = DRV_NO_TAPE_ERROR;
         }
     }
-    return TapeOK;
+    return tape->ok();
 }
 
 void CDrive::show()

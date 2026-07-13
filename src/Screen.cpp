@@ -55,8 +55,10 @@ Screen::Screen(RA8875& display,
 // Public API
 // -----------------------------------------------------------------------
 void Screen::clear() {
-    d_.writeReg(RA8875::MCLR,
-                static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));  // <-- ACTIVE, inte FULL
+    if (!suspended_) {
+        d_.writeReg(RA8875::MCLR,
+                    static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));  // <-- ACTIVE, inte FULL
+    }
     lines_.clear();
     lines_.reserve(ROWS_);
     for (std::uint8_t i = 0; i < ROWS_; ++i) {
@@ -67,15 +69,28 @@ void Screen::clear() {
     cnt_ = 0;
     cp_  = 0;
     escN_ = false;
-    // sleep(0.500) in the MicroPython original — keep a shorter delay here
-    // since the MCLR_START is synchronous from the controller's perspective.
-    d_.spiDelayMs(500);  // (declared below as a thin RA8875 helper)
+    if (!suspended_) {
+        // sleep(0.500) in the MicroPython original — keep a shorter delay here
+        // since the MCLR_START is synchronous from the controller's perspective.
+        d_.spiDelayMs(500);  // (declared below as a thin RA8875 helper)
+    }
     set_cur();
 }
 
 void Screen::full() {
+    // Always restore our own foreground/background color before redrawing.
+    // Something else (e.g. a UiDialog) may have changed the shared FG/BG
+    // color registers on the display and never restored them.
+    d_.txtColor(color_, 0);
+
+    // MCLR_ACTIVE, inte MCLR_FULL: full() ska bara rita om textbufferten inom
+    // det aktiva fonstret (satt av setActiveWindow() i pico_main.cpp).
+    // MCLR_FULL rensar HELA skarmens minne, vilket rev bort knapparna
+    // som ligger utanfor det aktiva fonstret.
     d_.writeReg(RA8875::MCLR,
-                static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_FULL));
+                static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));
+    d_.spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
+                         // ovanpa en pagaende clear.
     set_cursor(0, 0);
     d_.writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
     for (int row = 0; row < ROWS_; ++row) {
@@ -92,14 +107,14 @@ void Screen::up(bool roll, bool cmd) {
     if (!cmd && offset_ == 0) return;
 
     // BTE scroll screen content up by one line.
-    d_.BTE(0xC2, 0, 0,
+    bte(0xC2, 0, 0,
            static_cast<std::uint16_t>(COLS_ * width()),
            static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
            0, height());
 
     if (roll) {
         set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        d_.writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
+        if (!suspended_) d_.writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_ > 0 ? offset_ - 1 : 0][col]);
         }
@@ -114,14 +129,14 @@ void Screen::up(bool roll, bool cmd) {
         }
     } else {
         if (cmd) {
-            d_.BTE(0x06, 0, static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
+            bte(0x06, 0, static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
                    static_cast<std::uint16_t>(width() * COLS_),
                    height());   // blank last line
             lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
             if (lines_.size() > max_) lines_.pop_back();
         } else {
             set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-            d_.writeReg(0x40, 0x80);
+            if (!suspended_) d_.writeReg(0x40, 0x80);
             for (std::uint8_t col = 0; col < COLS_; ++col) {
                 draw_letter(lines_[offset_ - 1][col]);
             }
@@ -136,13 +151,13 @@ void Screen::down(bool cmd) {
     if (!cmd && offset_ >= lines_.size() - ROWS_) return;
 
     for (int row = ROWS_; row > 0; --row) {
-        d_.BTE(0xC2, 0, static_cast<std::uint16_t>(row * height()),
+        bte(0xC2, 0, static_cast<std::uint16_t>(row * height()),
                static_cast<std::uint16_t>(COLS_ * width()),
                height(),
                0, static_cast<std::uint16_t>((row - 1) * height()));
     }
     set_cursor(0, 0);
-    d_.writeReg(0x40, 0x80);
+    if (!suspended_) d_.writeReg(0x40, 0x80);
     for (std::uint8_t col = 0; col < COLS_; ++col) {
         draw_letter(lines_[offset_ + ROWS_][col]);
     }
@@ -160,11 +175,11 @@ void Screen::down(bool cmd) {
 }
 
 void Screen::store() {
-    d_.BTE(0xC2, 0, 0x8000, 800, 480);
+    bte(0xC2, 0, 0x8000, 800, 480);
 }
 
 void Screen::recall() {
-    d_.BTE(0xC2, 0, 0, 800, 480, 0, 0x8000);
+    bte(0xC2, 0, 0, 800, 480, 0, 0x8000);
 }
 
 void Screen::inschar() {
@@ -172,11 +187,11 @@ void Screen::inschar() {
     std::uint8_t last = line.back();
     line.pop_back();
 
-    d_.BTE(0xC2, 0, 0x8000, 800, static_cast<std::uint16_t>(height()), 0,
+    bte(0xC2, 0, 0x8000, 800, static_cast<std::uint16_t>(height()), 0,
            static_cast<std::uint16_t>(row_ * height()));   // store line
 
     if (col_ != COLS_ - 1) {
-        d_.BTE(0xC2,
+        bte(0xC2,
                (col() + 1) * width(),
                row() * height(),
                800 - (col() + 1) * width(),
@@ -204,13 +219,13 @@ void Screen::inschar() {
         prev.insert(prev.begin(), last);
         std::uint8_t prev_last = prev.back();
         prev.pop_back();
-        d_.BTE(0xC2, 0, 0x8000, width(), height(),
+        bte(0xC2, 0, 0x8000, width(), height(),
                static_cast<std::uint16_t>(800 - width()), 0x8000);
-        d_.BTE(0xC2, width(), 0x8000,
+        bte(0xC2, width(), 0x8000,
                static_cast<std::uint16_t>(800 - width()),
                height(), 0,
                static_cast<std::uint16_t>((row_ + 1) * height()));
-        d_.BTE(0xC2, 0, static_cast<std::uint16_t>((row_ + 1) * height()),
+        bte(0xC2, 0, static_cast<std::uint16_t>((row_ + 1) * height()),
                800, height(), 0, 0x8000);
         last = prev_last;
     }
@@ -218,6 +233,7 @@ void Screen::inschar() {
 }
 
 void Screen::txt_size(std::uint8_t size) {
+    if (suspended_) return;
     if (size < 4) {
         d_.txtSize(size);
         d_.writeReg(0x2E, 0);  // horizontal char spacing
@@ -340,7 +356,7 @@ void Screen::pr_char(std::uint8_t c) {
             for (std::uint8_t cc = col_; cc < COLS_; ++cc) {
                 lines_[ROWS_ - 1 - row_][cc] = 32;
             }
-            d_.BTE(0x06,
+            bte(0x06,
                    col_ * width(),
                    row_ * height(),
                    width() * (COLS_ - col_),
@@ -350,7 +366,7 @@ void Screen::pr_char(std::uint8_t c) {
                     lines_[i].assign(COLS_, 32);
                 }
                 if (row_ != ROWS_ - 1) {
-                    d_.BTE(0x06, 0,
+                    bte(0x06, 0,
                            height() * (row_ + 1),
                            width() * COLS_,
                            height() * (ROWS_ - row_ - 1));
@@ -358,15 +374,15 @@ void Screen::pr_char(std::uint8_t c) {
             }
         } else if (c == 76) {            // ESC L -> insert line
             if (row_ != ROWS_ - 1) {
-                d_.BTE(0xC2, 0, 0x8000, 800,
+                bte(0xC2, 0, 0x8000, 800,
                        (ROWS_ - 1 - row_) * height(),
                        0, height() * row_);
-                d_.BTE(0xC2, 0,
+                bte(0xC2, 0,
                        height() * (row_ + 1), 800,
                        (ROWS_ - 1 - row_) * height(),
                        0, 0x8000);
             }
-            d_.BTE(0x06, 0, height() * row(),
+            bte(0x06, 0, height() * row(),
                    width() * cols(), height());
             lines_.insert(lines_.begin() + (ROWS_ - 1 - row_),
                           std::vector<std::uint8_t>(COLS_, 32));
@@ -375,12 +391,12 @@ void Screen::pr_char(std::uint8_t c) {
             set_cursor(col_, row_);
         } else if (c == 77) {            // ESC M -> delete line
             if (row_ != ROWS_ - 1) {
-                d_.BTE(0xC2, 0, row_ * height(),
+                bte(0xC2, 0, row_ * height(),
                        COLS_ * width(),
                        height() * (ROWS_ - 1 - row_),
                        0, height() * (row_ + 1));
             }
-            d_.BTE(0x06, 0, height() * (ROWS_ - 1),
+            bte(0x06, 0, height() * (ROWS_ - 1),
                    width() * COLS_, height());
             lines_.erase(lines_.begin() + (ROWS_ - 1 - row_));
             lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
@@ -394,7 +410,7 @@ void Screen::pr_char(std::uint8_t c) {
                 }
             }
             if (col_ != COLS_ - 1) {
-                d_.BTE(0xC2,
+                bte(0xC2,
                        col_ * width(),
                        row_ * height(),
                        width() * (COLS_ - col_ - 1),
@@ -404,13 +420,13 @@ void Screen::pr_char(std::uint8_t c) {
             }
             if ((cnt_ < COLS_) || (cp_ > COLS_)) {
                 lines_[ROWS_ - 1 - row_].push_back(32);
-                d_.BTE(0x06,
+                bte(0x06,
                        (COLS_ - 1) * width(),
                        row_ * height(),
                        width(), height());
             } else {
                 lines_[ROWS_ - 1 - row_].push_back(lines_[ROWS_ - 2 - row_][0]);
-                d_.BTE(0xC2,
+                bte(0xC2,
                        (COLS_ - 1) * width(),
                        row_ * height(),
                        width(), height(),
@@ -419,12 +435,12 @@ void Screen::pr_char(std::uint8_t c) {
                     auto& prev = lines_[ROWS_ - 2 - row_];
                     prev.erase(prev.begin());
                 }
-                d_.BTE(0xC2, 0, (row_ + 1) * height(),
+                bte(0xC2, 0, (row_ + 1) * height(),
                        width() * (COLS_ - 1),
                        height(),
                        width(), (row_ + 1) * height());
                 lines_[ROWS_ - 2 - row_].push_back(32);
-                d_.BTE(0x06,
+                bte(0x06,
                        (COLS_ - 1) * width(),
                        (row_ + 1) * height(),
                        width(), height());
@@ -495,11 +511,13 @@ void Screen::pr_char(std::uint8_t c) {
 // -----------------------------------------------------------------------
 
 void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
+    if (suspended_) return;
     d_.writeReg16(0x2A, static_cast<std::uint16_t>(c * width() + ofx_));
     d_.writeReg16(0x2C, static_cast<std::uint16_t>(r * height() + ofy_));
 }
 
 void Screen::set_cur() {
+    if (suspended_) return;
     if (cv_) {
         // text mode + visible blinking cursor + auto-increment disabled
         d_.writeReg(0x40, 0xE2);
@@ -511,7 +529,16 @@ void Screen::set_cur() {
     set_cursor(col_, row_);
 }
 
+void Screen::bte(std::uint8_t opcode,
+                 std::uint16_t x1, std::uint16_t y1,
+                 std::uint16_t w, std::uint16_t h,
+                 std::uint16_t x0, std::uint16_t y0) {
+    if (suspended_) return;
+    d_.BTE(opcode, x1, y1, w, h, x0, y0);
+}
+
 void Screen::draw_letter(std::uint8_t c) {
+    if (suspended_) return;
     if (c > 127) {
         if (size_ < 4) {
             d_.txtColor(0, color_);
@@ -539,6 +566,7 @@ void Screen::draw_letter(std::uint8_t c) {
 
 void Screen::fon_mode() {
 //    if (d_.mode() != nullptr && std::strcmp(d_.mode(), "fon") == 0) return;
+    if (suspended_) return;
     d_.writeReg(0x40, 0x80);  // MWCR0: text mode
     d_.writeReg(0x21, 0x80);  // FNCR0: CGRAM
     d_.writeReg(0x2E, 2);     // horizontal char spacing
@@ -548,6 +576,7 @@ void Screen::fon_mode() {
 }
 
 void Screen::fon_write(const char* s) {
+    if (suspended_) return;
     fon_mode();
     d_.writeCmd(RA8875::MRWC);
     for (const char* p = s; *p; ++p) {

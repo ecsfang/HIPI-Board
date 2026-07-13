@@ -59,6 +59,16 @@ public:
     // Useful after changing size or restoring the layer.
     void full();
 
+    // Suspend/resume screen output. While suspended, pr_char() keeps
+    // updating the internal line buffer exactly as normal, but stops
+    // touching the actual display -- so something else (e.g. a UiDialog)
+    // can draw over the screen without incoming HP-41 text disturbing it.
+    // resume() re-enables output and immediately does a full() redraw to
+    // catch up on anything that was written while suspended.
+    void suspend()  { suspended_ = true; }
+    void resume()   { suspended_ = false; full(); }
+    bool isSuspended() const { return suspended_; }
+
     // Scroll / roll helpers matching the HP82163 commands.
     //   roll=true  -> also draw the new bottom line from the buffer
     //   cmd=true   -> also rotate the line buffer (true for ESC-83/84)
@@ -85,6 +95,11 @@ public:
     std::uint8_t size()    const { return size_; }
     std::uint16_t color()  const { return color_; }
 
+    // Change the screen's own foreground text color (persisted -- survives
+    // a later full() redraw, unlike writing txtColor() on the RA8875
+    // directly, which full() will now override on every redraw).
+    void setColor(std::uint16_t c) { color_ = c; d_.txtColor(color_, 0); }
+
     // Cursor-mode commands (HP82163 ESC-60/62, 81/82, 65..68, 72, 37).
     void cursor(std::uint8_t cur);
 
@@ -101,6 +116,13 @@ private:
     void set_cur();
     void draw_letter(std::uint8_t c);
     void fon_write(const char* s);
+
+    // Forwards to d_.BTE(), but does nothing while suspended_ is true.
+    // All Screen-internal BTE calls go through this single choke point.
+    void bte(std::uint8_t opcode,
+             std::uint16_t x1, std::uint16_t y1,
+             std::uint16_t w, std::uint16_t h,
+             std::uint16_t x0 = 0, std::uint16_t y0 = 0);
 
     // ---- Mode switch ----
     void fon_mode();
@@ -138,7 +160,8 @@ private:
 
     std::uint8_t cnt_;       // chars in current physical line
     std::uint8_t cp_;        // cursor position within current physical line
+
+    bool suspended_ = false; // true while a UI dialog owns the display
 };
 
 }  // namespace hp82163
-

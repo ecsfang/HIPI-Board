@@ -220,6 +220,8 @@ public:
     void pixel   (std::int16_t x, std::int16_t y, std::uint16_t color);
     void fillRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h, std::uint16_t color);
     void rect    (std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h, std::uint16_t color);
+    void fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
+                        std::uint16_t r, std::uint16_t color);
     void fill    (std::uint16_t color);
     void hline   (std::int16_t x, std::int16_t y, std::int16_t w, std::uint16_t color);
     void vline   (std::int16_t x, std::int16_t y, std::int16_t h, std::uint16_t color);

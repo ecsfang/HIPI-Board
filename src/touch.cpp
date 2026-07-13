@@ -112,75 +112,111 @@ int i2c_read(const uint8_t reg, uint8_t *buf, const uint8_t nbytes)
     return i2c_read_blocking(touch_i2c, GSLX680_I2C_ADDR, buf, nbytes, false);
 }
 
+typedef struct {
+    uint8_t reg;
+    uint8_t data[4];
+    uint8_t len;
+    uint8_t delay;
+} TouchCmd_t;
+
+TouchCmd_t cmdClr[4] = {
+    {
+        GSL_STATUS_REG,
+        { 0x88, 0, 0, 0 },
+        1,
+        20
+    },
+    {
+        GSL_DATA_REG,
+        { 0x01, 0, 0, 0 },
+        1,
+        5
+    },
+    {
+        0xe4,
+        { 0x04, 0, 0, 0 },
+        1,
+        5
+    },
+    {
+        GSL_STATUS_REG,
+        { 0x00, 0, 0, 0 },
+        1,
+        20
+    }
+};
+
+TouchCmd_t cmdStrt[1] = {
+    {
+        GSL_STATUS_REG,
+        { 0x00, 0, 0, 0 },
+        1,
+        0
+    }
+};
+
+TouchCmd_t cmdRst[3] = {
+    {
+        GSL_STATUS_REG,
+        { 0x88, 0, 0, 0 },
+        1,
+        20
+    },
+    {
+        0xe4,
+        { 0x04, 0, 0, 0 },
+        1,
+        10
+    },
+    {
+        0xbc,
+        { 0, 0, 0, 0 },
+        4,
+        10
+    }
+};
+
+void sendCmd(TouchCmd_t *pCmd, int nCmd)
+{
+    for( int i=0; i<nCmd; i++ ) {
+    	i2c_write(pCmd->reg, pCmd->data, pCmd->len);
+        if( pCmd->delay )
+	        sleep_ms(pCmd->delay);
+        pCmd++;
+    }
+}
+
 void clr_reg(void)
 {
-	uint8_t buf[4];
-
-	buf[0] = 0x88;
-	i2c_write(GSL_STATUS_REG, buf, 1);
-	sleep_ms(20);
-
-	buf[0] = 0x01;
-	i2c_write(GSL_DATA_REG, buf, 1);
-	sleep_ms(5);
-
-	buf[0] = 0x04;
-	i2c_write(0xe4, buf, 1);
-	sleep_ms(5);
-
-	buf[0] = 0x00;
-	i2c_write(GSL_STATUS_REG, buf, 1);
-	sleep_ms(20);
+    sendCmd(cmdClr, sizeof(cmdClr)/sizeof(TouchCmd_t));
 }
 
 void start_chip(void)
 {
-	uint8_t buf[4];
-
-	buf[0] = 0x00;
-	i2c_write(GSL_STATUS_REG, buf, 1);
+    sendCmd(cmdStrt, sizeof(cmdStrt)/sizeof(TouchCmd_t));
 }
 
 void reset_chip()
 {
-	uint8_t buf[4];
-
-	buf[0] = 0x88;
-    i2c_write(GSL_STATUS_REG, buf, 1);
-	sleep_ms(20);
-
-	buf[0] = 0x04;
-    i2c_write(0xe4,buf, 1);
-	sleep_ms(10);
-
-	buf[0] = 0x00;
-	buf[1] = 0x00;
-	buf[2] = 0x00;
-	buf[3] = 0x00;
-    i2c_write(0xbc,buf, 4);
-	sleep_ms(10);
+    sendCmd(cmdRst, sizeof(cmdRst)/sizeof(TouchCmd_t));
 }
 
 void load_fw(void)
 {
-	uint8_t buf[32+1];
+	uint8_t buf[32];
 	size_t source_len = (sizeof(GSLX680_FW)/sizeof(struct fw_data));
 
     for(int i=0; i<source_len; i++) {
-        if( GSLX680_FW[i].offset == 0xf0 ) {
+        if( GSLX680_FW[i].offset == PAGE_REG ) {
             memcpy(&buf[0], &GSLX680_FW[i].val, 4);
-			//buf[0] = GSLX680_FW[i].val & 0xFF;
-			//buf[1] = 0;
-			//buf[2] = 0;
-			//buf[3] = 0;
-			i2c_write(GSL_PAGE_REG, buf, 4);   // Select the block
+			i2c_write(GSL_PAGE_REG, buf, 4);    // Select the block
         } else {
-            int reg = GSLX680_FW[i].offset; // Register to write to
-            int off = reg & (I2CBUF_SIZE-1); // 32-byte offset
+            int reg = GSLX680_FW[i].offset;     // Register to write to
+            int off = reg & (I2CBUF_SIZE-1);    // 32-byte offset
             memcpy(&buf[off], &GSLX680_FW[i].val, 4);
             // Write when buffer is full
             if( (off+4) == I2CBUF_SIZE ) {
-		    i2c_write(reg & I2CBUF_MASK, buf, I2CBUF_SIZE);
+		        i2c_write(reg & I2CBUF_MASK, buf, I2CBUF_SIZE);
             }
         }
     }
@@ -213,7 +249,7 @@ uint8_t touch_read()
     return ts_event.NBfingers;
 }
 
-int touchTest() {
+int touchInit() {
 
     i2c_init(touch_i2c, 400 * 1000);
     gpio_set_function(TOUCH_SDA, GPIO_FUNC_I2C);
@@ -239,7 +275,6 @@ int touchTest() {
     reset_chip();
     sleep_ms(10);
 
-
     load_fw();
     sleep_ms(50);
 
@@ -250,7 +285,6 @@ int touchTest() {
 
     setupDataReadyInterrupt();
 
-    printf("\t* GSL1680 Boot up completed!\r\n");
     return 0;
 }
 

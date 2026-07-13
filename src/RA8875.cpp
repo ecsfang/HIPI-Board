@@ -485,6 +485,38 @@ void RA8875::rect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h
                static_cast<std::int16_t>(y + h - 1), color, false);
 }
 
+void RA8875::fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
+                           std::uint16_t r, std::uint16_t color) {
+    // Clip the radius if it doesn't fit the box.
+    std::uint16_t rr = r;
+    if (static_cast<std::int16_t>(rr * 2) > w) rr = static_cast<std::uint16_t>(w / 2);
+    if (static_cast<std::int16_t>(rr * 2) > h) rr = static_cast<std::uint16_t>(h / 2);
+
+    if (rr == 0) {
+        fillRect(x, y, w, h, color);
+        return;
+    }
+
+    // Draw a full circle at each corner first, then overdraw the straight
+    // edges/center on top of them. Whatever remains visible of each circle
+    // is exactly the rounded corner we want. This avoids the RA8875's
+    // per-quadrant curve ("part") command, which only renders two of its
+    // four quadrant codes correctly on this hardware/revision.
+    circleHelper(static_cast<std::int16_t>(x + rr),         static_cast<std::int16_t>(y + rr),         rr, color, true);
+    circleHelper(static_cast<std::int16_t>(x + w - rr - 1), static_cast<std::int16_t>(y + rr),         rr, color, true);
+    circleHelper(static_cast<std::int16_t>(x + w - rr - 1), static_cast<std::int16_t>(y + h - rr - 1), rr, color, true);
+    circleHelper(static_cast<std::int16_t>(x + rr),         static_cast<std::int16_t>(y + h - rr - 1), rr, color, true);
+
+    // Center strip + left/right strips overdraw everything except the
+    // outer quarter of each corner circle.
+    fillRect(static_cast<std::int16_t>(x + rr), y,
+             static_cast<std::int16_t>(w - 2 * rr), h, color);
+    fillRect(x, static_cast<std::int16_t>(y + rr),
+             static_cast<std::int16_t>(rr), static_cast<std::int16_t>(h - 2 * rr), color);
+    fillRect(static_cast<std::int16_t>(x + w - rr), static_cast<std::int16_t>(y + rr),
+             static_cast<std::int16_t>(rr), static_cast<std::int16_t>(h - 2 * rr), color);
+}
+
 void RA8875::fill(std::uint16_t color) {
     rectHelper(0, 0, static_cast<std::int16_t>(width_  - 1),
                static_cast<std::int16_t>(height_ - 1), color, true);
@@ -578,4 +610,3 @@ void RA8875::triangleHelper(std::int16_t x1, std::int16_t y1,
 }
 
 }  // namespace hp82163
-

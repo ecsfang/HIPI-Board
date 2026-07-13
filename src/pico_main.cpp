@@ -54,6 +54,7 @@ extern void init_spi(void);
 #include "tusb.h"
 
 #include "uidialog.hpp"
+#include "config.hpp"
 
 #include <cstdio>
 
@@ -63,6 +64,8 @@ extern void init_spi(void);
 
 extern bool SDOK;
 extern void sd_dir();
+extern bool bTrace;
+hp82163::Config config;
 
 bool drawBmpRightAligned(hp82163::RA8875& display, const char* path,
                          std::uint16_t screen_width, std::uint16_t y0);
@@ -119,9 +122,9 @@ extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
 
 
 namespace {
-constexpr std::uint8_t FONT_COLOR  = 0xFF;  // foreground index in 8BPP mode
+//constexpr std::uint8_t FONT_COLOR  = 0xFF;  // foreground index in 8BPP mode
 constexpr std::uint8_t TEXT_SIZE   = 0;     // 0..3 = built-in CGRAM modes
-constexpr std::uint8_t BRIGHTNESS  = 200;
+constexpr std::uint8_t BRIGHTNESS  = 0xFF; //200;
 }  // namespace
 
 extern void hipi_init(void);
@@ -145,6 +148,9 @@ void SetPinDriveStrength(uint pin, uint mA) {
 }
 
 hp82163::Screen *screen;
+#ifdef UI_DIALOG
+hp82163::UiDialog *dialog = nullptr;
+#endif
 
 extern void ledTest(void);
 extern std::atomic<bool> g_dataReadyFlag;
@@ -208,9 +214,11 @@ int main() {
             //sd_dir();
         }
         SDOK = true;
+        config.load();
+        bTrace = config.trace();
     }
+    
     tud_task();
-
 
     hp82163::PicoSpiTransport transport(spi0,
                                         /*baudrate=*/6'000'000,
@@ -218,10 +226,6 @@ int main() {
                                         /*rst_gpio=*/4);
 
     hp82163::RA8875 display(transport, /*width=*/800, /*height=*/480);
-
-#ifdef UI_DIALOG
-    hp82163::UiDialog dialog(display, *screen);
-#endif
 
     display.begin();
 
@@ -234,14 +238,12 @@ int main() {
 
     cdc0_printf("\r\n * Draw text ... ");
     display.setActiveWindow(0, 0, 679, 479);
-    screen = new hp82163::Screen(display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS, 680 );
+    screen = new hp82163::Screen(display, config.textColor(), TEXT_SIZE, BRIGHTNESS, 680 );
 
     const char* lines[] = {
         "HELLO, WORLD!",
         "HP82163 EMULATOR",
-        "PICO 2 + RA8875",
-        "PICO 2 + RA8875",
-        "PICO 2 + RA8875",
+        "PICO 2 + RA8875"
     };
     for (const char* line : lines) {
         for (const char* p = line; *p; ++p) screen->pr_char(*p);
@@ -252,10 +254,17 @@ int main() {
     tud_cdc_n_write_flush(0);
     tud_task();
 
+#ifdef UI_DIALOG
+    dialog = new hp82163::UiDialog(display, *screen);
+    dialog->setColorChangedCallback([](std::uint16_t c) { config.setTextColor(c); });
+    dialog->setTraceChangedCallback([](bool t) { config.setTrace(t); });
+#endif
+
     // Init touch sensor ...
     if( usb_connected ) {
         cdc0_printf("\r\n * Init touch sensor ...");
-        touchTest();
+        touchInit();
+        cdc0_printf("\t* GSL1680 Boot up completed!\r\n");
     }
     tud_task();
 
@@ -292,7 +301,7 @@ int main() {
                 if (touch_get_point(tx, ty)) {
                     touchActive = true;
                     hp82163::Button b = hp82163::hitTestButton(tx, ty);
-                    if (b != hp82163::Button::None) dialog.handleButton(b);
+                    if (b != hp82163::Button::None) dialog->handleButton(b);
                 }
             }
             // Om touchActive redan ar true: ignorera — fingret ligger kvar,

@@ -1,6 +1,7 @@
 #ifndef __DRIVE_H__
 #define __DRIVE_H__
 
+#include <string>
 #include <queue>
 #include <cstring>
 #include "hardware/flash.h"
@@ -64,19 +65,35 @@ enum {
 class CTape {
 protected:
     char _name[64];
+    bool _open;
 public:
-    CTape() {}
-
+    CTape(const char *name = MEDIA_NAME) {
+        _open = false;
+        select(name);
+    }
     virtual unsigned int tell(void) = 0;
     virtual void read(unsigned char *buf) = 0;
     virtual unsigned int readInt() = 0;
     virtual void write(unsigned char *buf) = 0;
     virtual void seek(unsigned int s) = 0;
-    virtual void open(const char *name = MEDIA_NAME) = 0;
-    virtual void close() = 0;
+    virtual void open(void) = 0;
+    virtual void close(void) = 0;
+    bool ok(void) {
+        return _open;
+    }
+    void select(const char *name) {
+        if( ok() )
+            close();
+        strcpy(_name, name);
+    }
+    void select(const std::string& name) {
+        select( name.c_str());
+    }
     unsigned int mediaSize() {
         return tracks()*surfaces()*blocks();
-
+    }
+    const char *media(void) {
+        return _name;
     }
     unsigned int readInt(int offs) {
         seek(offs);
@@ -97,10 +114,9 @@ public:
 class CTapeSD : public CTape {
     FIL _tape;
     FRESULT _fr;
-    bool _open = false;
 public:
-    CTapeSD() : CTape() {
-        open();
+    CTapeSD(const char *name = MEDIA_NAME) : CTape(name) {
+        //open();
     }
     unsigned int tell(void) {
         return f_tell(&_tape);
@@ -134,8 +150,10 @@ public:
         }
         return w;
     }
-    void error(char *str) {
-        EMSG_PRINTF("%s error: %s (%d)\n", str, FRESULT_str(_fr), _fr);
+    void error(const char *str) {
+        cdc0_printf("%s error: %s (%d)\n", str, FRESULT_str(_fr), _fr);
+        tud_cdc_n_write_flush(0);
+        tud_task();
     }
     void write(unsigned char *buf) {
         //printf("Writing %d bytes to tape at %d\n", BUF_SIZE, tell());
@@ -149,27 +167,31 @@ public:
         if (_fr != FR_OK)
             error("f_lseek");
     }
-    void open(const char *name = MEDIA_NAME) {
+    void open() { //const char *name = MEDIA_NAME) {
+        cdc0_printf("Opening tape SD-file: [%s]\r\n", _name);
+        tud_cdc_n_write_flush(0);
+        tud_task();
         if( _open )
             close();
-        cdc0_printf("Opening tape SD-file: [%s]\r\n", name);
-        _fr = f_open(&_tape, name, FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
+        _fr = f_open(&_tape, _name, FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
         if (_fr != FR_OK) {
             error("f_open");
-            _name[0] = '\0';
+            //_name[0] = '\0';
             _open = false;
         } else {
-            strncpy(_name, name, sizeof(_name) - 1);
-            _name[sizeof(_name) - 1] = '\0';
+            //strncpy(_name, name, sizeof(_name) - 1);
+            //_name[sizeof(_name) - 1] = '\0';
             _open = true;
         }
     }
     void close() {
         cdc0_printf("Closing tape SD-file: [%s]\r\n", _name);
+        tud_cdc_n_write_flush(0);
+        tud_task();
         _fr = f_close(&_tape);
         if (_fr != FR_OK)
             error("f_close");
-        _name[0] = '\0';
+        //_name[0] = '\0';
         _open = false;
     }
 };
@@ -180,7 +202,7 @@ class CTapeMem : public CTape {
     unsigned char   _tape[TAPE_SIZE];
     unsigned int    _tPos;
 public:
-    CTapeMem() : CTape() {
+    CTapeMem(const char *name = MEDIA_NAME) : CTape(name) {
         open();
     }
     unsigned int tell(void) {
@@ -214,13 +236,15 @@ public:
     void wind(unsigned int s) {
         seek(tell() + s);
     }
-    void open(const char *name = "memory.bin") {
+    void open(void) {
         cdc0_printf("Opening tape in RAM\r\n");
         seek(0);
+        _open = true;
     }
     void close() {
         cdc0_printf("Closing tape in RAM\r\n");
         seek(0);
+        _open = false;
     }
 };
 
@@ -263,7 +287,7 @@ class CTapeFlash : public CTape {
     }
 
 public:
-    CTapeFlash() : CTape(), _tPos(0), _loadedSector(-1), _dirty(false) {
+    CTapeFlash(const char *name = MEDIA_NAME) : CTape(name), _tPos(0), _loadedSector(-1), _dirty(false) {
         open();
     }
 
@@ -308,15 +332,17 @@ public:
         flushSector();   // ← always flush immediately
     }
 
-    void open(const char *name = "FLASH_MEM") override {
-        cdc0_printf("Opening flash tape [%s] @ offset 0x%06X\r\n", name, TAPE_FLASH_OFFSET);
+    void open(void) override {
+        cdc0_printf("Opening flash tape [%s] @ offset 0x%06X\r\n", _name, TAPE_FLASH_OFFSET);
         _tPos = 0;
+        _open = true;
     }
 
     void close() override {
         cdc0_printf("Closing flash tape, flushing sector %d\r\n", _loadedSector);
         flushSector();
         _tPos = 0;
+        _open = false;
     }
 };
 
@@ -368,6 +394,10 @@ public:
     }
     void size(size_t sz) {
         m_size = sz;
+    }
+    void selectMedia(const char *media) {
+        tape->close();
+
     }
 };
 
