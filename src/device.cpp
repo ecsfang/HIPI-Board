@@ -48,7 +48,7 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
         return true;
     }
     if( cmd == AAU ) {
-        _addr = m_nAau;
+        addr(m_nAau);
         return true;
     }
     if( cmd == SAI && isTalker() ) {

@@ -1,9 +1,0 @@
-; src/hpil_debug_simple.pio
-
-.program hpil_debug_simple
-
-.wrap_target
-    ; Toggle pin 25 (LED) snabbt
-    set pins, 1 [3]
-    set pins, 0 [3]
-.wrap

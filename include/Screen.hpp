@@ -66,8 +66,18 @@ public:
     // resume() re-enables output and immediately does a full() redraw to
     // catch up on anything that was written while suspended.
     void suspend()  { suspended_ = true; }
-    void resume()   { suspended_ = false; full(); }
+    void resume()   { suspended_ = false; txt_size(size_); full(); }
     bool isSuspended() const { return suspended_; }
+
+    // Manual scroll-back, independent of the HP-41 stream's own animated
+    // roll/paper-feed commands (up()/down() above). Positive n moves
+    // further into history (older content); negative moves back toward
+    // the live view (newer content). Clamped to the buffered range.
+    // Redraws once via full() if the offset actually changed.
+    void scrollBy(int n);
+
+    // Jump straight back to the live/current view (offset = 0).
+    void scrollToLive();
 
     // Scroll / roll helpers matching the HP82163 commands.
     //   roll=true  -> also draw the new bottom line from the buffer
@@ -82,6 +92,13 @@ public:
     // Recompute layout parameters for a given text size (0..4).
     void screen_pars(std::uint8_t size);
 
+    // Adjusts every buffered line to the current COLS_ (padding with spaces
+    // if wider, truncating if narrower) and ensures there are enough lines
+    // to fill the current ROWS_, instead of wiping the buffer outright.
+    // Used by setTextSize()/setColumns() so changing font size or column
+    // count preserves existing text.
+    void reflow();
+
     // Change text size (0..3 -> built-in CGRAM, 4 -> custom "fon" mode).
     void txt_size(std::uint8_t size);
 
@@ -94,11 +111,38 @@ public:
     std::uint16_t height() const { return height_; }
     std::uint8_t size()    const { return size_; }
     std::uint16_t color()  const { return color_; }
+    std::uint8_t brightness() const { return brightness_; }
+
+    // Explicit column count, overriding the auto-computed max for the
+    // current font size (e.g. to reproduce the original HP82163's 32
+    // columns regardless of font size). 0 means "auto" (use the max the
+    // current font size and textWidth_ allow). Clamped silently if the
+    // requested value exceeds that max. Recomputes layout and clears, same
+    // as setTextSize().
+    std::uint8_t columnsOverride() const { return columnsOverride_; }
+    void setColumns(std::uint8_t cols) {
+        columnsOverride_ = cols;
+        screen_pars(size_);
+        reflow();
+    }
+    // Max columns available at the current font size (before any override).
+    std::uint8_t maxColumns() const {
+        return static_cast<std::uint8_t>(textWidth_ / width_);
+    }
 
     // Change the screen's own foreground text color (persisted -- survives
     // a later full() redraw, unlike writing txtColor() on the RA8875
     // directly, which full() will now override on every redraw).
     void setColor(std::uint16_t c) { color_ = c; d_.txtColor(color_, 0); }
+
+    // Change the backlight duty cycle (0..255, straight through to the
+    // RA8875's PWM1 register -- see RA8875::brightness()).
+    void setBrightness(std::uint8_t level) { brightness_ = level; d_.brightness(level); }
+
+    // Change text size at runtime (0..3 -> built-in CGRAM modes). This
+    // recomputes the row/column layout and clears the screen, same as
+    // the HP82163 ESC [ / ESC ] stream commands do internally.
+    void setTextSize(std::uint8_t size) { screen_pars(size); reflow(); }
 
     // Cursor-mode commands (HP82163 ESC-60/62, 81/82, 65..68, 72, 37).
     void cursor(std::uint8_t cur);
@@ -131,7 +175,9 @@ private:
     RA8875& d_;
 
     std::uint16_t color_;
+    std::uint8_t brightness_;
     std::uint8_t size_;
+    std::uint8_t columnsOverride_ = 0;   // 0 = auto (max for current font size)
     std::uint8_t ROWS_;
     std::uint8_t COLS_;
     std::uint16_t width_;

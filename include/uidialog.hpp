@@ -2,20 +2,120 @@
 #pragma once
 #include "RA8875.hpp"
 #include "Screen.hpp"
+#include "bmp_loader.hpp"
 #include "ui_buttons.hpp"
 #include "ff.h"
 #include <vector>
 #include <string>
 #include <cstring>
+#include <cstdio>
 #include <cctype>
 #include <functional>
 
 
-// Global trace flag, defined elsewhere (e.g. hipi.cpp) -- same convention
-// as the existing global `SDOK`.
+// Global trace/debug flags, defined elsewhere (e.g. hipi.cpp) -- same
+// convention as the existing global `SDOK`.
 extern bool bTrace;
+extern bool bDebug;
 
 namespace hp82163 {
+
+// Shared box position/size/style for the on-screen menu frame. Pulled out
+// to namespace scope so the splash screen (shown before any UiDialog
+// exists) can draw an identical-looking frame without duplicating the
+// yellow/radius/thickness constants.
+namespace MenuFrame {
+    // W widened to fit filenames up to ~32 characters at TextScale (16px/char
+    // at scale 1) plus margins, while still staying clear of the button
+    // strip at x=680.
+    constexpr int X = 60, Y = 80, W = 580, H = 260;
+    constexpr int BorderThickness = 3;
+    constexpr int CornerRadius    = 14;
+
+    // Samma gula/oranga som anvands i buttons.bmp (#E8B800 -> RGB565).
+    // Now that the display runs in genuine 16bpp mode, this renders as the
+    // real, correct color -- no more of the 8bpp "green mod 8" quirk we
+    // had to work around before (see git history / prior conversation).
+    constexpr std::uint16_t Yellow = 0xEDC0;
+
+    // The RA8875 only has one hardware text-scale register, shared by
+    // Screen (HP-41 video emulation) and the menu. Screen can change it
+    // at any time (font-size menu, or an incoming ESC sequence), so the
+    // menu always forces it back to this fixed scale before drawing --
+    // otherwise menu rows would grow/shrink along with the HP-41 font.
+    constexpr std::uint8_t TextScale = 1;
+
+    // Row pitch must fit TextScale's glyph height (16px base * (1+scale)
+    // = 32px at scale 1) with a bit of breathing room.
+    constexpr int RowPitch = 36;
+
+    // Thick, rounded frame: fill the whole box yellow (rounded corners),
+    // then lay a smaller rounded black rectangle on top, inset by
+    // BorderThickness on each side -> leaves an even yellow border.
+    inline void draw(RA8875& d, int x = X, int y = Y, int w = W, int h = H) {
+        d.txtSize(TextScale);   // force menu's own scale, independent of Screen's
+        d.fillRoundRect(x, y, w, h, CornerRadius, Yellow);
+        const int innerRadius = CornerRadius > BorderThickness
+                                     ? CornerRadius - BorderThickness : 0;
+        d.fillRoundRect(x + BorderThickness, y + BorderThickness,
+                         w - 2 * BorderThickness, h - 2 * BorderThickness,
+                         innerRadius, 0x0000);
+    }
+}  // namespace MenuFrame
+
+// Splash screen shown as early as possible at boot (right after
+// display.begin(), before Screen/UiDialog even exist), framed
+// with the same border style as the menu. Blocks for durationMs.
+inline void showSplashScreen(RA8875& display, const char* version,
+                              std::uint32_t durationMs = 2000) {
+    // setActiveWindow() hasn't been called yet this early in boot, so the
+    // active window is still at its undefined power-on state. rect/circle
+    // draws (which fillRoundRect is built from) are clipped to that window,
+    // so without this the corners/edges render incorrectly.
+    display.setActiveWindow(0, 0, 799, 479);
+
+    // Own box (not MenuFrame::X/Y/W/H), sized for the logo (96x114) + text,
+    // and centered on the full display -- the menu's own box is sized/
+    // positioned for the touch-button layout, which doesn't apply here.
+    constexpr int splashW = 400, splashH = 170;
+    constexpr int splashX = (800 - splashW) / 2;
+    constexpr int splashY = (480 - splashH) / 2;
+    MenuFrame::draw(display, splashX, splashY, splashW, splashH);
+
+    // Logo on the left, vertically centered in the box; if it's missing
+    // from the SD card, just skip it and fall back to text-only (same
+    // graceful-degradation style as the button strip in pico_main.cpp).
+    constexpr int logoX = splashX + 20;
+    std::uint16_t logoW = 0, logoH = 0;
+    // Peek dimensions first so we can vertically center whatever size the
+    // logo actually is.
+    const bool haveDims = peekBmpDimensions("logo.bmp", logoW, logoH);
+    const int logoY = splashY + (splashH - (haveDims ? logoH : 0)) / 2;
+    const bool haveLogo = haveDims &&
+        drawBmpAt(display, "logo.bmp", logoX, logoY, nullptr, &logoW, &logoH);
+
+    // Text sits to the right of the logo (or at the usual left margin if
+    // the logo failed to load).
+    const int textX = haveLogo ? (logoX + logoW + 20) : (splashX + 20);
+    const int textTop = splashY + (splashH - 90) / 2;  // ~90px tall text block
+
+    display.txtColor(0xFFFF, 0x0000);
+
+    display.txtSize(1);   // slightly larger title row
+    display.txtSetCursor(textX, textTop);
+    display.txtWrite("HIPI-Board");
+
+    display.txtSize(0);
+    display.txtSetCursor(textX, textTop + 46);
+    display.txtWrite("By Thomas Fänge");
+
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "Version %s", version);
+    display.txtSetCursor(textX, textTop + 70);
+    display.txtWrite(buf);
+
+    display.spiDelayMs(durationMs);
+}
 
 class UiDialog {
 public:
@@ -23,7 +123,7 @@ public:
 
     // Called with the chosen filename once the user confirms it in the
     // "Open file?" dialog. Decouples UiDialog from whatever device class
-    // (e.g. CDrive) actually acts on the file -- just wire it up in main:
+    // (e.g. CTape) actually acts on the file -- just wire it up in main:
     //
     //   dialog.setFileSelectedCallback([&drive](const std::string& name) {
     //       drive.select(name);
@@ -39,11 +139,33 @@ public:
         onColorChanged_ = std::move(cb);
     }
 
-    // Called with the newly chosen trace value whenever the user picks
-    // True/False in the "Trace" menu (after the global bTrace has already
-    // been updated). Useful for persisting the choice.
-    void setTraceChangedCallback(std::function<void(bool)> cb) {
+    // Called with the newly chosen (trace, debug) pair whenever the user
+    // picks Off/On/Extended in the "Trace" menu (after the globals bTrace
+    // and bDebug have already been updated). Useful for persisting the
+    // choice.
+    void setTraceChangedCallback(std::function<void(bool, bool)> cb) {
         onTraceChanged_ = std::move(cb);
+    }
+
+    // Called with the newly chosen font size (0..3) whenever the user
+    // picks one in the "Font size" menu (after screen_.setTextSize() has
+    // already applied it).
+    void setFontSizeChangedCallback(std::function<void(std::uint8_t)> cb) {
+        onFontSizeChanged_ = std::move(cb);
+    }
+
+    // Called with the newly chosen brightness (0..255) whenever the user
+    // picks one in the "Brightness" menu (after screen_.setBrightness()
+    // has already applied it).
+    void setBrightnessChangedCallback(std::function<void(std::uint8_t)> cb) {
+        onBrightnessChanged_ = std::move(cb);
+    }
+
+    // Called with the newly chosen column count (0 = auto) whenever the
+    // user picks one in the "Columns" menu (after screen_.setColumns() has
+    // already applied it).
+    void setColumnsChangedCallback(std::function<void(std::uint8_t)> cb) {
+        onColumnsChanged_ = std::move(cb);
     }
 
     bool isOpen() const { return state_ != State::Closed; }
@@ -52,9 +174,36 @@ public:
     void handleButton(Button b) {
         cdc0_printf("State: %d Button: %d\r\n", state_, b);
 
+        if (b == Button::Shift) {
+            shiftPending_ = true;   // latch for the *next* button press
+            return;
+        }
+        const bool shifted = shiftPending_;
+        shiftPending_ = false;      // consumed by this button press, whatever it is
+
+        // Shift+OK ("EXIT" on the button graphic) leaves the menu entirely,
+        // from any depth -- unlike X ("<--"), which only goes up one level.
+        if (shifted && b == Button::Ok && isOpen()) {
+            close();
+            return;
+        }
+
         switch (state_) {
             case State::Closed:
-                if (b == Button::Ok) openMainMenu();
+                if (b == Button::Ok) {
+                    openMainMenu();
+                } else if (b == Button::Up) {
+                    // Up = scroll further into history (older content).
+                    // With Shift: a whole page (one screen's worth of rows).
+                    screen_.scrollBy(shifted ? screen_.rows() : 1);
+                } else if (b == Button::Down) {
+                    // Down = scroll back toward the live view (newer content).
+                    screen_.scrollBy(shifted ? -screen_.rows() : -1);
+                } else if (b == Button::X) {
+                    // X = jump to the bottom (live view). Shift+X = clear.
+                    if (shifted) screen_.clear();
+                    else         screen_.scrollToLive();
+                }
                 break;
 
             case State::MainMenu:
@@ -64,57 +213,110 @@ public:
                 if (b == Button::X)    close();
                 break;
 
+            case State::ConfigMenu:
+                if (b == Button::Up)   moveSelection(-1, kConfigMenuCount);
+                if (b == Button::Down) moveSelection(+1, kConfigMenuCount);
+                if (b == Button::Ok)   enterConfigMenuItem();
+                if (b == Button::X)    openMainMenu();
+                break;
+
+            case State::SettingsMenu:
+                if (b == Button::Up)   moveSelection(-1, kSettingsMenuCount);
+                if (b == Button::Down) moveSelection(+1, kSettingsMenuCount);
+                if (b == Button::Ok)   enterSettingsMenuItem();
+                if (b == Button::X)    openMainMenu();
+                break;
+
             case State::ColorPicker:
                 if (b == Button::Up)   moveSelection(-1, kColorCount);
                 if (b == Button::Down) moveSelection(+1, kColorCount);
-                if (b == Button::Ok)   { applyColor(selected_); openMainMenu(); }
-                if (b == Button::X)    openMainMenu();
+                if (b == Button::Ok)   { applyColor(selected_); openSettingsMenu(); }
+                if (b == Button::X)    openSettingsMenu();
+                break;
+
+            case State::FontSizeMenu:
+                if (b == Button::Up)   moveSelection(-1, kFontSizeCount);
+                if (b == Button::Down) moveSelection(+1, kFontSizeCount);
+                if (b == Button::Ok)   { applyFontSize(selected_); openSettingsMenu(); }
+                if (b == Button::X)    openSettingsMenu();
+                break;
+
+            case State::BrightnessMenu:
+                if (b == Button::Up)   moveSelection(-1, kBrightnessCount);
+                if (b == Button::Down) moveSelection(+1, kBrightnessCount);
+                if (b == Button::Ok)   { applyBrightness(selected_); openSettingsMenu(); }
+                if (b == Button::X)    openSettingsMenu();
+                break;
+
+            case State::ColumnsMenu:
+                if (b == Button::Up)   moveSelection(-1, kColumnsCount);
+                if (b == Button::Down) moveSelection(+1, kColumnsCount);
+                if (b == Button::Ok)   { applyColumns(selected_); openSettingsMenu(); }
+                if (b == Button::X)    openSettingsMenu();
                 break;
 
             case State::FilePicker:
                 if (b == Button::Up)   moveSelection(-1, static_cast<int>(files_.size()));
                 if (b == Button::Down) moveSelection(+1, static_cast<int>(files_.size()));
                 if (b == Button::Ok)   openConfirmFile(files_[selected_]);
-                if (b == Button::X)    openMainMenu();
+                if (b == Button::X)    openConfigMenu();
                 break;
 
             case State::ConfirmFile:
-                if (b == Button::Ok) { applyFile(pendingFile_); openMainMenu(); }
+                if (b == Button::Ok) { applyFile(pendingFile_); openConfigMenu(); }
                 if (b == Button::X)  openFilePicker();
                 break;
 
             case State::TraceMenu:
                 if (b == Button::Up)   moveSelection(-1, kTraceCount);
                 if (b == Button::Down) moveSelection(+1, kTraceCount);
-                if (b == Button::Ok)   { applyTrace(selected_); openMainMenu(); }
-                if (b == Button::X)    openMainMenu();
+                if (b == Button::Ok)   { applyTrace(selected_); openConfigMenu(); }
+                if (b == Button::X)    openConfigMenu();
                 break;
         }
     }
 
 private:
-    enum class State { Closed, MainMenu, ColorPicker, FilePicker, ConfirmFile, TraceMenu };
+    enum class State {
+        Closed, MainMenu, ConfigMenu, SettingsMenu,
+        ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
+        FilePicker, ConfirmFile, TraceMenu
+    };
 
-    static constexpr const char* kMainMenuLabels[] = { "Textcolor", "Select file", "Trace" };
-    static constexpr int kMainMenuCount = 3;
+    static constexpr const char* kMainMenuLabels[] = { "Config", "Settings" };
+    static constexpr int kMainMenuCount = 2;
+
+    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace" };
+    static constexpr int kConfigMenuCount = 2;
+
+    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns" };
+    static constexpr int kSettingsMenuCount = 4;
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
     static constexpr const char*   kColorLabels[] = { "White", "Yellow", "Green", "Cyan", "Red" };
     static constexpr int kColorCount = 5;
 
-    static constexpr const char* kTraceLabels[] = { "False", "True" };
-    static constexpr int kTraceCount = 2;
+    // Matches Screen's size_ (0..3, built-in CGRAM modes only -- the
+    // custom "fon" mode 4 isn't offered here).
+    static constexpr const char* kFontSizeLabels[] = { "0", "1", "2", "3" };
+    static constexpr int kFontSizeCount = 4;
 
-    static constexpr int kBoxX = 60, kBoxY = 80, kBoxW = 400, kBoxH = 260;
-    static constexpr int kBorderThickness = 3;
-    static constexpr int kCornerRadius    = 14;
+    // A handful of discrete steps rather than a continuous 0..255 slider,
+    // since navigation is just Up/Down/Ok/X.
+    static constexpr std::uint8_t  kBrightnessLevels[] = { 51, 102, 153, 204, 255 };
+    static constexpr const char*   kBrightnessLabels[] = { "20%", "40%", "60%", "80%", "100%" };
+    static constexpr int kBrightnessCount = 5;
 
-    // Samma gula/oranga som anvands i buttons.bmp. OBS: RA8875 i 8bpp-lage
-    // verkar tolka det grona faltets tre understa bitar (mod 8), inte de tre
-    // oversta som man kunde tro fran en vanlig RGB565->RGB332-konvertering.
-    // Darfor valjer vi ett G-varde som redan ligger under 8 (ingen wrap-around
-    // mojlig) istallet for att harleda det fran den riktiga BMP-fargen rakt av.
-    static constexpr std::uint16_t kMenuYellow = 0xF9B0;
+    // 0 = auto (max for current font size). 32 = the original HP82163's
+    // column count; the rest are the natural max at each font size (0-3).
+    // See Screen::maxColumns()/setColumns().
+    static constexpr std::uint8_t  kColumnsValues[] = { 0, 21, 28, 32, 42, 85 };
+    static constexpr const char*   kColumnsLabels[] = { "Auto", "21", "28", "32", "42", "85" };
+    static constexpr int kColumnsCount = 6;
+
+    // Off = bTrace/bDebug both false. On = bTrace only. Extended = both.
+    static constexpr const char* kTraceLabels[] = { "Off", "On", "Extended" };
+    static constexpr int kTraceCount = 3;
 
     void openMainMenu() {
         screen_.suspend();  // idempotent if already open; stops screen_.pr_char()
@@ -126,21 +328,84 @@ private:
     }
 
     void enterMainMenuItem() {
+        if (selected_ == 0) openConfigMenu();
+        else                openSettingsMenu();
+    }
+
+    void openConfigMenu() {
+        state_ = State::ConfigMenu;
+        selected_ = 0;
+        drawBox();
+        for (int i = 0; i < kConfigMenuCount; ++i) drawRow(i, kConfigMenuLabels[i]);
+    }
+
+    void enterConfigMenuItem() {
+        if (selected_ == 0) openFilePicker();
+        else                openTraceMenu();
+    }
+
+    void openSettingsMenu() {
+        state_ = State::SettingsMenu;
+        selected_ = 0;
+        drawBox();
+        for (int i = 0; i < kSettingsMenuCount; ++i) drawRow(i, kSettingsMenuLabels[i]);
+    }
+
+    void enterSettingsMenuItem() {
         if (selected_ == 0) {
             state_ = State::ColorPicker;
             selected_ = 0;
             drawBox();
             for (int i = 0; i < kColorCount; ++i) drawRow(i, kColorLabels[i]);
         } else if (selected_ == 1) {
-            openFilePicker();
+            openFontSizeMenu();
+        } else if (selected_ == 2) {
+            openBrightnessMenu();
         } else {
-            openTraceMenu();
+            openColumnsMenu();
         }
+    }
+
+    void openFontSizeMenu() {
+        state_ = State::FontSizeMenu;
+        selected_ = screen_.size() < kFontSizeCount ? screen_.size() : 0;
+        drawBox();
+        for (int i = 0; i < kFontSizeCount; ++i) drawRow(i, kFontSizeLabels[i]);
+    }
+
+    void openBrightnessMenu() {
+        state_ = State::BrightnessMenu;
+        selected_ = closestBrightnessIndex(screen_.brightness());
+        drawBox();
+        for (int i = 0; i < kBrightnessCount; ++i) drawRow(i, kBrightnessLabels[i]);
+    }
+
+    void openColumnsMenu() {
+        state_ = State::ColumnsMenu;
+        selected_ = 0;  // "Auto" if no exact match found below
+        for (int i = 0; i < kColumnsCount; ++i) {
+            if (kColumnsValues[i] == screen_.columnsOverride()) { selected_ = i; break; }
+        }
+        drawBox();
+        for (int i = 0; i < kColumnsCount; ++i) drawRow(i, kColumnsLabels[i]);
+    }
+
+    static int closestBrightnessIndex(std::uint8_t level) {
+        int best = 0;
+        int bestDiff = 256;
+        for (int i = 0; i < kBrightnessCount; ++i) {
+            int diff = level - static_cast<int>(kBrightnessLevels[i]);
+            if (diff < 0) diff = -diff;
+            if (diff < bestDiff) { bestDiff = diff; best = i; }
+        }
+        return best;
     }
 
     void openTraceMenu() {
         state_ = State::TraceMenu;
-        selected_ = bTrace ? 1 : 0;  // pre-select whatever bTrace currently is
+        // Off (0): trace=false, debug=false. On (1): trace=true, debug=false.
+        // Extended (2): trace=true, debug=true.
+        selected_ = bDebug ? 2 : (bTrace ? 1 : 0);
         drawBox();
         for (int i = 0; i < kTraceCount; ++i) drawRow(i, kTraceLabels[i]);
     }
@@ -161,6 +426,11 @@ private:
         return true;
     }
 
+    // How many rows fit in the box at MenuFrame::RowPitch, minus top/bottom
+    // margin. Was a plain "10" sized for the old, tighter 24px pitch.
+    static constexpr int kMaxFilesShown =
+        (MenuFrame::H - 40) / MenuFrame::RowPitch;
+
     void openFilePicker() {
         files_.clear();
         DIR dir;
@@ -176,7 +446,7 @@ private:
         state_ = State::FilePicker;
         selected_ = 0;
         drawBox();
-        for (std::size_t i = 0; i < files_.size() && i < 10; ++i) {
+        for (std::size_t i = 0; i < files_.size() && i < static_cast<std::size_t>(kMaxFilesShown); ++i) {
             drawRow(static_cast<int>(i), files_[i].c_str());
         }
     }
@@ -190,11 +460,11 @@ private:
 
     void drawConfirmText() {
         d_.txtColor(0xFFFF, 0x0000);
-        d_.txtSetCursor(kBoxX + 20, kBoxY + 20);
+        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
         d_.txtWrite("Open file?");
-        d_.txtSetCursor(kBoxX + 20, kBoxY + 48);
+        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
         d_.txtWrite(pendingFile_.c_str());
-        d_.txtSetCursor(kBoxX + 20, kBoxY + 90);
+        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
         d_.txtWrite("OK = yes    X = cancel");
     }
 
@@ -218,10 +488,29 @@ private:
         if (onColorChanged_) onColorChanged_(kColors[index]);
     }
 
+    void applyFontSize(int index) {
+        screen_.setTextSize(static_cast<std::uint8_t>(index));
+        if (onFontSizeChanged_) onFontSizeChanged_(static_cast<std::uint8_t>(index));
+    }
+
+    void applyBrightness(int index) {
+        const std::uint8_t level = kBrightnessLevels[index];
+        screen_.setBrightness(level);
+        if (onBrightnessChanged_) onBrightnessChanged_(level);
+    }
+
+    void applyColumns(int index) {
+        const std::uint8_t cols = kColumnsValues[index];
+        screen_.setColumns(cols);
+        if (onColumnsChanged_) onColumnsChanged_(cols);
+    }
+
     void applyTrace(int index) {
-        bTrace = (index == 1);  // index 0 = "False", index 1 = "True"
-        cdc0_printf("\r\n * Trace: %s", bTrace ? "true" : "false");
-        if (onTraceChanged_) onTraceChanged_(bTrace);
+        // 0=Off (both false), 1=On (trace only), 2=Extended (both true).
+        bTrace = (index >= 1);
+        bDebug = (index == 2);
+        cdc0_printf("\r\n * Trace: %s", kTraceLabels[index]);
+        if (onTraceChanged_) onTraceChanged_(bTrace, bDebug);
     }
 
     void applyFile(const std::string& filename) {
@@ -230,21 +519,13 @@ private:
     }
 
     void drawBox() {
-        // Tjock, rundad ram: fyll hela rutan gul (rundade horn), lagg sedan
-        // en mindre svart rundad rektangel ovanpa, forskjuten med
-        // kBorderThickness pa varje sida -> kvar blir en jamn gul kant.
-        d_.fillRoundRect(kBoxX, kBoxY, kBoxW, kBoxH, kCornerRadius, kMenuYellow);
-        const int innerRadius = kCornerRadius > kBorderThickness
-                                     ? kCornerRadius - kBorderThickness : 0;
-        d_.fillRoundRect(kBoxX + kBorderThickness, kBoxY + kBorderThickness,
-                          kBoxW - 2 * kBorderThickness, kBoxH - 2 * kBorderThickness,
-                          innerRadius, 0x0000);
+        MenuFrame::draw(d_);
     }
 
     void drawRow(int index, const char* label) {
-        d_.txtSetCursor(kBoxX + 20, kBoxY + 20 + index * 24);
+        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
         d_.txtColor(index == selected_ ? 0x0000 : 0xFFFF,
-                    index == selected_ ? kMenuYellow : 0x0000);
+                    index == selected_ ? MenuFrame::Yellow : 0x0000);
         d_.txtWrite(label);
     }
 
@@ -256,9 +537,29 @@ private:
                 if (index >= 0 && index < kMainMenuCount)
                     drawRow(index, kMainMenuLabels[index]);
                 break;
+            case State::ConfigMenu:
+                if (index >= 0 && index < kConfigMenuCount)
+                    drawRow(index, kConfigMenuLabels[index]);
+                break;
+            case State::SettingsMenu:
+                if (index >= 0 && index < kSettingsMenuCount)
+                    drawRow(index, kSettingsMenuLabels[index]);
+                break;
             case State::ColorPicker:
                 if (index >= 0 && index < kColorCount)
                     drawRow(index, kColorLabels[index]);
+                break;
+            case State::FontSizeMenu:
+                if (index >= 0 && index < kFontSizeCount)
+                    drawRow(index, kFontSizeLabels[index]);
+                break;
+            case State::BrightnessMenu:
+                if (index >= 0 && index < kBrightnessCount)
+                    drawRow(index, kBrightnessLabels[index]);
+                break;
+            case State::ColumnsMenu:
+                if (index >= 0 && index < kColumnsCount)
+                    drawRow(index, kColumnsLabels[index]);
                 break;
             case State::FilePicker:
                 if (index >= 0 && index < static_cast<int>(files_.size()))
@@ -279,11 +580,16 @@ private:
     Screen& screen_;
     State state_ = State::Closed;
     int selected_ = 0;
+    bool shiftPending_ = false;   // latched by Button::Shift (any state),
+                                    // consumed by the next button press
     std::vector<std::string> files_;
     std::string pendingFile_;
     std::function<void(const std::string&)> onFileSelected_;
     std::function<void(std::uint16_t)> onColorChanged_;
-    std::function<void(bool)> onTraceChanged_;
+    std::function<void(bool, bool)> onTraceChanged_;
+    std::function<void(std::uint8_t)> onFontSizeChanged_;
+    std::function<void(std::uint8_t)> onBrightnessChanged_;
+    std::function<void(std::uint8_t)> onColumnsChanged_;
 };
 
 }  // namespace hp82163

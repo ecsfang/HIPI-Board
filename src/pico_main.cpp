@@ -16,6 +16,8 @@
 //#define TEST_DISPLAY
 
 #include <stdlib.h>
+#include <cstring>
+#include <vector>
 #include "pico/bootrom.h"   // reset_usb_boot()
 #include "pico/stdlib.h"
 #include <stdio.h>
@@ -55,6 +57,7 @@ extern void init_spi(void);
 
 #include "uidialog.hpp"
 #include "config.hpp"
+#include "bmp_loader.hpp"
 
 #include <cstdio>
 
@@ -65,16 +68,28 @@ extern void init_spi(void);
 extern bool SDOK;
 extern void sd_dir();
 extern bool bTrace;
+extern bool bDebug;
 hp82163::Config config;
 
 bool drawBmpRightAligned(hp82163::RA8875& display, const char* path,
-                         std::uint16_t screen_width, std::uint16_t y0);
-#ifdef UI_DIALOG
+                         std::uint16_t screen_width, std::uint16_t y0,
+                         std::vector<std::uint16_t>* outPixels = nullptr,
+                         std::uint16_t* outWidth = nullptr,
+                         std::uint16_t* outHeight = nullptr,
+                         std::uint16_t* outScreenX0 = nullptr);
 namespace {
 bool touchActive = false;
 absolute_time_t lastReleasePoll = get_absolute_time();
+hp82163::Button pressedButton = hp82163::Button::None;
+
+// Button-press visual feedback: redraw the button's bitmap shifted by
+// (kPressDx, kPressDy) while held. kPressMargin (> the largest shift
+// magnitude) is used for the baseline/restore redraws so any overflow
+// outside the button's own rect -- in any direction -- gets cleaned up,
+// not just the tight rect itself.
+constexpr std::int16_t kPressDx = 5, kPressDy = -5;
+constexpr std::int16_t kPressMargin = 8;
 }  // namespace
-#endif
 
 extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
                                             uint8_t stage,
@@ -119,12 +134,11 @@ extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
 // ─── Compatibility shim ───────────────────────────────────────────────────────
 #include "pico/stdlib.h"
 
-
-
 namespace {
-//constexpr std::uint8_t FONT_COLOR  = 0xFF;  // foreground index in 8BPP mode
-constexpr std::uint8_t TEXT_SIZE   = 0;     // 0..3 = built-in CGRAM modes
-constexpr std::uint8_t BRIGHTNESS  = 0xFF; //200;
+// FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
+// now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
+// once one exists.
+constexpr const char* HIPI_VERSION = "1.0 Beta";
 }  // namespace
 
 extern void hipi_init(void);
@@ -148,9 +162,15 @@ void SetPinDriveStrength(uint pin, uint mA) {
 }
 
 hp82163::Screen *screen;
-#ifdef UI_DIALOG
 hp82163::UiDialog *dialog = nullptr;
-#endif
+
+// Cached copy of the button-strip bitmap, so a single button's
+// sub-rectangle can be redrawn (e.g. shifted for "pressed" feedback)
+// without re-reading the BMP from the SD card. Filled in by
+// drawBmpRightAligned() at boot. RGB565 (2 bytes/pixel), matching the
+// display's 16bpp mode.
+std::vector<std::uint16_t> buttonStripPixels;
+std::uint16_t buttonStripWidth = 0, buttonStripHeight = 0, buttonStripScreenX0 = 0;
 
 extern void ledTest(void);
 extern std::atomic<bool> g_dataReadyFlag;
@@ -216,6 +236,7 @@ int main() {
         SDOK = true;
         config.load();
         bTrace = config.trace();
+        bDebug = config.debug();
     }
     
     tud_task();
@@ -229,17 +250,30 @@ int main() {
 
     display.begin();
 
-    display.set8Bpp();
+    // begin() already configures SYSR_16BPP as the default -- no override
+    // needed. (Used to call display.set8Bpp() here to drop to 8bpp/RGB332;
+    // switched to full 16bpp/RGB565 for better color depth, especially in
+    // dark tones.)
+
+    // Splash screen -- shown as early as possible, stays up for a couple
+    // of seconds while the rest of the boot sequence (buttons, SD-card
+    // driven config, HP-IL devices) continues below.
+    hp82163::showSplashScreen(display, HIPI_VERSION, 3000);
 
     // Show buttons ...
     cdc0_printf("\r\n * Draw buttons ... ");
-    if (!drawBmpRightAligned(display, "buttons.bmp", 800, 0))
+    if (!drawBmpRightAligned(display, "buttons.bmp", 800, 0,
+                             &buttonStripPixels, &buttonStripWidth,
+                             &buttonStripHeight, &buttonStripScreenX0)) {
         cdc0_printf("\r\n ### Failed to draw buttons ... ");
+    }
 
-    cdc0_printf("\r\n * Draw text ... ");
     display.setActiveWindow(0, 0, 679, 479);
-    screen = new hp82163::Screen(display, config.textColor(), TEXT_SIZE, BRIGHTNESS, 680 );
+    screen = new hp82163::Screen(display, config.textColor(), config.fontSize(), config.brightness(), 680 );
+    if (config.columns() != 0) screen->setColumns(config.columns());
 
+/**
+    cdc0_printf("\r\n * Draw text ... ");
     const char* lines[] = {
         "HELLO, WORLD!",
         "HP82163 EMULATOR",
@@ -253,12 +287,13 @@ int main() {
 
     tud_cdc_n_write_flush(0);
     tud_task();
-
-#ifdef UI_DIALOG
+***/
     dialog = new hp82163::UiDialog(display, *screen);
     dialog->setColorChangedCallback([](std::uint16_t c) { config.setTextColor(c); });
-    dialog->setTraceChangedCallback([](bool t) { config.setTrace(t); });
-#endif
+    dialog->setTraceChangedCallback([](bool t, bool d) { config.setTraceMode(t, d); });
+    dialog->setFontSizeChangedCallback([](std::uint8_t s) { config.setFontSize(s); });
+    dialog->setBrightnessChangedCallback([](std::uint8_t b) { config.setBrightness(b); });
+    dialog->setColumnsChangedCallback([](std::uint8_t c) { config.setColumns(c); });
 
     // Init touch sensor ...
     if( usb_connected ) {
@@ -293,7 +328,6 @@ int main() {
     while (bRunning) {
         tud_task();  // TinyUSB background task
         hipi_loop(hpil);
-#ifdef UI_DIALOG
         // Snabb reaktion vid NYTT tryck (interrupt-flaggan satts av IRQ_PIN)
         if (g_dataReadyFlag.exchange(false, std::memory_order_relaxed)) {
             if (!touchActive) {
@@ -301,7 +335,28 @@ int main() {
                 if (touch_get_point(tx, ty)) {
                     touchActive = true;
                     hp82163::Button b = hp82163::hitTestButton(tx, ty);
-                    if (b != hp82163::Button::None) dialog->handleButton(b);
+                    if (b != hp82163::Button::None) {
+                        pressedButton = b;
+                        // Visual feedback: redraw just this button's bitmap
+                        // region shifted, so it looks pressed in. The
+                        // baseline/restore redraws use a margin larger than
+                        // the shift, sourced from the same strip cache, so
+                        // any overflow outside the button's own rect (e.g.
+                        // a shift toward the top-right sticks out past the
+                        // rect's top and right edges) gets cleaned up too --
+                        // not just the tight rect itself.
+                        hp82163::redrawButtonRegion(
+                            display, buttonStripPixels.data(),
+                            buttonStripWidth, buttonStripHeight,
+                            buttonStripScreenX0, /*stripScreenY0=*/0, b, 0, 0,
+                            kPressMargin);
+                        hp82163::redrawButtonRegion(
+                            display, buttonStripPixels.data(),
+                            buttonStripWidth, buttonStripHeight,
+                            buttonStripScreenX0, /*stripScreenY0=*/0, b,
+                            kPressDx, kPressDy);
+                        dialog->handleButton(b);
+                    }
                 }
             }
             // Om touchActive redan ar true: ignorera — fingret ligger kvar,
@@ -313,9 +368,21 @@ int main() {
         if (touchActive &&
             absolute_time_diff_us(lastReleasePoll, get_absolute_time()) > 30'000) {
             lastReleasePoll = get_absolute_time();
-            if (!touch_is_down()) touchActive = false;
+            if (!touch_is_down()) {
+                touchActive = false;
+                if (pressedButton != hp82163::Button::None) {
+                    // Restore the button's bitmap to its normal position
+                    // (with the same margin, to clean up any overflow from
+                    // the shift regardless of direction).
+                    hp82163::redrawButtonRegion(
+                        display, buttonStripPixels.data(),
+                        buttonStripWidth, buttonStripHeight,
+                        buttonStripScreenX0, /*stripScreenY0=*/0, pressedButton, 0, 0,
+                        kPressMargin);
+                    pressedButton = hp82163::Button::None;
+                }
+            }
        }
-#endif
 //        if (g_dataReadyFlag.exchange(false, std::memory_order_relaxed)) {
 //            touch_read();
 //        }
@@ -331,94 +398,19 @@ int main() {
 
 
 bool drawBmpRightAligned(hp82163::RA8875& display, const char* path,
-                         std::uint16_t screen_width, std::uint16_t y0) {
-    FIL file;
-
-    cdc0_printf("\r\n\t * Open file <%s> ... ", path);
-
-    FRESULT fr =f_open(&file, path, FA_READ);
-    if (fr != FR_OK) {
-        cdc0_printf(" PANIC: f_mount error: %s (%d)\r\n", FRESULT_str(fr), fr);
+                         std::uint16_t screen_width, std::uint16_t y0,
+                         std::vector<std::uint16_t>* outPixels,
+                         std::uint16_t* outWidth,
+                         std::uint16_t* outHeight,
+                         std::uint16_t* outScreenX0) {
+    std::uint16_t width = 0, height = 0;
+    if (!hp82163::peekBmpDimensions(path, width, height)) {
+        cdc0_printf("\r\n\t * Could not read BMP dimensions for <%s>!", path);
         return false;
     }
-    cdc0_printf("\r\n\t * Read file ... ");
-
-    std::uint8_t header[54];
-    UINT br = 0;
-    if (f_read(&file, header, 54, &br) != FR_OK || br != 54 ||
-        header[0] != 'B' || header[1] != 'M') {
-        cdc0_printf("\r\n\t * No BMP file!");
-        f_close(&file);
-        return false;
-    }
-
-    auto rd32 = [&](int off) -> std::int32_t {
-        return static_cast<std::int32_t>(
-            header[off] | (header[off+1] << 8) |
-            (header[off+2] << 16) | (header[off+3] << 24));
-    };
-    auto rd16 = [&](int off) -> std::int16_t {
-        return static_cast<std::int16_t>(header[off] | (header[off+1] << 8));
-    };
-
-    const std::uint32_t dataOffset  = static_cast<std::uint32_t>(rd32(10));
-    const std::int32_t  width       = rd32(18);
-    const std::int32_t  heightRaw   = rd32(22);
-    const std::int16_t  bpp         = rd16(28);
-    const std::int32_t  compression = rd32(30);
-
-    cdc0_printf("\r\n\t * Width: %d height: %d", width, heightRaw);
-    cdc0_printf("\r\n\t * bpp: %d", bpp);
-
-    // Vi stöder bara det png_to_bmp24.py genererar: okomprimerad 24-bit.
-    if (bpp != 24 || compression != 0 || width <= 0) {
-        cdc0_printf("\r\n\t * Wrong format!");
-        f_close(&file);
-        return false;
-    }
-
-    const bool topDown = heightRaw < 0;
-    const std::uint32_t height  = static_cast<std::uint32_t>(topDown ? -heightRaw : heightRaw);
-    const std::uint32_t rowSize = ((static_cast<std::uint32_t>(width) * 3 + 3) / 4) * 4;  // 4-byte padding
-
     const std::uint16_t x0 = static_cast<std::uint16_t>(screen_width - width);  // höger kant
-
-    std::vector<std::uint8_t>  rawRow(rowSize);
-    std::vector<std::uint8_t> rowBuf(static_cast<std::size_t>(width));
-
-    for (std::uint32_t r = 0; r < height; ++r) {
-        // BMP lagras normalt underifrån och upp om height är positiv.
-        const std::uint32_t fileRow = topDown ? r : (height - 1 - r);
-
-        f_lseek(&file, dataOffset + static_cast<FSIZE_t>(fileRow) * rowSize);
-        if (f_read(&file, rawRow.data(), rowSize, &br) != FR_OK || br != rowSize) {
-            cdc0_printf("\r\n\t * Error ... ?");
-            f_close(&file);
-            return false;
-        }
-
-        for (std::int32_t col = 0; col < width; ++col) {
-            const std::uint8_t b = rawRow[static_cast<std::size_t>(col) * 3 + 0];
-            const std::uint8_t g = rawRow[static_cast<std::size_t>(col) * 3 + 1];
-            const std::uint8_t rr = rawRow[static_cast<std::size_t>(col) * 3 + 2];
-            // RA8875 8bpp-format: RRRGGGBB
-            rowBuf[static_cast<std::size_t>(col)] =
-            static_cast<std::uint8_t>((rr & 0xE0) | ((g & 0xE0) >> 3) | (b >> 6));
-            //rowBuf[static_cast<std::size_t>(col)] = static_cast<std::uint16_t>(
-            //    ((rr & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
-        }
-
-        display.drawBitmap332(static_cast<std::int16_t>(x0),
-                              static_cast<std::int16_t>(y0 + r),
-                              static_cast<std::uint16_t>(width), 1,
-                              rowBuf.data());
-        //display.drawBitmap565(static_cast<std::int16_t>(x0),
-        //                      static_cast<std::int16_t>(y0 + r),
-        //                      static_cast<std::uint16_t>(width), 1,
-        //                      rowBuf.data());
-    }
-
-    cdc0_printf("\r\n\t * Done!");
-    f_close(&file);
-    return true;
+    if (outScreenX0) *outScreenX0 = x0;
+    return hp82163::drawBmpAt(display, path, static_cast<std::int16_t>(x0),
+                              static_cast<std::int16_t>(y0),
+                              outPixels, outWidth, outHeight);
 }

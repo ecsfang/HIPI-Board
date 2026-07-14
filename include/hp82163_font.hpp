@@ -113,4 +113,35 @@ inline constexpr std::uint8_t font[FONT_CHAR_COUNT][FONT_BYTES_PER_CHAR] = {
     { 115, 219, 206, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },  //  94 ASCII 126 '~'
 };
 
+// Swedish å/ä/ö (upper + lower), at their standard Latin-1 code points
+// (0xC4/0xC5/0xD6 upper, 0xE4/0xE5/0xF6 lower -- same values as the actual
+// Unicode code points U+00C4 etc, which is what RA8875::txtWrite()'s UTF-8
+// decoding step reconstructs from a 2-byte UTF-8 sequence). Not part of the
+// contiguous ASCII 32..126 `font[]` table above, so they're uploaded
+// separately -- see RA8875::begin().
+//
+// Lowercase letters already leave rows 0..4 blank (no ascender), so the
+// dots/ring just drop into that existing space above the 'a'/'o' shape.
+// Uppercase letters use the full cell height, so the letter itself is
+// shifted/compressed down a couple of rows to make room up top.
+struct FontExtraEntry { std::uint8_t code; std::uint8_t bitmap[FONT_BYTES_PER_CHAR]; };
+
+inline constexpr FontExtraEntry extra_font[] = {
+    // Ä = 'A' with two redundant middle rows dropped (keeps the pointed tip
+    // and crossbar intact -- cropping from the top instead made it read as
+    // an 'H'), diaeresis at top.
+    { 0xC4, { 36, 36, 24, 60, 102, 195, 195, 195, 255, 195, 195, 195, 195, 0, 0, 0 } },
+    // Å = 'A' with three redundant middle rows dropped, small ring at top.
+    { 0xC5, { 24, 36, 24, 24, 60, 102, 195, 195, 255, 195, 195, 195, 195, 0, 0, 0 } },
+    // Ö = 'O' with two redundant middle rows dropped, diaeresis at top.
+    { 0xD6, { 36, 36, 60, 102, 195, 195, 195, 195, 195, 195, 195, 102, 60, 0, 0, 0 } },
+    // ä = 'a' (already has blank rows 0..4) with diaeresis dropped into rows 1..2.
+    { 0xE4, { 0, 36, 36, 0, 0, 62, 99, 3, 127, 195, 195, 195, 125, 0, 0, 0 } },
+    // å = 'a' with a small ring in rows 1..3.
+    { 0xE5, { 0, 24, 36, 24, 0, 62, 99, 3, 127, 195, 195, 195, 125, 0, 0, 0 } },
+    // ö = 'o' with diaeresis dropped into rows 1..2.
+    { 0xF6, { 0, 36, 36, 0, 0, 60, 102, 195, 195, 195, 195, 102, 60, 0, 0, 0 } },
+};
+inline constexpr std::size_t EXTRA_FONT_COUNT = sizeof(extra_font) / sizeof(extra_font[0]);
+
 }  // namespace hp82163

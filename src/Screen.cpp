@@ -21,6 +21,7 @@ Screen::Screen(RA8875& display,
                std::uint16_t textWidth)
     : d_(display),
       color_(color),
+      brightness_(brightness),
       size_(size),
       textWidth_(textWidth),
       ROWS_(0),
@@ -69,6 +70,14 @@ void Screen::clear() {
     cnt_ = 0;
     cp_  = 0;
     escN_ = false;
+    // Per the HP82163 spec: "Clears the display memory, moves the cursor
+    // to home, and displays cursor as a blinking block" -- so Clear Device
+    // always turns the cursor on (block style), regardless of whatever
+    // cv_/Ins_ were left at before (e.g. from an earlier ESC < / ESC Q).
+    cv_  = true;
+    Ins_ = false;
+    offset_ = 0;   // otherwise a later full() can index lines_ out of bounds
+                    // if the buffer was cleared while scrolled back
     if (!suspended_) {
         // sleep(0.500) in the MicroPython original — keep a shorter delay here
         // since the MCLR_START is synchronous from the controller's perspective.
@@ -94,13 +103,18 @@ void Screen::full() {
     set_cursor(0, 0);
     d_.writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
     for (int row = 0; row < ROWS_; ++row) {
+        // Explicit per-row positioning: the RA8875's own auto-wrap kicks in
+        // at the active window's full pixel width (i.e. the *max* columns
+        // for the current font size), not our possibly-smaller COLS_ (set
+        // via the Columns menu). Without this, a full repaint would wrap
+        // at the hardware's width instead of ours.
+        set_cursor(0, static_cast<std::uint8_t>(row));
         const auto& line = lines_[ROWS_ - 1 - row + offset_];
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(line[col]);
         }
     }
-    set_cursor(col_, row_);
-    set_cur();
+    set_cur();  // re-asserts cursor visibility/style too, not just position
 }
 
 void Screen::up(bool roll, bool cmd) {
@@ -118,8 +132,7 @@ void Screen::up(bool roll, bool cmd) {
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_ > 0 ? offset_ - 1 : 0][col]);
         }
-        set_cursor(col_, row_);
-        set_cur();
+        set_cur();  // re-asserts cursor visibility/style too, not just position
         if (cmd) {
             auto last = std::move(lines_.back());
             lines_.pop_back();
@@ -140,8 +153,7 @@ void Screen::up(bool roll, bool cmd) {
             for (std::uint8_t col = 0; col < COLS_; ++col) {
                 draw_letter(lines_[offset_ - 1][col]);
             }
-            set_cursor(col_, row_);
-            set_cur();
+            set_cur();  // re-asserts cursor visibility/style too, not just position
             offset_ = (offset_ > 0) ? offset_ - 1 : 0;
         }
     }
@@ -161,8 +173,7 @@ void Screen::down(bool cmd) {
     for (std::uint8_t col = 0; col < COLS_; ++col) {
         draw_letter(lines_[offset_ + ROWS_][col]);
     }
-    set_cursor(col_, row_);
-    set_cur();
+    set_cur();  // re-asserts cursor visibility/style too, not just position
 
     if (cmd) {
         auto first = std::move(lines_.front());
@@ -172,6 +183,63 @@ void Screen::down(bool cmd) {
         const std::size_t cap = lines_.size() > ROWS_ ? lines_.size() - ROWS_ : 0;
         offset_ = (offset_ + 1 <= cap) ? offset_ + 1 : cap;
     }
+}
+
+void Screen::scrollBy(int n) {
+    if (lines_.size() <= ROWS_) return;   // nothing buffered beyond one screen
+    const long maxOffset = static_cast<long>(lines_.size() - ROWS_);
+    long newOffset = static_cast<long>(offset_) + n;
+    if (newOffset < 0) newOffset = 0;
+    if (newOffset > maxOffset) newOffset = maxOffset;
+    if (static_cast<std::size_t>(newOffset) == offset_) return;
+
+    const long actualDelta = newOffset - static_cast<long>(offset_);
+    offset_ = static_cast<std::size_t>(newOffset);
+
+    if (actualDelta == 1) {
+        // One step further into history: shift the whole screen DOWN by one
+        // row via BTE (same row-by-row block-move pattern as down()'s own
+        // paper-feed scroll) and draw just the newly revealed older row at
+        // the top -- much cheaper than a full repaint of every row.
+        for (int row = ROWS_; row > 0; --row) {
+            bte(0xC2, 0, static_cast<std::uint16_t>(row * height()),
+                   static_cast<std::uint16_t>(COLS_ * width()),
+                   height(),
+                   0, static_cast<std::uint16_t>((row - 1) * height()));
+        }
+        set_cursor(0, 0);
+        if (!suspended_) d_.writeReg(0x40, 0x80);
+        for (std::uint8_t col = 0; col < COLS_; ++col) {
+            draw_letter(lines_[ROWS_ - 1 + offset_][col]);
+        }
+        set_cur();  // re-asserts cursor visibility/style too, not just position
+    } else if (actualDelta == -1) {
+        // One step back toward the live view: shift the whole screen UP by
+        // one row via a single BTE block move (same pattern as up()'s own
+        // paper-feed scroll) and draw just the newly revealed newer row at
+        // the bottom.
+        bte(0xC2, 0, 0,
+               static_cast<std::uint16_t>(COLS_ * width()),
+               static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
+               0, height());
+        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
+        if (!suspended_) d_.writeReg(0x40, 0x80);
+        for (std::uint8_t col = 0; col < COLS_; ++col) {
+            draw_letter(lines_[offset_][col]);
+        }
+        set_cur();  // re-asserts cursor visibility/style too, not just position
+    } else {
+        // Multi-line jump (e.g. Shift+Up/Down page scroll): more rows change
+        // than not, so a full repaint is cheaper than many individual
+        // BTE row-shifts.
+        full();
+    }
+}
+
+void Screen::scrollToLive() {
+    if (offset_ == 0) return;
+    offset_ = 0;
+    full();
 }
 
 void Screen::store() {
@@ -249,7 +317,9 @@ void Screen::screen_pars(std::uint8_t size) {
     if (size < 4) {
         const std::uint8_t k = static_cast<std::uint8_t>(1 + size);
         width_  = static_cast<std::uint16_t>(8 * k);
-        COLS_   = static_cast<std::uint8_t>(textWidth_ / width_);   // <-- var: 100 / k
+        const std::uint8_t maxCols = static_cast<std::uint8_t>(textWidth_ / width_);
+        COLS_   = (columnsOverride_ > 0 && columnsOverride_ <= maxCols)
+                      ? columnsOverride_ : maxCols;
         height_ = static_cast<std::uint16_t>(16 * k);
         ROWS_   = static_cast<std::uint8_t>(30 / k);
         ofx_ = 0;
@@ -263,6 +333,38 @@ void Screen::screen_pars(std::uint8_t size) {
         ofy_ = 3;
     }
     txt_size(size);
+}
+
+void Screen::reflow() {
+    // Resize every buffered line to the new COLS_, preserving content:
+    // pad with spaces if the new width is wider, truncate if narrower.
+    for (auto& line : lines_) {
+        line.resize(COLS_, 32);
+    }
+    // Make sure there are enough buffered lines to fill the new ROWS_
+    // (pad blank lines at the front -- lines_[0] is the newest -- so
+    // full()'s indexing never goes out of bounds).
+    while (lines_.size() < ROWS_) {
+        lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
+    }
+    // Clamp the scroll-back offset in case ROWS_ grew.
+    if (lines_.size() > ROWS_) {
+        const std::size_t maxOffset = lines_.size() - ROWS_;
+        if (offset_ > maxOffset) offset_ = maxOffset;
+    } else {
+        offset_ = 0;
+    }
+    // Clamp the live cursor/line-tracking state to the new dimensions so
+    // it doesn't point past the (possibly narrower/shorter) new layout.
+    if (col_ >= COLS_) col_ = static_cast<std::uint8_t>(COLS_ > 0 ? COLS_ - 1 : 0);
+    if (row_ >= ROWS_) row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
+    if (cnt_ > COLS_) cnt_ = COLS_;
+    if (cp_  > COLS_) cp_  = COLS_;
+
+    // If a UiDialog is currently open (suspended_), don't draw over it --
+    // just leave the buffer in its new shape. resume() will call full()
+    // itself once the dialog closes, picking up the new layout then.
+    if (!suspended_) full();
 }
 
 void Screen::cursor(std::uint8_t cur) {
@@ -313,17 +415,25 @@ void Screen::cursor(std::uint8_t cur) {
             set_cur();
             return;
     }
-    set_cursor(col_, row_);
+    set_cur();  // re-asserts cursor visibility/style too, not just position
 }
 
 void Screen::cursor_pos(std::uint8_t row, std::uint8_t col) {
-    // Original Python:
-    //   self.col = pos[0] % self.COLS
-    //   self.row = pos[1] % self.ROWS
-    // (where pos[0]=column, pos[1]=row from the HP-41 stream)
-    col_ = static_cast<std::uint8_t>(col % COLS_);
-    row_ = static_cast<std::uint8_t>(row % ROWS_);
-    set_cursor(col_, row_);
+    // HP82163 spec: the cursor-address space is a FIXED 32-column x 16-row
+    // grid ("column = m mod 32, row = n mod 16"), independent of our own
+    // current COLS_/ROWS_ (which vary with font size). The original Python
+    // used "% self.COLS" / "% self.ROWS" instead of the fixed 32/16 -- that
+    // only happened to work if COLS_/ROWS_ were exactly 32/16 for whatever
+    // size the original targeted; it's wrong in general.
+    const std::uint8_t addrCol = static_cast<std::uint8_t>(col % 32);
+    const std::uint8_t addrRow = static_cast<std::uint8_t>(row % 16);
+
+    // Safety clamp: if the current font size gives fewer physical rows/
+    // columns than the protocol's 32x16 address space allows, don't let an
+    // otherwise-valid address write outside our own line buffers.
+    col_ = (addrCol < COLS_) ? addrCol : static_cast<std::uint8_t>(COLS_ - 1);
+    row_ = (addrRow < ROWS_) ? addrRow : static_cast<std::uint8_t>(ROWS_ - 1);
+    set_cur();  // re-asserts cursor visibility/style too, not just position
 }
 
 // -----------------------------------------------------------------------
@@ -339,7 +449,13 @@ void Screen::pr_char(std::uint8_t c) {
             flag_ = true;
         } else if (n_ == 1) {
             pos_[1] = c;
-            cursor(37);  // -> set_cursor via the 37 case
+            // pos_[0] = column, pos_[1] = row (see cursor_pos()'s doc comment,
+            // matching the HP-41 stream's byte order). The previous code
+            // called cursor(37), which silently did nothing -- 37 isn't a
+            // handled case in cursor()'s switch, so "ESC % row col" never
+            // actually moved the cursor.
+            cursor_pos(pos_[1], pos_[0]);
+            n_ = -1;
         } else if (c == 37) {            // ESC %
             n_ = 0;
             flag_ = true;
@@ -388,7 +504,7 @@ void Screen::pr_char(std::uint8_t c) {
                           std::vector<std::uint8_t>(COLS_, 32));
             if (lines_.size() > 0) lines_.erase(lines_.begin());
             col_ = 0;
-            set_cursor(col_, row_);
+            set_cur();  // re-asserts cursor visibility/style too, not just position
         } else if (c == 77) {            // ESC M -> delete line
             if (row_ != ROWS_ - 1) {
                 bte(0xC2, 0, row_ * height(),
@@ -479,7 +595,7 @@ void Screen::pr_char(std::uint8_t c) {
                 } else if (c == 13) {
                     col_ = 0;
                 }
-                set_cursor(col_, row_);
+                set_cur();  // re-asserts cursor visibility/style too, not just position
             }
         } else {
             // printable character
@@ -501,7 +617,7 @@ void Screen::pr_char(std::uint8_t c) {
                     up();
                 }
             }
-            set_cursor(col_, row_);
+            set_cur();  // re-asserts cursor visibility/style too, not just position
         }
     }
 }
@@ -518,7 +634,11 @@ void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
 
 void Screen::set_cur() {
     if (suspended_) return;
-    if (cv_) {
+    // Only actually show the cursor at the live position -- it sits on top
+    // of whatever physical row_/col_ is, which is meaningless while
+    // scrolled back into history (that row is showing an older line, not
+    // where the next character would land).
+    if (cv_ && offset_ == 0) {
         // text mode + visible blinking cursor + auto-increment disabled
         d_.writeReg(0x40, 0xE2);
         if (Ins_) d_.writeReg(0x4F, 0x00);     // underscore cursor

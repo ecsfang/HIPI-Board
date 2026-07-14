@@ -158,15 +158,6 @@ target_compile_definitions(hp82163_pico PRIVATE
 pico_generate_pio_header(hp82163_pico
     ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
 )
-pico_generate_pio_header(hp82163_pico
-    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_debug.pio
-)
-pico_generate_pio_header(hp82163_pico
-    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_debug_simple.pio
-)
-pico_generate_pio_header(hp82163_pico
-    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_debug_1hz.pio
-)
 
 
 pico_enable_stdio_usb(hp82163_pico 0)

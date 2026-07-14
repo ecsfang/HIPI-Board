@@ -40,9 +40,7 @@ void show(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 }
 
 static CTape *cassette = NULL;
-#ifdef UI_DIALOG
 extern hp82163::UiDialog *dialog;
-#endif
 
 // Add devices to the HP-IL loop here
 void hipi_init()
@@ -67,7 +65,9 @@ bool bTrace = false;
 
 bool hipi_loop(HpIlLoop& loop) {
     uint32_t rx_word;
-    uint32_t lastCmd = NO_FRAME;
+    static uint32_t lastCmd = NO_FRAME;  // was a local re-initialized every
+                                          // call, which defeated the "don't
+                                          // reprint the same frame" check below
     char buf[32];
     int n = 0;
     // Check if any HP-IL frame from the PIO interface is available

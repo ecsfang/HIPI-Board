@@ -288,8 +288,6 @@ int touchInit() {
     return 0;
 }
 
-#ifdef UI_DIALOG
-
 // Tyst variant av avlasningen - ingen printf, anvands for intern
 // tillstandssparning (kallas ofta, vill inte spamma konsolen).
 static uint8_t touch_read_silent() {
@@ -325,5 +323,3 @@ bool touch_get_point(uint16_t& x, uint16_t& y) {
 bool touch_is_down() {
     return touch_read_silent() > 0;
 }
-
-#endif

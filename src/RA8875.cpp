@@ -136,6 +136,12 @@ void RA8875::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
         for (std::size_t i = 0; i < fontChars; ++i) {
             uploadCgramChar(static_cast<std::uint8_t>(FONT_FIRST_ASCII + i), font[i]);
         }
+        // Swedish å/ä/ö (upper+lower) at their own Latin-1 code points --
+        // not contiguous with the ASCII 32..126 table above, so uploaded
+        // as a separate small set. See hp82163_font.hpp's extra_font[].
+        for (std::size_t i = 0; i < EXTRA_FONT_COUNT; ++i) {
+            uploadCgramChar(extra_font[i].code, extra_font[i].bitmap);
+        }
         // restore MWCR0 = 0 (gfx mode, cursor off)
         writeReg(MWCR0, 0x00);
     }
@@ -411,8 +417,23 @@ void RA8875::txtSize(std::uint8_t scale) {
 void RA8875::txtWrite(const char* s) {
     txtMode();
     writeCmd(MRWC);
-    for (const char* p = s; *p; ++p) {
-        writeData(static_cast<std::uint8_t>(*p));
+    for (const char* p = s; *p; ) {
+        const std::uint8_t b0 = static_cast<std::uint8_t>(*p);
+        std::uint8_t out;
+        if (b0 == 0xC3 && p[1] != '\0') {
+            // 2-byte UTF-8 sequence for U+00C0..U+00FF (Latin-1 Supplement,
+            // e.g. å/ä/ö) -- reconstructs the single Latin-1-style byte our
+            // CGRAM font uses (see hp82163_font.hpp's extra_font[]), so a
+            // literal "ä" typed in a UTF-8-saved source file just works
+            // instead of rendering as two garbage characters.
+            const std::uint8_t b1 = static_cast<std::uint8_t>(p[1]);
+            out = static_cast<std::uint8_t>(0xC0 | (b1 & 0x3F));
+            p += 2;
+        } else {
+            out = b0;
+            p += 1;
+        }
+        writeData(out);
         if (txtScale_ > 0) t_.delayMs(1);
     }
 }

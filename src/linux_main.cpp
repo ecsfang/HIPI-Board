@@ -21,7 +21,7 @@
 
 namespace {
 
-constexpr std::uint8_t FONT_COLOR  = 0xFF;
+constexpr std::uint16_t FONT_COLOR = 0xFFFF;  // RGB565 white
 constexpr std::uint8_t TEXT_SIZE   = 0;
 constexpr std::uint8_t BRIGHTNESS  = 200;
 
@@ -69,8 +69,7 @@ int main(int argc, char** argv) {
                                             gpioValuePath(rst_pin), 6'000'000);
 
     hp82163::RA8875 display(transport, 800, 480);
-    display.begin();
-    display.set8Bpp();
+    display.begin();   // begin() already configures 16bpp by default
     display.set2LayerConfig();
 
     hp82163::Screen screen(display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
