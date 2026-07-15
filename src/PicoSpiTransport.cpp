@@ -32,15 +32,19 @@ PicoSpiTransport::PicoSpiTransport(spi_inst_t* spi_inst,
     gpio_put(cs_, 1);
 
     // RST pin: idle high (the controller is in reset while LOW).
-    gpio_init(rst_);
-    gpio_set_dir(rst_, GPIO_OUT);
-    gpio_put(rst_, 1);
+    // Skipped entirely if not wired (NO_RESET_PIN) -- e.g. if this GPIO
+    // is shared with something else (like an LED) that must own it instead.
+    if (rst_ != NO_RESET_PIN) {
+        gpio_init(rst_);
+        gpio_set_dir(rst_, GPIO_OUT);
+        gpio_put(rst_, 1);
+    }
 }
 
 void PicoSpiTransport::csLow()  { gpio_put(cs_,  0); }
 void PicoSpiTransport::csHigh() { gpio_put(cs_,  1); }
-void PicoSpiTransport::rstLow()  { gpio_put(rst_, 0); }
-void PicoSpiTransport::rstHigh() { gpio_put(rst_, 1); }
+void PicoSpiTransport::rstLow()  { if (rst_ != NO_RESET_PIN) gpio_put(rst_, 0); }
+void PicoSpiTransport::rstHigh() { if (rst_ != NO_RESET_PIN) gpio_put(rst_, 1); }
 
 void PicoSpiTransport::spiTransfer(const std::uint8_t* tx,
                                    std::uint8_t*       rx,

@@ -14,7 +14,7 @@ namespace hp82163 {
 // Construction
 // -----------------------------------------------------------------------
 
-Screen::Screen(RA8875& display,
+Screen::Screen(RA8875* display,
                std::uint16_t color,
                std::uint8_t size,
                std::uint8_t brightness,
@@ -44,11 +44,11 @@ Screen::Screen(RA8875& display,
       max_(200),
       cnt_(0),
       cp_(0) {
-    d_.txtColor(color, 0);
-    d_.brightness(brightness);
+    d_->txtColor(color, 0);
+    d_->brightness(brightness);
     screen_pars(size);
     // Cursor blinking frequency (register 0x44 = CBLR)
-    d_.writeReg(0x44, 0x0F);
+    d_->writeReg(0x44, 0x0F);
     clear();
 }
 
@@ -57,7 +57,7 @@ Screen::Screen(RA8875& display,
 // -----------------------------------------------------------------------
 void Screen::clear() {
     if (!suspended_) {
-        d_.writeReg(RA8875::MCLR,
+        d_->writeReg(RA8875::MCLR,
                     static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));  // <-- ACTIVE, inte FULL
     }
     lines_.clear();
@@ -81,7 +81,7 @@ void Screen::clear() {
     if (!suspended_) {
         // sleep(0.500) in the MicroPython original — keep a shorter delay here
         // since the MCLR_START is synchronous from the controller's perspective.
-        d_.spiDelayMs(500);  // (declared below as a thin RA8875 helper)
+        d_->spiDelayMs(500);  // (declared below as a thin RA8875 helper)
     }
     set_cur();
 }
@@ -90,18 +90,18 @@ void Screen::full() {
     // Always restore our own foreground/background color before redrawing.
     // Something else (e.g. a UiDialog) may have changed the shared FG/BG
     // color registers on the display and never restored them.
-    d_.txtColor(color_, 0);
+    d_->txtColor(color_, 0);
 
     // MCLR_ACTIVE, inte MCLR_FULL: full() ska bara rita om textbufferten inom
     // det aktiva fonstret (satt av setActiveWindow() i pico_main.cpp).
     // MCLR_FULL rensar HELA skarmens minne, vilket rev bort knapparna
     // som ligger utanfor det aktiva fonstret.
-    d_.writeReg(RA8875::MCLR,
+    d_->writeReg(RA8875::MCLR,
                 static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));
-    d_.spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
+    d_->spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
                          // ovanpa en pagaende clear.
     set_cursor(0, 0);
-    d_.writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
+    d_->writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
     for (int row = 0; row < ROWS_; ++row) {
         // Explicit per-row positioning: the RA8875's own auto-wrap kicks in
         // at the active window's full pixel width (i.e. the *max* columns
@@ -128,7 +128,7 @@ void Screen::up(bool roll, bool cmd) {
 
     if (roll) {
         set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        if (!suspended_) d_.writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
+        if (!suspended_) d_->writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_ > 0 ? offset_ - 1 : 0][col]);
         }
@@ -149,7 +149,7 @@ void Screen::up(bool roll, bool cmd) {
             if (lines_.size() > max_) lines_.pop_back();
         } else {
             set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-            if (!suspended_) d_.writeReg(0x40, 0x80);
+            if (!suspended_) d_->writeReg(0x40, 0x80);
             for (std::uint8_t col = 0; col < COLS_; ++col) {
                 draw_letter(lines_[offset_ - 1][col]);
             }
@@ -162,14 +162,19 @@ void Screen::up(bool roll, bool cmd) {
 void Screen::down(bool cmd) {
     if (!cmd && offset_ >= lines_.size() - ROWS_) return;
 
-    for (int row = ROWS_; row > 0; --row) {
+    // Shift rows 0..ROWS_-2 down into rows 1..ROWS_-1. Previously ran from
+    // row=ROWS_ (not ROWS_-1), whose first iteration wrote a row's worth of
+    // pixels to y=ROWS_*height() -- one row past the bottom of the visible
+    // screen, off-screen (and potentially aliasing/corrupting other RA8875
+    // memory depending on how it handles addresses past the active window).
+    for (int row = ROWS_ - 1; row > 0; --row) {
         bte(0xC2, 0, static_cast<std::uint16_t>(row * height()),
                static_cast<std::uint16_t>(COLS_ * width()),
                height(),
                0, static_cast<std::uint16_t>((row - 1) * height()));
     }
     set_cursor(0, 0);
-    if (!suspended_) d_.writeReg(0x40, 0x80);
+    if (!suspended_) d_->writeReg(0x40, 0x80);
     for (std::uint8_t col = 0; col < COLS_; ++col) {
         draw_letter(lines_[offset_ + ROWS_][col]);
     }
@@ -201,14 +206,14 @@ void Screen::scrollBy(int n) {
         // row via BTE (same row-by-row block-move pattern as down()'s own
         // paper-feed scroll) and draw just the newly revealed older row at
         // the top -- much cheaper than a full repaint of every row.
-        for (int row = ROWS_; row > 0; --row) {
+        for (int row = ROWS_ - 1; row > 0; --row) {
             bte(0xC2, 0, static_cast<std::uint16_t>(row * height()),
                    static_cast<std::uint16_t>(COLS_ * width()),
                    height(),
                    0, static_cast<std::uint16_t>((row - 1) * height()));
         }
         set_cursor(0, 0);
-        if (!suspended_) d_.writeReg(0x40, 0x80);
+        if (!suspended_) d_->writeReg(0x40, 0x80);
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[ROWS_ - 1 + offset_][col]);
         }
@@ -223,7 +228,7 @@ void Screen::scrollBy(int n) {
                static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
                0, height());
         set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        if (!suspended_) d_.writeReg(0x40, 0x80);
+        if (!suspended_) d_->writeReg(0x40, 0x80);
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_][col]);
         }
@@ -303,11 +308,11 @@ void Screen::inschar() {
 void Screen::txt_size(std::uint8_t size) {
     if (suspended_) return;
     if (size < 4) {
-        d_.txtSize(size);
-        d_.writeReg(0x2E, 0);  // horizontal char spacing
-        d_.writeReg(0x29, 0);  // vertical line spacing
+        d_->txtSize(size);
+        d_->writeReg(0x2E, 0);  // horizontal char spacing
+        d_->writeReg(0x29, 0);  // vertical line spacing
     } else {
-        d_.txtSize(0);
+        d_->txtSize(0);
         fon_mode();
     }
 }
@@ -369,13 +374,13 @@ void Screen::reflow() {
 
 void Screen::cursor(std::uint8_t cur) {
     switch (cur) {
-        case 65:  // up
+        case 65:  // ESC A - up
             if (row_ != 0) row_ = static_cast<std::uint8_t>(row_ - 1);
             break;
-        case 66:  // down
+        case 66:  // ESC B - down
             if (row_ != ROWS_ - 1) row_ = static_cast<std::uint8_t>(row_ + 1);
             break;
-        case 67:  // right
+        case 67:  // ESC C - right
             cp_ = static_cast<std::uint8_t>(cp_ + 1);
             if (col_ < COLS_ - 1) {
                 col_ = static_cast<std::uint8_t>(col_ + 1);
@@ -385,7 +390,7 @@ void Screen::cursor(std::uint8_t cur) {
                 if (row_ == ROWS_) row_ = 0;
             }
             break;
-        case 68:  // left
+        case 68:  // ESC D - left
             cp_ = (cp_ > 0) ? static_cast<std::uint8_t>(cp_ - 1) : 0;
             if (col_ > 0) {
                 col_ = static_cast<std::uint8_t>(col_ - 1);
@@ -394,19 +399,19 @@ void Screen::cursor(std::uint8_t cur) {
                 col_ = static_cast<std::uint8_t>(COLS_ - 1);
             }
             break;
-        case 72:  // home
+        case 72:  // ESC H - home
             col_ = 0;
             row_ = 0;
             break;
         default:
             // cursor-mode commands
             switch (cur) {
-                case 60: cv_ = false; break;
-                case 62: cv_ = true;  break;
-                case 81:
+                case 60: cv_ = false; break;    // ESC < - Cursor off
+                case 62: cv_ = true;  break;    // ESC > - Cursor on
+                case 81:                        // ESC Q - Insert cursor
                     Ins_ = true;
                     break;
-                case 82:
+                case 82:                        // ESC R - Replace cursor
                     Ins_ = false;
                     escN_ = false;
                     break;
@@ -622,14 +627,21 @@ void Screen::pr_char(std::uint8_t c) {
     }
 }
 
+void Screen::pr_str(const char *p) {
+    while( *p )
+        pr_char(*p++);
+    pr_char('\r');
+    pr_char('\n');
+}
+
 // -----------------------------------------------------------------------
 // Internals
 // -----------------------------------------------------------------------
 
 void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
     if (suspended_) return;
-    d_.writeReg16(0x2A, static_cast<std::uint16_t>(c * width() + ofx_));
-    d_.writeReg16(0x2C, static_cast<std::uint16_t>(r * height() + ofy_));
+    d_->writeReg16(0x2A, static_cast<std::uint16_t>(c * width() + ofx_));
+    d_->writeReg16(0x2C, static_cast<std::uint16_t>(r * height() + ofy_));
 }
 
 void Screen::set_cur() {
@@ -640,11 +652,11 @@ void Screen::set_cur() {
     // where the next character would land).
     if (cv_ && offset_ == 0) {
         // text mode + visible blinking cursor + auto-increment disabled
-        d_.writeReg(0x40, 0xE2);
-        if (Ins_) d_.writeReg(0x4F, 0x00);     // underscore cursor
-        else      d_.writeReg(0x4F, 0x0F);     // full-height cursor
+        d_->writeReg(0x40, 0xE2);
+        if (Ins_) d_->writeReg(0x4F, 0x00);     // underscore cursor
+        else      d_->writeReg(0x4F, 0x0F);     // full-height cursor
     } else {
-        d_.writeReg(0x40, 0x82);                // invisible cursor
+        d_->writeReg(0x40, 0x82);                // invisible cursor
     }
     set_cursor(col_, row_);
 }
@@ -654,29 +666,29 @@ void Screen::bte(std::uint8_t opcode,
                  std::uint16_t w, std::uint16_t h,
                  std::uint16_t x0, std::uint16_t y0) {
     if (suspended_) return;
-    d_.BTE(opcode, x1, y1, w, h, x0, y0);
+    d_->BTE(opcode, x1, y1, w, h, x0, y0);
 }
 
 void Screen::draw_letter(std::uint8_t c) {
     if (suspended_) return;
     if (c > 127) {
         if (size_ < 4) {
-            d_.txtColor(0, color_);
-            d_.txtWriteChar(static_cast<std::uint8_t>(c & 0x7F));
+            d_->txtColor(0, color_);
+            d_->txtWriteChar(static_cast<std::uint8_t>(c & 0x7F));
         } else {
-            d_.fillRect(static_cast<std::int16_t>(col_ * width()),
+            d_->fillRect(static_cast<std::int16_t>(col_ * width()),
                         static_cast<std::int16_t>(row_ * height()),
                         static_cast<std::int16_t>(width()),
                         static_cast<std::int16_t>(height()),
                         color_);
-            d_.txtColor(0, color_);
+            d_->txtColor(0, color_);
             const char tmp[2] = { static_cast<char>(c & 0x7F), 0 };
             fon_write(tmp);
         }
-        d_.txtColor(color_, 0);
+        d_->txtColor(color_, 0);
     } else {
         if (size_ < 4) {
-            d_.txtWriteChar(c);
+            d_->txtWriteChar(c);
         } else {
             const char tmp[2] = { static_cast<char>(c), 0 };
             fon_write(tmp);
@@ -685,12 +697,12 @@ void Screen::draw_letter(std::uint8_t c) {
 }
 
 void Screen::fon_mode() {
-//    if (d_.mode() != nullptr && std::strcmp(d_.mode(), "fon") == 0) return;
+//    if (d_->mode() != nullptr && std::strcmp(d_->mode(), "fon") == 0) return;
     if (suspended_) return;
-    d_.writeReg(0x40, 0x80);  // MWCR0: text mode
-    d_.writeReg(0x21, 0x80);  // FNCR0: CGRAM
-    d_.writeReg(0x2E, 2);     // horizontal char spacing
-    d_.writeReg(0x29, 4);     // vertical line spacing
+    d_->writeReg(0x40, 0x80);  // MWCR0: text mode
+    d_->writeReg(0x21, 0x80);  // FNCR0: CGRAM
+    d_->writeReg(0x2E, 2);     // horizontal char spacing
+    d_->writeReg(0x29, 4);     // vertical line spacing
     // We don't expose "fon" via RA8875::mode(); tag it with a no-op write.
     // (See note in Screen.hpp — we track mode implicitly via size_.)
 }
@@ -698,10 +710,10 @@ void Screen::fon_mode() {
 void Screen::fon_write(const char* s) {
     if (suspended_) return;
     fon_mode();
-    d_.writeCmd(RA8875::MRWC);
+    d_->writeCmd(RA8875::MRWC);
     for (const char* p = s; *p; ++p) {
-        d_.writeData(static_cast<std::uint8_t>(*p));
-        if (d_.txtScale() > 0) d_.spiDelayMs(1);
+        d_->writeData(static_cast<std::uint8_t>(*p));
+        if (d_->txtScale() > 0) d_->spiDelayMs(1);
     }
 }
 

@@ -22,8 +22,6 @@
  * 
 */
 
-#define printf cdc0_printf
-
 #define TOUCH_SDA   16
 #define TOUCH_SCL   17
 #define WAKE_PIN    18
@@ -236,15 +234,15 @@ uint8_t touch_read()
     }
 
     if( ts_event.NBfingers ) {
-        printf("Finger event: ");
+        LOGF("Finger event: ");
         for(int i = 0; i<ts_event.NBfingers; i++) {
-        printf("%d(%d): [%d,%d] ",
+        LOGF("%d(%d): [%d,%d] ",
             i,
             ts_event.fingers[i].fingerID,
             ts_event.fingers[i].x,
             ts_event.fingers[i].y);
         }
-        printf("\r\n");
+        LOGF("\r\n");
     }
     return ts_event.NBfingers;
 }

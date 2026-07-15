@@ -11,6 +11,9 @@
 #include "hp82163_font.hpp"
 #include <cstdint>
 
+#define SCREEN_MAX_X 		800
+#define SCREEN_MAX_Y 		480
+
 namespace hp82163 {
 
 class RA8875 {

@@ -25,7 +25,7 @@ public:
     void load() {
         FIL file;
         if (f_open(&file, kPath, FA_READ) != FR_OK) {
-            cdc0_printf("\r\n * Config: no %s yet, creating one with defaults", kPath);
+            LOGF("\r\n * Config: no %s yet, creating one with defaults", kPath);
             save();
             return;
         }
@@ -37,7 +37,7 @@ public:
         f_close(&file);
 
         parse(buf);
-        cdc0_printf("\r\n * Config: loaded from %s", kPath);
+        LOGF("\r\n * Config: loaded from %s", kPath);
     }
 
     // Rewrite the whole file with the current values. Called automatically
@@ -46,7 +46,7 @@ public:
     void save() {
         FIL file;
         if (f_open(&file, kPath, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
-            cdc0_printf("\r\n * Config: failed to save %s", kPath);
+            LOGF("\r\n * Config: failed to save %s", kPath);
             return;
         }
 

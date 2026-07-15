@@ -15,7 +15,6 @@
 
 std::vector<CDevice*> devices;
 
-#define printf cdc0_printf
 #define RESET           "\e[0m"
 #define HILIGHT         "\e[1;92m"       // Green highlight
 
@@ -27,16 +26,16 @@ void show(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 {
     char buf[32];
     if( !IS_IDLE(cmd) && cmd != NO_FRAME ) {
-        printf("%-6.6s --> ", ilMnemonic(cmd, buf));
+        LOGF("%-6.6s --> ", ilMnemonic(cmd, buf));
     } else
-        printf("\t   ");
+        LOGF("\t   ");
     if( !IS_IDLE(rtn) ) {
-        printf("--> %s ", ilMnemonic(rtn, buf));
+        LOGF("--> %s ", ilMnemonic(rtn, buf));
         if( IS_DATA(cmd) && isprint(rtn) )
-            printf(" '%c' ", isprint(rtn) ? rtn : '.');
+            LOGF(" '%c' ", isprint(rtn) ? rtn : '.');
     }
     dev->show();
-    printf("\r\n");
+    LOGF("\r\n");
 }
 
 static CTape *cassette = NULL;
@@ -48,7 +47,7 @@ void hipi_init()
     cassette = new CTapeSD(config.filename().c_str()); // Uses SD-card for file storage
 
     dialog->setFileSelectedCallback([&cassette](const std::string& filename) {
-        printf("\r\nSelect file: " HILIGHT "%s" RESET " ", filename.c_str());
+        LOGF("\r\nSelect file: " HILIGHT "%s" RESET " ", filename.c_str());
         cassette->select(filename);
         config.setFilename(filename);
     });
@@ -74,7 +73,7 @@ bool hipi_loop(HpIlLoop& loop) {
     if( loop.receiveFrame(rx_word) ) {
         // Got a frame, send to all devices in the loop
         if (bTrace && !IS_IDLE(rx_word) && lastCmd != rx_word) {
-            printf("\r\n" HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
+            LOGF("\r\n" HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
             lastCmd = rx_word;
         }
         for (CDevice* dev : devices) {
@@ -86,16 +85,16 @@ bool hipi_loop(HpIlLoop& loop) {
             rx_word = rtn;
             if (bTrace && !IS_IDLE(rx_word)) {
                 if( lastCmd != rx_word ) {
-                    printf("> " HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
+                    LOGF("> " HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
                     lastCmd = rx_word;
                 } else
-                    printf("> %-6.6s ", ilMnemonic(rx_word, buf));
+                    LOGF("> %-6.6s ", ilMnemonic(rx_word, buf));
             }
         }
         if( bTrace && IS_DATA(rx_word) )
-            printf(" '%c' ", isprint(rx_word&0xFF) ? rx_word&0xFF : '.');
+            LOGF(" '%c' ", isprint(rx_word&0xFF) ? rx_word&0xFF : '.');
         if (bDebug && !IS_IDLE(rx_word)) {
-            printf("\t   <<< %s\r\n", ilMnemonic(rx_word, buf));
+            LOGF("\t   <<< %s\r\n", ilMnemonic(rx_word, buf));
         }
         // Send the final return value back to the HP-IL loop using the PIO interface
         loop.sendFrame(rx_word);

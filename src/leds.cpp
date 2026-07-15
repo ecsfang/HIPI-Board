@@ -1,4 +1,5 @@
 #include "leds.h"
+#include "usb_serial.h"
 
 
 void led_on(int n) {
@@ -279,7 +280,7 @@ static void update_breath(uint32_t now) {
     // DEBUG — skriv ut 5 ggr/sekund
     static uint32_t last_dbg = 0;
     if ((uint32_t)(now - last_dbg) > 200'000) {
-        printf("    breath: phase=%u idx=%d level=%u\n",
+        LOGF("    breath: phase=%u idx=%d level=%u\n",
                (unsigned)phase_ms, idx, level);
         last_dbg = now;
     }
@@ -293,7 +294,7 @@ void update(int value) {
     // DEBUG
     static int last_v = -1;
     if (value != last_v) {
-        printf("v=0x%X now=%u _is_breathing=%d\n",
+        LOGF("v=0x%X now=%u _is_breathing=%d\n",
                value, (unsigned)now, (int)_is_breathing);
         last_v = value;
     }
@@ -304,7 +305,7 @@ void update(int value) {
         if (!_is_breathing) {
             _is_breathing = true;
             _breath_start = now;
-            printf("  start breathing, _breath_start=%u\n", (unsigned)_breath_start);
+            LOGF("  start breathing, _breath_start=%u\n", (unsigned)_breath_start);
         }
     }
 
@@ -357,9 +358,9 @@ void PicoPwm::setFrequency(uint32_t freq) {
         }
     }
     if (div16_top < 16) {
-        printf("Freq too low!\n!");
+        LOGF("Freq too low!\n!");
     } else if (div16_top >= 256 * 16) {
-        printf("Freq too high!\n!");
+        LOGF("Freq too high!\n!");
     }
 
     this->div = div16_top;

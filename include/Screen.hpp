@@ -39,7 +39,7 @@ public:
     //  The display must be put in 8BPP / 2-layer config and the CGRAM font
     //  must be uploaded *before* constructing the Screen.  See
     //  RA8875::begin() and the README.
-    Screen(RA8875& display,
+    Screen(RA8875* display,
         std::uint16_t color,
         std::uint8_t size,
         std::uint8_t brightness,
@@ -49,6 +49,7 @@ public:
     // for an HP-41 display stream.  Recognised bytes include ASCII printable
     // characters, BS, LF, CR, ESC, and the HP82163 escape sequences.
     void pr_char(std::uint8_t c);
+    void pr_str(const char *p);
 
     // ----- High-level commands used by pr_char but also useful externally ---
 
@@ -68,6 +69,14 @@ public:
     void suspend()  { suspended_ = true; }
     void resume()   { suspended_ = false; txt_size(size_); full(); }
     bool isSuspended() const { return suspended_; }
+
+    // Re-asserts the cursor's visibility/style/position. Call this after
+    // anything OUTSIDE Screen touches the shared RA8875 in a way that might
+    // have clobbered the cursor-visible bit in MWCR0 -- e.g. gfxMode()
+    // (used internally by drawBitmap565()/drawBitmap332(), which the
+    // button press-feedback redraw in pico_main.cpp calls directly on the
+    // display, bypassing Screen entirely) blindly zeros that register.
+    void refreshCursor() { set_cur(); }
 
     // Manual scroll-back, independent of the HP-41 stream's own animated
     // roll/paper-feed commands (up()/down() above). Positive n moves
@@ -133,11 +142,11 @@ public:
     // Change the screen's own foreground text color (persisted -- survives
     // a later full() redraw, unlike writing txtColor() on the RA8875
     // directly, which full() will now override on every redraw).
-    void setColor(std::uint16_t c) { color_ = c; d_.txtColor(color_, 0); }
+    void setColor(std::uint16_t c) { color_ = c; d_->txtColor(color_, 0); }
 
     // Change the backlight duty cycle (0..255, straight through to the
     // RA8875's PWM1 register -- see RA8875::brightness()).
-    void setBrightness(std::uint8_t level) { brightness_ = level; d_.brightness(level); }
+    void setBrightness(std::uint8_t level) { brightness_ = level; d_->brightness(level); }
 
     // Change text size at runtime (0..3 -> built-in CGRAM modes). This
     // recomputes the row/column layout and clears the screen, same as
@@ -161,7 +170,7 @@ private:
     void draw_letter(std::uint8_t c);
     void fon_write(const char* s);
 
-    // Forwards to d_.BTE(), but does nothing while suspended_ is true.
+    // Forwards to d_->BTE(), but does nothing while suspended_ is true.
     // All Screen-internal BTE calls go through this single choke point.
     void bte(std::uint8_t opcode,
              std::uint16_t x1, std::uint16_t y1,
@@ -172,7 +181,7 @@ private:
     void fon_mode();
 
     // ---- Members ----
-    RA8875& d_;
+    RA8875* d_;
 
     std::uint16_t color_;
     std::uint8_t brightness_;

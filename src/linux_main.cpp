@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     display.begin();   // begin() already configures 16bpp by default
     display.set2LayerConfig();
 
-    hp82163::Screen screen(display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
+    hp82163::Screen screen(&display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
 
     const char* msg = "HELLO, WORLD!\n> 42\n";
     for (const char* p = msg; *p; ++p) screen.pr_char(*p);

@@ -52,27 +52,27 @@ namespace MenuFrame {
     // Thick, rounded frame: fill the whole box yellow (rounded corners),
     // then lay a smaller rounded black rectangle on top, inset by
     // BorderThickness on each side -> leaves an even yellow border.
-    inline void draw(RA8875& d, int x = X, int y = Y, int w = W, int h = H) {
-        d.txtSize(TextScale);   // force menu's own scale, independent of Screen's
-        d.fillRoundRect(x, y, w, h, CornerRadius, Yellow);
+    inline void draw(RA8875* d, int x = X, int y = Y, int w = W, int h = H) {
+        d->txtSize(TextScale);   // force menu's own scale, independent of Screen's
+        d->fillRoundRect(x, y, w, h, CornerRadius, Yellow);
         const int innerRadius = CornerRadius > BorderThickness
                                      ? CornerRadius - BorderThickness : 0;
-        d.fillRoundRect(x + BorderThickness, y + BorderThickness,
+        d->fillRoundRect(x + BorderThickness, y + BorderThickness,
                          w - 2 * BorderThickness, h - 2 * BorderThickness,
                          innerRadius, 0x0000);
     }
 }  // namespace MenuFrame
 
 // Splash screen shown as early as possible at boot (right after
-// display.begin(), before Screen/UiDialog even exist), framed
+// display->begin(), before Screen/UiDialog even exist), framed
 // with the same border style as the menu. Blocks for durationMs.
-inline void showSplashScreen(RA8875& display, const char* version,
+inline void showSplashScreen(RA8875* display, const char* version,
                               std::uint32_t durationMs = 2000) {
     // setActiveWindow() hasn't been called yet this early in boot, so the
     // active window is still at its undefined power-on state. rect/circle
     // draws (which fillRoundRect is built from) are clipped to that window,
     // so without this the corners/edges render incorrectly.
-    display.setActiveWindow(0, 0, 799, 479);
+    display->setActiveWindow(0, 0, 799, 479);
 
     // Own box (not MenuFrame::X/Y/W/H), sized for the logo (96x114) + text,
     // and centered on the full display -- the menu's own box is sized/
@@ -99,27 +99,27 @@ inline void showSplashScreen(RA8875& display, const char* version,
     const int textX = haveLogo ? (logoX + logoW + 20) : (splashX + 20);
     const int textTop = splashY + (splashH - 90) / 2;  // ~90px tall text block
 
-    display.txtColor(0xFFFF, 0x0000);
+    display->txtColor(0xFFFF, 0x0000);
 
-    display.txtSize(1);   // slightly larger title row
-    display.txtSetCursor(textX, textTop);
-    display.txtWrite("HIPI-Board");
+    display->txtSize(1);   // slightly larger title row
+    display->txtSetCursor(textX, textTop);
+    display->txtWrite("HIPI-Board");
 
-    display.txtSize(0);
-    display.txtSetCursor(textX, textTop + 46);
-    display.txtWrite("By Thomas Fänge");
+    display->txtSize(0);
+    display->txtSetCursor(textX, textTop + 46);
+    display->txtWrite("By Thomas Fänge");
 
     char buf[48];
     std::snprintf(buf, sizeof(buf), "Version %s", version);
-    display.txtSetCursor(textX, textTop + 70);
-    display.txtWrite(buf);
+    display->txtSetCursor(textX, textTop + 70);
+    display->txtWrite(buf);
 
-    display.spiDelayMs(durationMs);
+    display->spiDelayMs(durationMs);
 }
 
 class UiDialog {
 public:
-    UiDialog(RA8875& display, Screen& screen) : d_(display), screen_(screen) {}
+    UiDialog(RA8875* display, Screen& screen) : d_(display), screen_(screen) {}
 
     // Called with the chosen filename once the user confirms it in the
     // "Open file?" dialog. Decouples UiDialog from whatever device class
@@ -172,7 +172,6 @@ public:
 
     // Anropas fran huvudloopen nar en knapp-touch upptäcks.
     void handleButton(Button b) {
-        cdc0_printf("State: %d Button: %d\r\n", state_, b);
 
         if (b == Button::Shift) {
             shiftPending_ = true;   // latch for the *next* button press
@@ -459,13 +458,13 @@ private:
     }
 
     void drawConfirmText() {
-        d_.txtColor(0xFFFF, 0x0000);
-        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-        d_.txtWrite("Open file?");
-        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
-        d_.txtWrite(pendingFile_.c_str());
-        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
-        d_.txtWrite("OK = yes    X = cancel");
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        d_->txtWrite("Open file?");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+        d_->txtWrite(pendingFile_.c_str());
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
+        d_->txtWrite("OK = yes    X = cancel");
     }
 
     void close() {
@@ -509,12 +508,12 @@ private:
         // 0=Off (both false), 1=On (trace only), 2=Extended (both true).
         bTrace = (index >= 1);
         bDebug = (index == 2);
-        cdc0_printf("\r\n * Trace: %s", kTraceLabels[index]);
+        LOGF("\r\n * Trace: %s", kTraceLabels[index]);
         if (onTraceChanged_) onTraceChanged_(bTrace, bDebug);
     }
 
     void applyFile(const std::string& filename) {
-        cdc0_printf("\r\n * Selected file: %s", filename.c_str());
+        LOGF("\r\n * Selected file: %s", filename.c_str());
         if (onFileSelected_) onFileSelected_(filename);
     }
 
@@ -523,10 +522,10 @@ private:
     }
 
     void drawRow(int index, const char* label) {
-        d_.txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
-        d_.txtColor(index == selected_ ? 0x0000 : 0xFFFF,
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
+        d_->txtColor(index == selected_ ? 0x0000 : 0xFFFF,
                     index == selected_ ? MenuFrame::Yellow : 0x0000);
-        d_.txtWrite(label);
+        d_->txtWrite(label);
     }
 
     void highlightRow(int index, bool /*selected*/) {
@@ -576,7 +575,7 @@ private:
         }
     }
 
-    RA8875& d_;
+    RA8875* d_;
     Screen& screen_;
     State state_ = State::Closed;
     int selected_ = 0;

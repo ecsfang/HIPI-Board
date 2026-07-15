@@ -143,7 +143,7 @@ public:
         return w;
     }
     void error(const char *str) {
-        cdc0_printf("%s error: %s (%d)\n", str, FRESULT_str(_fr), _fr);
+        LOGF("%s error: %s (%d)\n", str, FRESULT_str(_fr), _fr);
         tud_cdc_n_write_flush(0);
         tud_task();
     }
@@ -160,7 +160,7 @@ public:
             error("f_lseek");
     }
     void open() { //const char *name = MEDIA_NAME) {
-        cdc0_printf("Opening tape SD-file: [%s]\r\n", _name);
+        LOGF("Opening tape SD-file: [%s]\r\n", _name);
         tud_cdc_n_write_flush(0);
         tud_task();
         if( _open )
@@ -177,7 +177,7 @@ public:
         }
     }
     void close() {
-        cdc0_printf("Closing tape SD-file: [%s]\r\n", _name);
+        LOGF("Closing tape SD-file: [%s]\r\n", _name);
         tud_cdc_n_write_flush(0);
         tud_task();
         _fr = f_close(&_tape);
@@ -218,7 +218,7 @@ public:
         return n;
     }
     void write(unsigned char *buf) {
-        cdc0_printf("Writing %d bytes to tape at %d\r\n", BUF_SIZE, tell());
+        LOGF("Writing %d bytes to tape at %d\r\n", BUF_SIZE, tell());
         memcpy(pos(), buf, BUF_SIZE);
         wind(BUF_SIZE);
     }
@@ -229,12 +229,12 @@ public:
         seek(tell() + s);
     }
     void open(void) {
-        cdc0_printf("Opening tape in RAM\r\n");
+        LOGF("Opening tape in RAM\r\n");
         seek(0);
         _open = true;
     }
     void close() {
-        cdc0_printf("Closing tape in RAM\r\n");
+        LOGF("Closing tape in RAM\r\n");
         seek(0);
         _open = false;
     }
@@ -270,7 +270,7 @@ class CTapeFlash : public CTape {
     void flushSector() {
         if (_loadedSector < 0 || !_dirty) return;
         uint32_t off = TAPE_FLASH_OFFSET + (uint32_t)_loadedSector * FLASH_SECTOR_SIZE;
-        cdc0_printf("Flush to flash at %u\r\n", off);
+        LOGF("Flush to flash at %u\r\n", off);
         uint32_t irq = save_and_disable_interrupts();
         flash_range_erase  (off, FLASH_SECTOR_SIZE);
         flash_range_program(off, _sectorBuf, FLASH_SECTOR_SIZE);
@@ -314,7 +314,7 @@ public:
 
     // Writes go into the sector buffer; flash is only touched on sector change or close()
     void write(unsigned char *buf) override {
-        cdc0_printf("Writing %d bytes to flash at %u\r\n", BUF_SIZE, _tPos);
+        LOGF("Writing %d bytes to flash at %u\r\n", BUF_SIZE, _tPos);
         int sector = sectorOf(_tPos);
         loadSector(sector);                           // load if not already buffered
         uint32_t offsetInSector = _tPos % FLASH_SECTOR_SIZE;
@@ -325,13 +325,13 @@ public:
     }
 
     void open(void) override {
-        cdc0_printf("Opening flash tape [%s] @ offset 0x%06X\r\n", _name, TAPE_FLASH_OFFSET);
+        LOGF("Opening flash tape [%s] @ offset 0x%06X\r\n", _name, TAPE_FLASH_OFFSET);
         _tPos = 0;
         _open = true;
     }
 
     void close() override {
-        cdc0_printf("Closing flash tape, flushing sector %d\r\n", _loadedSector);
+        LOGF("Closing flash tape, flushing sector %d\r\n", _loadedSector);
         flushSector();
         _tPos = 0;
         _open = false;

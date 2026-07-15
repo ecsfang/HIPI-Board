@@ -1,9 +1,6 @@
 #include <stdio.h>
 #include "hpil.h"
 
-#define printf cdc0_printf
-
-
 IL_CMD_t CDevice::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t rtn = cmd;
@@ -23,7 +20,7 @@ IL_CMD_t CDevice::hpil(IL_CMD_t cmd)
 
 void CDevice::show(void)
 {
-    printf("\r\n@@@ Name: %s status:%c addr: %d sai: %s nSai:%d nAau:%d sdi: %p\r\n",
+    LOGF("\r\n@@@ Name: %s status:%c addr: %d sai: %s nSai:%d nAau:%d sdi: %p\r\n",
         name(), isTalker() ? 'T' : ((isListener()) ? 'L' : '-'),
         addr(), m_sai?"TRUE":"FALSE", m_nSai, m_nAau, m_sdi);
 }

@@ -55,7 +55,7 @@ void CDrive::preProc(IL_CMD_t cmd)
     if( ddl == 5 ) {
         //Busy formatting
         if( check() ) {
-            cdc0_printf("$$$ Formatting ... (%d)\r\n", tape->tell());
+            LOGF("$$$ Formatting ... (%d)\r\n", tape->tell());
             tape->write(buffer[0]);
             if( tape->tell() >= TAPE_SIZE ) {
                 end = true;
@@ -63,7 +63,7 @@ void CDrive::preProc(IL_CMD_t cmd)
                 sst = DRV_IDLE;
                 tape->close();
                 tape->open();
-                cdc0_printf("$$$ Done with formatting!\r\n");
+                LOGF("$$$ Done with formatting!\r\n");
             }
         }
     }
@@ -173,7 +173,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                     break;
                 case 5:
                     // Format
-                    cdc0_printf("$$$ Do FORMAT ...\r\n");
+                    LOGF("$$$ Do FORMAT ...\r\n");
                     mode = WRITE_MODE;
                     sst = DRV_BUSY;
                     memset(buffer[0], 255, BUF_SIZE);
@@ -304,7 +304,7 @@ void CDrive::readblock()
 {
     if( check() ) {
         // Read BUF_SIZE bytes from tape
-        cdc0_printf("$$$ Read block ...\r\n");
+        LOGF("$$$ Read block ...\r\n");
         tape->read(buffer[0]);
     }
 }
@@ -312,7 +312,7 @@ void CDrive::writeblock()
 {
     if( check() ) {
         // Write buffer[0] to tape
-        cdc0_printf("$$$ Write block ...\r\n");
+        LOGF("$$$ Write block ...\r\n");
         tape->write(buffer[0]);
         // ... and flush!
         // tape.flush();
@@ -324,28 +324,28 @@ bool CDrive::check()
     if( !tape->ok() ) {
         if( SDOK ) {
             if( tape->media() && *tape->media() ) {
-                cdc0_printf("$$$ Opening tape file: %s ", tape->media());
+                LOGF("$$$ Opening tape file: %s ", tape->media());
                 tud_cdc_n_write_flush(0);
                 tud_task();
                 //tape->select(share_Tape);
                 tape->open();
                 size(tape->mediaSize());
                 int i = findMedia(size());
-                cdc0_printf("media: %s ", mediaInfo[i].media);
+                LOGF("media: %s ", mediaInfo[i].media);
                 if( size() <= 0 )
                     size(512);
-                cdc0_printf("size=%dkb\r\n", (size()*BUF_SIZE)/1024);
+                LOGF("size=%dkb\r\n", (size()*BUF_SIZE)/1024);
                 tape->seek(0);
                 sst = DRV_NEW_TAPE_ERROR;
             } else {
-                cdc0_printf("$$$ No tape selected!\r\n");
+                LOGF("$$$ No tape selected!\r\n");
                 tud_cdc_n_write_flush(0);
                 tud_task();
                 sst = DRV_NO_TAPE_ERROR;
             }
             //TapeOK = true;
         } else {
-            cdc0_printf("$$$ No tape file!\r\n");
+            LOGF("$$$ No tape file!\r\n");
             tud_cdc_n_write_flush(0);
             tud_task();
             sst = DRV_NO_TAPE_ERROR;
@@ -357,8 +357,8 @@ bool CDrive::check()
 void CDrive::show()
 {
     CDevice::show();
-    cdc0_printf("$$$ Drive: mode:%d ddl:%d ddt:%d sst:%d last:%d\r\n", ddl, ddt, sst, last);
-    cdc0_printf("           tape:%p size:%d\r\n", (void*)tape, size());
+    LOGF("$$$ Drive: mode:%d ddl:%d ddt:%d sst:%d last:%d\r\n", ddl, ddt, sst, last);
+    LOGF("           tape:%p size:%d\r\n", (void*)tape, size());
 }
 
 static void list_dir(const char* path, int depth) {
@@ -366,7 +366,7 @@ static void list_dir(const char* path, int depth) {
     FILINFO fno;
     FRESULT fr = f_opendir(&dir, path);
     if (fr != FR_OK) {
-        cdc0_printf("$$$ %*s[opendir %s: %s]\r\n", depth*2, "", path, FRESULT_str(fr));
+        LOGF("$$$ %*s[opendir %s: %s]\r\n", depth*2, "", path, FRESULT_str(fr));
         return;
     }
 
@@ -375,7 +375,7 @@ static void list_dir(const char* path, int depth) {
         if (fr != FR_OK || fno.fname[0] == 0) break;   // 0 = slut på katalogen
 
         const char* kind = (fno.fattrib & AM_DIR) ? "DIR " : "FILE";
-        cdc0_printf("$$$ \t%*s%-4s %8lu  %s\r\n",
+        LOGF("$$$ \t%*s%-4s %8lu  %s\r\n",
                depth*2, "",
                kind,
                (unsigned long)fno.fsize,
@@ -392,8 +392,8 @@ static void list_dir(const char* path, int depth) {
 }
 
 void sd_dir() {
-    cdc0_printf("\r\n\t=== SD card contents ===\r\n");
+    LOGF("\r\n\t=== SD card contents ===\r\n");
     list_dir("", 0);
-    cdc0_printf("\t=== done ===\r\n");
+    LOGF("\t=== done ===\r\n");
 }
 

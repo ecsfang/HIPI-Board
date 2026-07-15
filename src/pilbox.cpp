@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#include "RA8875.hpp"
 #include "hpil.h"
 #include "pilbox.h"
 #include "tusb.h" 
 #include "usb_serial.h"
+#include "ui_buttons.hpp"
 
-#define printf cdc0_printf
+extern hp82163::RA8875* display;
 
 /*
  * an improved format is using full 8-bit bytes:
@@ -20,7 +22,7 @@
  */
 #define P_DEBUG false
 
-#define PL_MODE(x) do { if( P_DEBUG) printf("\r\nPILBOX: " #x "\r\n"); } while(0)
+#define PL_MODE(x) do { if( P_DEBUG) LOGF("\r\nPILBOX: " #x "\r\n"); } while(0)
 
 // Send a single byte to the PILBox serial link and flush
 #define PL_SEND(x) do { \
@@ -54,7 +56,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     if (((cmd & CMD_MASK) == CMD) ) {
         m_wLastCmd = cmd;    // remember last CMD frame to send later when RFC is received
         if( P_DEBUG ) {
-            printf("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
+            LOGF("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
         }
         // Return without sending the CMD frame to PyIlPer
         return cmd;
@@ -64,7 +66,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     // CMD/RFC handshaking done in the PILBox emulation
     if ((cmd == RFC)) {
         if( P_DEBUG ) {
-            printf("pilbox: RFC\r\n");
+            LOGF("pilbox: RFC\r\n");
         }
         cmd = m_wLastCmd;                            // use the last CMD frame as answer
         sendFrame(cmd);                            // send the RFC frame
@@ -73,7 +75,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
             pil_cmd = receiveFrame();
         } while( pil_cmd == NO_FRAME );
         if( P_DEBUG ) {
-            printf("\t   <== RFC!\r\n");
+            LOGF("\t   <== RFC!\r\n");
         }
         return RFC;
     }
@@ -86,7 +88,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
         pil_cmd = receiveFrame();
     } while( pil_cmd == NO_FRAME );
     if(  P_DEBUG && !IS_IDLE(pil_cmd) ) {
-        printf("\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
+        LOGF("\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
     }
     return pil_cmd;                            // return the received frame
 }
@@ -143,7 +145,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         }
 
         if( P_DEBUG && !IS_IDLE(PIL_rx_frame) ) {
-            printf("\t   <-- %s\r\n", ilMnemonic(PIL_rx_frame, pbBuf));
+            LOGF("\t   <-- %s\r\n", ilMnemonic(PIL_rx_frame, pbBuf));
         }
 
         // The frame is now received, first process the PILBox commands
@@ -157,6 +159,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PILBox_mode = TDIS;             // set mode to disabled
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
+            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, false);
             break;
         case CON:                           // CON: Controller ON
             PL_MODE("CON");
@@ -165,6 +168,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
+            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         case COFF:                          // COFF: Controller OFF
             PL_MODE("COFF");
@@ -174,6 +178,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
+            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         case COFI:                          // COFI: Controller OFF with IDY 
             PL_MODE("COFI");
@@ -182,6 +187,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
+            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         // default:
             // all other frames are sent on to the HP-IL loop
@@ -217,7 +223,7 @@ IL_CMD_t CPilBox::sendFrame(IL_CMD_t cmd)
     PL_SEND_FRAME();
 
     if( P_DEBUG && !IS_IDLE(frame) ) {
-        printf("\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
+        LOGF("\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
     }
     return frame;
 }
@@ -229,12 +235,12 @@ void CPilBox::idle(void)
 
 void CPilBox::show(void)
 {
-    printf("@@@ %s: status: ", name());
+    LOGF("@@@ %s: status: ", name());
     if( PILBox_mode == TDIS ) {
-        printf("DISABLED");
+        LOGF("DISABLED");
 
     } else {
-        printf("%c addr:%2d",
+        LOGF("%c addr:%2d",
             isTalker() ? 'T' : ((isListener()) ? 'L' : '-'),
                 addr());
     }

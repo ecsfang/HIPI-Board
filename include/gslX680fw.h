@@ -2,8 +2,8 @@
 #define _GSLX680_H_
 
 
-//#define SCREEN_MAX_X 		800
-//#define SCREEN_MAX_Y 		480
+#define SCREEN_MAX_X 		800
+#define SCREEN_MAX_Y 		480
 
 #define VERSION_1
 #define PAGE_REG    0xF0

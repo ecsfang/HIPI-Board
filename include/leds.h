@@ -1,7 +1,12 @@
 #ifndef __LEDS_H__
 #define __LEDS_H__
 
-#define CLED_NO_PWM     // Due to HW conflict - now PWM right now!
+// PWM re-enabled: LED_PIN_4/5 moved off GPIO21/22, which aliased the exact
+// same PWM slice+channel as LED_PIN_2 (GPIO5) and LED_PIN_3 (GPIO6) on the
+// RP2040/RP2350 (slice = (gpio/2) % 8, channel = gpio % 2 -- GPIO n and
+// GPIO n+16 always collide). GPIO26/27 land on their own free slice (5),
+// so all five LEDs now have independent PWM channels.
+//#define CLED_NO_PWM     // Due to HW conflict - now PWM right now!
 
 #include <stdlib.h>
 #include "pico/stdlib.h"
@@ -25,8 +30,8 @@
 #define LED_PIN_1 4
 #define LED_PIN_2 5
 #define LED_PIN_3 6
-#define LED_PIN_4 22
-#define LED_PIN_5 21
+#define LED_PIN_4 21 //26
+#define LED_PIN_5 22 //27
 
 class PicoPwmBaseException : public std::exception {
    protected:
@@ -490,5 +495,12 @@ private:
         return v < lo ? lo : (v > hi ? hi : v);
     }
 };
+
+extern CLedDriver ledPower;    // Power indicator
+extern CLedDriver ledStatus;   // Status / activity
+extern CLedDriver ledError;    // Error / alert
+extern CLedDriver ledA;        // General purpose A
+extern CLedDriver ledB;        // General purpose B
+extern CLedDriver* leds[];
 
 #endif//__LEDS_H__

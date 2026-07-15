@@ -14,12 +14,15 @@ struct ButtonRect { Button id; std::uint16_t x0, y0, x1, y1; };
 // x0 = screen_width - width = 800 - 120 = 680. Y-koordinaterna behover ingen
 // forskjutning (remsan ritas vid y0=0). Om buttons.bmp byts ut igen, kor om
 // samma extrahering istallet for att gissa nya varden for hand.
+// Coordinates match resources/buttons.bmp exactly (from the generation
+// script -- buttons shifted up from the previous layout to make room for
+// the USB/PIL status section at the bottom). X range unchanged.
 inline constexpr ButtonRect kButtonRects[] = {
-    { Button::Shift, 704, 28,  776, 84  },
-    { Button::Ok,    704, 120, 776, 176 },
-    { Button::Up,    704, 212, 776, 268 },
-    { Button::Down,  704, 304, 776, 360 },
-    { Button::X,     704, 396, 776, 452 },
+    { Button::Shift, 704, 16,  776, 72  },
+    { Button::Ok,    704, 100, 776, 156 },
+    { Button::Up,    704, 184, 776, 240 },
+    { Button::Down,  704, 268, 776, 324 },
+    { Button::X,     704, 352, 776, 408 },
 };
 
 inline Button hitTestButton(std::uint16_t x, std::uint16_t y) {
@@ -46,7 +49,7 @@ inline Button hitTestButton(std::uint16_t x, std::uint16_t y) {
 //                            your largest press-shift on the "restore to
 //                            normal" calls, so any overflow from a shifted
 //                            press -- in any direction -- gets cleaned up.
-inline void redrawButtonRegion(RA8875& display,
+inline void redrawButtonRegion(RA8875* display,
                                const std::uint16_t* stripPixels,
                                std::uint16_t stripWidth, std::uint16_t stripHeight,
                                std::uint16_t stripScreenX0, std::uint16_t stripScreenY0,
@@ -72,12 +75,45 @@ inline void redrawButtonRegion(RA8875& display,
         for (int row = 0; row < h; ++row) {
             const std::uint16_t* src =
                 stripPixels + static_cast<std::size_t>(localY0 + row) * stripWidth + localX0;
-            display.drawBitmap565(static_cast<std::int16_t>(r.x0 - margin + dx),
+            display->drawBitmap565(static_cast<std::int16_t>(r.x0 - margin + dx),
                                   static_cast<std::int16_t>(r.y0 - margin + row + dy),
                                   static_cast<std::uint16_t>(w), 1, src);
         }
         return;
     }
+}
+
+// ── Status indicator LEDs (USB / HP-IL) ─────────────────────────────────────
+//
+// Drawn directly as filled circles (via RA8875::fillRoundRect() with
+// radius == half the bounding box, which produces a true circle) rather
+// than being part of the cached button-strip bitmap -- so they can be
+// toggled from code at any time, independent of touch interaction.
+// resources/buttons.bmp already bakes in the "off" (black) state plus a
+// dark bezel and the "USB"/"PIL" labels; setStatusLed() only needs to
+// redraw the small circle itself, in either black (off) or green (on).
+//
+// Coordinates are screen coordinates (local button-panel position + the
+// strip's own x0 offset, matching kButtonRects), taken directly from the
+// generation script that produced resources/buttons.bmp -- see the status
+// section layout there if the artwork ever changes.
+enum class StatusLed { Usb, Pil };
+
+struct StatusLedSpec { std::uint16_t cx, cy, radius; };
+
+inline constexpr StatusLedSpec kUsbLed = { 717, 452, 10 };
+inline constexpr StatusLedSpec kPilLed = { 763, 452, 10 };
+
+inline constexpr std::uint16_t kStatusLedOnColor  = 0x07E0;  // green
+inline constexpr std::uint16_t kStatusLedOffColor = 0x0000;  // black
+
+inline void setStatusLed(RA8875* display, StatusLed which, bool on) {
+    const StatusLedSpec& s = (which == StatusLed::Usb) ? kUsbLed : kPilLed;
+    const std::int16_t d = static_cast<std::int16_t>(s.radius * 2);
+    display->fillRoundRect(static_cast<std::int16_t>(s.cx - s.radius),
+                          static_cast<std::int16_t>(s.cy - s.radius),
+                          d, d, s.radius,
+                          on ? kStatusLedOnColor : kStatusLedOffColor);
 }
 
 }  // namespace hp82163

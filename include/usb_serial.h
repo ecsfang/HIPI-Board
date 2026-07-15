@@ -54,6 +54,16 @@ static inline void cdc0_printf(const char* fmt, ...) {
         cdc0_write(buf, (size_t)len);
 }
 
+// ── Logging gate ──────────────────────────────────────────────────────────────
+// `usb_connected` is set once at boot (see pico_main.cpp) based on whether a
+// USB host was seen at all within the startup timeout. cdc0_write() already
+// checks tud_cdc_n_connected() before writing, but everything must still work
+// (not stall/hang) when there's no USB present at all -- use LOGF(...) instead
+// of calling cdc0_printf()/printf() directly for any log/debug output, so
+// nothing even attempts to touch the CDC port when usb_connected is false.
+extern bool usb_connected;
+#define LOGF(...) do { if (usb_connected) cdc0_printf(__VA_ARGS__); } while (0)
+
 // ── CDC1 — data port ──────────────────────────────────────────────────────────
 
 static inline void cdc1_write(const char* buf, size_t len) {

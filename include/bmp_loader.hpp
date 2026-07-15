@@ -46,15 +46,15 @@ inline bool peekBmpDimensions(const char* path, std::uint16_t& outWidth, std::ui
 // also caches the decoded RGB565 pixels (row-major, stride = width) --
 // e.g. so a button's sub-rectangle can be redrawn later without re-reading
 // the file (see ui_buttons.hpp's redrawButtonRegion()).
-inline bool drawBmpAt(RA8875& display, const char* path,
+inline bool drawBmpAt(RA8875* display, const char* path,
                        std::int16_t x0, std::int16_t y0,
                        std::vector<std::uint16_t>* outPixels = nullptr,
                        std::uint16_t* outWidth = nullptr,
                        std::uint16_t* outHeight = nullptr) {
     FIL file;
-    cdc0_printf("\r\n\t * Open file <%s> ... ", path);
+    LOGF("\r\n\t * Open file <%s> ... ", path);
     if (f_open(&file, path, FA_READ) != FR_OK) {
-        cdc0_printf("\r\n\t * Could not open file!");
+        LOGF("\r\n\t * Could not open file!");
         return false;
     }
 
@@ -62,7 +62,7 @@ inline bool drawBmpAt(RA8875& display, const char* path,
     UINT br = 0;
     if (f_read(&file, header, 54, &br) != FR_OK || br != 54 ||
         header[0] != 'B' || header[1] != 'M') {
-        cdc0_printf("\r\n\t * No BMP file!");
+        LOGF("\r\n\t * No BMP file!");
         f_close(&file);
         return false;
     }
@@ -82,12 +82,12 @@ inline bool drawBmpAt(RA8875& display, const char* path,
     const std::int16_t  bpp         = rd16(28);
     const std::int32_t  compression = rd32(30);
 
-    cdc0_printf("\r\n\t * Width: %d height: %d", width, heightRaw);
-    cdc0_printf("\r\n\t * bpp: %d", bpp);
+    LOGF("\r\n\t * Width: %d height: %d", width, heightRaw);
+    LOGF("\r\n\t * bpp: %d", bpp);
 
     // We only support what png_to_bmp24.py generates: uncompressed 24-bit.
     if (bpp != 24 || compression != 0 || width <= 0) {
-        cdc0_printf("\r\n\t * Wrong format!");
+        LOGF("\r\n\t * Wrong format!");
         f_close(&file);
         return false;
     }
@@ -111,7 +111,7 @@ inline bool drawBmpAt(RA8875& display, const char* path,
 
         f_lseek(&file, dataOffset + static_cast<FSIZE_t>(fileRow) * rowSize);
         if (f_read(&file, rawRow.data(), rowSize, &br) != FR_OK || br != rowSize) {
-            cdc0_printf("\r\n\t * Error ... ?");
+            LOGF("\r\n\t * Error ... ?");
             f_close(&file);
             return false;
         }
@@ -125,7 +125,7 @@ inline bool drawBmpAt(RA8875& display, const char* path,
                 ((rr & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
         }
 
-        display.drawBitmap565(x0, static_cast<std::int16_t>(y0 + r),
+        display->drawBitmap565(x0, static_cast<std::int16_t>(y0 + r),
                               static_cast<std::uint16_t>(width), 1,
                               rowBuf.data());
 
@@ -135,7 +135,7 @@ inline bool drawBmpAt(RA8875& display, const char* path,
         }
     }
 
-    cdc0_printf("\r\n\t * Done!");
+    LOGF("\r\n\t * Done!");
     f_close(&file);
     return true;
 }

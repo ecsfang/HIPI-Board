@@ -7,6 +7,7 @@
 #include "hardware/gpio.h"
 #include "pico/time.h"
 #include "hpil.pio.h"
+#include "usb_serial.h"
 
 #define IN_M_PIN  13
 #define IN_P_PIN  12
@@ -24,17 +25,17 @@ public:
           minus_out_pin_(minus_out_pin),
           plus_out_pin_(plus_out_pin) {
 /*            if (plus_out_pin_ != minus_out_pin_ + 1) {
-                printf("ERROR: TX pins not adjacent: minus=%u plus=%u (expected plus=minus+1)\n",
+                LOGF("ERROR: TX pins not adjacent: minus=%u plus=%u (expected plus=minus+1)\n",
                     minus_out_pin_, plus_out_pin_);
                 while (true) tight_loop_contents();  // stoppa tydligt
             }
             if (plus_in_pin_ != minus_in_pin_ + 1) {
-                printf("ERROR: RX pins not adjacent: minus=%u plus=%u\n",
+                LOGF("ERROR: RX pins not adjacent: minus=%u plus=%u\n",
                     minus_in_pin_, plus_in_pin_);
                 while (true) tight_loop_contents();
             }
             if (minus_out_pin_ == minus_in_pin_) {
-                printf("ERROR: TX and RX share pin: %u\n", minus_in_pin_);
+                LOGF("ERROR: TX and RX share pin: %u\n", minus_in_pin_);
                 while (true) tight_loop_contents();
             }**/
             init();

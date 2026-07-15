@@ -11,8 +11,6 @@
 #include "tusb.h"
 #include "usb_serial.h"
 
-#define printf cdc0_printf
-
 extern CLedParser  parser;
 
 void sendCmd(const char* str) {
