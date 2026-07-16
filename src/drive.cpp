@@ -357,8 +357,13 @@ bool CDrive::check()
 void CDrive::show()
 {
     CDevice::show();
-    LOGF("$$$ Drive: mode:%d ddl:%d ddt:%d sst:%d last:%d\r\n", ddl, ddt, sst, last);
-    LOGF("           tape:%p size:%d\r\n", (void*)tape, size());
+    char buf[16];
+    char sBuf[256];
+    int n=0;
+    n += sprintf(sBuf+n, "\r\n\tmode:%s", mode == WRITE_MODE ? "WRITE" : "PARTIAL");
+    n += sprintf(sBuf+n, " ddl:%d ddt:%d sst:%d last:%s", ddl, ddt, sst, ilMnemonic(last, buf));
+    LOGF(sBuf);
+    LOGF("\r\n\ttape:'%s' size:%d", (void*)tape->media(), size());
 }
 
 static void list_dir(const char* path, int depth) {

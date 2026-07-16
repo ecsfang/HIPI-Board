@@ -35,6 +35,7 @@ void CDisplay::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
     *rtn = cmd;
     if( IS_DATA(cmd) ) {
         // Data - save in queue ...
+        LOGF("Push %03X\r\n", cmd);
         fifo.push(cmd & 0xFF);
     }
 }
@@ -42,5 +43,5 @@ void CDisplay::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
 void CDisplay::show()
 {
     CDevice::show();
-    LOGF("$$$ Display: fifo:%d\r\n", fifo.size());
+    LOGF(" fifo size:%d", fifo.size());
 }

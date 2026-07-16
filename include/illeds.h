@@ -7,7 +7,7 @@
 
 class CHipiLed : public CDevice {
 public:
-    CHipiLed(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau=31) : CDevice(name, _sai, _aau) {
+    CHipiLed(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau=31) : CDevice(name, _sai, _aau, LED) {
     }
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);
     void clear(void);

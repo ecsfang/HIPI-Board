@@ -3,6 +3,9 @@
 
 #include "usb_serial.h"
 
+#define RESET           "\e[0m"
+#define HILIGHT         "\e[1;92m"       // Green highlight
+
 #define DOE     0x000   // Data byte (0-255)
 #define CMD     0x400   // Command
 #define SDC     0x404   // Selected device clear
@@ -35,7 +38,8 @@
 #define IS_CMD(x)  (((x) & CMD_MASK) == CMD)
 
 #define IDLE_FRAME (IDY | 0xC0)
-#define IS_IDLE(x) ((x) == IDLE_FRAME)
+//#define IS_IDLE(x) ((x) == IDLE_FRAME)
+#define IS_IDLE(x) (((x) & 0x700) == IDY)
 
 // info below from Christoph Giesselink:
 // PILBox commands
@@ -69,6 +73,14 @@ typedef enum {
     TALKER
 } IL_Status_e;
 
+typedef enum {
+    NONE,
+    DISPLAY,
+    DRIVE,
+    LED,
+    PILBOX
+} IL_Type_e;
+
 class CDevice {
 protected:
     IL_Status_e     m_status;
@@ -78,8 +90,9 @@ protected:
     IL_ADDR_t       m_nSai;
     IL_ADDR_t       m_nAau;
     const char      *m_sdi;
+    IL_Type_e       m_type;
 public:
-    CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau) {
+    CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau, IL_Type_e type = NONE) {
         m_devName = name;
         m_status = STAT_IDLE;
         m_addr = 31;
@@ -87,6 +100,7 @@ public:
         m_sdi = NULL;
         m_nSai = _sai;
         m_nAau = _aau;
+        m_type = type;
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
     virtual IL_CMD_t hpil(IL_CMD_t cmd);
@@ -109,6 +123,8 @@ public:
     void setListener() { status(LISTENER); }
     bool isListener() { return isStatus(LISTENER); }
     const char *name() { return m_devName; }
+    void type(IL_Type_e type) { m_type = type; }
+    IL_Type_e type(void) { return m_type; }
 };
 
 #endif//__HPIL_H__

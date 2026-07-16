@@ -20,9 +20,9 @@ IL_CMD_t CDevice::hpil(IL_CMD_t cmd)
 
 void CDevice::show(void)
 {
-    LOGF("\r\n@@@ Name: %s status:%c addr: %d sai: %s nSai:%d nAau:%d sdi: %p\r\n",
-        name(), isTalker() ? 'T' : ((isListener()) ? 'L' : '-'),
-        addr(), m_sai?"TRUE":"FALSE", m_nSai, m_nAau, m_sdi);
+    LOGF("\r\n@@@ " HILIGHT "%s" RESET " status:%s addr:%d sai:%s nSai:%d nAau:%d sdi:%02X",
+        name(), isTalker() ? "TALKER" : ((isListener()) ? "LISTENER" : " "),
+        addr(), m_sai?"TRUE":"FALSE", m_nSai, m_nAau, m_sdi?*m_sdi:0);
 }
 
 bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
@@ -30,6 +30,9 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
     IL_ADDR_t   _addr = GET_ADDR(cmd);
 
     preProc(cmd);
+
+    if( !IS_IDLE(cmd) )
+        LOGF(">%03X\r\n", cmd);
 
     if( cmd == IFC) {
         ifc();
@@ -60,6 +63,7 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
     }
     if( inAddrRange(cmd, LAD) ) {
         if( addr() == _addr && _addr < 31 ) {
+            LOGF("LISTEN!\r\n");
             setListener();
         } else
             setIdle();

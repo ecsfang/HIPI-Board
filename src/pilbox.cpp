@@ -7,6 +7,7 @@
 #include "tusb.h" 
 #include "usb_serial.h"
 #include "ui_buttons.hpp"
+#include "pico/time.h"
 
 extern hp82163::RA8875* display;
 
@@ -22,25 +23,25 @@ extern hp82163::RA8875* display;
  */
 #define P_DEBUG false
 
-#define PL_MODE(x) do { if( P_DEBUG) LOGF("\r\nPILBOX: " #x "\r\n"); } while(0)
+#define PL_MODE(x) do { if( P_DEBUG) LOGF("\r\nPILBOX: " #x ); } while(0)
 
 // Send a single byte to the PILBox serial link and flush
-#define PL_SEND(x) do { \
-        tud_cdc_n_write_char(ITF_HPIL, x); \
-        tud_cdc_n_write_flush(ITF_HPIL); \
+#define PL_SEND(x) do {                     \
+        tud_cdc_n_write_char(ITF_HPIL, x);  \
+        tud_cdc_n_write_flush(ITF_HPIL);    \
     } while(0)
 
 // Send a complete frame to the PILBox serial link, using the 2-byte format and flush
-#define PL_SEND_FRAME() do { \
-        tud_cdc_n_write(ITF_HPIL, &PIL_tx_hi,1); \
-        tud_cdc_n_write(ITF_HPIL, &PIL_tx_lo,1); \
-        tud_cdc_n_write_flush(ITF_HPIL);         \
+#define PL_SEND_FRAME() do {                                    \
+        tud_cdc_n_write(ITF_HPIL, &PIL_tx_hi,1);                \
+        tud_cdc_n_write(ITF_HPIL, &PIL_tx_lo,1);                \
+        tud_cdc_n_write_flush(ITF_HPIL);                        \
     } while(0)
 
 
 IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
 {
-    IL_CMD_t pil_cmd;
+    IL_CMD_t pil_cmd = NO_FRAME;
     // Got a frame from the HPIL bus
     // in this case the frame is received from the PILBox emulator
     // modelled after functions in V41 (Christoph Giesselink)
@@ -55,6 +56,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     // CMD/RFC handshaking is done in the PILBox emulation
     if (((cmd & CMD_MASK) == CMD) ) {
         m_wLastCmd = cmd;    // remember last CMD frame to send later when RFC is received
+        m_hadCmd = true;
         if( P_DEBUG ) {
             LOGF("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
         }
@@ -64,20 +66,52 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
 
     // CA (controller active) and RFC frame
     // CMD/RFC handshaking done in the PILBox emulation
+    //
+    // The PIC firmware only translates/forwards RFC to the PC if a CMD
+    // frame actually just preceded it (FCMD flag) -- otherwise, unless
+    // we're the bus controller (PILBox_mode == CON, never used in this
+    // device-only setup), it just retransmits RFC unchanged and never
+    // touches the PC link at all. Forwarding+waiting unconditionally (as
+    // this used to) waits for a PC reply that was never coming for any
+    // "bare" RFC not tied to a pending command.
     if ((cmd == RFC)) {
+        if (!m_hadCmd && PILBox_mode != CON) {
+            if( P_DEBUG ) {
+                LOGF("\t   <== RFC (bare)\r\n");
+            }
+            return cmd;
+        }        
         if( P_DEBUG ) {
             LOGF("pilbox: RFC\r\n");
         }
         cmd = m_wLastCmd;                            // use the last CMD frame as answer
+        m_hadCmd = false;   // consumed
         sendFrame(cmd);                            // send the RFC frame
+        // Bounded wait: previously unbounded, so any hiccup on the PC side
+        // (dropped byte, app not yet ready to answer) hung the whole
+        // device forever -- hipi_loop() never returned to the main loop,
+        // so even touch stopped responding.
+        absolute_time_t rfcDeadline = make_timeout_time_ms(500);
         do {
             tud_task();  // TinyUSB background task
             pil_cmd = receiveFrame();
-        } while( pil_cmd == NO_FRAME );
+        } while( pil_cmd == NO_FRAME ); //&& !time_reached(rfcDeadline) );
         if( P_DEBUG ) {
             LOGF("\t   <== RFC!\r\n");
+            if( pil_cmd == NO_FRAME ) LOGF("\t   <== Timeout!!!!!!!!!!!!\r\n");
         }
         return RFC;
+    }
+
+    // IDY frames circulate constantly on an idle bus. The PIC firmware
+    // only forwards them to the PC when PILBox_mode == COFI (TRIDY set)
+    // or CON (controller); in COFF mode they're handled purely locally
+    // (retransmitted unchanged -- SRQ-bit patching isn't implemented
+    // here yet). Falling through to the generic "forward everything"
+    // path below would otherwise send+wait for a PC reply to routine
+    // bus polling traffic the PC was never going to answer.
+    if ( IS_IDLE(cmd) && PILBox_mode == COFF) {
+        return cmd;
     }
 
     // Send all other frames to PyIlPer
@@ -90,7 +124,9 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     if(  P_DEBUG && !IS_IDLE(pil_cmd) ) {
         LOGF("\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
     }
-    return pil_cmd;                            // return the received frame
+
+    // return the received frame
+    return pil_cmd;
 }
 
 IL_CMD_t CPilBox::receiveFrame(void)
@@ -159,7 +195,8 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PILBox_mode = TDIS;             // set mode to disabled
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
-            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, false);
+            type( NONE );
+            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, false);
             break;
         case CON:                           // CON: Controller ON
             PL_MODE("CON");
@@ -168,7 +205,8 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
-            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+            type( PILBOX );
+            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         case COFF:                          // COFF: Controller OFF
             PL_MODE("COFF");
@@ -178,7 +216,8 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
-            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+            type( PILBOX );
+            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         case COFI:                          // COFI: Controller OFF with IDY 
             PL_MODE("COFI");
@@ -187,7 +226,8 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
-            hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+            type( PILBOX );
+            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         // default:
             // all other frames are sent on to the HP-IL loop
@@ -219,8 +259,10 @@ IL_CMD_t CPilBox::sendFrame(IL_CMD_t cmd)
         PIL_tx_lo = (frame & 0x003F) | 0x40;        // lower 6 data bits, msb = 1
         PIL_tx_hi = ((frame >> 6) & 0x1F) | 0x20;   // higher byte
     }
+
     // Send frame and flush
-    PL_SEND_FRAME();
+    if( !(PILBox_mode == COFF && IS_IDLE(frame)) )
+        PL_SEND_FRAME();
 
     if( P_DEBUG && !IS_IDLE(frame) ) {
         LOGF("\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
@@ -235,13 +277,13 @@ void CPilBox::idle(void)
 
 void CPilBox::show(void)
 {
-    LOGF("@@@ %s: status: ", name());
-    if( PILBox_mode == TDIS ) {
-        LOGF("DISABLED");
-
-    } else {
-        LOGF("%c addr:%2d",
-            isTalker() ? 'T' : ((isListener()) ? 'L' : '-'),
-                addr());
+    LOGF("\r\n@@@ " HILIGHT "%s" RESET " status: ", name());
+    switch(PILBox_mode) {
+    case TDIS: LOGF("TDIS"); break;
+    case COFF: LOGF("COFF"); break;
+    case COFI: LOGF("COFI"); break;
+    case CON: LOGF("CON"); break;
+    default:  LOGF("unknown");
     }
+    LOGF(" %d bit", PILmode8 ? 8 : 7);
 }

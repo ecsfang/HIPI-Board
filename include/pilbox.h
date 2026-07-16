@@ -13,9 +13,10 @@ class CPilBox : public CDevice {
     IL_CMD_t pil_recv;                   // PILBox received byte from the serial link
     char pbBuf[32];
     IL_CMD_t m_wLastCmd;
-    IL_CMD_t loopbackFrame = NO_FRAME;     // loopback frame when no valid serial link is available
+    IL_CMD_t loopbackFrame = NO_FRAME;    // loopback frame when no valid serial link is available
+    bool m_hadCmd = false;               // true right after a CMD frame, until the next RFC consumes it (matches the PIC firmware's FCMD flag)
 public:
-    CPilBox(const char *name) : CDevice(name, 0, 0) {
+    CPilBox(const char *name) : CDevice(name, 0, 0, NONE) {
     }
     IL_CMD_t hpil(IL_CMD_t cmd);
     void idle(void);

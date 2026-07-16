@@ -30,7 +30,7 @@ class CDrive : public CDevice {
     IL_DATA_t       buffer[TRACKS][BUF_SIZE];
     size_t          m_size;
 public:
-    CDrive(const char *name, CTape *_tape, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau) {
+    CDrive(const char *name, CTape *_tape, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau, DRIVE) {
         tape = _tape;
         mode = WRITE_MODE;
         last = ddl = ddt = sst = 0;

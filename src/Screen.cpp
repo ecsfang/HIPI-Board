@@ -341,10 +341,15 @@ void Screen::screen_pars(std::uint8_t size) {
 }
 
 void Screen::reflow() {
-    // Resize every buffered line to the new COLS_, preserving content:
-    // pad with spaces if the new width is wider, truncate if narrower.
+    // Grow each line's storage to the new COLS_ if it's wider than before,
+    // but never shrink it if narrower. full() only ever draws the first
+    // COLS_ characters of each line regardless of how much more is
+    // stored, so a narrower COLS_ just means the tail isn't drawn for
+    // now -- it's not lost, and reappears once COLS_ grows again (e.g.
+    // the button strip hiding widens the text area back out). Shrinking
+    // the vector here would permanently delete that tail instead.
     for (auto& line : lines_) {
-        line.resize(COLS_, 32);
+        if (line.size() < COLS_) line.resize(COLS_, 32);
     }
     // Make sure there are enough buffered lines to fill the new ROWS_
     // (pad blank lines at the front -- lines_[0] is the newest -- so

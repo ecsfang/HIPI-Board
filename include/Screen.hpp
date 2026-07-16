@@ -139,6 +139,19 @@ public:
         return static_cast<std::uint8_t>(textWidth_ / width_);
     }
 
+    // Usable pixel width for text (e.g. narrower while the button strip is
+    // shown, full panel width while it's hidden). Recomputes layout and
+    // reflows existing text to the new width instead of clearing it --
+    // same pattern as setColumns()/setTextSize(). Caller is responsible for
+    // also adjusting the RA8875's own active window to match (Screen has
+    // no knowledge of where the button strip lives on screen).
+    std::uint16_t textWidth() const { return textWidth_; }
+    void setTextWidth(std::uint16_t w) {
+        textWidth_ = w;
+        screen_pars(size_);
+        reflow();
+    }
+
     // Change the screen's own foreground text color (persisted -- survives
     // a later full() redraw, unlike writing txtColor() on the RA8875
     // directly, which full() will now override on every redraw).

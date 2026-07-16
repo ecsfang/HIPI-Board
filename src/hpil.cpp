@@ -69,7 +69,18 @@ char *ilMnemonic(IL_CMD_t frame, char *buf)
 
 			strcpy(buf,ilCodes[i].mne);		// copy name
 			if (arg != 0) {					// opcode has an argument
-				sprintf(&buf[3], " %02X", frame & arg);
+                switch(frame) {
+                case TDIS:
+    				sprintf(buf, "TDIS"); break;
+                case COFF:
+    				sprintf(buf, "COFF"); break;
+                case COFI:
+    				sprintf(buf, "COFI"); break;
+                case CON:
+    				sprintf(buf, "CON"); break;
+                default:
+    				sprintf(&buf[3], " %02X", frame & arg);
+                }
 			}
 			break;
 		}

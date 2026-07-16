@@ -69,6 +69,8 @@ extern bool SDOK;
 extern void sd_dir();
 extern bool bTrace;
 extern bool bDebug;
+extern uint8_t hpilDevices;
+
 hp82163::Config config;
 
 bool drawBmpRightAligned(hp82163::RA8875* display, const char* path,
@@ -214,6 +216,153 @@ FRESULT initSD()
     return fr;
 }
 
+// ── Auto-hiding button strip ────────────────────────────────────────────────
+//
+// Normally hidden, so the text area gets the full panel width. Any touch
+// anywhere on the screen -- whether that's a tap squarely on a button or
+// just the start of a drag across the display -- reveals the strip and
+// resets the countdown; hitTestButton() works purely on fixed screen
+// coordinates, so it still recognizes touches in the (currently blank)
+// button area even while hidden. The touch that reveals the strip is
+// consumed by the reveal itself, not treated as an actual button press
+// (the user couldn't see what they were pressing yet). It auto-hides again
+// after kButtonStripHideMs of inactivity, but only while the menu is closed
+// -- you need the buttons visible to navigate it.
+namespace {
+bool buttonStripVisible = true;
+absolute_time_t buttonStripHideDeadline;
+constexpr std::uint32_t kButtonStripHideMs = 5000;
+
+// Last commanded state of each status LED, so re-showing the strip (which
+// redraws the whole cached bitmap, including their baked-in "off" look)
+// can immediately reapply whichever state was actually current.
+bool usbLedOn = false;
+bool pilLedOn = false;
+}  // namespace
+
+void showButtonStrip() {
+    if (buttonStripVisible) return;
+
+    // Draw first, while the active window is still the full panel width
+    // (that's what it was left at while hidden) -- the RA8875 clips
+    // drawing to the active window, so drawing the strip at its screen
+    // position *after* narrowing the window back down would get clipped
+    // away since that position is outside the narrower window.
+    display->drawBitmap565(static_cast<std::int16_t>(buttonStripScreenX0), 0,
+                           buttonStripWidth, buttonStripHeight,
+                           buttonStripPixels.data());
+    hp82163::setStatusLed(display, hp82163::StatusLed::Usb, usbLedOn);
+    hp82163::setStatusLed(display, hp82163::StatusLed::Pil, pilLedOn);
+
+    // Now narrow the active window/text area back and let Screen reflow
+    // into it.
+    display->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
+    screen->setTextWidth(SCREEN_MAX_X - buttonStripWidth);
+
+    buttonStripVisible = true;
+}
+
+void hideButtonStrip() {
+    if (!buttonStripVisible) return;
+
+    // Widen the active window to the full panel, then let Screen reflow
+    // into it -- full()'s own hardware clear wipes the button pixels, and
+    // the wider layout naturally uses that space for text afterward.
+    display->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    screen->setTextWidth(SCREEN_MAX_X);
+
+    buttonStripVisible = false;
+}
+
+// ── Top-left-corner info box ────────────────────────────────────────────────
+//
+// Touching the top-left corner of the screen shows a summary of the current
+// config. Reuses Screen's own suspend()/resume() -- same mechanism the menu
+// already relies on -- so incoming HP-41 stream bytes still update the text
+// buffer while the box is up, and resume() catches the display back up the
+// moment it's dismissed, instead of losing anything.
+namespace {
+bool infoBoxVisible = false;
+absolute_time_t infoBoxHideDeadline;
+constexpr std::uint32_t kInfoBoxShowMs = 5000;
+constexpr std::uint16_t kInfoCornerSize = 120;  // touch hit-zone: top-left NxN
+}  // namespace
+
+bool isInfoCornerTouch(std::uint16_t x, std::uint16_t y) {
+    return x < kInfoCornerSize && y < kInfoCornerSize;
+}
+
+// Named color if it matches one of the ColorPicker menu's presets,
+// otherwise falls back to the raw hex value.
+const char* colorName(std::uint16_t c) {
+    switch (c) {
+        case 0xFFFF: return "White";
+        case 0xFFE0: return "Yellow";
+        case 0x07E0: return "Green";
+        case 0x07FF: return "Cyan";
+        case 0xF800: return "Red";
+        default:     return nullptr;
+    }
+}
+
+void showInfoBox() {
+    if (infoBoxVisible) return;
+    screen->suspend();
+
+    constexpr int boxW = 400, boxH = 220;
+    constexpr int boxX = (SCREEN_MAX_X - boxW) / 2;
+    constexpr int boxY = (SCREEN_MAX_Y - boxH) / 2;
+    hp82163::MenuFrame::draw(display, boxX, boxY, boxW, boxH);
+
+    display->txtColor(0xFFFF, 0x0000);
+    char buf[64];
+
+    display->txtSize(1);
+    std::snprintf(buf, sizeof(buf), "HIPI-Board %s", HIPI_VERSION);
+    display->txtSetCursor(boxX + 20, boxY + 16);
+    display->txtWrite(buf);
+
+    display->txtSize(0);
+    int y = boxY + 56;
+    constexpr int lineStep = 24;
+
+    if( hpilDevices > 0 ) {
+        std::snprintf(buf, sizeof(buf), "Devices: %d", hpilDevices);
+    } else {
+        std::snprintf(buf, sizeof(buf), "Devices: (not configured)");
+    }
+    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
+
+    std::snprintf(buf, sizeof(buf), "File: %s",
+                  config.filename().empty() ? "(none)" : config.filename().c_str());
+    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
+
+    std::snprintf(buf, sizeof(buf), "Trace: %s",
+                  config.debug() ? "Extended" : (config.trace() ? "On" : "Off"));
+    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
+
+    std::snprintf(buf, sizeof(buf), "Font size: %u", config.fontSize());
+    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
+
+    if (config.columns() == 0) std::snprintf(buf, sizeof(buf), "Columns: Auto");
+    else                       std::snprintf(buf, sizeof(buf), "Columns: %u", config.columns());
+    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
+
+    const char* cname = colorName(config.textColor());
+    if (cname) std::snprintf(buf, sizeof(buf), "Text color: %s", cname);
+    else       std::snprintf(buf, sizeof(buf), "Text color: 0x%04X", config.textColor());
+    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
+
+    infoBoxVisible = true;
+    infoBoxHideDeadline = make_timeout_time_ms(kInfoBoxShowMs);
+}
+
+void hideInfoBox() {
+    if (!infoBoxVisible) return;
+    screen->resume();  // catches up on anything the HP-41 stream sent meanwhile
+    infoBoxVisible = false;
+}
+
 int main() {
     board_init(); 
     tusb_init();
@@ -263,7 +412,10 @@ int main() {
 
     // PIL status LED is left for you to drive from wherever "HP-IL is
     // active/connected" actually means in your setup, e.g.:
-    //   hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+    //   pilLedOn = true;
+    //   hp82163::setStatusLed(display, hp82163::StatusLed::Pil, pilLedOn);
+    // (update pilLedOn too, not just the LED itself -- showButtonStrip()
+    // reapplies it from that variable after being hidden and shown again)
 
     // First here we know if the debug-port is open or not (usb_connected)
     LOGF("HIPI Board v0.1\r\n");
@@ -284,6 +436,7 @@ int main() {
                              &buttonStripPixels, &buttonStripWidth,
                              &buttonStripHeight, &buttonStripScreenX0))
         LOGF("\r\n ### Failed to draw buttons ... ");
+    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
 
     LOGF("\r\n * Draw text ... ");
     display->setActiveWindow(0, 0, SCREEN_MAX_X-buttonStripWidth-1, SCREEN_MAX_Y-1);
@@ -321,7 +474,8 @@ int main() {
 
     absolute_time_t infoTimeout = make_timeout_time_ms(5000);
 
-    hp82163::setStatusLed(display, hp82163::StatusLed::Usb, usb_connected);
+    usbLedOn = usb_connected;
+    hp82163::setStatusLed(display, hp82163::StatusLed::Usb, usbLedOn);
 
     tud_cdc_n_write_flush(0);
     tud_task();
@@ -375,8 +529,29 @@ int main() {
                 std::uint16_t tx, ty;
                 if (touch_get_point(tx, ty)) {
                     touchActive = true;
+
+                    if (infoBoxVisible) {
+                        // Any touch while it's up dismisses it early --
+                        // consumed here, not treated as a button-strip
+                        // wake/press or another corner-tap.
+                        hideInfoBox();
+                    } else if (isInfoCornerTouch(tx, ty)) {
+                        showInfoBox();
+                    } else {
+                    // Any touch, anywhere, keeps the strip up a while longer
+                    // (or wakes it up if it was hidden). hitTestButton()
+                    // works on fixed coordinates, so it still recognizes a
+                    // touch in the button area even while nothing is drawn
+                    // there -- that's what lets a "blind" tap wake it too.
+                    const bool wasHidden = !buttonStripVisible;
+                    if (wasHidden) showButtonStrip();
+                    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+
                     hp82163::Button b = hp82163::hitTestButton(tx, ty);
-                    if (b != hp82163::Button::None) {
+                    // The touch that just woke the strip up is consumed by
+                    // the reveal itself -- don't also act on it as a press,
+                    // since the user couldn't see what they were touching.
+                    if (!wasHidden && b != hp82163::Button::None) {
                         pressedButton = b;
                         // Visual feedback: redraw just this button's bitmap
                         // region shifted, so it looks pressed in. The
@@ -405,10 +580,25 @@ int main() {
                         screen->refreshCursor();
                         dialog->handleButton(b);
                     }
+                    }
                 }
             }
             // Om touchActive redan ar true: ignorera — fingret ligger kvar,
             // vantar bara pa att lyftas innan nasta tryck raknas.
+        }
+
+        // Auto-hide the info box after kInfoBoxShowMs, same idea as the
+        // button strip's own countdown below.
+        if (infoBoxVisible && time_reached(infoBoxHideDeadline)) {
+            hideInfoBox();
+        }
+
+        // Auto-hide the strip after kButtonStripHideMs of inactivity -- but
+        // never while the menu is open; you need the buttons visible to
+        // navigate it.
+        if (buttonStripVisible && !dialog->isOpen() &&
+            time_reached(buttonStripHideDeadline)) {
+            hideButtonStrip();
         }
 
         // Lattviktig poll (var ~30 ms) for att upptacka NAR fingret lyfts —

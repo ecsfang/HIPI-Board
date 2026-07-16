@@ -306,11 +306,16 @@ private:
     static constexpr const char*   kBrightnessLabels[] = { "20%", "40%", "60%", "80%", "100%" };
     static constexpr int kBrightnessCount = 5;
 
-    // 0 = auto (max for current font size). 32 = the original HP82163's
-    // column count; the rest are the natural max at each font size (0-3).
-    // See Screen::maxColumns()/setColumns().
-    static constexpr std::uint8_t  kColumnsValues[] = { 0, 21, 28, 32, 42, 85 };
-    static constexpr const char*   kColumnsLabels[] = { "Auto", "21", "28", "32", "42", "85" };
+    // 0 = auto (max for current font size *and* current text width -- the
+    // button strip hiding/showing changes that at runtime, see
+    // pico_main.cpp's showButtonStrip()/hideButtonStrip()). 32 = the
+    // original HP82163's column count. The rest are the natural max at
+    // each font size (0-3) at the *full* 800px panel width (i.e. with the
+    // button strip hidden) -- if the strip happens to be showing when one
+    // of these is picked, Screen::setColumns() clamps it down to whatever
+    // the narrower width currently allows instead of overflowing.
+    static constexpr std::uint8_t  kColumnsValues[] = { 0, 25, 32, 33, 50, 100 };
+    static constexpr const char*   kColumnsLabels[] = { "Auto", "25", "32", "33", "50", "100" };
     static constexpr int kColumnsCount = 6;
 
     // Off = bTrace/bDebug both false. On = bTrace only. Extended = both.
