@@ -2,8 +2,9 @@
 #pragma once
 #include "RA8875.hpp"
 #include "Screen.hpp"
-#include "bmp_loader.hpp"
 #include "ui_buttons.hpp"
+#include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
+#include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
 #include "ff.h"
 #include <vector>
 #include <string>
@@ -17,6 +18,10 @@
 // convention as the existing global `SDOK`.
 extern bool bTrace;
 extern bool bDebug;
+
+// The HP-IL device chain, defined in hipi.cpp -- the "Devices" menu lists
+// these directly (by name()) and toggles their enabled() state.
+extern std::vector<CDevice*> devices;
 
 namespace hp82163 {
 
@@ -63,59 +68,9 @@ namespace MenuFrame {
     }
 }  // namespace MenuFrame
 
-// Splash screen shown as early as possible at boot (right after
-// display->begin(), before Screen/UiDialog even exist), framed
-// with the same border style as the menu. Blocks for durationMs.
-inline void showSplashScreen(RA8875* display, const char* version,
-                              std::uint32_t durationMs = 2000) {
-    // setActiveWindow() hasn't been called yet this early in boot, so the
-    // active window is still at its undefined power-on state. rect/circle
-    // draws (which fillRoundRect is built from) are clipped to that window,
-    // so without this the corners/edges render incorrectly.
-    display->setActiveWindow(0, 0, 799, 479);
-
-    // Own box (not MenuFrame::X/Y/W/H), sized for the logo (96x114) + text,
-    // and centered on the full display -- the menu's own box is sized/
-    // positioned for the touch-button layout, which doesn't apply here.
-    constexpr int splashW = 400, splashH = 170;
-    constexpr int splashX = (800 - splashW) / 2;
-    constexpr int splashY = (480 - splashH) / 2;
-    MenuFrame::draw(display, splashX, splashY, splashW, splashH);
-
-    // Logo on the left, vertically centered in the box; if it's missing
-    // from the SD card, just skip it and fall back to text-only (same
-    // graceful-degradation style as the button strip in pico_main.cpp).
-    constexpr int logoX = splashX + 20;
-    std::uint16_t logoW = 0, logoH = 0;
-    // Peek dimensions first so we can vertically center whatever size the
-    // logo actually is.
-    const bool haveDims = peekBmpDimensions("logo.bmp", logoW, logoH);
-    const int logoY = splashY + (splashH - (haveDims ? logoH : 0)) / 2;
-    const bool haveLogo = haveDims &&
-        drawBmpAt(display, "logo.bmp", logoX, logoY, nullptr, &logoW, &logoH);
-
-    // Text sits to the right of the logo (or at the usual left margin if
-    // the logo failed to load).
-    const int textX = haveLogo ? (logoX + logoW + 20) : (splashX + 20);
-    const int textTop = splashY + (splashH - 90) / 2;  // ~90px tall text block
-
-    display->txtColor(0xFFFF, 0x0000);
-
-    display->txtSize(1);   // slightly larger title row
-    display->txtSetCursor(textX, textTop);
-    display->txtWrite("HIPI-Board");
-
-    display->txtSize(0);
-    display->txtSetCursor(textX, textTop + 46);
-    display->txtWrite("By Thomas Fänge");
-
-    char buf[48];
-    std::snprintf(buf, sizeof(buf), "Version %s", version);
-    display->txtSetCursor(textX, textTop + 70);
-    display->txtWrite(buf);
-
-    display->spiDelayMs(durationMs);
-}
+// Note: the splash screen used to live here, but it's board "chrome" (not
+// part of the interactive menu UiDialog implements) and has moved to
+// boardui.h/.cpp alongside the button strip, info box, and status LEDs.
 
 class UiDialog {
 public:
@@ -166,6 +121,14 @@ public:
     // already applied it).
     void setColumnsChangedCallback(std::function<void(std::uint8_t)> cb) {
         onColumnsChanged_ = std::move(cb);
+    }
+
+    // Called with a device's name() and its new enabled state whenever the
+    // user toggles it in the "Devices" menu (after CDevice::setEnabled()
+    // has already been applied). Useful for persisting the choice, e.g. to
+    // a Config object.
+    void setDeviceToggledCallback(std::function<void(const std::string&, bool)> cb) {
+        onDeviceToggled_ = std::move(cb);
     }
 
     bool isOpen() const { return state_ != State::Closed; }
@@ -272,6 +235,13 @@ public:
                 if (b == Button::Ok)   { applyTrace(selected_); openConfigMenu(); }
                 if (b == Button::X)    openConfigMenu();
                 break;
+
+            case State::DeviceList:
+                if (b == Button::Up)   moveSelection(-1, static_cast<int>(devices.size()));
+                if (b == Button::Down) moveSelection(+1, static_cast<int>(devices.size()));
+                if (b == Button::Ok)   toggleDevice(selected_);
+                if (b == Button::X)    openMainMenu();
+                break;
         }
     }
 
@@ -279,11 +249,11 @@ private:
     enum class State {
         Closed, MainMenu, ConfigMenu, SettingsMenu,
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
-        FilePicker, ConfirmFile, TraceMenu
+        FilePicker, ConfirmFile, TraceMenu, DeviceList
     };
 
-    static constexpr const char* kMainMenuLabels[] = { "Config", "Settings" };
-    static constexpr int kMainMenuCount = 2;
+    static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices" };
+    static constexpr int kMainMenuCount = 3;
 
     static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace" };
     static constexpr int kConfigMenuCount = 2;
@@ -308,7 +278,7 @@ private:
 
     // 0 = auto (max for current font size *and* current text width -- the
     // button strip hiding/showing changes that at runtime, see
-    // pico_main.cpp's showButtonStrip()/hideButtonStrip()). 32 = the
+    // boardui.cpp's showButtonStrip()/hideButtonStrip()). 32 = the
     // original HP82163's column count. The rest are the natural max at
     // each font size (0-3) at the *full* 800px panel width (i.e. with the
     // button strip hidden) -- if the strip happens to be showing when one
@@ -332,8 +302,9 @@ private:
     }
 
     void enterMainMenuItem() {
-        if (selected_ == 0) openConfigMenu();
-        else                openSettingsMenu();
+        if (selected_ == 0)      openConfigMenu();
+        else if (selected_ == 1) openSettingsMenu();
+        else                     openDeviceList();
     }
 
     void openConfigMenu() {
@@ -455,6 +426,36 @@ private:
         }
     }
 
+    // Shows every device in the HP-IL chain (see the `devices` global from
+    // hipi.cpp) with its current enabled/disabled status. Labels are built
+    // fresh each time (name() + state), since device count/state isn't
+    // known at compile time like the other menus' fixed label arrays.
+    void openDeviceList() {
+        deviceLabels_.clear();
+        for (CDevice* dev : devices) {
+            deviceLabels_.push_back(deviceLabel(dev));
+        }
+        state_ = State::DeviceList;
+        selected_ = 0;
+        drawBox();
+        for (std::size_t i = 0; i < deviceLabels_.size() && i < static_cast<std::size_t>(kMaxFilesShown); ++i) {
+            drawRow(static_cast<int>(i), deviceLabels_[i].c_str());
+        }
+    }
+
+    static std::string deviceLabel(CDevice* dev) {
+        return std::string(dev->name()) + (dev->enabled() ? " [ON]" : " [OFF]");
+    }
+
+    void toggleDevice(int index) {
+        if (index < 0 || index >= static_cast<int>(devices.size())) return;
+        CDevice* dev = devices[index];
+        dev->toggleEnabled();
+        deviceLabels_[static_cast<std::size_t>(index)] = deviceLabel(dev);
+        drawRow(index, deviceLabels_[static_cast<std::size_t>(index)].c_str());
+        if (onDeviceToggled_) onDeviceToggled_(dev->name(), dev->enabled());
+    }
+
     void openConfirmFile(const std::string& filename) {
         pendingFile_ = filename;
         state_ = State::ConfirmFile;
@@ -573,6 +574,10 @@ private:
                 if (index >= 0 && index < kTraceCount)
                     drawRow(index, kTraceLabels[index]);
                 break;
+            case State::DeviceList:
+                if (index >= 0 && index < static_cast<int>(deviceLabels_.size()))
+                    drawRow(index, deviceLabels_[static_cast<std::size_t>(index)].c_str());
+                break;
             case State::Closed:
                 break;
             case State::ConfirmFile:
@@ -588,12 +593,14 @@ private:
                                     // consumed by the next button press
     std::vector<std::string> files_;
     std::string pendingFile_;
+    std::vector<std::string> deviceLabels_;
     std::function<void(const std::string&)> onFileSelected_;
     std::function<void(std::uint16_t)> onColorChanged_;
     std::function<void(bool, bool)> onTraceChanged_;
     std::function<void(std::uint8_t)> onFontSizeChanged_;
     std::function<void(std::uint8_t)> onBrightnessChanged_;
     std::function<void(std::uint8_t)> onColumnsChanged_;
+    std::function<void(const std::string&, bool)> onDeviceToggled_;
 };
 
 }  // namespace hp82163

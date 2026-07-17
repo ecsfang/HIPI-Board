@@ -91,6 +91,7 @@ protected:
     IL_ADDR_t       m_nAau;
     const char      *m_sdi;
     IL_Type_e       m_type;
+    bool            m_enabled;
 public:
     CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau, IL_Type_e type = NONE) {
         m_devName = name;
@@ -101,6 +102,7 @@ public:
         m_nSai = _sai;
         m_nAau = _aau;
         m_type = type;
+        m_enabled = true;
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
     virtual IL_CMD_t hpil(IL_CMD_t cmd);
@@ -125,6 +127,16 @@ public:
     const char *name() { return m_devName; }
     void type(IL_Type_e type) { m_type = type; }
     IL_Type_e type(void) { return m_type; }
+
+    // Whether this device participates on the HP-IL bus at all. Disabled
+    // devices are skipped entirely by hipi_loop() (see hipi.cpp) -- no
+    // frame processing, no idle() polling, and since AAD address
+    // assignment only advances for devices whose hpil() actually runs,
+    // a disabled device also doesn't consume an address slot, exactly as
+    // if it were physically absent from the loop.
+    bool enabled() const { return m_enabled; }
+    void setEnabled(bool e) { m_enabled = e; }
+    void toggleEnabled() { m_enabled = !m_enabled; }
 };
 
 #endif//__HPIL_H__

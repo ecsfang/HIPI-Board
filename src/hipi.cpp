@@ -14,6 +14,7 @@
 #include "usb_serial.h"
 
 std::vector<CDevice*> devices;
+CPilBox* pilbox = nullptr;
 
 extern hp82163::Config config;
 
@@ -22,11 +23,6 @@ extern hp82163::Config config;
 void extendedTrace(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 {
     char buf[32];
-//    if( !IS_IDLE(cmd) && cmd != NO_FRAME ) {
-//        LOGF("%-6.6s --> ", ilMnemonic(cmd, buf));
-//    } else
-//        LOGF("\t   ");
-//    if( !IS_IDLE(rtn) ) {
     if( cmd != rtn ) {
         LOGF("-> %s (%X,%X)", ilMnemonic(rtn, buf), cmd, rtn);
         if( IS_DATA(cmd) && isprint(rtn) )
@@ -53,7 +49,15 @@ void hipi_init()
     devices.push_back(new CDisplay("TFDISPLAY", 0x3E));
     devices.push_back(new CDrive("TFDRIVE", cassette));
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
-    devices.push_back(new CPilBox("PILBOX"));
+    pilbox = new CPilBox("PILBOX");
+    devices.push_back(pilbox);
+
+    // Apply persisted enabled/disabled state (see Config::isDeviceEnabled()
+    // / UiDialog's "Devices" menu) now that the actual instances exist --
+    // Config only stores names, since it's loaded before any CDevice does.
+    for (CDevice* dev : devices) {
+        dev->setEnabled(config.isDeviceEnabled(dev->name()));
+    }
 }
 
 bool bDebug = false;
@@ -73,14 +77,12 @@ bool hipi_loop(HpIlLoop& loop) {
         // Got a frame, send to all devices in the loop
         if( bTrace && !IS_IDLE(rx_word) ) {
             // Trace if new command and not idle ...
-            //LOGF("\r\n%s%-6.6s" RESET " ", lastCmd != rx_word ? HILIGHT : "", ilMnemonic(rx_word, buf));
             LOGF("\r\n@" HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
             lastCmd = rx_word;
-            LOGF("WTF!(%d)",devices.size());
         }
-        //for (CDevice* dev : devices) {
         for (std::size_t i = 0; i < devices.size(); ++i) {
             CDevice* dev = devices[i];
+            if (!dev->enabled()) continue;   // as if not physically on the loop
             bool isLast = (i == devices.size() - 1);
             IL_CMD_t rtn = dev->hpil(rx_word);
             if( !IS_IDLE(rtn) ) {
@@ -88,19 +90,17 @@ bool hipi_loop(HpIlLoop& loop) {
                 if (bDebug ) {
                     extendedTrace(dev, rx_word, rtn);
                 }
-            }
-            rx_word = rtn;
-            if( !IS_IDLE(rtn) ) {
                 if( bTrace && !bDebug && dev->type() == PILBOX )
-                    LOGF("> pilbox ");
+                LOGF("> pilbox ");
                 if (!isLast && bTrace ) {
-                    if( lastCmd != rx_word ) {
-                        LOGF("> " HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
-                        lastCmd = rx_word;
+                    if( lastCmd != rtn ) {
+                        LOGF("> " HILIGHT "%-6.6s" RESET " ", ilMnemonic(rtn, buf));
+                        lastCmd = rtn;
                     } else
-                        LOGF("> %-6.6s ", ilMnemonic(rx_word, buf));
+                    LOGF("> %-6.6s ", ilMnemonic(rtn, buf));
                 }
             }
+            rx_word = rtn;
         }
         if( bTrace && !IS_IDLE(rx_word) ) {
             LOGF("%s %s", bDebug ? "<<<" : ">>>", ilMnemonic(rx_word, buf));
@@ -108,11 +108,6 @@ bool hipi_loop(HpIlLoop& loop) {
                 LOGF(" '%c' ", isprint(rx_word&0xFF) ? rx_word&0xFF : '.');
             if( bDebug )
             LOGF("\r\n");
-//        } else if (bDebug && !IS_IDLE(rx_word)) {
-//            LOGF("<<< %s", ilMnemonic(rx_word, buf));
-//            if( IS_DATA(rx_word) )
-//                LOGF(" '%c' ", isprint(rx_word&0xFF) ? rx_word&0xFF : '.');
-//            LOGF("\r\n");
         }
         // Send the final return value back to the HP-IL loop using the PIO interface
         if( inAddrRange(rx_word, AAD) ) {
@@ -124,8 +119,9 @@ bool hipi_loop(HpIlLoop& loop) {
         return true;    // Handled a frame
     } else {
         led_on(LED_PIN_3);
-        // No frame received, call idle() on all devices
+        // No frame received, call idle() on all enabled devices
         for (CDevice* dev : devices) {
+            if (!dev->enabled()) continue;
             dev->idle();
         }
         led_off(LED_PIN_3);

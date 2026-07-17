@@ -408,9 +408,18 @@ public:
         }
 
         // ── Anything else (e.g. a new LED digit after params with no space) ───
-        // Finalize the current group, then re-process this character.
-        _finalize();
-        feed(c);
+        if (_cmd != 0) {
+            // A command is active -- finalize() resets _cmd, so re-processing
+            // this same character will be interpreted in the "awaiting LED
+            // selection" state.
+            _finalize();
+            feed(c);
+        } else {
+            // No active command and the character isn't a valid LED digit or
+            // command letter -- ignore it silently instead of recursing
+            // forever. This happens whenever non-LED-protocol data (e.g.
+            // plain text) is sent to the LED device's HP-IL address.
+        }
     }
 
     // Call after the last character of a string to flush any pending command

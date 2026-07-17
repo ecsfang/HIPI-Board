@@ -22,10 +22,20 @@ public:
     void idle(void);
     void clear(void) {}
     void show(void);
+
+    // True once the PC app has actually put us in an active PILBox mode
+    // (CON/COFF/COFI) via a PILBox command frame -- TDIS means "not
+    // connected", regardless of whether the underlying serial channel
+    // itself is open.
+    bool isConnected() const { return PILBox_mode != TDIS; }
 private:
     IL_CMD_t sendFrame(IL_CMD_t cmd);
     IL_CMD_t receiveFrame(void);
 };
 
+// The single CPilBox instance created in hipi_init() (see hipi.cpp) --
+// exposed so other modules (e.g. boardui.cpp's PILBOX status LED) can
+// query isConnected() without needing to search the `devices` vector.
+extern CPilBox* pilbox;
 
 #endif//__PILBOX_H__

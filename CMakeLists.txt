@@ -113,6 +113,7 @@ target_include_directories(hp82163_pico_transport PUBLIC include)
 # ----------------------------------------------------------------------
 add_executable(hp82163_pico
     src/pico_main.cpp
+    src/boardui.cpp
     src/hipi.cpp
     src/hpil.cpp
     src/device.cpp

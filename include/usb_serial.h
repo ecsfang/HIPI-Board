@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include "tusb.h"
 #include "pico/time.h"
 
@@ -32,8 +33,65 @@ static inline void usb_task(void) {
 
 // ── CDC0 — debug console (replaces printf) ────────────────────────────────────
 
+// ── Boot log buffer ─────────────────────────────────────────────────────────
+// cdc0_write() drops anything written before a terminal has actually opened
+// the CDC0 port (tud_cdc_n_connected(0)) -- and that can lag well behind
+// tud_mounted()/usb_connected, since enumeration is fast but a human still
+// has to go click open a terminal window. Buffer what's written before that
+// point (capped, so it can't grow unbounded), and flush it out in one go
+// the moment the port does connect, so early boot messages aren't silently
+// lost just because you were a bit slow opening your terminal after a reset.
+namespace usb_serial_detail {
+constexpr size_t kBootLogCapacity = 4096;
+inline char   bootLogBuf[kBootLogCapacity];
+inline size_t bootLogLen = 0;
+inline bool   bootLogFlushed = false;
+
+// True once we've paid the one-time "settle" delay below. Guards against a
+// known TinyUSB/host quirk: tud_cdc_n_connected() can report true slightly
+// before the host OS has fully finished attaching its read pipe for the
+// port, so the very first write attempt right after that transition can be
+// silently swallowed on the host side even though the device thinks it's
+// connected. Costs a few tens of ms, paid exactly once, at first connection.
+inline bool   settled = false;
+}  // namespace usb_serial_detail
+
 static inline void cdc0_write(const char* buf, size_t len) {
-    if (!tud_cdc_n_connected(0)) return;
+    using namespace usb_serial_detail;
+
+    if (!tud_cdc_n_connected(0)) {
+        // Not connected yet -- stash what fits (silently drops anything
+        // past the cap; better than blocking boot forever waiting for a
+        // terminal that may never come).
+        if (!bootLogFlushed) {
+            const size_t room = kBootLogCapacity - bootLogLen;
+            const size_t n = len < room ? len : room;
+            memcpy(bootLogBuf + bootLogLen, buf, n);
+            bootLogLen += n;
+        }
+        return;
+    }
+
+    if (!settled) {
+        // First write attempt since connecting -- give the host's CDC-ACM
+        // pipe a moment to finish settling before trusting it with actual
+        // data (see comment on `settled` above).
+        for (int i = 0; i < 5; ++i) { tud_task(); sleep_ms(10); }
+        settled = true;
+    }
+
+    if (!bootLogFlushed && bootLogLen > 0) {
+        // Flush the buffered backlog, in order, before this new message.
+        size_t written = 0;
+        while (written < bootLogLen) {
+            uint32_t n = tud_cdc_n_write(0, bootLogBuf + written, bootLogLen - written);
+            written += n;
+            if (n == 0) tud_task();
+        }
+        tud_cdc_n_write_flush(0);
+    }
+    bootLogFlushed = true;
+
     size_t written = 0;
     while (written < len) {
         uint32_t n = tud_cdc_n_write(0, buf + written, len - written);
@@ -41,6 +99,16 @@ static inline void cdc0_write(const char* buf, size_t len) {
         if (n == 0) tud_task();   // TX buffer full — yield and retry
     }
     tud_cdc_n_write_flush(0);
+}
+
+// Call periodically (e.g. once per main-loop iteration) to flush any
+// buffered boot-time log output as soon as the CDC port connects, without
+// waiting for the next LOGF() call to happen to trigger it.
+static inline void usb_serial_flush_boot_log(void) {
+    using namespace usb_serial_detail;
+    if (bootLogFlushed || bootLogLen == 0) return;
+    if (!tud_cdc_n_connected(0)) return;
+    cdc0_write("", 0);  // len=0 write -- takes the flush-backlog-first path above
 }
 
 // Drop-in replacement for printf — use cdc0_printf() in place of printf().
@@ -55,14 +123,17 @@ static inline void cdc0_printf(const char* fmt, ...) {
 }
 
 // ── Logging gate ──────────────────────────────────────────────────────────────
-// `usb_connected` is set once at boot (see pico_main.cpp) based on whether a
-// USB host was seen at all within the startup timeout. cdc0_write() already
-// checks tud_cdc_n_connected() before writing, but everything must still work
-// (not stall/hang) when there's no USB present at all -- use LOGF(...) instead
-// of calling cdc0_printf()/printf() directly for any log/debug output, so
-// nothing even attempts to touch the CDC port when usb_connected is false.
+// Gate on tud_mounted() directly (always current), not the cached
+// `usb_connected` variable (set/refreshed elsewhere, e.g. for the USB status
+// LED in boardui.cpp) -- gating on a value that can still be stale/false at
+// the exact moment a given LOGF() call runs would skip that call forever,
+// even though cdc0_write()'s own boot-log buffer could otherwise have
+// captured it. tud_mounted() is a cheap flag read, safe to call every time.
+//
+// `usb_connected` itself is unrelated to LOGF now -- it's just a
+// live-refreshed USB-status flag used for the status LED (see boardui.cpp).
 extern bool usb_connected;
-#define LOGF(...) do { if (usb_connected) cdc0_printf(__VA_ARGS__); } while (0)
+#define LOGF(...) do { if (tud_mounted()) cdc0_printf(__VA_ARGS__); } while (0)
 
 // ── CDC1 — data port ──────────────────────────────────────────────────────────
 

@@ -31,9 +31,6 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
 
     preProc(cmd);
 
-    if( !IS_IDLE(cmd) )
-        LOGF(">%03X\r\n", cmd);
-
     if( cmd == IFC) {
         ifc();
     }
@@ -63,7 +60,6 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
     }
     if( inAddrRange(cmd, LAD) ) {
         if( addr() == _addr && _addr < 31 ) {
-            LOGF("LISTEN!\r\n");
             setListener();
         } else
             setIdle();

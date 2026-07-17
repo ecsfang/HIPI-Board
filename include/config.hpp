@@ -6,6 +6,7 @@
 // the file on disk always matches the in-memory values.
 #pragma once
 
+#include "usb_serial.h"  // LOGF
 #include "ff.h"
 #include <cstdint>
 #include <cstdio>
@@ -78,6 +79,10 @@ public:
                            static_cast<unsigned>(columns_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "disabled_devices=%s\n",
+                           disabledDevices_.c_str());
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         f_close(&file);
     }
 
@@ -114,7 +119,56 @@ public:
         save();
     }
 
+    // Whether a given device name should start enabled. Devices not
+    // mentioned in the stored list default to enabled -- only names
+    // explicitly recorded as disabled are excluded.
+    bool isDeviceEnabled(const std::string& name) const {
+        return findDeviceToken(name) == std::string::npos;
+    }
+
+    // Records the given device's enabled/disabled state and persists it
+    // immediately. Called from UiDialog's device-toggle callback (see
+    // pico_main.cpp), matched back up against actual CDevice instances by
+    // name() in hipi_init() at boot.
+    void setDeviceEnabled(const std::string& name, bool enabled) {
+        const bool currentlyEnabled = isDeviceEnabled(name);
+        if (enabled == currentlyEnabled) return;   // no change, skip the save()
+
+        if (!enabled) {
+            // Add to the disabled list.
+            if (!disabledDevices_.empty()) disabledDevices_ += ",";
+            disabledDevices_ += name;
+        } else {
+            // Remove from the disabled list -- rebuild it without this name.
+            std::string rebuilt;
+            std::size_t start = 0;
+            while (start <= disabledDevices_.size()) {
+                std::size_t comma = disabledDevices_.find(',', start);
+                const std::size_t tokenLen = (comma == std::string::npos)
+                    ? std::string::npos : comma - start;
+                std::string token = disabledDevices_.substr(start, tokenLen);
+                if (!token.empty() && token != name) {
+                    if (!rebuilt.empty()) rebuilt += ",";
+                    rebuilt += token;
+                }
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+            disabledDevices_ = rebuilt;
+        }
+        save();
+    }
+
 private:
+    // Wraps in commas so a substring search can't false-positive on a
+    // name that's merely a substring of another (e.g. "LED" inside
+    // "TFLEDS") -- ",TFLEDS," only matches the exact token ",TFLEDS,".
+    static std::string wrapCsv(const std::string& s) { return "," + s + ","; }
+
+    std::size_t findDeviceToken(const std::string& name) const {
+        return wrapCsv(disabledDevices_).find(wrapCsv(name));
+    }
+
     // Very small "key=value" line parser. Unknown keys are ignored, so
     // old config files stay loadable as new keys get added later.
     void parse(const char* buf) {
@@ -143,6 +197,8 @@ private:
                     brightness_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "columns") == 0) {
                     columns_ = static_cast<std::uint8_t>(std::atoi(value));
+                } else if (std::strcmp(key, "disabled_devices") == 0) {
+                    disabledDevices_ = value;
                 }
             }
             line = std::strtok(nullptr, "\r\n");
@@ -166,6 +222,9 @@ private:
     std::uint8_t  fontSize_   = 0;
     std::uint8_t  brightness_ = 0xFF;
     std::uint8_t  columns_    = 0;   // 0 = auto
+    // Comma-separated device names (matched against CDevice::name()) that
+    // should start disabled. Empty = everything enabled (the default).
+    std::string   disabledDevices_ = "";
 };
 
 }  // namespace hp82163

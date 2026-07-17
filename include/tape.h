@@ -17,6 +17,7 @@
 #include "hw_config.h"
 #include "f_util.h"
 #include "ff.h"
+#include "usb_serial.h"  // LOGF
 
 #define MEDIUM_CASS     0
 #define MEDIUM_DISK     1

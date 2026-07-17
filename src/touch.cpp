@@ -8,7 +8,9 @@
 
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
+#include "pico/time.h"
 #include <atomic>
+#include <utility>
 
 #include "usb_serial.h"
 #include "touch.h"
@@ -320,4 +322,83 @@ bool touch_get_point(uint16_t& x, uint16_t& y) {
 // Latt koll (ingen skalning/parsing utover NBfingers) - for release-polling.
 bool touch_is_down() {
     return touch_read_silent() > 0;
+}
+
+// ── Debounced tap detection ─────────────────────────────────────────────────
+
+namespace {
+bool touchActive = false;
+bool touchConfirmed = false;
+uint16_t pendingTx = 0, pendingTy = 0;
+absolute_time_t confirmDeadline;
+absolute_time_t lastReleasePoll = get_absolute_time();
+
+// See the rationale in touch.h -- a single stray reading (no real finger)
+// looks identical to a real tap at the first sample, so we wait a short
+// moment and check the same spot is still reporting "down" before acting.
+constexpr uint32_t kTouchConfirmMs = 60;
+constexpr int kTouchConfirmToleranceSq = 30 * 30;  // 30px radius, squared
+
+TouchTapCallback     tapCallback;
+TouchReleaseCallback releaseCallback;
+}  // namespace
+
+void touch_set_tap_callback(TouchTapCallback cb) {
+    tapCallback = std::move(cb);
+}
+
+void touch_set_release_callback(TouchReleaseCallback cb) {
+    releaseCallback = std::move(cb);
+}
+
+void touch_poll() {
+    // Fast reaction to a NEW press (the interrupt flag is set by IRQ_PIN).
+    // Only records the press and arms the confirmation timer here -- the
+    // tap callback only fires once the touch has been debounced below.
+    if (g_dataReadyFlag.exchange(false, std::memory_order_relaxed)) {
+        if (!touchActive) {
+            uint16_t tx, ty;
+            if (touch_get_point(tx, ty)) {
+                touchActive     = true;
+                touchConfirmed  = false;
+                pendingTx = tx;
+                pendingTy = ty;
+                confirmDeadline = make_timeout_time_ms(kTouchConfirmMs);
+            }
+        }
+        // If touchActive is already true: ignore -- the finger is still
+        // down, just waiting for release before the next press counts.
+    }
+
+    // Confirmation step: re-sample a moment after the first detection,
+    // before acting on it. Filters out single-sample glitches (no second
+    // reading at all, or one that's jumped far away) at the cost of only
+    // kTouchConfirmMs of added latency on a genuine tap.
+    if (touchActive && !touchConfirmed && time_reached(confirmDeadline)) {
+        uint16_t tx, ty;
+        if (touch_get_point(tx, ty)) {
+            const int dx = static_cast<int>(tx) - static_cast<int>(pendingTx);
+            const int dy = static_cast<int>(ty) - static_cast<int>(pendingTy);
+            if (dx * dx + dy * dy <= kTouchConfirmToleranceSq) {
+                touchConfirmed = true;
+                if (tapCallback) tapCallback(pendingTx, pendingTy);
+            }
+            // else: moved too far between samples -- treat as noise or a
+            // drag, ignore. Still waits for release below as normal.
+        }
+        // else: finger already gone by the confirm deadline -- was a
+        // single-sample blip, not a real press. Ignore it.
+    }
+
+    // Lightweight poll (every ~30 ms) to detect WHEN the finger lifts --
+    // no IRQ arrives for that, so we have to ask actively.
+    if (touchActive &&
+        absolute_time_diff_us(lastReleasePoll, get_absolute_time()) > 30'000) {
+        lastReleasePoll = get_absolute_time();
+        if (!touch_is_down()) {
+            touchActive = false;
+            touchConfirmed = false;
+            if (releaseCallback) releaseCallback();
+        }
+    }
 }

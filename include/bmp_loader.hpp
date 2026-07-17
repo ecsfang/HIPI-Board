@@ -1,12 +1,13 @@
 // bmp_loader.hpp
 //
 // Loads 24-bit uncompressed BMP files from the SD card and draws them via
-// RA8875::drawBitmap565(). Shared by the button-strip loader (pico_main.cpp)
-// and the splash-screen logo (uidialog.hpp) so the BMP-parsing logic only
+// RA8875::drawBitmap565(). Shared by the button-strip loader and the
+// splash-screen logo (both in boardui.cpp) so the BMP-parsing logic only
 // exists once.
 #pragma once
 
 #include "RA8875.hpp"
+#include "usb_serial.h"  // LOGF
 #include "ff.h"
 #include <cstdint>
 #include <cstring>

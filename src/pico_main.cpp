@@ -16,6 +16,11 @@
 //   cmake -DPICO_SDK_PATH=/path/to/pico-sdk -B build
 //   cmake --build build
 //   picotool load -f build/hp82163_pico_demo.uf2
+//
+// Touch handling (debounced tap/release state machine) lives in touch.h/
+// touch.cpp. Splash screen, the auto-hiding button strip, the info box,
+// and the USB/PILBOX status LEDs live in boardui.h/boardui.cpp. This file
+// just wires everything together.
 
 //#define TEST_DISPLAY
 
@@ -45,10 +50,8 @@
 #include "hw_config.h"
 #include "hpil.h"
 
-#include "bsp/board.h"   // för board_init()
+#include "bsp/board.h"   // for board_init()
 #include "usb_serial.h"
-#include <atomic>
-
 
 extern void init_spi(void);
 
@@ -59,9 +62,8 @@ extern void init_spi(void);
 
 #include "tusb.h"
 
-#include "uidialog.hpp"
+#include "boardui.h"
 #include "config.hpp"
-#include "bmp_loader.hpp"
 
 #include <cstdio>
 
@@ -72,26 +74,6 @@ extern bool bDebug;
 extern uint8_t hpilDevices;
 
 hp82163::Config config;
-
-bool drawBmpRightAligned(hp82163::RA8875* display, const char* path,
-                         std::uint16_t screen_width, std::uint16_t y0,
-                         std::vector<std::uint16_t>* outPixels = nullptr,
-                         std::uint16_t* outWidth = nullptr,
-                         std::uint16_t* outHeight = nullptr,
-                         std::uint16_t* outScreenX0 = nullptr);
-namespace {
-bool touchActive = false;
-absolute_time_t lastReleasePoll = get_absolute_time();
-hp82163::Button pressedButton = hp82163::Button::None;
-
-// Button-press visual feedback: redraw the button's bitmap shifted by
-// (kPressDx, kPressDy) while held. kPressMargin (> the largest shift
-// magnitude) is used for the baseline/restore redraws so any overflow
-// outside the button's own rect -- in any direction -- gets cleaned up,
-// not just the tight rect itself.
-constexpr std::int16_t kPressDx = 5, kPressDy = -5;
-constexpr std::int16_t kPressMargin = 8;
-}  // namespace
 
 extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
                                             uint8_t stage,
@@ -151,9 +133,9 @@ extern bool hipi_loop(HpIlLoop& loop);
 bool usb_connected = false;
 
 void SetPinDriveStrength(uint pin, uint mA) {
-    // gpio_set_drive_strength() är pico-SDK:s API för detta
-    // Värdetypen heter 'gpio_drive_strength' (inte _t)
-    
+    // gpio_set_drive_strength() is the Pico SDK's API for this
+    // The type is named 'gpio_drive_strength' (not _t)
+
     if (mA <= 2) {
         gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_2MA);
     } else if (mA <= 4) {
@@ -168,16 +150,7 @@ void SetPinDriveStrength(uint pin, uint mA) {
 hp82163::Screen *screen;
 hp82163::UiDialog *dialog = nullptr;
 
-// Cached copy of the button-strip bitmap, so a single button's
-// sub-rectangle can be redrawn (e.g. shifted for "pressed" feedback)
-// without re-reading the BMP from the SD card. Filled in by
-// drawBmpRightAligned() at boot. RGB565 (2 bytes/pixel), matching the
-// display's 16bpp mode.
-std::vector<std::uint16_t> buttonStripPixels;
-std::uint16_t buttonStripWidth = 0, buttonStripHeight = 0, buttonStripScreenX0 = 0;
-
 extern void ledTest(void);
-extern std::atomic<bool> g_dataReadyFlag;
 
 hp82163::PicoSpiTransport* transport = nullptr;
 hp82163::RA8875* display = nullptr;
@@ -216,153 +189,6 @@ FRESULT initSD()
     return fr;
 }
 
-// ── Auto-hiding button strip ────────────────────────────────────────────────
-//
-// Normally hidden, so the text area gets the full panel width. Any touch
-// anywhere on the screen -- whether that's a tap squarely on a button or
-// just the start of a drag across the display -- reveals the strip and
-// resets the countdown; hitTestButton() works purely on fixed screen
-// coordinates, so it still recognizes touches in the (currently blank)
-// button area even while hidden. The touch that reveals the strip is
-// consumed by the reveal itself, not treated as an actual button press
-// (the user couldn't see what they were pressing yet). It auto-hides again
-// after kButtonStripHideMs of inactivity, but only while the menu is closed
-// -- you need the buttons visible to navigate it.
-namespace {
-bool buttonStripVisible = true;
-absolute_time_t buttonStripHideDeadline;
-constexpr std::uint32_t kButtonStripHideMs = 5000;
-
-// Last commanded state of each status LED, so re-showing the strip (which
-// redraws the whole cached bitmap, including their baked-in "off" look)
-// can immediately reapply whichever state was actually current.
-bool usbLedOn = false;
-bool pilLedOn = false;
-}  // namespace
-
-void showButtonStrip() {
-    if (buttonStripVisible) return;
-
-    // Draw first, while the active window is still the full panel width
-    // (that's what it was left at while hidden) -- the RA8875 clips
-    // drawing to the active window, so drawing the strip at its screen
-    // position *after* narrowing the window back down would get clipped
-    // away since that position is outside the narrower window.
-    display->drawBitmap565(static_cast<std::int16_t>(buttonStripScreenX0), 0,
-                           buttonStripWidth, buttonStripHeight,
-                           buttonStripPixels.data());
-    hp82163::setStatusLed(display, hp82163::StatusLed::Usb, usbLedOn);
-    hp82163::setStatusLed(display, hp82163::StatusLed::Pil, pilLedOn);
-
-    // Now narrow the active window/text area back and let Screen reflow
-    // into it.
-    display->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
-    screen->setTextWidth(SCREEN_MAX_X - buttonStripWidth);
-
-    buttonStripVisible = true;
-}
-
-void hideButtonStrip() {
-    if (!buttonStripVisible) return;
-
-    // Widen the active window to the full panel, then let Screen reflow
-    // into it -- full()'s own hardware clear wipes the button pixels, and
-    // the wider layout naturally uses that space for text afterward.
-    display->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
-    screen->setTextWidth(SCREEN_MAX_X);
-
-    buttonStripVisible = false;
-}
-
-// ── Top-left-corner info box ────────────────────────────────────────────────
-//
-// Touching the top-left corner of the screen shows a summary of the current
-// config. Reuses Screen's own suspend()/resume() -- same mechanism the menu
-// already relies on -- so incoming HP-41 stream bytes still update the text
-// buffer while the box is up, and resume() catches the display back up the
-// moment it's dismissed, instead of losing anything.
-namespace {
-bool infoBoxVisible = false;
-absolute_time_t infoBoxHideDeadline;
-constexpr std::uint32_t kInfoBoxShowMs = 5000;
-constexpr std::uint16_t kInfoCornerSize = 120;  // touch hit-zone: top-left NxN
-}  // namespace
-
-bool isInfoCornerTouch(std::uint16_t x, std::uint16_t y) {
-    return x < kInfoCornerSize && y < kInfoCornerSize;
-}
-
-// Named color if it matches one of the ColorPicker menu's presets,
-// otherwise falls back to the raw hex value.
-const char* colorName(std::uint16_t c) {
-    switch (c) {
-        case 0xFFFF: return "White";
-        case 0xFFE0: return "Yellow";
-        case 0x07E0: return "Green";
-        case 0x07FF: return "Cyan";
-        case 0xF800: return "Red";
-        default:     return nullptr;
-    }
-}
-
-void showInfoBox() {
-    if (infoBoxVisible) return;
-    screen->suspend();
-
-    constexpr int boxW = 400, boxH = 220;
-    constexpr int boxX = (SCREEN_MAX_X - boxW) / 2;
-    constexpr int boxY = (SCREEN_MAX_Y - boxH) / 2;
-    hp82163::MenuFrame::draw(display, boxX, boxY, boxW, boxH);
-
-    display->txtColor(0xFFFF, 0x0000);
-    char buf[64];
-
-    display->txtSize(1);
-    std::snprintf(buf, sizeof(buf), "HIPI-Board %s", HIPI_VERSION);
-    display->txtSetCursor(boxX + 20, boxY + 16);
-    display->txtWrite(buf);
-
-    display->txtSize(0);
-    int y = boxY + 56;
-    constexpr int lineStep = 24;
-
-    if( hpilDevices > 0 ) {
-        std::snprintf(buf, sizeof(buf), "Devices: %d", hpilDevices);
-    } else {
-        std::snprintf(buf, sizeof(buf), "Devices: (not configured)");
-    }
-    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
-
-    std::snprintf(buf, sizeof(buf), "File: %s",
-                  config.filename().empty() ? "(none)" : config.filename().c_str());
-    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
-
-    std::snprintf(buf, sizeof(buf), "Trace: %s",
-                  config.debug() ? "Extended" : (config.trace() ? "On" : "Off"));
-    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
-
-    std::snprintf(buf, sizeof(buf), "Font size: %u", config.fontSize());
-    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
-
-    if (config.columns() == 0) std::snprintf(buf, sizeof(buf), "Columns: Auto");
-    else                       std::snprintf(buf, sizeof(buf), "Columns: %u", config.columns());
-    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
-
-    const char* cname = colorName(config.textColor());
-    if (cname) std::snprintf(buf, sizeof(buf), "Text color: %s", cname);
-    else       std::snprintf(buf, sizeof(buf), "Text color: 0x%04X", config.textColor());
-    display->txtSetCursor(boxX + 20, y); display->txtWrite(buf); y += lineStep;
-
-    infoBoxVisible = true;
-    infoBoxHideDeadline = make_timeout_time_ms(kInfoBoxShowMs);
-}
-
-void hideInfoBox() {
-    if (!infoBoxVisible) return;
-    screen->resume();  // catches up on anything the HP-41 stream sent meanwhile
-    infoBoxVisible = false;
-}
-
 int main() {
     board_init(); 
     tusb_init();
@@ -389,15 +215,15 @@ int main() {
 
     absolute_time_t timeout = make_timeout_time_ms(2000);
 
-    // Vänta tills USB-CDC är ansluten (max 3 sekunder)
+    // Wait until USB CDC is connected (max 3 seconds)
     while (!time_reached(timeout)) {
-        tud_task();  // driver USB-stacken (host requests, enumeration, IN/OUT)
+        tud_task();  // drives the USB stack (host requests, enumeration, IN/OUT)
         if (tud_mounted()) {
             usb_connected = true;
             //ledPower.on();
             break;
         }
-        sleep_ms(10);   // lite snällare än tight_loop_contents
+        sleep_ms(10);   // a bit gentler than tight_loop_contents
     }
 
     // Wait for a terminal to actually open the CDC port too (max 2 seconds --
@@ -410,12 +236,8 @@ int main() {
 
     ledA.off();
 
-    // PIL status LED is left for you to drive from wherever "HP-IL is
-    // active/connected" actually means in your setup, e.g.:
-    //   pilLedOn = true;
-    //   hp82163::setStatusLed(display, hp82163::StatusLed::Pil, pilLedOn);
-    // (update pilLedOn too, not just the LED itself -- showButtonStrip()
-    // reapplies it from that variable after being hidden and shown again)
+    // PIL status LED is driven live by boardui_poll() (tud_cdc_n_connected(
+    // ITF_HPIL)), no manual wiring needed here.
 
     // First here we know if the debug-port is open or not (usb_connected)
     LOGF("HIPI Board v0.1\r\n");
@@ -430,13 +252,9 @@ int main() {
 
     tud_task();
 
-    // Show buttons ...
-    LOGF("\r\n * Draw buttons ... ");
-    if (!drawBmpRightAligned(display, "buttons.bmp", SCREEN_MAX_X, 0,
-                             &buttonStripPixels, &buttonStripWidth,
-                             &buttonStripHeight, &buttonStripScreenX0))
-        LOGF("\r\n ### Failed to draw buttons ... ");
-    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+    // Show buttons -- draws and caches the strip, and tells us how wide it
+    // is so Screen's initial text width can be sized around it.
+    const std::uint16_t buttonStripWidth = hp82163::boardui_loadButtonStrip(display);
 
     LOGF("\r\n * Draw text ... ");
     display->setActiveWindow(0, 0, SCREEN_MAX_X-buttonStripWidth-1, SCREEN_MAX_Y-1);
@@ -474,9 +292,6 @@ int main() {
 
     absolute_time_t infoTimeout = make_timeout_time_ms(5000);
 
-    usbLedOn = usb_connected;
-    hp82163::setStatusLed(display, hp82163::StatusLed::Usb, usbLedOn);
-
     tud_cdc_n_write_flush(0);
     tud_task();
 
@@ -486,10 +301,17 @@ int main() {
     dialog->setFontSizeChangedCallback([](std::uint8_t s) { config.setFontSize(s); });
     dialog->setBrightnessChangedCallback([](std::uint8_t b) { config.setBrightness(b); });
     dialog->setColumnsChangedCallback([](std::uint8_t c) { config.setColumns(c); });
+    dialog->setDeviceToggledCallback([](const std::string& name, bool enabled) {
+        config.setDeviceEnabled(name, enabled);
+    });
+
+    hp82163::boardui_init(screen, dialog, HIPI_VERSION);
 
     // Init touch sensor ...
     LOGF("\r\n * Init touch sensor ...");
     touchInit();
+    touch_set_tap_callback(hp82163::boardui_handleTap);
+    touch_set_release_callback(hp82163::boardui_handleRelease);
     LOGF("\r\n\t* GSL1680 Boot up completed!\r\n");
     tud_task();
 
@@ -511,6 +333,7 @@ int main() {
 
     while (!time_reached(infoTimeout)) {
         tud_task();
+        usb_serial_flush_boot_log();
         sleep_ms(10);
     }
 
@@ -522,129 +345,13 @@ int main() {
 
     while (bRunning) {
         tud_task();  // TinyUSB background task
+        usb_serial_flush_boot_log();  // flush buffered boot messages once a terminal connects
         hipi_loop(hpil);
-        // Snabb reaktion vid NYTT tryck (interrupt-flaggan satts av IRQ_PIN)
-        if (g_dataReadyFlag.exchange(false, std::memory_order_relaxed)) {
-            if (!touchActive) {
-                std::uint16_t tx, ty;
-                if (touch_get_point(tx, ty)) {
-                    touchActive = true;
-
-                    if (infoBoxVisible) {
-                        // Any touch while it's up dismisses it early --
-                        // consumed here, not treated as a button-strip
-                        // wake/press or another corner-tap.
-                        hideInfoBox();
-                    } else if (isInfoCornerTouch(tx, ty)) {
-                        showInfoBox();
-                    } else {
-                    // Any touch, anywhere, keeps the strip up a while longer
-                    // (or wakes it up if it was hidden). hitTestButton()
-                    // works on fixed coordinates, so it still recognizes a
-                    // touch in the button area even while nothing is drawn
-                    // there -- that's what lets a "blind" tap wake it too.
-                    const bool wasHidden = !buttonStripVisible;
-                    if (wasHidden) showButtonStrip();
-                    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
-
-                    hp82163::Button b = hp82163::hitTestButton(tx, ty);
-                    // The touch that just woke the strip up is consumed by
-                    // the reveal itself -- don't also act on it as a press,
-                    // since the user couldn't see what they were touching.
-                    if (!wasHidden && b != hp82163::Button::None) {
-                        pressedButton = b;
-                        // Visual feedback: redraw just this button's bitmap
-                        // region shifted, so it looks pressed in. The
-                        // baseline/restore redraws use a margin larger than
-                        // the shift, sourced from the same strip cache, so
-                        // any overflow outside the button's own rect (e.g.
-                        // a shift toward the top-right sticks out past the
-                        // rect's top and right edges) gets cleaned up too --
-                        // not just the tight rect itself.
-                        hp82163::redrawButtonRegion(
-                            display, buttonStripPixels.data(),
-                            buttonStripWidth, buttonStripHeight,
-                            buttonStripScreenX0, /*stripScreenY0=*/0, b, 0, 0,
-                            kPressMargin);
-                        hp82163::redrawButtonRegion(
-                            display, buttonStripPixels.data(),
-                            buttonStripWidth, buttonStripHeight,
-                            buttonStripScreenX0, /*stripScreenY0=*/0, b,
-                            kPressDx, kPressDy);
-                        // The redraws above went through RA8875::drawBitmap565(),
-                        // which switches to graphics mode (gfxMode()) and blindly
-                        // zeros MWCR0 -- the same register that holds the cursor-
-                        // visible bit. Screen never sees this happen (these calls
-                        // bypass it entirely), so the blinking cursor would
-                        // otherwise vanish on every single button touch.
-                        screen->refreshCursor();
-                        dialog->handleButton(b);
-                    }
-                    }
-                }
-            }
-            // Om touchActive redan ar true: ignorera — fingret ligger kvar,
-            // vantar bara pa att lyftas innan nasta tryck raknas.
-        }
-
-        // Auto-hide the info box after kInfoBoxShowMs, same idea as the
-        // button strip's own countdown below.
-        if (infoBoxVisible && time_reached(infoBoxHideDeadline)) {
-            hideInfoBox();
-        }
-
-        // Auto-hide the strip after kButtonStripHideMs of inactivity -- but
-        // never while the menu is open; you need the buttons visible to
-        // navigate it.
-        if (buttonStripVisible && !dialog->isOpen() &&
-            time_reached(buttonStripHideDeadline)) {
-            hideButtonStrip();
-        }
-
-        // Lattviktig poll (var ~30 ms) for att upptacka NAR fingret lyfts —
-        // inget IRQ kommer da, sa vi maste fraga aktivt.
-        if (touchActive &&
-            absolute_time_diff_us(lastReleasePoll, get_absolute_time()) > 30'000) {
-            lastReleasePoll = get_absolute_time();
-            if (!touch_is_down()) {
-                touchActive = false;
-                if (pressedButton != hp82163::Button::None) {
-                    // Restore the button's bitmap to its normal position
-                    // (with the same margin, to clean up any overflow from
-                    // the shift regardless of direction).
-                    hp82163::redrawButtonRegion(
-                        display, buttonStripPixels.data(),
-                        buttonStripWidth, buttonStripHeight,
-                        buttonStripScreenX0, /*stripScreenY0=*/0, pressedButton, 0, 0,
-                        kPressMargin);
-                    screen->refreshCursor();  // same MWCR0-clobber fix as on press
-                    pressedButton = hp82163::Button::None;
-                }
-            }
-        }
+        touch_poll();          // debounced tap/release detection (touch.h)
+        hp82163::boardui_poll();  // auto-hide timers + status LED poll
         tight_loop_contents();
     }
 
     LOGF("Done!\r\n");
 
-}
-
-
-
-bool drawBmpRightAligned(hp82163::RA8875* display, const char* path,
-                         std::uint16_t screen_width, std::uint16_t y0,
-                         std::vector<std::uint16_t>* outPixels,
-                         std::uint16_t* outWidth,
-                         std::uint16_t* outHeight,
-                         std::uint16_t* outScreenX0) {
-    std::uint16_t width = 0, height = 0;
-    if (!hp82163::peekBmpDimensions(path, width, height)) {
-        LOGF("\r\n\t * Could not read BMP dimensions for <%s>!", path);
-        return false;
-    }
-    const std::uint16_t x0 = static_cast<std::uint16_t>(screen_width - width);  // höger kant
-    if (outScreenX0) *outScreenX0 = x0;
-    return hp82163::drawBmpAt(display, path, static_cast<std::int16_t>(x0),
-                              static_cast<std::int16_t>(y0),
-                              outPixels, outWidth, outHeight);
 }
