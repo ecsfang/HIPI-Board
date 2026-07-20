@@ -152,7 +152,7 @@ menu to close it entirely; the "back" button goes up one level at a time.
 ```
 Config
 ├── Select file     (SD-card .dat picker, with an "Open file?" confirmation)
-└── Trace           (Off / On / Extended -- controls bTrace/bDebug in hipi.cpp)
+└── Trace           (Off / On / Extended -- controls bTrace/bExtTrace in hipi.cpp)
 Settings
 ├── Textcolor       (White / Yellow / Green / Cyan / Red)
 ├── Font size       (0-3, built-in CGRAM scales)

@@ -209,7 +209,7 @@ void showInfoBox() {
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
 
     std::snprintf(buf, sizeof(buf), "Trace: %s",
-                  config.debug() ? "Extended" : (config.trace() ? "On" : "Off"));
+                  config.extTrace() ? "Extended" : (config.trace() ? "On" : "Off"));
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
 
     std::snprintf(buf, sizeof(buf), "Font size: %u", config.fontSize());

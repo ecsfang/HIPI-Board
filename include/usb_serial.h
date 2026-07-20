@@ -133,7 +133,11 @@ static inline void cdc0_printf(const char* fmt, ...) {
 // `usb_connected` itself is unrelated to LOGF now -- it's just a
 // live-refreshed USB-status flag used for the status LED (see boardui.cpp).
 extern bool usb_connected;
+extern bool bTrace;
+extern bool bExtTrace;
 #define LOGF(...) do { if (tud_mounted()) cdc0_printf(__VA_ARGS__); } while (0)
+#define TRC_LOGF(...) do { if (bTrace) LOGF(__VA_ARGS__); } while (0)
+#define DBG_LOGF(...) do { if (bExtTrace) LOGF(__VA_ARGS__); } while (0)
 
 // ── CDC1 — data port ──────────────────────────────────────────────────────────
 

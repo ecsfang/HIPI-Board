@@ -17,7 +17,7 @@
 // Global trace/debug flags, defined elsewhere (e.g. hipi.cpp) -- same
 // convention as the existing global `SDOK`.
 extern bool bTrace;
-extern bool bDebug;
+extern bool bExtTrace;
 
 // The HP-IL device chain, defined in hipi.cpp -- the "Devices" menu lists
 // these directly (by name()) and toggles their enabled() state.
@@ -96,7 +96,7 @@ public:
 
     // Called with the newly chosen (trace, debug) pair whenever the user
     // picks Off/On/Extended in the "Trace" menu (after the globals bTrace
-    // and bDebug have already been updated). Useful for persisting the
+    // and bExtTrace have already been updated). Useful for persisting the
     // choice.
     void setTraceChangedCallback(std::function<void(bool, bool)> cb) {
         onTraceChanged_ = std::move(cb);
@@ -288,7 +288,7 @@ private:
     static constexpr const char*   kColumnsLabels[] = { "Auto", "25", "32", "33", "50", "100" };
     static constexpr int kColumnsCount = 6;
 
-    // Off = bTrace/bDebug both false. On = bTrace only. Extended = both.
+    // Off = bTrace/bExtTrace both false. On = bTrace only. Extended = both.
     static constexpr const char* kTraceLabels[] = { "Off", "On", "Extended" };
     static constexpr int kTraceCount = 3;
 
@@ -380,7 +380,7 @@ private:
         state_ = State::TraceMenu;
         // Off (0): trace=false, debug=false. On (1): trace=true, debug=false.
         // Extended (2): trace=true, debug=true.
-        selected_ = bDebug ? 2 : (bTrace ? 1 : 0);
+        selected_ = bExtTrace ? 2 : (bTrace ? 1 : 0);
         drawBox();
         for (int i = 0; i < kTraceCount; ++i) drawRow(i, kTraceLabels[i]);
     }
@@ -513,9 +513,9 @@ private:
     void applyTrace(int index) {
         // 0=Off (both false), 1=On (trace only), 2=Extended (both true).
         bTrace = (index >= 1);
-        bDebug = (index == 2);
+        bExtTrace = (index == 2);
         LOGF("\r\n * Trace: %s", kTraceLabels[index]);
-        if (onTraceChanged_) onTraceChanged_(bTrace, bDebug);
+        if (onTraceChanged_) onTraceChanged_(bTrace, bExtTrace);
     }
 
     void applyFile(const std::string& filename) {

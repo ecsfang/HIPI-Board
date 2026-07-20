@@ -69,11 +69,11 @@ extern void init_spi(void);
 
 extern bool SDOK;
 extern void sd_dir();
-extern bool bTrace;
-extern bool bDebug;
-extern uint8_t hpilDevices;
 
 hp82163::Config config;
+
+// Run the loop as long as true ...
+bool bRunning = true;
 
 extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
                                             uint8_t stage,
@@ -118,8 +118,6 @@ extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
 // ─── Compatibility shim ───────────────────────────────────────────────────────
 #include "pico/stdlib.h"
 
-
-
 namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
@@ -149,8 +147,6 @@ void SetPinDriveStrength(uint pin, uint mA) {
 
 hp82163::Screen *screen;
 hp82163::UiDialog *dialog = nullptr;
-
-extern void ledTest(void);
 
 hp82163::PicoSpiTransport* transport = nullptr;
 hp82163::RA8875* display = nullptr;
@@ -184,7 +180,7 @@ FRESULT initSD()
         SDOK = true;
         config.load();
         bTrace = config.trace();
-        bDebug = config.debug();
+        bExtTrace = config.extTrace();
     }
     return fr;
 }
@@ -277,7 +273,7 @@ int main() {
         sprintf(buf, " * Drive: %.32s", config.filename().c_str() );
         screen->pr_str(buf);
         int z = sprintf(buf, " * Trace: " );
-        switch( (config.trace() ? 0b10 : 0b00) | (config.debug() ? 0b01 : 0b00) ) {
+        switch( (config.trace() ? 0b10 : 0b00) | (config.extTrace() ? 0b01 : 0b00) ) {
         case 0b00: sprintf(buf+z, "OFF" ); break;
         case 0b10: sprintf(buf+z, "ON" ); break;
         case 0b11: sprintf(buf+z, "Extended" ); break;
@@ -329,8 +325,6 @@ int main() {
     LOGF("\r\n-----------------------------");
     LOGF("\r\nUp and running ...\r\n");
 
-    bool bRunning = true;
-
     while (!time_reached(infoTimeout)) {
         tud_task();
         usb_serial_flush_boot_log();
@@ -340,15 +334,13 @@ int main() {
     screen->clear();
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());
-    //screen->refreshCursor();
-    //screen->clear();
 
     while (bRunning) {
-        tud_task();  // TinyUSB background task
-        usb_serial_flush_boot_log();  // flush buffered boot messages once a terminal connects
-        hipi_loop(hpil);
-        touch_poll();          // debounced tap/release detection (touch.h)
-        hp82163::boardui_poll();  // auto-hide timers + status LED poll
+        tud_task();                     // TinyUSB background task
+        usb_serial_flush_boot_log();    // flush buffered boot messages once a terminal connects
+        hipi_loop(hpil);                // Check IL for any instruction to send through the loop!
+        touch_poll();                   // debounced tap/release detection (touch.h)
+        hp82163::boardui_poll();        // auto-hide timers + status LED poll
         tight_loop_contents();
     }
 
