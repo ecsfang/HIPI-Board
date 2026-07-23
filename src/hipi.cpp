@@ -16,6 +16,7 @@
 
 std::vector<CDevice*> devices;
 CPilBox* pilbox = nullptr;      // Need to be global for UI indication
+CPlotter* plotter = nullptr;    // Need to be global for plotterview.cpp
 
 extern hp82163::Config config;
 
@@ -46,6 +47,8 @@ uint8_t hpilDevices = 0;
 void hipi_init()
 {
     cassette = new CTapeSD(config.filename().c_str()); // Uses SD-card for file storage
+    pilbox = new CPilBox("PILBOX");
+    plotter = new CPlotter("TFPLOT");
 
     dialog->setFileSelectedCallback([&cassette](const std::string& filename) {
         LOGF("\r\nSelect file: " HILIGHT "%s" RESET " ", filename.c_str());
@@ -56,9 +59,8 @@ void hipi_init()
     devices.push_back(new CDisplay("TFDISPLAY", 0x3E));
     devices.push_back(new CDrive("TFDRIVE", cassette));
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
-    pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
-    devices.push_back(new CPlotter("TFPLOT"));
+    devices.push_back(plotter);
 
     // Apply persisted enabled/disabled state (see Config::isDeviceEnabled()
     // / UiDialog's "Devices" menu) now that the actual instances exist --

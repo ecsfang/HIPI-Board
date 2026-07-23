@@ -1,7 +1,17 @@
 #include "plotter.h"
+#include "hpgl_font.h"
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <utility>
+
+// Real 7475A factory-default hard-clip scaling points (see OP's response
+// in execute() below) -- also used by XT/YT/SR to convert percentages
+// into plotter units, and as IW's default clip window.
+namespace {
+constexpr int kP1X = 250, kP1Y = 279, kP2X = 10250, kP2Y = 7479;
+}
 
 void CPlotter::reset_state() {
     parseState_ = 0;
@@ -13,6 +23,20 @@ void CPlotter::reset_state() {
     penDown_ = false;
     currentPen_ = 1;
     coordMode_ = CoordMode::Absolute;
+    tickLenPos_ = tickLenNeg_ = 0.5;  // HP-GL default: 0.5% of the P1-P2 span
+
+    // IW defaults to the full P1-P2 area -- i.e. no extra clipping beyond
+    // the hard-clip limits already implied by plotter coordinates.
+    iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
+
+    // SR defaults: 0.75%/1.5% of the P1-P2 span (HP-GL default character
+    // size), converted to plotter units up front so drawLabelChar() never
+    // has to redo the percentage math per character.
+    charWidthUnits_  = 0.75 / 100.0 * (kP2X - kP1X);
+    charHeightUnits_ = 1.5  / 100.0 * (kP2Y - kP1Y);
+    charSlant_ = 0.0;
+    dirCos_ = 1.0; dirSin_ = 0.0;
+    charPosX_ = penX_; charPosY_ = penY_;
 
     segments_.clear();
 
@@ -92,9 +116,7 @@ void CPlotter::queueOutput(const std::string& s) {
     if (bTrace) LOGF("\r\n[PLOTTER] queued response: \"%s\"", s.c_str());
 }
 
-// Tokenizer, ported from pyILPER's cls_HP7470Processor.process_char() --
-// simplified since our command set has no LB (text label) or single-char
-// (DT/SM) special cases to worry about.
+// Tokenizer, ported from pyILPER's cls_HP7470Processor.process_char().
 void CPlotter::feed_char(char c) {
     switch (parseState_) {
     case 0:
@@ -111,6 +133,19 @@ void CPlotter::feed_char(char c) {
         if (c == ' ') return;
         if (std::isalpha(static_cast<unsigned char>(c))) {
             cmdBuf_ += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            if (cmdBuf_ == "LB") {
+                // Label text starts immediately after the mnemonic and
+                // isn't HP-GL syntax at all -- it must NOT go through the
+                // normal numeric-parameter state (case 2 below), since
+                // label text is extremely often digits/commas/periods/
+                // signs (e.g. axis labels like "0,00" or "-180"), which
+                // would otherwise get misparsed as HP-GL parameters
+                // before we ever noticed this was LB. Jump straight to
+                // raw verbatim accumulation instead.
+                cmdBuf_.clear();
+                parseState_ = 3;
+                return;
+            }
             parseState_ = 2;
             inParam_ = false;
             sawSeparator_ = false;
@@ -149,23 +184,11 @@ void CPlotter::feed_char(char c) {
             cmdBuf_ += c;
             return;
         }
-        // Anything else ends this command's parameter portion. LB (label)
-        // is a special case: what follows isn't HP-GL syntax at all, it's
-        // raw label text that runs verbatim up to a terminator (default
-        // ETX/0x03, since we don't support DT redefining it yet) -- it
-        // must NOT be fed back through the normal tokenizer, or letters
-        // inside the label (e.g. a label containing "SP" or "PU") would
-        // get misparsed as real commands and could corrupt plotter state.
-        if (cmdBuf_.size() >= 2 && cmdBuf_[0] == 'L' && cmdBuf_[1] == 'B') {
-            execute(cmdBuf_);  // no-op (LB unsupported in v1), keeps logging consistent
-            cmdBuf_.clear();
-            if (c == 0x03) {
-                parseState_ = 0;  // empty label, already terminated
-            } else {
-                parseState_ = 3;  // consume label text verbatim
-            }
-            return;
-        }
+        // Anything else (a letter, ';', etc.) ends this command's
+        // parameter portion and starts the next one. (LB is handled
+        // earlier, at the state1->state3 transition -- see above --
+        // since its "parameters" are actually raw label text, not HP-GL
+        // syntax, and must never reach here.)
         execute(cmdBuf_);
         if (std::isalpha(static_cast<unsigned char>(c))) {
             cmdBuf_.clear();
@@ -178,9 +201,13 @@ void CPlotter::feed_char(char c) {
         break;
 
     case 3:
-        // Inside LB label text -- discard verbatim until the terminator.
+        // Inside LB label text -- accumulate verbatim until the terminator.
         if (c == 0x03) {
+            drawLabel(cmdBuf_);
+            cmdBuf_.clear();
             parseState_ = 0;
+        } else {
+            cmdBuf_ += c;
         }
         break;
     }
@@ -201,20 +228,117 @@ std::vector<double> CPlotter::parseParams(const std::string& cmd, std::size_t fr
     return params;
 }
 
+// ── Clipping (ported from oo7470A.rx's drawline: -- Cohen-Sutherland) ──────
+
+namespace {
+constexpr int kInside = 0, kLeft = 1, kRight = 2, kBottom = 4, kTop = 8;
+
+int outcode(double x, double y, double xmin, double ymin, double xmax, double ymax) {
+    int code = kInside;
+    if (x < xmin) code |= kLeft;
+    else if (x > xmax) code |= kRight;
+    if (y < ymin) code |= kBottom;
+    else if (y > ymax) code |= kTop;
+    return code;
+}
+}  // namespace
+
+bool CPlotter::clipToWindow(double& x0, double& y0, double& x1, double& y1) const {
+    double xmin = iw1x_, xmax = iw2x_;
+    double ymin = iw1y_, ymax = iw2y_;
+    if (xmin > xmax) std::swap(xmin, xmax);
+    if (ymin > ymax) std::swap(ymin, ymax);
+
+    int code0 = outcode(x0, y0, xmin, ymin, xmax, ymax);
+    int code1 = outcode(x1, y1, xmin, ymin, xmax, ymax);
+
+    for (;;) {
+        if (!(code0 | code1)) return true;    // both endpoints inside
+        if (code0 & code1) return false;      // trivially outside -- nothing to draw
+
+        const int codeOut = code0 ? code0 : code1;
+        double x = 0, y = 0;
+        if (codeOut & kTop) {
+            x = x0 + (x1 - x0) * (ymax - y0) / (y1 - y0);
+            y = ymax;
+        } else if (codeOut & kBottom) {
+            x = x0 + (x1 - x0) * (ymin - y0) / (y1 - y0);
+            y = ymin;
+        } else if (codeOut & kRight) {
+            y = y0 + (y1 - y0) * (xmax - x0) / (x1 - x0);
+            x = xmax;
+        } else {  // kLeft
+            y = y0 + (y1 - y0) * (xmin - x0) / (x1 - x0);
+            x = xmin;
+        }
+
+        if (codeOut == code0) {
+            x0 = x; y0 = y;
+            code0 = outcode(x0, y0, xmin, ymin, xmax, ymax);
+        } else {
+            x1 = x; y1 = y;
+            code1 = outcode(x1, y1, xmin, ymin, xmax, ymax);
+        }
+    }
+}
+
+void CPlotter::emitSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1) {
+    double cx0 = x0, cy0 = y0, cx1 = x1, cy1 = y1;
+    if (!clipToWindow(cx0, cy0, cx1, cy1)) return;  // fully outside IW -- nothing to draw
+
+    const auto ix0 = static_cast<std::int16_t>(cx0);
+    const auto iy0 = static_cast<std::int16_t>(cy0);
+    const auto ix1 = static_cast<std::int16_t>(cx1);
+    const auto iy1 = static_cast<std::int16_t>(cy1);
+
+    segments_.push_back({ix0, iy0, ix1, iy1, currentPen_});
+    if (bTrace) {
+        LOGF("\r\n[PLOTTER]   draw (%d,%d) -> (%d,%d) pen=%u", ix0, iy0, ix1, iy1, currentPen_);
+    }
+    if (onDraw_) onDraw_(ix0, iy0, ix1, iy1, currentPen_);
+}
+
 void CPlotter::doMove(std::int16_t x, std::int16_t y) {
     if (penDown_) {
-        segments_.push_back({penX_, penY_, x, y, currentPen_});
-        if (bTrace) {
-            LOGF("\r\n[PLOTTER]   draw (%d,%d) -> (%d,%d) pen=%u",
-                 penX_, penY_, x, y, currentPen_);
-        }
-        if (onDraw_) onDraw_(penX_, penY_, x, y, currentPen_);
+        if (bTrace) LOGF("\r\n[PLOTTER]   (pen down move)");
+        emitSegment(penX_, penY_, x, y);
     } else {
         if (bTrace) LOGF("\r\n[PLOTTER]   move -> (%d,%d)", x, y);
         if (onMove_) onMove_(x, y);
     }
     penX_ = x;
     penY_ = y;
+    // Keep the label "text cursor" in sync with every real pen move -- CP
+    // (see execute()) is the only thing that deliberately offsets it away
+    // from the actual pen position afterward.
+    charPosX_ = x;
+    charPosY_ = y;
+}
+
+void CPlotter::drawTick(bool vertical) {
+    // tp/tn are percentages of the RELEVANT axis's P1-P2 span: XT (a
+    // vertical stroke) uses the Y span, YT (a horizontal stroke) uses the
+    // X span -- the tick crosses the axis it's perpendicular to.
+    const int spanY = kP2Y - kP1Y;
+    const int spanX = kP2X - kP1X;
+    std::int16_t x0, y0, x1, y1;
+    if (vertical) {
+        const int lenPos = static_cast<int>(tickLenPos_ / 100.0 * spanY);
+        const int lenNeg = static_cast<int>(tickLenNeg_ / 100.0 * spanY);
+        x0 = x1 = penX_;
+        y0 = static_cast<std::int16_t>(penY_ - lenNeg);
+        y1 = static_cast<std::int16_t>(penY_ + lenPos);
+    } else {
+        const int lenPos = static_cast<int>(tickLenPos_ / 100.0 * spanX);
+        const int lenNeg = static_cast<int>(tickLenNeg_ / 100.0 * spanX);
+        y0 = y1 = penY_;
+        x0 = static_cast<std::int16_t>(penX_ - lenNeg);
+        x1 = static_cast<std::int16_t>(penX_ + lenPos);
+    }
+    // A tick always draws, using the current pen, regardless of the
+    // logical PU/PD state -- and leaves the pen position unchanged
+    // afterward (it's a one-shot mark, not a move).
+    emitSegment(x0, y0, x1, y1);
 }
 
 void CPlotter::moveThroughParams(const std::vector<double>& params) {
@@ -227,6 +351,60 @@ void CPlotter::moveThroughParams(const std::vector<double>& params) {
             coordMode_ == CoordMode::Absolute ? params[i + 1] : penY_ + params[i + 1]);
         doMove(x, y);
     }
+}
+
+// ── Label (LB) text rendering ───────────────────────────────────────────
+
+void CPlotter::drawLabel(const std::string& text) {
+    if (bTrace) LOGF("\r\n[PLOTTER] LB \"%s\"", text.c_str());
+    for (char ch : text) {
+        drawLabelChar(static_cast<unsigned char>(ch));
+    }
+}
+
+void CPlotter::drawLabelChar(unsigned char code) {
+    // Build the full stroke list: the font table (hpgl_font.h) holds each
+    // glyph's own strokes verbatim from oo7470A.rx's chagra. table, which
+    // does NOT yet include the inter-character advance -- that's appended
+    // here exactly like oo7470A.rx's LB handler does (",0, 48, 0", a
+    // final pen-up move to x=48 in the glyph's own coordinate space),
+    // except for control characters (code <= 32, e.g. space/BS/LF/VT)
+    // whose own glyph data already fully encodes their specific advance.
+    std::string strokes;
+    const bool known = (code < 128) && (hpgl_font::kGlyphs[code] != nullptr);
+    if (known) {
+        strokes = hpgl_font::kGlyphs[code];
+        if (code > 32) strokes += ",0, 48,  0";
+    } else {
+        strokes = "0, 48,  0";  // unrecognized glyph -- just advance like a space
+    }
+
+    const std::vector<double> nums = parseParams(strokes, 0);
+    const std::int16_t originX = charPosX_, originY = charPosY_;
+    std::int16_t prevX = originX, prevY = originY;
+    std::int16_t lastX = originX, lastY = originY;
+    bool first = true;
+
+    for (std::size_t i = 0; i + 2 < nums.size(); i += 3) {
+        const bool penDown = nums[i] != 0.0;
+        double sx = charWidthUnits_  * nums[i + 1] / 32.0;
+        double sy = charHeightUnits_ * nums[i + 2] / 32.0;
+        sx += charSlant_ * sy;                            // SL: shear x by slant*y
+        const double rx = sx * dirCos_ - sy * dirSin_;    // DI: rotate into plotter space
+        const double ry = sx * dirSin_ + sy * dirCos_;
+        const auto x = static_cast<std::int16_t>(originX + rx);
+        const auto y = static_cast<std::int16_t>(originY + ry);
+
+        if (!first && penDown) emitSegment(prevX, prevY, x, y);
+        prevX = x; prevY = y;
+        lastX = x; lastY = y;
+        first = false;
+    }
+
+    // The glyph's final point (after the appended advance move) becomes
+    // the next character's origin.
+    charPosX_ = lastX;
+    charPosY_ = lastY;
 }
 
 void CPlotter::execute(const std::string& cmd) {
@@ -277,7 +455,6 @@ void CPlotter::execute(const std::string& cmd) {
         // 7475A factory defaults; we don't support IP/user-scaling yet,
         // so these never change. The HP-41's PINIT ROM routine requires
         // this response to complete its startup handshake.
-        constexpr int kP1X = 250, kP1Y = 279, kP2X = 10250, kP2Y = 7479;
         char buf[48];
         std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d\r\n", kP1X, kP1Y, kP2X, kP2Y);
         if (bTrace) LOGF("\r\n[PLOTTER] OP (output P1/P2)");
@@ -303,10 +480,85 @@ void CPlotter::execute(const std::string& cmd) {
         // yet, so this always reports "no error".
         if (bTrace) LOGF("\r\n[PLOTTER] OE (output error status)");
         queueOutput("0\r\n");
+    } else if (mnemonic == "TL") {
+        // Tick Length: tp[,tn] as percentages of the P1-P2 span. tn
+        // defaults to tp if omitted; bare "TL" resets both to the HP-GL
+        // default (0.5%).
+        tickLenPos_ = params.empty() ? 0.5 : params[0];
+        tickLenNeg_ = params.size() > 1 ? params[1] : tickLenPos_;
+        if (bTrace) LOGF("\r\n[PLOTTER] TL pos=%.3f%% neg=%.3f%%", tickLenPos_, tickLenNeg_);
+    } else if (mnemonic == "XT") {
+        if (bTrace) LOGF("\r\n[PLOTTER] XT (x-axis tick)");
+        drawTick(/*vertical=*/true);
+    } else if (mnemonic == "YT") {
+        if (bTrace) LOGF("\r\n[PLOTTER] YT (y-axis tick)");
+        drawTick(/*vertical=*/false);
+    } else if (mnemonic == "IW") {
+        // Input Window: a clip rectangle for every subsequently drawn
+        // line (PD, ticks, label strokes) -- bare "IW" resets it to the
+        // full P1-P2 area (i.e. no extra clipping).
+        if (params.size() < 4) {
+            iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
+            if (bTrace) LOGF("\r\n[PLOTTER] IW reset to P1-P2");
+        } else {
+            iw1x_ = static_cast<std::int16_t>(params[0]);
+            iw1y_ = static_cast<std::int16_t>(params[1]);
+            iw2x_ = static_cast<std::int16_t>(params[2]);
+            iw2y_ = static_cast<std::int16_t>(params[3]);
+            if (bTrace) {
+                LOGF("\r\n[PLOTTER] IW (%d,%d)-(%d,%d)", iw1x_, iw1y_, iw2x_, iw2y_);
+            }
+        }
+    } else if (mnemonic == "SR") {
+        // Character size: width%,height% of the P1-P2 span. Bare "SR"
+        // resets to the HP-GL default (0.75%, 1.5%).
+        const double wPct = params.empty() ? 0.75 : params[0];
+        const double hPct = params.size() > 1 ? params[1] : wPct;
+        charWidthUnits_  = wPct / 100.0 * (kP2X - kP1X);
+        charHeightUnits_ = hPct / 100.0 * (kP2Y - kP1Y);
+        if (bTrace) {
+            LOGF("\r\n[PLOTTER] SR w=%.3f%% h=%.3f%% (%.1f x %.1f units)",
+                 wPct, hPct, charWidthUnits_, charHeightUnits_);
+        }
+    } else if (mnemonic == "SL") {
+        // Character slant: a shear factor (dx per unit y), not an angle in
+        // degrees -- matches how oo7470A.rx's PxCSA is used directly.
+        charSlant_ = params.empty() ? 0.0 : params[0];
+        if (bTrace) LOGF("\r\n[PLOTTER] SL slant=%.3f", charSlant_);
+    } else if (mnemonic == "DI") {
+        // Label direction: a (run,rise) vector: bare "DI" resets to the
+        // default (horizontal, i.e. (1,0)).
+        if (params.empty()) {
+            dirCos_ = 1.0; dirSin_ = 0.0;
+        } else {
+            const double run = params[0];
+            const double rise = params.size() > 1 ? params[1] : 0.0;
+            const double mag = std::sqrt(run * run + rise * rise);
+            if (mag > 1e-9) { dirCos_ = run / mag; dirSin_ = rise / mag; }
+        }
+        if (bTrace) LOGF("\r\n[PLOTTER] DI cos=%.3f sin=%.3f", dirCos_, dirSin_);
+    } else if (mnemonic == "CP") {
+        // Character Plot: reposition the label "text cursor" by dCols
+        // character-widths and dRows character-heights, along the current
+        // text direction (DI), relative to the CURRENT pen position (not
+        // accumulated from a previous CP) -- matches oo7470A.rx, where
+        // each CP is computed fresh from the last real PA/PU/PD position.
+        // Bare "CP" (no params) means "one line down, same column".
+        const double dCols = params.empty() ? 0.0 : params[0];
+        const double dRows = params.size() > 1 ? params[1] : (params.empty() ? -1.0 : 0.0);
+        const double dx = dCols * charWidthUnits_;
+        const double dy = dRows * charHeightUnits_;
+        charPosX_ = static_cast<std::int16_t>(penX_ + dx * dirCos_ - dy * dirSin_);
+        charPosY_ = static_cast<std::int16_t>(penY_ + dx * dirSin_ + dy * dirCos_);
+        if (bTrace) {
+            LOGF("\r\n[PLOTTER] CP dCols=%.2f dRows=%.2f -> textpos(%d,%d)",
+                 dCols, dRows, charPosX_, charPosY_);
+        }
     } else if (bTrace) {
-        // v1 scope (see plotter.h) -- unrecognized mnemonics are otherwise
-        // silently ignored, but worth seeing while testing against real
-        // programs to know what's not implemented yet.
+        // Remaining v1 gaps (see plotter.h): SC/IP user-scaling,
+        // digitizing, OS/OD/OF/OI/OO/OW, DT -- unrecognized mnemonics are
+        // otherwise silently ignored, but worth seeing while testing
+        // against real programs to know what's not implemented yet.
         LOGF("\r\n[PLOTTER] unrecognized command '%s'", cmd.c_str());
     }
 }
@@ -318,4 +570,7 @@ void CPlotter::show(void) {
          coordMode_ == CoordMode::Absolute ? "ABS" : "REL",
          segments_.size(), cmdBuf_.c_str(), outQueue_.size(),
          outEnd_ ? " (end)" : "");
+    LOGF("\r\n\tIW:(%d,%d)-(%d,%d) charSize:(%.1f,%.1f) textpos:(%d,%d)",
+         iw1x_, iw1y_, iw2x_, iw2y_, charWidthUnits_, charHeightUnits_,
+         charPosX_, charPosY_);
 }

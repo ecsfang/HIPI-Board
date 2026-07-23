@@ -5,6 +5,7 @@
 #include "ui_buttons.hpp"
 #include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
 #include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
+#include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "ff.h"
 #include <vector>
 #include <string>
@@ -242,6 +243,13 @@ public:
                 if (b == Button::Ok)   toggleDevice(selected_);
                 if (b == Button::X)    openMainMenu();
                 break;
+
+            case State::DisplayMenu:
+                if (b == Button::Up)   moveSelection(-1, kDisplayMenuCount);
+                if (b == Button::Down) moveSelection(+1, kDisplayMenuCount);
+                if (b == Button::Ok)   enterDisplayMenuItem();
+                if (b == Button::X)    openMainMenu();
+                break;
         }
     }
 
@@ -249,11 +257,11 @@ private:
     enum class State {
         Closed, MainMenu, ConfigMenu, SettingsMenu,
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
-        FilePicker, ConfirmFile, TraceMenu, DeviceList
+        FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu
     };
 
-    static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices" };
-    static constexpr int kMainMenuCount = 3;
+    static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
+    static constexpr int kMainMenuCount = 4;
 
     static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace" };
     static constexpr int kConfigMenuCount = 2;
@@ -292,6 +300,12 @@ private:
     static constexpr const char* kTraceLabels[] = { "Off", "On", "Extended" };
     static constexpr int kTraceCount = 3;
 
+    // "Display"/"Plotter" pick which full-screen output is showing (see
+    // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
+    // not a pickable state, so it doesn't need a selected_-tracked value.
+    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Clear plotter" };
+    static constexpr int kDisplayMenuCount = 3;
+
     void openMainMenu() {
         screen_.suspend();  // idempotent if already open; stops screen_.pr_char()
                              // from drawing over the dialog while it's showing
@@ -304,7 +318,28 @@ private:
     void enterMainMenuItem() {
         if (selected_ == 0)      openConfigMenu();
         else if (selected_ == 1) openSettingsMenu();
-        else                     openDeviceList();
+        else if (selected_ == 2) openDeviceList();
+        else                     openDisplayMenu();
+    }
+
+    void openDisplayMenu() {
+        state_ = State::DisplayMenu;
+        selected_ = (plotterview_output() == DisplayOutput::Plotter) ? 1 : 0;
+        drawBox();
+        for (int i = 0; i < kDisplayMenuCount; ++i) drawRow(i, kDisplayMenuLabels[i]);
+    }
+
+    void enterDisplayMenuItem() {
+        if (selected_ == 0) {
+            plotterview_setOutput(DisplayOutput::Display);
+            close();
+        } else if (selected_ == 1) {
+            plotterview_setOutput(DisplayOutput::Plotter);
+            close();
+        } else {
+            plotterview_clearPlotter();
+            close();
+        }
     }
 
     void openConfigMenu() {
@@ -475,6 +510,13 @@ private:
 
     void close() {
         state_ = State::Closed;
+        if (plotterview_output() == DisplayOutput::Plotter) {
+            // Screen stays suspended (it's not what's showing) -- just
+            // erase the menu box by redrawing the plot underneath it,
+            // instead of screen_.resume()'s HP-41 text redraw below.
+            plotterview_redraw();
+            return;
+        }
         screen_.resume();   // re-enables output and redraws the buffer,
                              // catching up on anything written while the
                              // dialog was open
@@ -577,6 +619,10 @@ private:
             case State::DeviceList:
                 if (index >= 0 && index < static_cast<int>(deviceLabels_.size()))
                     drawRow(index, deviceLabels_[static_cast<std::size_t>(index)].c_str());
+                break;
+            case State::DisplayMenu:
+                if (index >= 0 && index < kDisplayMenuCount)
+                    drawRow(index, kDisplayMenuLabels[index]);
                 break;
             case State::Closed:
                 break;

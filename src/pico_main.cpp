@@ -63,6 +63,7 @@ extern void init_spi(void);
 #include "tusb.h"
 
 #include "boardui.h"
+#include "plotterview.h"
 #include "config.hpp"
 
 #include <cstdio>
@@ -320,6 +321,10 @@ int main() {
 
     // Setup all devices in the HPIL loop (display, drive, LEDs, PILBox)
     hipi_init();
+
+    // Wire up the plotter's live-draw callbacks now that display/screen/
+    // plotter all exist (plotter is set inside hipi_init() above).
+    hp82163::plotterview_init(display, screen, plotter);
 
     LOGF("\r\n\t* HP-IL initialized");
     {

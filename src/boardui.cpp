@@ -7,6 +7,7 @@
 // all use in inline/header function bodies. Including it later left LOGF
 // undefined at the point those headers were parsed.
 #include "usb_serial.h"
+#include "plotterview.h"
 
 #include "boardui.h"
 
@@ -130,6 +131,20 @@ void hideButtonStrip() {
     // the wider layout naturally uses that space for text afterward.
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     screen_->setTextWidth(SCREEN_MAX_X);
+
+    // setTextWidth() above updates Screen's own row/column bookkeeping
+    // either way, but its reflow() only actually redraws anything if
+    // Screen isn't suspended -- and it IS suspended whenever Plotter
+    // output (see plotterview.h) is what's showing. So in that case,
+    // repaint the plot ourselves: otherwise the space the button bitmap
+    // just occupied would be left showing stale button pixels instead of
+    // the drawing. Only that strip actually needs it -- the rest of the
+    // screen was never touched by the button bitmap in the first place.
+    if (plotterview_isActive()) {
+        plotterview_redrawRegion(static_cast<std::int16_t>(buttonStripScreenX0), 0,
+                                 static_cast<std::int16_t>(buttonStripWidth),
+                                 static_cast<std::int16_t>(buttonStripHeight));
+    }
 
     buttonStripVisible = false;
 }

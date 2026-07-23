@@ -11,6 +11,11 @@
 // logic in feed_char()) is ported from pyILPER's cls_HP7470Processor,
 // simplified for the command set actually supported here.
 //
+// The IW clip-window and LB text-label support are ported from Mike's
+// oo7470A.rx (an ooRexx HP7470A/HP-IL simulator, freeware under the Q
+// Public License) -- specifically its drawline:/plolet: routines (line
+// clipping) and its chagra. stroke-font table (see include/hpgl_font.h).
+//
 // v1 scope (by design, not yet a full HP-GL/2 implementation):
 //   IN  - initialize: clears the plot and resets pen state
 //   SP  - select pen (just tracks a pen index/color, no physical carousel)
@@ -32,11 +37,30 @@
 //         OA -- we don't simulate motor lag, so these never differ here)
 //   OE  - output error status (always reports "no error" -- v1 doesn't
 //         track real error conditions yet)
+//   TL  - tick length (percentage of the P1-P2 span, positive/negative
+//         direction), used by XT/YT below
+//   XT  - draw a small tick mark through the current pen position,
+//         perpendicular to the X axis (i.e. a short vertical stroke),
+//         without moving the pen
+//   YT  - same as XT but perpendicular to the Y axis (a short horizontal
+//         stroke)
+//   IW  - input window: a clip rectangle (defaults to P1-P2) applied to
+//         every drawn line (PD segments, ticks, and label strokes) --
+//         anything outside gets clipped or dropped entirely, matching the
+//         real plotter's hard-clip behavior
+//   SR  - character size, as a percentage of the P1-P2 span (width,height)
+//   SL  - character slant (a shear factor applied to each glyph's x)
+//   DI  - label direction, as a (run,rise) vector -- rotates subsequent
+//         LB text (and CP's positioning) to match
+//   CP  - character plot: repositions the "text cursor" by a number of
+//         character widths/heights (from SR), along the current DI
+//         direction, relative to the current pen position
+//   LB  - label: draws text using a stroke ("stick") font (see
+//         include/hpgl_font.h) terminated by ETX (0x03) -- DT (redefining
+//         the terminator) isn't supported, so it's always ETX
 //
-// Not yet supported: SC/IP user-scaling, text labels (LB), digitizing,
-// other output/status queries (OS, OD, OF, OI, OO, OW) -- left for a
-// later pass once the display-rendering side (step two) exists to drive
-// priorities from.
+// Not yet supported: SC/IP user-scaling, digitizing, other output/status
+// queries (OS, OD, OF, OI, OO, OW), DT -- left for a later pass.
 //
 // Output is exposed two ways, for step two (actual rendering) to use:
 //   - Live callbacks (onMove/onDraw/onPenChange/onClear), fired as each
@@ -110,11 +134,39 @@ private:
     void doMove(std::int16_t x, std::int16_t y);
     void queueOutput(const std::string& s);
 
+    // Draws a short tick mark through the current pen position without
+    // moving it -- vertical=true for XT (perpendicular to the X axis),
+    // false for YT. Length comes from tickLenPos_/tickLenNeg_ (set by TL,
+    // as a percentage of the P1-P2 span), regardless of the current
+    // PU/PD pen state (a tick always draws, using the current pen color).
+    void drawTick(bool vertical);
+
+    // Single choke point for every drawn segment (PD lines, ticks, and
+    // label strokes) -- clips to the current IW window (clipToWindow())
+    // before pushing to segments_/firing onDraw_, dropping the segment
+    // entirely if it's fully outside.
+    void emitSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1);
+
+    // Cohen-Sutherland line clipping against [iw1x_,iw1y_]-[iw2x_,iw2y_].
+    // Returns false if the segment is entirely outside (nothing to draw);
+    // otherwise x0/y0/x1/y1 are adjusted in place to the clipped endpoints.
+    bool clipToWindow(double& x0, double& y0, double& x1, double& y1) const;
+
+    // Renders one LB label's text, character by character.
+    void drawLabel(const std::string& text);
+
+    // Renders a single character's stroke glyph (see include/hpgl_font.h)
+    // at the current character position (charPosX_/charPosY_), scaled by
+    // charWidthUnits_/charHeightUnits_ (SR), sheared by charSlant_ (SL),
+    // and rotated by dirCos_/dirSin_ (DI) -- then advances the character
+    // position to the next character's origin.
+    void drawLabelChar(unsigned char code);
+
     // ── Tokenizer state (ported from pyILPER's process_char()) ──────────
     // 0: waiting for the command's first letter
     // 1: waiting for the second letter
     // 2: collecting numeric parameters until a non-parameter character
-    // 3: inside LB label text, discarding verbatim until the terminator
+    // 3: inside LB label text, accumulating verbatim until the terminator
     //    (default ETX/0x03) -- see feed_char() in plotter.cpp
     int parseState_ = 0;
     std::string cmdBuf_;
@@ -127,6 +179,25 @@ private:
     bool penDown_ = false;
     std::uint8_t currentPen_ = 1;
     CoordMode coordMode_ = CoordMode::Absolute;
+
+    // Tick length as a percentage of the P1-P2 span, in the positive and
+    // negative directions -- set by TL, used by XT/YT. HP-GL default: 0.5
+    // for both.
+    double tickLenPos_ = 0.5, tickLenNeg_ = 0.5;
+
+    // Input window (clip rectangle) -- set by IW, defaults to P1-P2.
+    std::int16_t iw1x_ = 0, iw1y_ = 0, iw2x_ = 0, iw2y_ = 0;
+
+    // ── Label (LB) text state ────────────────────────────────────────
+    // Character size in plotter units (SR, as a percentage of the P1-P2
+    // span -- HP-GL defaults to 0.75%/1.5% width/height).
+    double charWidthUnits_ = 0.0, charHeightUnits_ = 0.0;
+    double charSlant_ = 0.0;                  // SL -- shear factor, default 0
+    double dirCos_ = 1.0, dirSin_ = 0.0;       // DI -- default: horizontal
+    // "Text cursor" position -- kept in sync with penX_/penY_ by doMove()
+    // on every real pen movement, but overridden by CP to offset it by a
+    // number of character cells without touching the actual pen position.
+    std::int16_t charPosX_ = 0, charPosY_ = 0;
 
     std::vector<PlotSegment> segments_;
     std::function<void(std::int16_t, std::int16_t)> onMove_;
@@ -149,5 +220,11 @@ private:
     // for that, since those never satisfy IS_DATA() anyway.
     bool midTransfer_ = false;
 };
+
+// The single CPlotter instance created in hipi_init() (see hipi.cpp) --
+// exposed so other modules (e.g. plotterview.cpp) can wire up its
+// callbacks/segments() without needing to search the `devices` vector.
+// Matches the same pattern as pilbox.h's `extern CPilBox* pilbox;`.
+extern CPlotter* plotter;
 
 #endif//__PLOTTER_H__

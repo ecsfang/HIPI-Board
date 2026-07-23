@@ -55,7 +55,10 @@ void boardui_poll();
 // (see touch.h). boardui_handleTap() decides whether a confirmed touch
 // dismisses/opens the info box, wakes/uses the button strip, or forwards to
 // the UiDialog menu; boardui_handleRelease() restores a pressed button's
-// normal appearance once the finger lifts.
+// normal appearance once the finger lifts. Both work the same regardless
+// of which output plotterview.h is currently showing -- the button strip
+// always shows/hides/responds normally; only *what's underneath it* (text
+// vs. the plotter's drawing) differs, see hideButtonStrip() in boardui.cpp.
 void boardui_handleTap(std::uint16_t x, std::uint16_t y);
 void boardui_handleRelease();
 
