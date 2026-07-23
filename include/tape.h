@@ -109,7 +109,6 @@ class CTapeSD : public CTape {
     FRESULT _fr;
 public:
     CTapeSD(const char *name = MEDIA_NAME) : CTape(name) {
-        //open();
     }
     unsigned int tell(void) {
         return f_tell(&_tape);
@@ -169,11 +168,8 @@ public:
         _fr = f_open(&_tape, _name, FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
         if (_fr != FR_OK) {
             error("f_open");
-            //_name[0] = '\0';
             _open = false;
         } else {
-            //strncpy(_name, name, sizeof(_name) - 1);
-            //_name[sizeof(_name) - 1] = '\0';
             _open = true;
         }
     }
@@ -184,7 +180,6 @@ public:
         _fr = f_close(&_tape);
         if (_fr != FR_OK)
             error("f_close");
-        //_name[0] = '\0';
         _open = false;
     }
 };

@@ -127,6 +127,7 @@ constexpr const char* HIPI_VERSION = "1.0";
 
 extern void hipi_init(void);
 extern bool hipi_loop(HpIlLoop& loop);
+extern bool hipi_test(HpIlLoop& loop);
 
 bool usb_connected = false;
 
@@ -236,9 +237,8 @@ int main() {
     // ITF_HPIL)), no manual wiring needed here.
 
     // First here we know if the debug-port is open or not (usb_connected)
-    LOGF("HIPI Board v0.1\r\n");
+    LOGF("\r\n\nHIPI Board v%s\r\n", HIPI_VERSION);
     LOGF("======================");
-    LOGF("\r\n * Init display ...");
     LOGF("\r\n * Init SD-card ... ");
     if (FR_OK != fr) {
         LOGF(" PANIC: f_mount error: %s (%d)\r\n", FRESULT_str(fr), fr);
@@ -248,11 +248,12 @@ int main() {
 
     tud_task();
 
+    LOGF("\r\n * Init display ...");
     // Show buttons -- draws and caches the strip, and tells us how wide it
     // is so Screen's initial text width can be sized around it.
     const std::uint16_t buttonStripWidth = hp82163::boardui_loadButtonStrip(display);
 
-    LOGF("\r\n * Draw text ... ");
+    LOGF("\r\n\t* Draw text ... ");
     display->setActiveWindow(0, 0, SCREEN_MAX_X-buttonStripWidth-1, SCREEN_MAX_Y-1);
     screen = new hp82163::Screen(display, config.textColor(), 1, config.brightness(), SCREEN_MAX_X-buttonStripWidth );
 
@@ -308,7 +309,7 @@ int main() {
     touchInit();
     touch_set_tap_callback(hp82163::boardui_handleTap);
     touch_set_release_callback(hp82163::boardui_handleRelease);
-    LOGF("\r\n\t* GSL1680 Boot up completed!\r\n");
+    LOGF("\r\n\t* GSL1680 Boot up completed!");
     tud_task();
 
     // Init HPIL scanner ...
@@ -321,6 +322,11 @@ int main() {
     hipi_init();
 
     LOGF("\r\n\t* HP-IL initialized");
+    {
+        LOGF("\r\n\t* Loop-back test");
+        hipi_test(hpil);
+    }
+
     // Done! Start the HPIL monoitoring ...
     LOGF("\r\n-----------------------------");
     LOGF("\r\nUp and running ...\r\n");

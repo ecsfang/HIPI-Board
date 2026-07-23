@@ -138,8 +138,9 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                 // The tape can’t be used until after the tape door is opened
                 // and closed, a Device Clear command is received, or a
                 // Seek (Device Dependent Listener 4) command repositions the tape.
-                if( check() )
-                    tape->seek(0);
+                clear();
+                //if( check() )
+                //    tape->seek(0);
                 break;
             case 8:
                 //Close record
@@ -174,7 +175,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                 case 5:
                     // Format
                     LOGF("$$$ Do FORMAT ...\r\n");
-                    mode = WRITE_MODE;
+                    clear();
                     sst = DRV_BUSY;
                     memset(buffer[0], 255, BUF_SIZE);
                     break;

@@ -3,6 +3,7 @@
 
 #include "hpil_pio.hpp"
 #include "pilbox.h"
+#include "plotter.h"
 
 #include "display.h"
 #include "drive.h"
@@ -14,7 +15,7 @@
 #include "usb_serial.h"
 
 std::vector<CDevice*> devices;
-CPilBox* pilbox = nullptr;
+CPilBox* pilbox = nullptr;      // Need to be global for UI indication
 
 extern hp82163::Config config;
 
@@ -57,6 +58,7 @@ void hipi_init()
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
+    devices.push_back(new CPlotter("TFPLOT"));
 
     // Apply persisted enabled/disabled state (see Config::isDeviceEnabled()
     // / UiDialog's "Devices" menu) now that the actual instances exist --
@@ -64,6 +66,25 @@ void hipi_init()
     for (CDevice* dev : devices) {
         dev->setEnabled(config.isDeviceEnabled(dev->name()));
     }
+}
+
+bool hipi_test(HpIlLoop& loop) {
+    uint32_t rx_word    = 0x01BC;
+    uint32_t rtn        = 0x0000;
+    absolute_time_t cdcTimeout = make_timeout_time_ms(500);
+
+    do {
+        tud_task();
+        sleep_ms(10);
+        loop.sendFrame(rx_word);
+    } while (!loop.receiveFrame(rtn) && !time_reached(cdcTimeout));
+
+    LOGF("\r\n\t\t* Loopback ");
+    if( rx_word == rtn )
+        LOGF("OK! (0x%03X)", rtn);
+    else
+        LOGF("failed: 0x%03X -> 0x%03X", rx_word, rtn);
+    return true;
 }
 
 bool hipi_loop(HpIlLoop& loop) {

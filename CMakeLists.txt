@@ -123,6 +123,7 @@ add_executable(hp82163_pico
     src/touch.cpp
     src/leds.cpp
     src/pilbox.cpp
+    src/plotter.cpp
     src/hw_config.cpp
     src/my_descriptors.c
 )

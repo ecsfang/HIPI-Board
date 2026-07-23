@@ -53,7 +53,7 @@ inline bool drawBmpAt(RA8875* display, const char* path,
                        std::uint16_t* outWidth = nullptr,
                        std::uint16_t* outHeight = nullptr) {
     FIL file;
-    LOGF("\r\n\t * Open file <%s> ... ", path);
+    LOGF("\r\n\t\t* Open file <%s> ... ", path);
     if (f_open(&file, path, FA_READ) != FR_OK) {
         LOGF("\r\n\t * Could not open file!");
         return false;
@@ -83,8 +83,8 @@ inline bool drawBmpAt(RA8875* display, const char* path,
     const std::int16_t  bpp         = rd16(28);
     const std::int32_t  compression = rd32(30);
 
-    LOGF("\r\n\t * Width: %d height: %d", width, heightRaw);
-    LOGF("\r\n\t * bpp: %d", bpp);
+    LOGF("\r\n\t\t* Width: %d height: %d", width, heightRaw);
+    LOGF("\r\n\t\t* bpp: %d", bpp);
 
     // We only support what png_to_bmp24.py generates: uncompressed 24-bit.
     if (bpp != 24 || compression != 0 || width <= 0) {
@@ -136,7 +136,7 @@ inline bool drawBmpAt(RA8875* display, const char* path,
         }
     }
 
-    LOGF("\r\n\t * Done!");
+    LOGF("\r\n\t\t* Done!");
     f_close(&file);
     return true;
 }

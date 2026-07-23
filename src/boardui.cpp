@@ -294,7 +294,7 @@ void showSplashScreen(RA8875* display, const char* version,
 std::uint16_t boardui_loadButtonStrip(RA8875* display, const char* bmpPath) {
     display_ = display;
 
-    LOGF("\r\n * Draw buttons ... ");
+    LOGF("\r\n\t* Draw buttons ... ");
     if (!drawBmpRightAligned(display, bmpPath, SCREEN_MAX_X, 0,
                              &buttonStripPixels, &buttonStripWidth,
                              &buttonStripHeight, &buttonStripScreenX0)) {

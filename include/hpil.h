@@ -78,7 +78,8 @@ typedef enum {
     DISPLAY,
     DRIVE,
     LED,
-    PILBOX
+    PILBOX,
+    PLOTTER
 } IL_Type_e;
 
 class CDevice {
