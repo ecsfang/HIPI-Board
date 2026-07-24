@@ -21,6 +21,10 @@
 namespace hp82163 {
 
 enum class DisplayOutput { Display, Plotter };
+// Bump this alongside the enum whenever a new view is added (e.g. a future
+// Printer view) -- plotterview_cycleOutput() cycles through 0..count-1
+// generically, so that's the only change needed to make swiping reach it.
+constexpr int kDisplayOutputCount = 2;
 
 // Call once, after display/screen/plotter all exist (see hipi_init()).
 void plotterview_init(RA8875* display, Screen* screen, CPlotter* plotter);
@@ -31,6 +35,24 @@ void plotterview_init(RA8875* display, Screen* screen, CPlotter* plotter);
 // (re)drawing whichever output is now current.
 void plotterview_setOutput(DisplayOutput mode);
 DisplayOutput plotterview_output();
+
+// Cycles to the next (forward=true) or previous (forward=false) view in
+// the list, wrapping around at either end -- used for the left/right
+// swipe gesture (see boardui.cpp's boardui_handleSwipe()). Generic over
+// kDisplayOutputCount, so it already works correctly for however many
+// views exist whenever that count grows.
+void plotterview_cycleOutput(bool forward);
+
+// Call once per main-loop iteration -- handles the view-switch splash's
+// auto-dismiss timer (see plotterview_setOutput()).
+void plotterview_poll();
+
+// True while the brief "DISPLAY"/"PLOTTER" switch-announcement splash is
+// showing (see plotterview_setOutput()) -- checked by UiDialog::close()
+// so it doesn't redraw over/under the splash while the menu closes right
+// after a mode switch (the splash already covers the whole screen,
+// menu box included; its own timeout reveals the real content shortly).
+bool plotterview_isSplashVisible();
 
 // Clears the plotter's drawing (both the retained segments() history and,
 // if Plotter output is currently showing, the on-screen drawing too) --

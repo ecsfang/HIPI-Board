@@ -399,11 +399,20 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     } else if (isInfoCornerTouch(x, y)) {
         showInfoBox();
     } else {
-        // Any touch, anywhere, keeps the strip up a while longer (or wakes
-        // it up if it was hidden). hitTestButton() works on fixed
-        // coordinates, so it still recognizes a touch in the button area
-        // even while nothing is drawn there -- that's what lets a "blind"
-        // tap wake it too.
+        // Only a touch actually within the button strip's own screen
+        // region wakes/keeps it up -- a tap elsewhere (e.g. the left side,
+        // reserved for the swipe gesture -- see boardui_handleSwipe()) no
+        // longer wakes it "blindly" the way any touch anywhere used to.
+        // hitTestButton() still works on fixed coordinates regardless of
+        // visibility, so a tap within the strip's region wakes it even
+        // while nothing is drawn there yet.
+        const bool inStripZone = (x >= buttonStripScreenX0);
+        if (bTrace) {
+            LOGF("\r\n[TOUCH] tap (%u,%u) inStripZone=%d stripVisible=%d",
+                 x, y, inStripZone, buttonStripVisible);
+        }
+        if (!inStripZone) return;
+
         const bool wasHidden = !buttonStripVisible;
         if (wasHidden) showButtonStrip();
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
@@ -455,6 +464,17 @@ void boardui_handleRelease() {
         kPressMargin);
     screen_->refreshCursor();  // same MWCR0-clobber fix as on press
     pressedButton = Button::None;
+}
+
+void boardui_handleSwipe(bool forward) {
+    // Ignore while the menu is open -- a swipe crossing the menu box
+    // shouldn't also switch views underneath it.
+    if (dialog_->isOpen()) {
+        if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d ignored (menu open)", forward);
+        return;
+    }
+    if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d -> cycling display output", forward);
+    plotterview_cycleOutput(forward);
 }
 
 }  // namespace hp82163

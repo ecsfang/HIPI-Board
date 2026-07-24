@@ -62,4 +62,10 @@ void boardui_poll();
 void boardui_handleTap(std::uint16_t x, std::uint16_t y);
 void boardui_handleRelease();
 
+// Register with touch_set_swipe_callback() (see touch.h). Cycles the
+// current display output (see plotterview.h) forward/backward -- ignored
+// while the menu is open, so a swipe during menu navigation doesn't also
+// switch views underneath it.
+void boardui_handleSwipe(bool forward);
+
 }  // namespace hp82163

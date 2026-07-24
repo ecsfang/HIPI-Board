@@ -41,6 +41,19 @@
 //#define IS_IDLE(x) ((x) == IDLE_FRAME)
 #define IS_IDLE(x) (((x) & 0x700) == IDY)
 
+// Trace-print filter only -- NOT used for any protocol/functional logic
+// (that's what IS_IDLE() above is for; leds.cpp/pilbox.cpp depend on its
+// exact current meaning, so it's deliberately left untouched). This just
+// widens what hipi.cpp's LOGF trace calls treat as uninteresting routine
+// bus housekeeping, so a real capture doesn't drown in thousands of
+// identical lines: IDY (already covered by IS_IDLE), plus DSR (0x100
+// class -- continuous device-status/SRQ-chain polling) and ESR (0x300
+// class -- its extended-status sibling), both of which repeat constantly
+// during normal operation and rarely indicate anything worth looking at
+// per-occurrence.
+//#define IS_ROUTINE(x) (IS_IDLE(x))
+#define IS_ROUTINE(x) (IS_IDLE(x) || (((x) & 0x700) == 0x100) || (((x) & 0x700) == 0x300))
+
 // info below from Christoph Giesselink:
 // PILBox commands
 #define TDIS    0x494   // TDIS

@@ -37,6 +37,15 @@
 //         OA -- we don't simulate motor lag, so these never differ here)
 //   OE  - output error status (always reports "no error" -- v1 doesn't
 //         track real error conditions yet)
+//   OI  - output identification (always "7470A")
+//   OF  - output scaling factors (always "40,40" -- fixed at the real
+//         7470A/7475A's standard resolution, 40 units/mm)
+//   OO  - output options (fixed "0,1,0,0,1,0,0,0" -- matches the manual's
+//         own real-hardware example: pen select yes, arcs/circles no)
+//   OS  - output status byte -- tracks pen-down (bit 0) and the one-shot
+//         "initialized" bit (bit 3, cleared after being read); "ready for
+//         data" (bit 4) is always set
+//   OW  - output window (the current IW clip rectangle)
 //   TL  - tick length (percentage of the P1-P2 span, positive/negative
 //         direction), used by XT/YT below
 //   XT  - draw a small tick mark through the current pen position,
@@ -49,6 +58,9 @@
 //         anything outside gets clipped or dropped entirely, matching the
 //         real plotter's hard-clip behavior
 //   SR  - character size, as a percentage of the P1-P2 span (width,height)
+//   SI  - character size, in absolute centimeters (width,height) -- fixed
+//         physical size regardless of P1/P2, via the same 40 units/mm
+//         scale as OF
 //   SL  - character slant (a shear factor applied to each glyph's x)
 //   DI  - label direction, as a (run,rise) vector -- rotates subsequent
 //         LB text (and CP's positioning) to match
@@ -56,11 +68,21 @@
 //         character widths/heights (from SR), along the current DI
 //         direction, relative to the current pen position
 //   LB  - label: draws text using a stroke ("stick") font (see
-//         include/hpgl_font.h) terminated by ETX (0x03) -- DT (redefining
-//         the terminator) isn't supported, so it's always ETX
+//         include/hpgl_font.h) terminated by DT's current terminator
+//         (labelTerminator_, default ETX/0x03)
+//   UC  - user-defined character -- explicitly a NOP per the manual for
+//         the HP-IL interface variant (only HP-IB/RS-232-C actually draw
+//         with it), so recognized-and-ignored is the *correct* behavior,
+//         not a gap
+//   DT  - define terminator: the very next character, taken completely
+//         literally (per the manual, there's no "no parameter" case --
+//         even ';' immediately after DT becomes the new terminator)
+//   DF  - default: resets character size/slant/direction, tick length,
+//         and the label terminator back to their power-on defaults --
+//         unlike IN, does NOT touch pen position, segments, or IW
 //
-// Not yet supported: SC/IP user-scaling, digitizing, other output/status
-// queries (OS, OD, OF, OI, OO, OW), DT -- left for a later pass.
+// Not yet supported: SC/IP user-scaling, digitizing (OD and the actual
+// digitize action) -- left for a later pass.
 //
 // Output is exposed two ways, for step two (actual rendering) to use:
 //   - Live callbacks (onMove/onDraw/onPenChange/onClear), fired as each
@@ -127,6 +149,11 @@ private:
     enum class CoordMode { Absolute, Relative };
 
     void reset_state();
+    // Resets just the drawing/label defaults DF is documented to affect
+    // (character size/slant/direction, tick length, label terminator) --
+    // used by both IN (full reset) and DF (defaults only, pen position
+    // and plotted content untouched).
+    void reset_defaults();
     void feed_char(char c);
     void execute(const std::string& cmd);
     std::vector<double> parseParams(const std::string& cmd, std::size_t from) const;
@@ -188,6 +215,11 @@ private:
     // Input window (clip rectangle) -- set by IW, defaults to P1-P2.
     std::int16_t iw1x_ = 0, iw1y_ = 0, iw2x_ = 0, iw2y_ = 0;
 
+    // OS status-byte bit 3 ("initialized") -- true from reset until the
+    // first OS read clears it (matches the real 7470A: power-on status is
+    // 24 = 8+16, and bit 3 clears the moment it's actually read).
+    bool everInitialized_ = true;
+
     // ── Label (LB) text state ────────────────────────────────────────
     // Character size in plotter units (SR, as a percentage of the P1-P2
     // span -- HP-GL defaults to 0.75%/1.5% width/height).
@@ -198,6 +230,18 @@ private:
     // on every real pen movement, but overridden by CP to offset it by a
     // number of character cells without touching the actual pen position.
     std::int16_t charPosX_ = 0, charPosY_ = 0;
+    // "Carriage return home" position -- where an embedded CR (0x0D)
+    // inside LB text snaps the text cursor back to (projected onto the
+    // current text direction, so any perpendicular offset from an
+    // embedded LF is preserved). Reset to the current pen position by
+    // every real PA/PU/PD/PR move and by DI, but NOT by CP -- matches
+    // oo7470A.rx's newCRP: exactly.
+    std::int16_t crPosX_ = 0, crPosY_ = 0;
+    // Label terminator (DT) -- defaults to ETX (0x03). Per the manual, DT
+    // ALWAYS takes the very next character literally as the new
+    // terminator, with NO special case for "no parameter" -- only DF, IN,
+    // or explicitly sending ETX itself as DT's argument resets it back.
+    char labelTerminator_ = 0x03;
 
     std::vector<PlotSegment> segments_;
     std::function<void(std::int16_t, std::int16_t)> onMove_;

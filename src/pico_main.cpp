@@ -310,6 +310,7 @@ int main() {
     touchInit();
     touch_set_tap_callback(hp82163::boardui_handleTap);
     touch_set_release_callback(hp82163::boardui_handleRelease);
+    touch_set_swipe_callback(hp82163::boardui_handleSwipe);
     LOGF("\r\n\t* GSL1680 Boot up completed!");
     tud_task();
 
@@ -352,6 +353,7 @@ int main() {
         hipi_loop(hpil);                // Check IL for any instruction to send through the loop!
         touch_poll();                   // debounced tap/release detection (touch.h)
         hp82163::boardui_poll();        // auto-hide timers + status LED poll
+        hp82163::plotterview_poll();    // view-switch splash auto-dismiss timer
         tight_loop_contents();
     }
 

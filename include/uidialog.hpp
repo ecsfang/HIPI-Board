@@ -510,6 +510,15 @@ private:
 
     void close() {
         state_ = State::Closed;
+        if (plotterview_isSplashVisible()) {
+            // A view switch just happened (this menu action selected a
+            // new Display/Plotter output) -- the splash announcing it
+            // already covers the whole screen, menu box included, and
+            // its own timeout (see plotterview_poll()) reveals the real
+            // content shortly. Redrawing here now would just prematurely
+            // wipe the splash out early.
+            return;
+        }
         if (plotterview_output() == DisplayOutput::Plotter) {
             // Screen stays suspended (it's not what's showing) -- just
             // erase the menu box by redrawing the plot underneath it,

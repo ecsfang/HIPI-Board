@@ -70,6 +70,20 @@ public:
     void resume()   { suspended_ = false; txt_size(size_); full(); }
     bool isSuspended() const { return suspended_; }
 
+    // Explicitly turns off the hardware cursor (MWCR0's visible/blink
+    // bits) without touching cv_ (the user's own cursor-visible HP-41
+    // stream setting) -- suspend() alone only stops OUR OWN future draws;
+    // it doesn't touch whatever cursor state the RA8875 already had
+    // active, which otherwise just keeps blinking autonomously via the
+    // chip's own hardware timer regardless of software suspension. Used
+    // when an alternate full-screen view (see plotterview.h) takes over
+    // the panel. resume()'s full() call (which ends with set_cur())
+    // correctly restores the cursor afterward, based on the unchanged
+    // cv_, so this doesn't need an explicit "undo".
+    void hideCursorHardware() {
+        d_->writeReg(0x40, 0x82);  // text mode, invisible cursor, auto-increment off
+    }
+
     // Re-asserts the cursor's visibility/style/position. Call this after
     // anything OUTSIDE Screen touches the shared RA8875 in a way that might
     // have clobbered the cursor-visible bit in MWCR0 -- e.g. gfxMode()

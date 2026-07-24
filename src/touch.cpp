@@ -10,9 +10,14 @@
 #include "hardware/gpio.h"
 #include "pico/time.h"
 #include <atomic>
+#include <cstdlib>
 #include <utility>
 
 #include "usb_serial.h"
+
+// Same global trace flag used throughout the project (Config > Trace
+// menu) -- gates the touch-event logging below.
+extern bool bTrace;
 #include "touch.h"
 
 /*
@@ -329,6 +334,15 @@ bool touch_is_down() {
 namespace {
 bool touchActive = false;
 bool touchConfirmed = false;
+// Separate from touchConfirmed -- that means "confirmed as a tap"
+// specifically, whereas this just means "the one-shot confirm check at
+// kTouchConfirmMs has already run" (pass or fail). Without it, a touch
+// that FAILS confirmation (moved too far -- i.e. every real swipe) kept
+// re-entering that check on every single touch_poll() call for as long
+// as the finger stayed down, since time_reached(confirmDeadline) stays
+// true forever once reached -- spamming the trace log hundreds of times
+// per gesture and wasting an I2C read each time.
+bool confirmChecked = false;
 uint16_t pendingTx = 0, pendingTy = 0;
 absolute_time_t confirmDeadline;
 absolute_time_t lastReleasePoll = get_absolute_time();
@@ -339,8 +353,17 @@ absolute_time_t lastReleasePoll = get_absolute_time();
 constexpr uint32_t kTouchConfirmMs = 60;
 constexpr int kTouchConfirmToleranceSq = 30 * 30;  // 30px radius, squared
 
+// Swipe detection -- evaluated at release using the very first sample
+// (pendingTx/pendingTy) vs. the last known position before the finger
+// lifted (lastTx/lastTy, updated on every release-poll tick below, not
+// just at the 60ms confirm mark, so a slower real-world swipe still gets
+// tracked all the way to its actual endpoint).
+constexpr int kSwipeMinDx = 150;      // minimum horizontal travel, in pixels
+uint16_t lastTx = 0, lastTy = 0;
+
 TouchTapCallback     tapCallback;
 TouchReleaseCallback releaseCallback;
+TouchSwipeCallback   swipeCallback;
 }  // namespace
 
 void touch_set_tap_callback(TouchTapCallback cb) {
@@ -349,6 +372,10 @@ void touch_set_tap_callback(TouchTapCallback cb) {
 
 void touch_set_release_callback(TouchReleaseCallback cb) {
     releaseCallback = std::move(cb);
+}
+
+void touch_set_swipe_callback(TouchSwipeCallback cb) {
+    swipeCallback = std::move(cb);
 }
 
 void touch_poll() {
@@ -361,9 +388,13 @@ void touch_poll() {
             if (touch_get_point(tx, ty)) {
                 touchActive     = true;
                 touchConfirmed  = false;
+                confirmChecked  = false;
                 pendingTx = tx;
                 pendingTy = ty;
+                lastTx = tx;
+                lastTy = ty;
                 confirmDeadline = make_timeout_time_ms(kTouchConfirmMs);
+                if (bTrace) LOGF("\r\n[TOUCH] press (%u,%u)", tx, ty);
             }
         }
         // If touchActive is already true: ignore -- the finger is still
@@ -374,30 +405,65 @@ void touch_poll() {
     // before acting on it. Filters out single-sample glitches (no second
     // reading at all, or one that's jumped far away) at the cost of only
     // kTouchConfirmMs of added latency on a genuine tap.
-    if (touchActive && !touchConfirmed && time_reached(confirmDeadline)) {
+    if (touchActive && !confirmChecked && time_reached(confirmDeadline)) {
+        confirmChecked = true;
         uint16_t tx, ty;
         if (touch_get_point(tx, ty)) {
             const int dx = static_cast<int>(tx) - static_cast<int>(pendingTx);
             const int dy = static_cast<int>(ty) - static_cast<int>(pendingTy);
             if (dx * dx + dy * dy <= kTouchConfirmToleranceSq) {
                 touchConfirmed = true;
+                if (bTrace) LOGF("\r\n[TOUCH] confirmed tap (%u,%u)", pendingTx, pendingTy);
                 if (tapCallback) tapCallback(pendingTx, pendingTy);
+            } else if (bTrace) {
+                LOGF("\r\n[TOUCH] confirm failed: moved (%d,%d) from (%u,%u) -- treating as drag/swipe candidate",
+                     dx, dy, pendingTx, pendingTy);
             }
             // else: moved too far between samples -- treat as noise or a
             // drag, ignore. Still waits for release below as normal.
+        } else if (bTrace) {
+            LOGF("\r\n[TOUCH] confirm failed: finger gone by %ums -- single-sample blip", kTouchConfirmMs);
         }
         // else: finger already gone by the confirm deadline -- was a
         // single-sample blip, not a real press. Ignore it.
     }
 
     // Lightweight poll (every ~30 ms) to detect WHEN the finger lifts --
-    // no IRQ arrives for that, so we have to ask actively.
+    // no IRQ arrives for that, so we have to ask actively. Also doubles as
+    // our ongoing position tracker: touch_get_point() gives us both "is it
+    // still down" and "where" in one I2C read, so we use it here instead
+    // of the plain touch_is_down() check, updating lastTx/lastTy each time
+    // so a swipe's actual endpoint is known even if the gesture takes
+    // longer than the initial confirm window.
     if (touchActive &&
         absolute_time_diff_us(lastReleasePoll, get_absolute_time()) > 30'000) {
         lastReleasePoll = get_absolute_time();
-        if (!touch_is_down()) {
+        uint16_t tx, ty;
+        if (touch_get_point(tx, ty)) {
+            lastTx = tx;
+            lastTy = ty;
+            if (bTrace) LOGF("\r\n[TOUCH]   still down @ (%u,%u)", tx, ty);
+        } else {
             touchActive = false;
             touchConfirmed = false;
+
+            // Swipe check: total travel from the very first sample to the
+            // last known position before lift-off. Requires enough
+            // horizontal distance, and that the gesture stayed more
+            // horizontal than vertical (so a mostly-vertical drag, e.g. a
+            // finger sliding while trying to tap, doesn't misfire one).
+            const int dx = static_cast<int>(lastTx) - static_cast<int>(pendingTx);
+            const int dy = static_cast<int>(lastTy) - static_cast<int>(pendingTy);
+            const bool isSwipe = std::abs(dx) >= kSwipeMinDx && std::abs(dy) < std::abs(dx);
+            if (bTrace) {
+                LOGF("\r\n[TOUCH] release: start(%u,%u) end(%u,%u) dx=%d dy=%d minDx=%d -> %s",
+                     pendingTx, pendingTy, lastTx, lastTy, dx, dy, kSwipeMinDx,
+                     isSwipe ? "SWIPE" : "no swipe");
+            }
+            if (isSwipe && swipeCallback) {
+                swipeCallback(dx > 0);   // true = left-to-right ("forward")
+            }
+
             if (releaseCallback) releaseCallback();
         }
     }

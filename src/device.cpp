@@ -34,9 +34,25 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
     if( cmd == IFC) {
         ifc();
     }
-    if( (cmd == UNL && isListener())
-            || (cmd == UNT && isTalker()) ) {
-        setIdle();
+    if( cmd == UNL ) {
+        // Universal Unlisten. Handled unconditionally, and *before* the
+        // generic LAD/TAD address-range checks below -- UNL (0x43F) and
+        // UNT (0x45F) both sit exactly at LAD+31/TAD+31 (address 31 is
+        // reserved as "no device"/broadcast in HP-IL, MAX_ADDR=0x1F), so
+        // inAddrRange(cmd, LAD)/inAddrRange(cmd, TAD) would otherwise
+        // treat them as "address a device at address 31" -- since no
+        // device ever has that address, every device would fall into the
+        // "not addressed" branch and get set idle, silently clearing
+        // LISTENER status for a device that UNT was never meant to
+        // touch (and vice versa for TALKER/UNL). Returning true here
+        // unconditionally prevents UNL/UNT from ever reaching those
+        // checks at all.
+        if (isListener()) setIdle();
+        return true;
+    }
+    if( cmd == UNT ) {
+        // Universal Untalk -- same reasoning as UNL above.
+        if (isTalker()) setIdle();
         return true;
     }
     if ((cmd == DCL) || ((cmd == SDC) && isListener()) ) {
@@ -66,7 +82,7 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
         return true;
     }
     if( inAddrRange(cmd, TAD) ) {
-        if( addr() == _addr ) {
+        if( addr() == _addr && _addr < 31 ) {
             setTalker();
         } else
             setIdle();

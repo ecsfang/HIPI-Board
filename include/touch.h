@@ -20,6 +20,9 @@ bool touch_is_down();                                      // lightweight releas
 
 using TouchTapCallback     = std::function<void(std::uint16_t x, std::uint16_t y)>;
 using TouchReleaseCallback = std::function<void()>;
+// true = left-to-right swipe ("forward" through the list of views),
+// false = right-to-left ("backward").
+using TouchSwipeCallback   = std::function<void(bool forward)>;
 
 // Invoked once, with the original (first-sample) coordinates, when a touch
 // has passed the debounce confirmation.
@@ -30,7 +33,16 @@ void touch_set_tap_callback(TouchTapCallback cb);
 // glitch) -- there's nothing to "release" in that case.
 void touch_set_release_callback(TouchReleaseCallback cb);
 
+// Invoked once, at release, if the whole touch (from first press to lift)
+// moved far enough horizontally -- and stayed horizontal enough -- to
+// count as a swipe rather than a tap or a stray drag. Does NOT suppress
+// the tap/release callbacks above; a swipe simply never passes the tap
+// debounce's tight (30px) tolerance in the first place, so in practice
+// only one or the other ever fires for a given touch.
+void touch_set_swipe_callback(TouchSwipeCallback cb);
+
 // Call once per main-loop iteration. Consumes the IRQ flag, runs the
 // confirm-resample debounce, and detects release via periodic polling
-// (touch_is_down()) -- invoking whichever callbacks are registered.
+// (also used to track ongoing position for swipe detection) --
+// invoking whichever callbacks are registered.
 void touch_poll();

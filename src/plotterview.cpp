@@ -2,6 +2,8 @@
 #include "boardui.h"
 #include "usb_serial.h"
 #include <cmath>
+#include <cstring>
+#include "pico/time.h"
 
 namespace hp82163 {
 
@@ -103,6 +105,53 @@ void onPlotterClear() {
     screen_->refreshCursor();
 }
 
+// ── View-switch splash ──────────────────────────────────────────────────
+// Briefly announces which view is now showing, whenever it actually
+// changes (menu-driven or via the swipe gesture) -- non-blocking: drawn
+// once here, then dismissed later by plotterview_poll() once the
+// deadline passes, so a switch never freezes the main loop (HP-IL
+// processing, touch handling, ...) for the splash's whole duration.
+bool splashVisible_ = false;
+absolute_time_t splashHideDeadline_;
+constexpr std::uint32_t kSplashMs = 1500;
+
+const char* outputName(DisplayOutput mode) {
+    switch (mode) {
+        case DisplayOutput::Display: return "DISPLAY";
+        case DisplayOutput::Plotter: return "PLOTTER";
+    }
+    return "?";
+}
+
+void showSwitchSplash(DisplayOutput mode) {
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
+
+    constexpr int splashW = 300, splashH = 90;
+    constexpr int splashX = (SCREEN_MAX_X - splashW) / 2;
+    constexpr int splashY = (SCREEN_MAX_Y - splashH) / 2;
+    // Same yellow used for the menu box (see uidialog.hpp's MenuFrame) --
+    // not reused directly to avoid a circular include (uidialog.hpp
+    // already includes plotterview.h for DisplayOutput).
+    display_->fillRect(splashX, splashY, splashW, splashH, 0xEDC0);
+    display_->rect(splashX, splashY, splashW, splashH, 0xFFFF);
+
+    const char* name = outputName(mode);
+    display_->txtColor(0x0000, 0xEDC0);  // black text on the yellow box
+    display_->txtSize(2);
+    // RA8875 hardware font: 8px base glyph width, scaling to 8*(size+1)
+    // per the project's own established convention (see MenuFrame's
+    // "16px/char at scale 1" comment, i.e. 8*(1+1)).
+    const int charW = 8 * (2 + 1);
+    const int charH = 16 * (2 + 1);
+    const int textW = static_cast<int>(std::strlen(name)) * charW;
+    display_->txtSetCursor(splashX + (splashW - textW) / 2, splashY + (splashH - charH) / 2);
+    display_->txtWrite(name);
+
+    splashVisible_ = true;
+    splashHideDeadline_ = make_timeout_time_ms(kSplashMs);
+}
+
 }  // namespace
 
 void plotterview_init(RA8875* display, Screen* screen, CPlotter* plotter) {
@@ -145,20 +194,45 @@ void plotterview_setOutput(DisplayOutput mode) {
     if (mode == output_) return;
     output_ = mode;
     if (mode == DisplayOutput::Plotter) {
-        // Just stop Screen from drawing text over the plot -- suspend()
-        // has no visible effect of its own. The actual redraw happens
-        // exactly once, when the menu closes (see UiDialog::close()),
-        // regardless of whether we just switched into Plotter mode here
-        // or were already showing it. Doing a redraw here *too* just
-        // drew the same thing twice in a row.
+        // Stop Screen from drawing text over the plot, and turn off the
+        // hardware cursor explicitly -- suspend() alone doesn't touch
+        // whatever cursor state the RA8875 already had active, which
+        // would otherwise just keep blinking autonomously via the chip's
+        // own hardware timer regardless of software suspension.
         screen_->suspend();
+        screen_->hideCursorHardware();
     }
-    // Switching to Display: nothing to do here either -- UiDialog::close()
-    // calls screen_->resume() itself, which un-suspends and redraws in a
-    // single step.
+    // Switching to Display: deliberately do NOT resume() here -- Screen
+    // stays suspended (if it currently is) through the splash below, so
+    // the real text can't flash in before the splash's own timeout. Its
+    // resume() happens in plotterview_poll() instead, once the splash
+    // actually dismisses.
+    showSwitchSplash(mode);
+}
+
+bool plotterview_isSplashVisible() { return splashVisible_; }
+
+void plotterview_poll() {
+    if (splashVisible_ && time_reached(splashHideDeadline_)) {
+        splashVisible_ = false;
+        // Reveal whatever's actually supposed to be showing now.
+        if (output_ == DisplayOutput::Plotter) {
+            plotterview_redraw();
+        } else {
+            screen_->resume();   // un-suspends + its own full() redraw
+        }
+    }
 }
 
 DisplayOutput plotterview_output() { return output_; }
+
+void plotterview_cycleOutput(bool forward) {
+    int next = static_cast<int>(output_) + (forward ? 1 : -1);
+    // Proper modulo for the backward case too (a plain % can return a
+    // negative result in C++ for a negative left-hand side).
+    next = ((next % kDisplayOutputCount) + kDisplayOutputCount) % kDisplayOutputCount;
+    plotterview_setOutput(static_cast<DisplayOutput>(next));
+}
 
 void plotterview_clearPlotter() {
     plotter_->clear();   // resets state + segments_; fires onPlotterClear() above

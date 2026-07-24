@@ -11,6 +11,23 @@
 // into plotter units, and as IW's default clip window.
 namespace {
 constexpr int kP1X = 250, kP1Y = 279, kP2X = 10250, kP2Y = 7479;
+// Safety cap for LB label text accumulation (see feed_char()'s case 3) --
+// well beyond any realistic real-world label, just a backstop against a
+// program that forgets the terminator entirely.
+constexpr std::size_t kMaxLabelLength = 200;
+}
+
+void CPlotter::reset_defaults() {
+    // Everything DF is documented to reset -- see execute()'s "DF" branch.
+    tickLenPos_ = tickLenNeg_ = 0.5;  // HP-GL default: 0.5% of the P1-P2 span
+    // SR defaults: 0.75%/1.5% of the P1-P2 span (HP-GL default character
+    // size), converted to plotter units up front so drawLabelChar() never
+    // has to redo the percentage math per character.
+    charWidthUnits_  = 0.75 / 100.0 * (kP2X - kP1X);
+    charHeightUnits_ = 1.5  / 100.0 * (kP2Y - kP1Y);
+    charSlant_ = 0.0;
+    dirCos_ = 1.0; dirSin_ = 0.0;
+    labelTerminator_ = 0x03;  // ETX -- see plotter.h's note on DT/DF
 }
 
 void CPlotter::reset_state() {
@@ -23,20 +40,16 @@ void CPlotter::reset_state() {
     penDown_ = false;
     currentPen_ = 1;
     coordMode_ = CoordMode::Absolute;
-    tickLenPos_ = tickLenNeg_ = 0.5;  // HP-GL default: 0.5% of the P1-P2 span
 
     // IW defaults to the full P1-P2 area -- i.e. no extra clipping beyond
     // the hard-clip limits already implied by plotter coordinates.
     iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
 
-    // SR defaults: 0.75%/1.5% of the P1-P2 span (HP-GL default character
-    // size), converted to plotter units up front so drawLabelChar() never
-    // has to redo the percentage math per character.
-    charWidthUnits_  = 0.75 / 100.0 * (kP2X - kP1X);
-    charHeightUnits_ = 1.5  / 100.0 * (kP2Y - kP1Y);
-    charSlant_ = 0.0;
-    dirCos_ = 1.0; dirSin_ = 0.0;
+    everInitialized_ = true;  // OS's power-on status bit, see plotter.h
+
+    reset_defaults();
     charPosX_ = penX_; charPosY_ = penY_;
+    crPosX_ = penX_; crPosY_ = penY_;
 
     segments_.clear();
 
@@ -146,6 +159,15 @@ void CPlotter::feed_char(char c) {
                 parseState_ = 3;
                 return;
             }
+            if (cmdBuf_ == "DT") {
+                // Define Terminator's argument is a single literal
+                // character, taken completely as-is -- it must NOT go
+                // through normal numeric-parameter parsing either (the
+                // argument could be any byte, digit or not, and per the
+                // manual there's no "no argument" case to special-case).
+                parseState_ = 4;
+                return;
+            }
             parseState_ = 2;
             inParam_ = false;
             sawSeparator_ = false;
@@ -201,14 +223,40 @@ void CPlotter::feed_char(char c) {
         break;
 
     case 3:
-        // Inside LB label text -- accumulate verbatim until the terminator.
-        if (c == 0x03) {
+        // Inside LB label text -- accumulate verbatim until the terminator
+        // (labelTerminator_, defaulting to ETX/0x03 -- see DT).
+        if (c == labelTerminator_) {
             drawLabel(cmdBuf_);
             cmdBuf_.clear();
             parseState_ = 0;
         } else {
             cmdBuf_ += c;
+            // Safety cap: a program that forgets the terminator (e.g.
+            // sends ';' -- an ordinary HP-GL separator, but not what LB
+            // expects) would otherwise make this buffer swallow every
+            // subsequent byte forever, including what should have been
+            // real commands, growing without bound. Bail out once a
+            // label's gotten implausibly long for anything real rather
+            // than let that happen.
+            if (cmdBuf_.size() > kMaxLabelLength) {
+                if (bTrace) {
+                    LOGF("\r\n[PLOTTER] LB exceeded %zu chars without a terminator "
+                         "(0x%02X) -- aborting, treating as malformed",
+                         kMaxLabelLength, static_cast<unsigned char>(labelTerminator_));
+                }
+                cmdBuf_.clear();
+                parseState_ = 0;
+            }
         }
+        break;
+
+    case 4:
+        // DT's single-character argument -- taken completely literally,
+        // whatever it is (no special case for ';' or anything else; see
+        // the manual note quoted in plotter.h).
+        labelTerminator_ = c;
+        cmdBuf_.clear();
+        parseState_ = 0;
         break;
     }
 }
@@ -308,11 +356,15 @@ void CPlotter::doMove(std::int16_t x, std::int16_t y) {
     }
     penX_ = x;
     penY_ = y;
-    // Keep the label "text cursor" in sync with every real pen move -- CP
-    // (see execute()) is the only thing that deliberately offsets it away
-    // from the actual pen position afterward.
+    // Keep the label "text cursor" AND its CR "home" position in sync
+    // with every real pen move -- CP (see execute()) is the only thing
+    // that deliberately offsets charPosX_/Y_ away from the actual pen
+    // position afterward, and it does NOT touch crPosX_/Y_ (matches
+    // oo7470A.rx: PA/PU/PD/PR and DI reset the CR home point, CP doesn't).
     charPosX_ = x;
     charPosY_ = y;
+    crPosX_ = x;
+    crPosY_ = y;
 }
 
 void CPlotter::drawTick(bool vertical) {
@@ -358,7 +410,26 @@ void CPlotter::moveThroughParams(const std::vector<double>& params) {
 void CPlotter::drawLabel(const std::string& text) {
     if (bTrace) LOGF("\r\n[PLOTTER] LB \"%s\"", text.c_str());
     for (char ch : text) {
-        drawLabelChar(static_cast<unsigned char>(ch));
+        const unsigned char code = static_cast<unsigned char>(ch);
+        if (code == 13) {
+            // Carriage return: snap the text cursor back onto the same
+            // "column" (position along the text direction) it started
+            // at -- crPosX_/crPosY_, the CR home point -- while keeping
+            // whatever offset perpendicular to that direction has built
+            // up since then (e.g. from an embedded LF moving down a
+            // row). This is a vector projection of (crPos - charPos)
+            // onto the (unit) direction vector, ported directly from
+            // oo7470A.rx's CR handling in its LB command. Without this
+            // special case, CR would just fall through to drawLabelChar()
+            // as an unrecognized glyph and merely advance one character
+            // width instead of returning to the line's start column.
+            const double a = (crPosX_ - charPosX_) * dirCos_ + (crPosY_ - charPosY_) * dirSin_;
+            charPosX_ = static_cast<std::int16_t>(charPosX_ + a * dirCos_);
+            charPosY_ = static_cast<std::int16_t>(charPosY_ + a * dirSin_);
+            if (bTrace) LOGF("\r\n[PLOTTER]   CR -> textpos(%d,%d)", charPosX_, charPosY_);
+            continue;
+        }
+        drawLabelChar(code);
     }
 }
 
@@ -480,6 +551,49 @@ void CPlotter::execute(const std::string& cmd) {
         // yet, so this always reports "no error".
         if (bTrace) LOGF("\r\n[PLOTTER] OE (output error status)");
         queueOutput("0\r\n");
+    } else if (mnemonic == "OI") {
+        // Output Identification -- always "7470A" on a real 7470A,
+        // regardless of interface (matches the SDI device-id string too).
+        if (bTrace) LOGF("\r\n[PLOTTER] OI (output identification)");
+        queueOutput("7470A\r\n");
+    } else if (mnemonic == "OF") {
+        // Output Factors -- plotter units per millimeter (X,Y). Fixed at
+        // the real 7470A/7475A's standard resolution (40 units/mm, i.e.
+        // 0.025mm per unit) -- not something we model differently.
+        if (bTrace) LOGF("\r\n[PLOTTER] OF (output scaling factors)");
+        queueOutput("40,40\r\n");
+    } else if (mnemonic == "OO") {
+        // Output Options -- 8 comma-separated flags for optional features.
+        // Matches the manual's own real-hardware example exactly: arcs/
+        // circles = 0 (an RS-232-C-only option, not applicable to our
+        // HP-IL v1 anyway), pen select = 1 (we do support SP).
+        if (bTrace) LOGF("\r\n[PLOTTER] OO (output options)");
+        queueOutput("0,1,0,0,1,0,0,0\r\n");
+    } else if (mnemonic == "OS") {
+        // Output Status -- an 8-bit status byte. We only meaningfully
+        // track bit 0 (pen down) and bit 3 (initialized, one-shot --
+        // cleared the moment it's read, matching the spec); bit 4 (ready
+        // for data) is always set since we have no real motors/pinch
+        // wheels to wait on, and bit 5 (error) stays clear since OE
+        // always reports no error. Power-on value is 24 (8+16), matching
+        // the manual.
+        int status = 16;
+        if (penDown_) status |= 1;
+        if (everInitialized_) {
+            status |= 8;
+            everInitialized_ = false;
+        }
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%d\r\n", status);
+        if (bTrace) LOGF("\r\n[PLOTTER] OS (output status) -> %d", status);
+        queueOutput(buf);
+    } else if (mnemonic == "OW") {
+        // Output Window -- the current IW clip rectangle (lower-left,
+        // upper-right), same 4-integer format as OP.
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d\r\n", iw1x_, iw1y_, iw2x_, iw2y_);
+        if (bTrace) LOGF("\r\n[PLOTTER] OW (output window)");
+        queueOutput(buf);
     } else if (mnemonic == "TL") {
         // Tick Length: tp[,tn] as percentages of the P1-P2 span. tn
         // defaults to tp if omitted; bare "TL" resets both to the HP-GL
@@ -520,6 +634,24 @@ void CPlotter::execute(const std::string& cmd) {
             LOGF("\r\n[PLOTTER] SR w=%.3f%% h=%.3f%% (%.1f x %.1f units)",
                  wPct, hPct, charWidthUnits_, charHeightUnits_);
         }
+    } else if (mnemonic == "SI") {
+        // Absolute Character Size: width,height in centimeters, converted
+        // to plotter units via the fixed 40 units/mm scale (see OF) --
+        // NOT via the P1-P2 percentage SR uses, so character size stays
+        // constant regardless of P1/P2. Bare "SI" defaults to 0.19cm/
+        // 0.27cm, matching SR's own no-param default size at standard
+        // P1/P2 (per the manual). Negative values mirror the label for
+        // free -- drawLabelChar()'s scaling already flips correctly for a
+        // negative charWidthUnits_/charHeightUnits_.
+        constexpr double kUnitsPerCm = 400.0;  // 10 mm/cm * 40 units/mm
+        const double wCm = params.empty() ? 0.19 : params[0];
+        const double hCm = params.size() > 1 ? params[1] : 0.27;
+        charWidthUnits_  = wCm * kUnitsPerCm;
+        charHeightUnits_ = hCm * kUnitsPerCm;
+        if (bTrace) {
+            LOGF("\r\n[PLOTTER] SI w=%.3fcm h=%.3fcm (%.1f x %.1f units)",
+                 wCm, hCm, charWidthUnits_, charHeightUnits_);
+        }
     } else if (mnemonic == "SL") {
         // Character slant: a shear factor (dx per unit y), not an angle in
         // degrees -- matches how oo7470A.rx's PxCSA is used directly.
@@ -536,6 +668,9 @@ void CPlotter::execute(const std::string& cmd) {
             const double mag = std::sqrt(run * run + rise * rise);
             if (mag > 1e-9) { dirCos_ = run / mag; dirSin_ = rise / mag; }
         }
+        // DI also resets the CR "home" position to the current pen
+        // position (oo7470A.rx's newCRP), same as a real PA/PU/PD/PR move.
+        crPosX_ = penX_; crPosY_ = penY_;
         if (bTrace) LOGF("\r\n[PLOTTER] DI cos=%.3f sin=%.3f", dirCos_, dirSin_);
     } else if (mnemonic == "CP") {
         // Character Plot: reposition the label "text cursor" by dCols
@@ -554,6 +689,16 @@ void CPlotter::execute(const std::string& cmd) {
             LOGF("\r\n[PLOTTER] CP dCols=%.2f dRows=%.2f -> textpos(%d,%d)",
                  dCols, dRows, charPosX_, charPosY_);
         }
+    } else if (mnemonic == "UC") {
+        // User Defined Character -- explicitly a NOP on a real 7470A with
+        // an HP-IL interface (verbatim from the manual: "It is not
+        // included in the instruction set of the 7470 plotter with an
+        // HP-IL interface... treated as a NOP"). Only the HP-IB/RS-232-C
+        // interface variants actually draw custom characters with it.
+        // Recognized and silently ignored here rather than falling
+        // through to "unrecognized command" -- this is correct,
+        // documented behavior for our interface, not a missing feature.
+        if (bTrace) LOGF("\r\n[PLOTTER] UC (NOP on HP-IL interface, per manual)");
     } else if (bTrace) {
         // Remaining v1 gaps (see plotter.h): SC/IP user-scaling,
         // digitizing, OS/OD/OF/OI/OO/OW, DT -- unrecognized mnemonics are

@@ -47,8 +47,6 @@ uint8_t hpilDevices = 0;
 void hipi_init()
 {
     cassette = new CTapeSD(config.filename().c_str()); // Uses SD-card for file storage
-    pilbox = new CPilBox("PILBOX");
-    plotter = new CPlotter("TFPLOT");
 
     dialog->setFileSelectedCallback([&cassette](const std::string& filename) {
         LOGF("\r\nSelect file: " HILIGHT "%s" RESET " ", filename.c_str());
@@ -59,7 +57,9 @@ void hipi_init()
     devices.push_back(new CDisplay("TFDISPLAY", 0x3E));
     devices.push_back(new CDrive("TFDRIVE", cassette));
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
+    pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
+    plotter = new CPlotter("TFPLOT");
     devices.push_back(plotter);
 
     // Apply persisted enabled/disabled state (see Config::isDeviceEnabled()
@@ -89,6 +89,7 @@ bool hipi_test(HpIlLoop& loop) {
     return true;
 }
 
+static int nCmd = 0;
 bool hipi_loop(HpIlLoop& loop) {
     uint32_t rx_word;
     static uint32_t lastCmd = NO_FRAME;  // was a local re-initialized every
@@ -99,8 +100,8 @@ bool hipi_loop(HpIlLoop& loop) {
     if( loop.receiveFrame(rx_word) ) {
         led_on(LED_PIN_2);
         // Got a frame, send to all devices in the loop
-        if( bTrace && !IS_IDLE(rx_word) ) {
-            // Trace if new command and not idle ...
+        if( bTrace && !IS_ROUTINE(rx_word) ) {
+            // Trace if new command and not routine bus housekeeping ...
             LOGF("\r\n@" HILIGHT "%-6.6s" RESET " ", ilMnemonic(rx_word, buf));
             lastCmd = rx_word;
         }
@@ -109,7 +110,7 @@ bool hipi_loop(HpIlLoop& loop) {
             if (!dev->enabled()) continue;   // as if not physically on the loop
             bool isLast = (i == devices.size() - 1);
             IL_CMD_t rtn = dev->hpil(rx_word);
-            if( !IS_IDLE(rtn) ) {
+            if( !IS_ROUTINE(rtn) ) {
                 if (bExtTrace ) {
                     // Show device status if extended trace
                     extendedTrace(dev, rx_word, rtn);
@@ -128,7 +129,7 @@ bool hipi_loop(HpIlLoop& loop) {
             }
             rx_word = rtn;
         }
-        if( bTrace && !IS_IDLE(rx_word) ) {
+        if( bTrace && !IS_ROUTINE(rx_word) ) {
             LOGF("%s %s", bExtTrace ? "<<<" : ">>>", ilMnemonic(rx_word, buf));
             if( IS_DATA(rx_word) )
                 LOGF(" '%c' ", isprint(rx_word&0xFF) ? rx_word&0xFF : '.');
