@@ -43,15 +43,19 @@ inline bool peekBmpDimensions(const char* path, std::uint16_t& outWidth, std::ui
     return true;
 }
 
-// Decodes a 24-bit uncompressed BMP and draws it at (x0, y0). Optionally
-// also caches the decoded RGB565 pixels (row-major, stride = width) --
-// e.g. so a button's sub-rectangle can be redrawn later without re-reading
-// the file (see ui_buttons.hpp's redrawButtonRegion()).
+// Decodes a 24-bit uncompressed BMP and draws it at (x0, y0) (unless
+// alsoDraw is false, in which case it's only decoded/cached, not drawn --
+// e.g. so the button strip's bitmap can be loaded and cached at boot
+// without actually appearing on screen until a real tap first shows it).
+// Optionally also caches the decoded RGB565 pixels (row-major, stride =
+// width) -- e.g. so a button's sub-rectangle can be redrawn later without
+// re-reading the file (see ui_buttons.hpp's redrawButtonRegion()).
 inline bool drawBmpAt(RA8875* display, const char* path,
                        std::int16_t x0, std::int16_t y0,
                        std::vector<std::uint16_t>* outPixels = nullptr,
                        std::uint16_t* outWidth = nullptr,
-                       std::uint16_t* outHeight = nullptr) {
+                       std::uint16_t* outHeight = nullptr,
+                       bool alsoDraw = true) {
     FIL file;
     LOGF("\r\n\t\t* Open file <%s> ... ", path);
     if (f_open(&file, path, FA_READ) != FR_OK) {
@@ -126,9 +130,11 @@ inline bool drawBmpAt(RA8875* display, const char* path,
                 ((rr & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
         }
 
-        display->drawBitmap565(x0, static_cast<std::int16_t>(y0 + r),
-                              static_cast<std::uint16_t>(width), 1,
-                              rowBuf.data());
+        if (alsoDraw) {
+            display->drawBitmap565(x0, static_cast<std::int16_t>(y0 + r),
+                                  static_cast<std::uint16_t>(width), 1,
+                                  rowBuf.data());
+        }
 
         if (outPixels) {
             std::memcpy(outPixels->data() + static_cast<std::size_t>(r) * width,

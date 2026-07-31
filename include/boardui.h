@@ -68,4 +68,11 @@ void boardui_handleRelease();
 // switch views underneath it.
 void boardui_handleSwipe(bool forward);
 
+// Called by UiDialog::close() (see uidialog.hpp) -- shortens the button
+// strip's auto-hide countdown to a quick ~0.5s instead of leaving
+// whatever's left of the normal 5s inactivity window, since explicitly
+// closing the menu (Back/Exit) already signals "done", unlike just going
+// quiet mid-navigation.
+void boardui_onMenuClosed();
+
 }  // namespace hp82163

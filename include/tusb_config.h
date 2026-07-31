@@ -8,7 +8,7 @@
 
 // Två CDC:er för hp82163 (itf 0 = debug, itf 1 = data)
 #ifndef CFG_TUD_CDC
-#define CFG_TUD_CDC             2
+#define CFG_TUD_CDC             3
 #endif
 
 #ifndef CFG_TUD_CDC_RX_BUFSIZE

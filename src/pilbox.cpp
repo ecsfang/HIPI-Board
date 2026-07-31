@@ -151,7 +151,6 @@ IL_CMD_t CPilBox::receiveFrame(void)
         // - and there is data available in the serial buffer
         // if a frame arrives we must check for a PILBox command first
         pil_recv = tud_cdc_n_read_char(ITF_HPIL);
-
         // PILBox emulation received a byte from the PILBox designated serial port
         // pil_recv contains the returned byte
         if ((pil_recv & 0xE0) == 0x20)

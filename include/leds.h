@@ -33,6 +33,9 @@
 #define LED_PIN_4 21 //26
 #define LED_PIN_5 22 //27
 
+#define HPIL_ACT_LED    LED_PIN_2   // Indicate HP-IL active
+#define HPIL_IDY_LED    LED_PIN_3   // Indicate HP-IL idle
+
 class PicoPwmBaseException : public std::exception {
    protected:
     std::string _msg;

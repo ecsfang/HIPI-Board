@@ -26,6 +26,10 @@ extern std::vector<CDevice*> devices;
 
 namespace hp82163 {
 
+// Forward declaration -- defined in boardui.cpp. Not including the whole
+// of boardui.h here since it already includes this file (uidialog.hpp).
+void boardui_onMenuClosed();
+
 // Shared box position/size/style for the on-screen menu frame. Pulled out
 // to namespace scope so the splash screen (shown before any UiDialog
 // exists) can draw an identical-looking frame without duplicating the
@@ -510,6 +514,9 @@ private:
 
     void close() {
         state_ = State::Closed;
+        boardui_onMenuClosed();  // shortens the button strip's auto-hide
+                                  // countdown -- see its definition in
+                                  // boardui.cpp for why
         if (plotterview_isSplashVisible()) {
             // A view switch just happened (this menu action selected a
             // new Display/Plotter output) -- the splash announcing it

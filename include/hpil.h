@@ -51,7 +51,6 @@
 // class -- its extended-status sibling), both of which repeat constantly
 // during normal operation and rarely indicate anything worth looking at
 // per-occurrence.
-//#define IS_ROUTINE(x) (IS_IDLE(x))
 #define IS_ROUTINE(x) (IS_IDLE(x) || (((x) & 0x700) == 0x100) || (((x) & 0x700) == 0x300))
 
 // info below from Christoph Giesselink:
@@ -65,6 +64,23 @@
 
 // Channel for the HP-IL port for PIL-Box interface
 #define ITF_HPIL   1
+
+// Channel for CTerminal's USB CDC bridge (see terminal.h) -- a separate
+// TinyUSB CDC instance (3 total, CFG_TUD_CDC=3 in tusb_config.h) so it
+// doesn't collide with the debug console (0) or PILBox forwarding (1).
+#define ITF_TERMINAL   2
+
+// The Service Request bit ("C@", the lowest of the 3 control bits) --
+// per the HP-IL protocol spec's SR function: a device requests service
+// by setting this bit on any DOE-class (IS_DATA(), i.e. DAB/DSR/END/ESR)
+// or IDY-class (IS_IDLE()) frame it sources or retransmits, regardless of
+// that frame's own data/addressee -- it's what the (misleadingly-named,
+// in our own trace mnemonics) "DSR"/"ESR" traffic actually is: perfectly
+// ordinary DAB/END frames with this bit additionally set. CMD/RDY-class
+// frames (LAD/TAD/UNL/UNT/AAU/SDA/SST/...) have no SRQ bit position and
+// must never have it set. See CTerminal::hpil() for the one place this
+// project currently uses it.
+#define SRQ_BIT 0x100
 
 #define MAX_ADDR    0x1F
 #define MAX_CMD     0x1F
@@ -92,7 +108,8 @@ typedef enum {
     DRIVE,
     LED,
     PILBOX,
-    PLOTTER
+    PLOTTER,
+    TERMINAL
 } IL_Type_e;
 
 class CDevice {
@@ -106,6 +123,7 @@ protected:
     const char      *m_sdi;
     IL_Type_e       m_type;
     bool            m_enabled;
+    bool            m_last;
 public:
     CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau, IL_Type_e type = NONE) {
         m_devName = name;
@@ -117,6 +135,7 @@ public:
         m_nAau = _aau;
         m_type = type;
         m_enabled = true;
+        m_last = false;
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
     virtual IL_CMD_t hpil(IL_CMD_t cmd);
@@ -138,6 +157,8 @@ public:
     bool isTalker() { return isStatus(TALKER); }
     void setListener() { status(LISTENER); }
     bool isListener() { return isStatus(LISTENER); }
+    void last(bool _last) { m_last = _last; }
+    bool isLast() { return m_last; }
     const char *name() { return m_devName; }
     void type(IL_Type_e type) { m_type = type; }
     IL_Type_e type(void) { return m_type; }

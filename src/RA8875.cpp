@@ -279,17 +279,23 @@ std::uint8_t RA8875::readStatus() {
 }
 
 void RA8875::waitPoll(std::uint8_t reg, std::uint8_t mask) {
-    // 50 ms timeout, matching the MicroPython reference.
+    // Check immediately first, *then* delay if still busy -- not the
+    // other way around. Most graphics operations (line/rect/BTE/MCLR)
+    // complete in well under a millisecond, so the previous "sleep 1ms,
+    // then check, up to 50 times" pattern added a needless ~1ms of pure
+    // waiting to nearly every single hardware draw call, even though the
+    // operation was already done by the time the first check happened.
+    // Still a 50ms safety-net timeout overall, just not front-loaded.
     for (int i = 0; i < 50; ++i) {
-        t_.delayMs(1);
         if ((readReg(reg) & mask) == 0) return;
+        t_.delayMs(1);
     }
 }
 
 void RA8875::waitStatus(std::uint8_t mask) {
     for (int i = 0; i < 50; ++i) {
-        t_.delayMs(1);
         if ((readStatus() & mask) == 0) return;
+        t_.delayMs(1);
     }
 }
 
@@ -461,23 +467,30 @@ void RA8875::pixel(std::int16_t x, std::int16_t y, std::uint16_t color) {
 void RA8875::drawBitmap565(std::int16_t x, std::int16_t y,
                            std::uint16_t w, std::uint16_t h,
                            const std::uint16_t* data) {
+    drawBitmap565Cropped(x, y, w, h, w, data);
+}
+
+void RA8875::drawBitmap565Cropped(std::int16_t x, std::int16_t y,
+                                  std::uint16_t drawWidth, std::uint16_t h,
+                                  std::uint16_t srcStride,
+                                  const std::uint16_t* data) {
     gfxMode();
 
     // Radbuffert: 2 byte per pixel (high byte, low byte — samma format som pixel())
     static std::uint8_t rowBuf[800 * 2];  // storsta stodda skarmbredd
-    if (w > 800) return;                  // enkel sakerhetsspärr
+    if (drawWidth > 800) return;          // enkel sakerhetsspärr
 
     for (std::uint16_t row = 0; row < h; ++row) {
         setxy(static_cast<std::uint16_t>(x),
               static_cast<std::uint16_t>(y + row));
         writeCmd(MRWC);
 
-        const std::uint16_t* src = data + static_cast<std::size_t>(row) * w;
-        for (std::uint16_t col = 0; col < w; ++col) {
+        const std::uint16_t* src = data + static_cast<std::size_t>(row) * srcStride;
+        for (std::uint16_t col = 0; col < drawWidth; ++col) {
             rowBuf[col * 2]     = static_cast<std::uint8_t>(src[col] >> 8);
             rowBuf[col * 2 + 1] = static_cast<std::uint8_t>(src[col] & 0xFF);
         }
-        writeData(rowBuf, static_cast<std::size_t>(w) * 2);
+        writeData(rowBuf, static_cast<std::size_t>(drawWidth) * 2);
     }
 }
 

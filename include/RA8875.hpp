@@ -232,6 +232,16 @@ public:
     void drawBitmap565(std::int16_t x, std::int16_t y,
                     std::uint16_t w, std::uint16_t h,
                     const std::uint16_t* data);
+    // Like drawBitmap565(), but draws only the leftmost drawWidth columns
+    // of each row -- srcStride is the *true* row width of the source data
+    // (drawWidth alone isn't enough to index into it correctly when
+    // they differ). Used for the button strip's slide in/out animation
+    // (see boardui.cpp), where only part of the bitmap is visible at a
+    // time as it moves across the screen edge.
+    void drawBitmap565Cropped(std::int16_t x, std::int16_t y,
+                    std::uint16_t drawWidth, std::uint16_t h,
+                    std::uint16_t srcStride,
+                    const std::uint16_t* data);
     void drawBitmap332(std::int16_t x, std::int16_t y,
                     std::uint16_t w, std::uint16_t h,
                     const std::uint8_t* data);   // 1 byte per pixel (RGB332)
@@ -291,5 +301,3 @@ private:
 
 
 }  // namespace hp82163
-
-

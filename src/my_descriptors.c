@@ -24,17 +24,20 @@ static const tusb_desc_device_t desc_device = {
     .bNumConfigurations = 1,
 };
 
-// ─── Configuration descriptor: 2 × CDC ──────────────────────────────────
+// ─── Configuration descriptor: 3 × CDC ──────────────────────────────────
 #define EPNUM_CDC0_NOTIF   0x81
 #define EPNUM_CDC0_OUT     0x02
 #define EPNUM_CDC0_IN      0x82
 #define EPNUM_CDC1_NOTIF   0x83
 #define EPNUM_CDC1_OUT     0x04
 #define EPNUM_CDC1_IN      0x84
+#define EPNUM_CDC2_NOTIF   0x85
+#define EPNUM_CDC2_OUT     0x06
+#define EPNUM_CDC2_IN      0x86
 
 static const uint8_t desc_configuration[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 4, 0,
-        (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN * 2),
+    TUD_CONFIG_DESCRIPTOR(1, 6, 0,
+        (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN * 3),
         TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
 
     TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC0_NOTIF, 8,           // CDC0: itf 0+1
@@ -42,6 +45,9 @@ static const uint8_t desc_configuration[] = {
 
     TUD_CDC_DESCRIPTOR(2, 5, EPNUM_CDC1_NOTIF, 8,           // CDC1: itf 2+3  ← FIXEN
                        EPNUM_CDC1_OUT, EPNUM_CDC1_IN, 64),
+
+    TUD_CDC_DESCRIPTOR(4, 6, EPNUM_CDC2_NOTIF, 8,           // CDC2: itf 4+5  ← TERMINALEN
+                       EPNUM_CDC2_OUT, EPNUM_CDC2_IN, 64),
 };
 
 // ─── String descriptors ──────────────────────────────────────────────────
@@ -52,6 +58,7 @@ static const char *string_desc_arr[] = {
     "PICO2-0001",                    // 3: serial
     "HP-IL Debug",                   // 4: CDC0
     "HP-IL Data",                    // 5: CDC1
+    "HP-IL Terminal",                // 6: CDC2
 };
 
 // ─── TinyUSB hooks ───────────────────────────────────────────────────────

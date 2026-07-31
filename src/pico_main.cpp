@@ -261,9 +261,9 @@ int main() {
     //screen->setTextSize(0);
     screen->pr_char(27);
     screen->pr_char('<'); // Cursor off
-    screen->pr_str("###############################");
+//    screen->pr_str("###############################");
     screen->pr_str("# HIPI - HP-IL Pico Interface #");
-    screen->pr_str("###############################");
+//    screen->pr_str("###############################");
 
     if( usb_connected )
         screen->pr_str("USB connected!");
@@ -271,7 +271,7 @@ int main() {
         screen->pr_str("Stand alone - no USB");
     {
         char buf[64];
-        screen->pr_str("Config:");
+        //screen->pr_str("Config:");
         sprintf(buf, " * Drive: %.32s", config.filename().c_str() );
         screen->pr_str(buf);
         int z = sprintf(buf, " * Trace: " );
@@ -288,7 +288,10 @@ int main() {
         screen->pr_str("--------------------------------------");
     }
 
-    absolute_time_t infoTimeout = make_timeout_time_ms(5000);
+    // 10s, not 5 -- gives enough time to actually read the device
+    // self-check list (see hipi_test()) that ends up on screen just
+    // before this; a touch breaks out of the wait early (see below).
+    absolute_time_t infoTimeout = make_timeout_time_ms(10000);
 
     tud_cdc_n_write_flush(0);
     tud_task();
@@ -340,6 +343,11 @@ int main() {
     while (!time_reached(infoTimeout)) {
         tud_task();
         usb_serial_flush_boot_log();
+        // A raw touch check (not the full touch_poll()/tap-callback
+        // flow) -- lets someone skip the wait early without also
+        // processing this same touch as a real tap, which would show
+        // the button strip right as boot finishes.
+        if (touch_is_down()) break;
         sleep_ms(10);
     }
 
