@@ -359,11 +359,15 @@ constexpr int kTouchConfirmToleranceSq = 30 * 30;  // 30px radius, squared
 // just at the 60ms confirm mark, so a slower real-world swipe still gets
 // tracked all the way to its actual endpoint).
 constexpr int kSwipeMinDx = 150;      // minimum horizontal travel, in pixels
+constexpr int kSwipeMinDy = 150;      // minimum vertical travel, in pixels -- same
+                                       // feel as the horizontal one, just for the
+                                       // "Devices" list's scroll gesture instead
 uint16_t lastTx = 0, lastTy = 0;
 
 TouchTapCallback     tapCallback;
 TouchReleaseCallback releaseCallback;
 TouchSwipeCallback   swipeCallback;
+TouchVerticalSwipeCallback verticalSwipeCallback;
 }  // namespace
 
 void touch_set_tap_callback(TouchTapCallback cb) {
@@ -376,6 +380,10 @@ void touch_set_release_callback(TouchReleaseCallback cb) {
 
 void touch_set_swipe_callback(TouchSwipeCallback cb) {
     swipeCallback = std::move(cb);
+}
+
+void touch_set_vertical_swipe_callback(TouchVerticalSwipeCallback cb) {
+    verticalSwipeCallback = std::move(cb);
 }
 
 void touch_poll() {
@@ -452,16 +460,23 @@ void touch_poll() {
             // horizontal distance, and that the gesture stayed more
             // horizontal than vertical (so a mostly-vertical drag, e.g. a
             // finger sliding while trying to tap, doesn't misfire one).
+            // The vertical check below is the mirror image, for the
+            // "Devices" list's scroll gesture -- mutually exclusive with
+            // the horizontal one by construction (each requires the OTHER
+            // axis to be the smaller of the two).
             const int dx = static_cast<int>(lastTx) - static_cast<int>(pendingTx);
             const int dy = static_cast<int>(lastTy) - static_cast<int>(pendingTy);
             const bool isSwipe = std::abs(dx) >= kSwipeMinDx && std::abs(dy) < std::abs(dx);
+            const bool isVerticalSwipe = std::abs(dy) >= kSwipeMinDy && std::abs(dx) < std::abs(dy);
             if (bTrace) {
                 LOGF("\r\n[TOUCH] release: start(%u,%u) end(%u,%u) dx=%d dy=%d minDx=%d -> %s",
                      pendingTx, pendingTy, lastTx, lastTy, dx, dy, kSwipeMinDx,
-                     isSwipe ? "SWIPE" : "no swipe");
+                     isSwipe ? "SWIPE" : (isVerticalSwipe ? "VERTICAL SWIPE" : "no swipe"));
             }
             if (isSwipe && swipeCallback) {
                 swipeCallback(dx > 0);   // true = left-to-right ("forward")
+            } else if (isVerticalSwipe && verticalSwipeCallback) {
+                verticalSwipeCallback(dy > 0);   // true = top-to-bottom ("down")
             }
 
             if (releaseCallback) releaseCallback();

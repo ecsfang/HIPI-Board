@@ -23,6 +23,8 @@ using TouchReleaseCallback = std::function<void()>;
 // true = left-to-right swipe ("forward" through the list of views),
 // false = right-to-left ("backward").
 using TouchSwipeCallback   = std::function<void(bool forward)>;
+// true = top-to-bottom swipe ("down"), false = bottom-to-top ("up").
+using TouchVerticalSwipeCallback = std::function<void(bool down)>;
 
 // Invoked once, with the original (first-sample) coordinates, when a touch
 // has passed the debounce confirmation.
@@ -40,6 +42,13 @@ void touch_set_release_callback(TouchReleaseCallback cb);
 // debounce's tight (30px) tolerance in the first place, so in practice
 // only one or the other ever fires for a given touch.
 void touch_set_swipe_callback(TouchSwipeCallback cb);
+
+// Same idea as touch_set_swipe_callback(), but for a mostly-vertical
+// gesture instead -- mutually exclusive with it (a given release fires at
+// most one of the two, whichever direction dominated). Used for scrolling
+// the "Devices" list dialog (see boardui.cpp) rather than the horizontal
+// swipe's view-cycling.
+void touch_set_vertical_swipe_callback(TouchVerticalSwipeCallback cb);
 
 // Call once per main-loop iteration. Consumes the IRQ flag, runs the
 // confirm-resample debounce, and detects release via periodic polling

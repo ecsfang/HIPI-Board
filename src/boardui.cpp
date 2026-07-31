@@ -16,12 +16,14 @@
 
 #include "bmp_loader.hpp"
 #include "config.hpp"
+#include "hipi.h"      // DeviceInfo, hipi_enumerateDevices() -- "Devices" dialog
 #include "hpil.h"      // hpilDevices
 #include "pilbox.h"    // pilbox, CPilBox::isConnected()
 #include "ui_buttons.hpp"
 #include "pico/time.h"
 #include "pico/stdlib.h"  // sleep_ms(), for the button strip's slide animation
 #include "tusb.h"       // tud_mounted() -- keeps usb_connected live, see boardui_poll()
+#include <algorithm>    // std::max, for the "Devices" dialog's scroll clamping
 
 extern hp82163::Config config;
 extern std::uint8_t hpilDevices;
@@ -117,7 +119,7 @@ constexpr std::uint32_t kSlideStepDelayMs = 12;
 // Hiding felt rushed at the same pace as showing -- a bit longer per
 // step here specifically, so it reads as a deliberate slide rather than
 // a blink.
-constexpr std::uint32_t kHideStepDelayMs = 48;
+constexpr std::uint32_t kHideStepDelayMs = 24;
 
 // Splits buttonStripWidth into kSlideSteps horizontal slices (the last
 // one absorbs whatever doesn't divide evenly) -- used by
@@ -362,6 +364,156 @@ void hideInfoBox() {
     infoBoxVisible = false;
 }
 
+// ── Devices list dialog (bottom-left corner tap) ────────────────────────
+// Shows the same result hipi_test()'s boot-time self-check log does --
+// address, name, SAI, and enabled/disabled status for every device -- but
+// as an on-screen, scrollable dialog instead of USB log text. Reuses
+// hipi_enumerateDevices() (see hipi.h) directly, so it re-runs the exact
+// same AAD/TAD/SAI/SDI exchange live, entirely via dev->hpil() and never
+// touching the physical PIO loop. That's the same tradeoff hipi_test()
+// itself carries: safe as long as nothing else is expected to be
+// mid-transaction on the real bus at that moment -- calling it while a
+// real controller is actively talking to us risks disrupting that
+// exchange. Chosen deliberately anyway (see conversation this came from)
+// over a safer read-only alternative, so the list always reflects a
+// fresh, live query rather than a cached/stale one.
+bool deviceListVisible = false;
+int deviceListScrollOffset = 0;
+std::vector<DeviceInfo> deviceListCache;
+
+constexpr std::uint16_t kDeviceListCornerSize = 120;  // touch hit-zone: bottom-left NxN
+
+bool isDeviceListCornerTouch(std::uint16_t x, std::uint16_t y) {
+    return x < kDeviceListCornerSize && y >= static_cast<std::uint16_t>(SCREEN_MAX_Y - kDeviceListCornerSize);
+}
+
+bool isInsideDeviceListBox(std::uint16_t x, std::uint16_t y) {
+    return x >= MenuFrame::X && x < MenuFrame::X + MenuFrame::W &&
+           y >= MenuFrame::Y && y < MenuFrame::Y + MenuFrame::H;
+}
+
+// How many device rows fit below the title line.
+// MenuFrame::RowPitch (36px) is sized for TextScale(1) -- the settings
+// menu's font. The device list uses the smaller txtSize(0) (16px glyph
+// height), so reusing that pitch left a lot of dead space between rows.
+constexpr int kDeviceListRowPitch = 22;
+
+// Space reserved above the rows for the "Devices" title (txtSize(1) at
+// Y+16 -- roughly 32px tall, so this needs real clearance past that, not
+// just past its baseline) -- too little here was exactly what let the
+// first row overlap the title.
+constexpr int kDeviceListRowsTopOffset = 56;
+
+int deviceListVisibleRows() {
+    // Bottom margin reserves MenuFrame::CornerRadius so the row area
+    // (see drawDeviceListRows()'s fill below) never has to reach all the
+    // way into the frame's rounded corners.
+    return (MenuFrame::H - kDeviceListRowsTopOffset - MenuFrame::CornerRadius) / kDeviceListRowPitch;
+}
+
+// Redraws just the row area (not the frame/title) -- used both for the
+// initial display and every scroll step, so scrolling doesn't need to
+// redraw the whole dialog each time.
+void drawDeviceListRows() {
+    const int rowsY = MenuFrame::Y + kDeviceListRowsTopOffset;
+    // Inset by CornerRadius on every side (not just BorderThickness) --
+    // this fill is a plain rectangle, not a rounded one, so anything
+    // closer to the corners than the frame's own CornerRadius would
+    // paint squarely over the curve where the yellow border is meant to
+    // show through, blacking out the rounded corners. A real test showed
+    // exactly that on the two corners this fill's own bottom edge
+    // reached (top was never close enough to be affected).
+    const int rowsBottom = MenuFrame::Y + MenuFrame::H - MenuFrame::CornerRadius;
+    const int fillX = MenuFrame::X + MenuFrame::CornerRadius;
+    const int fillW = MenuFrame::W - 2 * MenuFrame::CornerRadius;
+    display_->fillRect(static_cast<std::int16_t>(fillX),
+                       static_cast<std::int16_t>(rowsY - 6),
+                       fillW,
+                       static_cast<std::int16_t>(rowsBottom - (rowsY - 6)),
+                       0x0000);
+
+    display_->txtColor(0xFFFF, 0x0000);
+    display_->txtSize(0);
+    const int visibleRows = deviceListVisibleRows();
+    int y = rowsY;
+    char buf[64];
+    for (int i = 0; i < visibleRows; ++i) {
+        const std::size_t idx = static_cast<std::size_t>(deviceListScrollOffset + i);
+        if (idx >= deviceListCache.size()) break;
+        const DeviceInfo& info = deviceListCache[idx];
+        if (info.addr < 0) {
+            std::snprintf(buf, sizeof(buf), "%6s  %-10s [%c]",
+                          "--", info.devName, info.enabled ? 'X' : ' ');
+        } else {
+            std::snprintf(buf, sizeof(buf), "addr%2d  %-10s0x%02X [%c]",
+                          info.addr, info.devName, info.sai, info.enabled ? 'X' : ' ');
+        }
+        display_->txtSetCursor(MenuFrame::X + 20, y);
+        display_->txtWrite(buf);
+        y += kDeviceListRowPitch;
+    }
+
+    // Simple scroll hints -- "^" if there's more above, "v" if there's
+    // more below -- drawn in the frame's own border area (top/bottom
+    // right corner of the box) rather than stealing a row from the list.
+    display_->txtSetCursor(MenuFrame::X + MenuFrame::W - 30, MenuFrame::Y + 16);
+    display_->txtWrite(deviceListScrollOffset > 0 ? "^" : " ");
+    const bool moreBelow = deviceListScrollOffset + visibleRows <
+                           static_cast<int>(deviceListCache.size());
+    display_->txtSetCursor(MenuFrame::X + MenuFrame::W - 30, rowsBottom - kDeviceListRowPitch);
+    display_->txtWrite(moreBelow ? "v" : " ");
+}
+
+void showDeviceList() {
+    if (deviceListVisible) return;
+    screen_->suspend();
+
+    deviceListCache = hipi_enumerateDevices();
+    deviceListScrollOffset = 0;
+
+    MenuFrame::draw(display_, MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+
+    display_->txtColor(0xFFFF, 0x0000);
+    display_->txtSize(1);
+    display_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 16);
+    display_->txtWrite("Devices");
+    display_->txtSize(0);
+
+    drawDeviceListRows();
+
+    deviceListVisible = true;
+}
+
+void hideDeviceList() {
+    if (!deviceListVisible) return;
+    screen_->resume();  // catches up on anything the HP-41 stream sent meanwhile
+    deviceListVisible = false;
+}
+
+void scrollDeviceList(bool down) {
+    const int visibleRows = deviceListVisibleRows();
+    const int maxOffset = std::max(0, static_cast<int>(deviceListCache.size()) - visibleRows);
+    // down=true means the finger moved downward (top-to-bottom) -- on a
+    // touchscreen, that drags the CONTENT down with it, revealing rows
+    // further UP the list (offset decreases). A swipe upward (down=false)
+    // does the opposite: content follows the finger up, revealing rows
+    // further DOWN the list (offset increases). Standard "content follows
+    // the finger" touchscreen convention -- inverted from this was the
+    // actual bug: a real test showed swiping up from offset 0 (nothing
+    // above it yet to reveal by going the other way) visibly did nothing.
+    int newOffset = deviceListScrollOffset + (down ? -1 : 1);
+    if (newOffset < 0) newOffset = 0;
+    if (newOffset > maxOffset) newOffset = maxOffset;
+    if (bTrace) {
+        LOGF("\r\n[TOUCH] scrollDeviceList down=%d: devices=%zu visibleRows=%d maxOffset=%d %d->%d",
+             down, deviceListCache.size(), visibleRows, maxOffset, deviceListScrollOffset, newOffset);
+    }
+    if (newOffset != deviceListScrollOffset) {
+        deviceListScrollOffset = newOffset;
+        drawDeviceListRows();
+    }
+}
+
 }  // namespace
 
 // ── Splash screen ────────────────────────────────────────────────────────
@@ -501,8 +653,17 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // Any touch while it's up dismisses it early -- consumed here, not
         // treated as a button-strip wake/press or another corner-tap.
         hideInfoBox();
+    } else if (deviceListVisible) {
+        // Only a tap OUTSIDE the dialog closes it -- a tap inside is
+        // simply ignored (scrolling is via the vertical swipe gesture,
+        // not tap, and there's nothing else to act on in here yet).
+        if (!isInsideDeviceListBox(x, y)) {
+            hideDeviceList();
+        }
     } else if (isInfoCornerTouch(x, y)) {
         showInfoBox();
+    } else if (isDeviceListCornerTouch(x, y)) {
+        showDeviceList();
     } else {
         // Only a touch actually within the button strip's own screen
         // region wakes/keeps it up -- a tap elsewhere (e.g. the left side,
@@ -572,10 +733,10 @@ void boardui_handleRelease() {
 }
 
 void boardui_handleSwipe(bool forward) {
-    // Ignore while the menu is open -- a swipe crossing the menu box
-    // shouldn't also switch views underneath it.
-    if (dialog_->isOpen()) {
-        if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d ignored (menu open)", forward);
+    // Ignore while the menu -- or the Devices list dialog -- is open; a
+    // swipe crossing either box shouldn't also switch views underneath it.
+    if (dialog_->isOpen() || deviceListVisible) {
+        if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d ignored (menu/dialog open)", forward);
         return;
     }
     if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d -> cycling display output", forward);
@@ -592,6 +753,16 @@ void boardui_onMenuClosed() {
     if (buttonStripVisible) {
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripQuickHideMs);
     }
+}
+
+void boardui_handleVerticalSwipe(bool down) {
+    if (bTrace) {
+        LOGF("\r\n[TOUCH] vertical swipe down=%d deviceListVisible=%d", down, deviceListVisible);
+    }
+    if (deviceListVisible) {
+        scrollDeviceList(down);
+    }
+    // No other use for a vertical swipe currently.
 }
 
 }  // namespace hp82163

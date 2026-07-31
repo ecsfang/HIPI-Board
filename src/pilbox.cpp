@@ -21,14 +21,21 @@ extern hp82163::RA8875* display;
  * Conversely, if the receiver gets only the low byte, it will use the last received high byte to rebuild the full
  * frame.
  */
-#define P_DEBUG false
+#define P_DEBUG bExtTrace
+#define PD_LOGF(...) do { if (P_DEBUG) LOGF(__VA_ARGS__); } while (0)
+#define PD_IDY_LOGF(frm,...) do {           \
+        if( P_DEBUG && !IS_IDLE(frm) ) {    \
+            LOGF(__VA_ARGS__);              \
+        }                                   \
+    } while(0)
 
-#define PL_MODE(x) do { if( P_DEBUG) LOGF("\r\nPILBOX: " #x ); } while(0)
+#define PL_LOG_MODE(x) PD_LOGF("\r\nPILBOX: " #x )
 
 // Send a single byte to the PILBox serial link and flush
 #define PL_SEND(x) do {                     \
         tud_cdc_n_write_char(ITF_HPIL, x);  \
         tud_cdc_n_write_flush(ITF_HPIL);    \
+        PD_LOGF("\r\n[PILBOX] --> %02X", x);   \
     } while(0)
 
 // Send a complete frame to the PILBox serial link, using the 2-byte format and flush
@@ -36,6 +43,7 @@ extern hp82163::RA8875* display;
         tud_cdc_n_write(ITF_HPIL, &PIL_tx_hi,1);                \
         tud_cdc_n_write(ITF_HPIL, &PIL_tx_lo,1);                \
         tud_cdc_n_write_flush(ITF_HPIL);                        \
+        PD_LOGF("\r\n[PILBOX] --> %02X:%02X", PIL_tx_hi, PIL_tx_lo); \
     } while(0)
 
 
@@ -57,9 +65,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     if (((cmd & CMD_MASK) == CMD) ) {
         m_wLastCmd = cmd;    // remember last CMD frame to send later when RFC is received
         m_hadCmd = true;
-        if( P_DEBUG ) {
-            LOGF("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
-        }
+        PD_LOGF("\t   <== %s (skip)\r\n", ilMnemonic(m_wLastCmd, pbBuf));
         // Return without sending the CMD frame to PyIlPer
         return cmd;
     }
@@ -76,14 +82,10 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     // "bare" RFC not tied to a pending command.
     if ((cmd == RFC)) {
         if (!m_hadCmd && PILBox_mode != CON) {
-            if( P_DEBUG ) {
-                LOGF("\t   <== RFC (bare)\r\n");
-            }
+            PD_LOGF("\t   <== RFC (bare)\r\n");
             return cmd;
         }        
-        if( P_DEBUG ) {
-            LOGF("pilbox: RFC\r\n");
-        }
+        PD_LOGF("pilbox: RFC\r\n");
         cmd = m_wLastCmd;                            // use the last CMD frame as answer
         m_hadCmd = false;   // consumed
         sendFrame(cmd);                            // send the RFC frame
@@ -96,10 +98,8 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
             tud_task();  // TinyUSB background task
             pil_cmd = receiveFrame();
         } while( pil_cmd == NO_FRAME ); //&& !time_reached(rfcDeadline) );
-        if( P_DEBUG ) {
-            LOGF("\t   <== RFC!\r\n");
-            if( pil_cmd == NO_FRAME ) LOGF("\t   <== Timeout!!!!!!!!!!!!\r\n");
-        }
+        PD_LOGF("\t   <== RFC!\r\n");
+        if( pil_cmd == NO_FRAME ) LOGF("\t   <== Timeout!!!!!!!!!!!!\r\n");
         return RFC;
     }
 
@@ -121,9 +121,7 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
         tud_task();  // TinyUSB background task
         pil_cmd = receiveFrame();
     } while( pil_cmd == NO_FRAME );
-    if(  P_DEBUG && !IS_IDLE(pil_cmd) ) {
-        LOGF("\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
-    }
+    PD_IDY_LOGF(pil_cmd, "\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
 
     // return the received frame
     return pil_cmd;
@@ -151,6 +149,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         // - and there is data available in the serial buffer
         // if a frame arrives we must check for a PILBox command first
         pil_recv = tud_cdc_n_read_char(ITF_HPIL);
+        LOGF("\r\n[PILBOX] <-- %02X", pil_recv);
         // PILBox emulation received a byte from the PILBox designated serial port
         // pil_recv contains the returned byte
         if ((pil_recv & 0xE0) == 0x20)
@@ -179,9 +178,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PIL_rx_frame = pil_recv;
         }
 
-        if( P_DEBUG && !IS_IDLE(PIL_rx_frame) ) {
-            LOGF("\t   <-- %s\r\n", ilMnemonic(PIL_rx_frame, pbBuf));
-        }
+        PD_IDY_LOGF(PIL_rx_frame, "\t   <-- %s\r\n", ilMnemonic(PIL_rx_frame, pbBuf));
 
         // The frame is now received, first process the PILBox commands
         // send to our scope for debugging
@@ -190,7 +187,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         switch (PIL_rx_frame)
         {
         case TDIS:                          // TDI: Translator DIsabled
-            PL_MODE("TDIS");
+            PL_LOG_MODE("TDIS");
             PILBox_mode = TDIS;             // set mode to disabled
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
@@ -198,7 +195,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, false);
             break;
         case CON:                           // CON: Controller ON
-            PL_MODE("CON");
+            PL_LOG_MODE("CON");
             PILBox_mode = CON;              // set mode to controller ON
                                             // default on the HP41
                                             // frame is not forwarded to the HP-IL emulation
@@ -208,7 +205,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         case COFF:                          // COFF: Controller OFF
-            PL_MODE("COFF");
+            PL_LOG_MODE("COFF");
             PILBox_mode = COFF;             // set mode to controller OFF
                                             // the PILBox is now a device
                                             // not used on the HP41
@@ -219,7 +216,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
             break;
         case COFI:                          // COFI: Controller OFF with IDY 
-            PL_MODE("COFI");
+            PL_LOG_MODE("COFI");
             PILBox_mode = COFI;             // set mode to COFI
                                             // device with sending IDY frame
                                             // frame is not forwarded to the HP-IL emulation
@@ -263,9 +260,8 @@ IL_CMD_t CPilBox::sendFrame(IL_CMD_t cmd)
     if( !(PILBox_mode == COFF && IS_IDLE(frame)) )
         PL_SEND_FRAME();
 
-    if( P_DEBUG && !IS_IDLE(frame) ) {
-        LOGF("\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
-    }
+    PD_IDY_LOGF(frame, "\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
+
     return frame;
 }
 

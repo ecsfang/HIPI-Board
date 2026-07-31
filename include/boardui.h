@@ -16,6 +16,8 @@
 //
 //   touch_set_tap_callback(hp82163::boardui_handleTap);
 //   touch_set_release_callback(hp82163::boardui_handleRelease);
+//   touch_set_swipe_callback(hp82163::boardui_handleSwipe);
+//   touch_set_vertical_swipe_callback(hp82163::boardui_handleVerticalSwipe);
 //
 //   while (running) {
 //       touch_poll();
@@ -67,6 +69,11 @@ void boardui_handleRelease();
 // while the menu is open, so a swipe during menu navigation doesn't also
 // switch views underneath it.
 void boardui_handleSwipe(bool forward);
+
+// Register with touch_set_vertical_swipe_callback() (see touch.h). Scrolls
+// the "Devices" list dialog (bottom-left corner tap) when it's open --
+// does nothing otherwise.
+void boardui_handleVerticalSwipe(bool down);
 
 // Called by UiDialog::close() (see uidialog.hpp) -- shortens the button
 // strip's auto-hide countdown to a quick ~0.5s instead of leaving

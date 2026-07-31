@@ -337,7 +337,7 @@ int main() {
     }
 
     // Done! Start the HPIL monoitoring ...
-    LOGF("\r\n-----------------------------");
+    LOGF("\r\n=============================");
     LOGF("\r\nUp and running ...\r\n");
 
     while (!time_reached(infoTimeout)) {

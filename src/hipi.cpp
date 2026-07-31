@@ -5,6 +5,7 @@
 #include "pilbox.h"
 #include "plotter.h"
 #include "terminal.h"
+#include "hipi.h"
 
 #include "display.h"
 #include "drive.h"
@@ -14,6 +15,9 @@
 #include "config.hpp"
 
 #include "usb_serial.h"
+#include "Screen.hpp"
+#include <cstdarg>
+#include <algorithm>
 
 std::vector<CDevice*> devices;
 CPilBox* pilbox = nullptr;      // Need to be global for UI indication
@@ -99,6 +103,116 @@ void hipi_init()
     }
 }
 
+// See hipi.h for the full rationale (shared by hipi_test()'s boot-time
+// log and boardui.cpp's on-demand "Devices" dialog).
+std::vector<DeviceInfo> hipi_enumerateDevices() {
+    std::vector<DeviceInfo> result;
+ 
+    auto sendAll = [](uint32_t frame) -> uint32_t {
+        for (CDevice* dev : devices) {
+            frame = dev->hpil(static_cast<IL_CMD_t>(frame));
+        }
+        return frame;
+    };
+ 
+    sendAll(UNL);
+    sendAll(RFC);
+    sendAll(AAU);
+    sendAll(RFC);
+    sendAll(UNT);
+    sendAll(RFC);
+ 
+    // Discover the device count purely from the AAD response -- NOT from
+    // the size of our own `devices` vector. This is the part an earlier
+    // version of this function got wrong: it looped over `devices` and
+    // read dev->addr()/name()/enabled() directly, which only ever shows
+    // OUR OWN objects. A real controller has no such list to cheat
+    // with -- it only knows what AAD/TAD/SAI/SDI themselves reveal, and
+    // that's the only thing that would also correctly surface a genuine
+    // external device reachable through CPilBox (e.g. something pyILPER
+    // presents on the other side), which has no corresponding CDevice of
+    // ours at all.
+    const uint32_t afterAad = sendAll(AAD + 1);
+    const int deviceCount = static_cast<int>(afterAad) - static_cast<int>(AAD + 1);
+ 
+    for (int addr = 1; addr <= deviceCount; ++addr) {
+        DeviceInfo info{};
+        info.addr = addr;
+        info.devName[0] = '\0';
+        info.enabled = true;   // default for anything that isn't one of our own -- see the cross-reference pass below
+ 
+        // RFC ("ready for command") between each step -- gives the
+        // addressed device a moment to act before the next command
+        // arrives, the same pacing a real controller would use, not just
+        // an unbroken burst of frames.
+        sendAll(static_cast<uint32_t>(TAD + addr));
+        sendAll(RFC);
+ 
+        const uint32_t sai = sendAll(SAI);
+        sendAll(sai);   // confirmation echo, closes out m_sai cleanly
+        sendAll(RFC);
+        info.sai = static_cast<std::uint8_t>(sai & 0xFF);
+ 
+        std::size_t n = 0;
+        uint32_t c = sendAll(SDI);
+        while (c != ETO && n < sizeof(info.sdiName) - 1) {
+            info.sdiName[n++] = static_cast<char>(c & 0xFF);
+            // No RFC here -- unlike TAD/SAI/UNT (distinct commands), this
+            // is a continuous data stream: base()'s m_sdi residual check
+            // advances on ANY incoming frame regardless of its value, so
+            // an RFC here consumes a character exactly like the real
+            // continuation read does. A real test proved it: inserting
+            // one here garbled every name ("TFDISPLAY" -> "TDSLY", every
+            // other character silently skipped).
+            c = sendAll(0);
+        }
+        info.sdiName[n] = '\0';
+ 
+        sendAll(UNT);
+        sendAll(RFC);
+ 
+        result.push_back(info);
+    }
+ 
+    // Cross-reference our own devices vector purely for display purposes
+    // (a local name + enabled/disabled status) -- this never feeds back
+    // into the address/SAI/SDI values above, which came entirely from
+    // the protocol exchange itself. A genuine external device (no match
+    // here) just keeps the defaults set above (blank name, enabled=true,
+    // i.e. "not applicable").
+    for (DeviceInfo& info : result) {
+        for (CDevice* dev : devices) {
+            if (dev->addr() == info.addr) {
+                std::snprintf(info.devName, sizeof(info.devName), "%s", dev->name());
+                info.enabled = dev->enabled();
+                break;
+            }
+        }
+    }
+ 
+    // Also list any of our OWN devices that didn't take an address at
+    // all (addr() left at 31, "unaddressed") -- e.g. CPilBox when
+    // nothing's connected on the other side, correctly staying
+    // transparent during AAD rather than claiming to be a device it
+    // isn't. These aren't part of the protocol-driven loop above (there's
+    // no address to query them at), but they're still worth surfacing so
+    // the list doesn't just silently omit a disconnected/disabled local
+    // device.
+    for (CDevice* dev : devices) {
+        if (dev->addr() >= 31) {
+            DeviceInfo info{};
+            info.addr = -1;
+            std::snprintf(info.devName, sizeof(info.devName), "%s", dev->name());
+            info.enabled = dev->enabled();
+            info.sai = 0;
+            info.sdiName[0] = '\0';
+            result.push_back(info);
+        }
+    }
+ 
+    return result;
+}
+
 bool hipi_test(HpIlLoop& loop) {
     uint32_t rx_frame   = 0x01BC;
     uint32_t rtn        = 0x0000;
@@ -138,11 +252,39 @@ bool hipi_test(HpIlLoop& loop) {
     // and answers hpil() exactly the same either way, so the self-check
     // queries all of them identically and just notes which ones are
     // currently disabled alongside the result, rather than skipping them.
-    bTrace = true;
+
+    // Force the trace to avoid corrupt logging
+    bTrace = false;
     bExtTrace = false;
 
-    //logBoth("\r\n* Device list");
- 
+    LOGF("\r\n* Current device list");
+
+    const std::vector<DeviceInfo> infos = hipi_enumerateDevices();
+    const int addressedCount = static_cast<int>(std::count_if(
+        infos.begin(), infos.end(), [](const DeviceInfo& d) { return d.addr >= 0; }));
+
+    LOGF("\r\n%d device(s) responded to AAD", addressedCount);
+    LOGF("\r\nAddr     Name       ID       Enabled"); 
+    LOGF("\r\n------------------------------------");
+
+    for (const DeviceInfo& info : infos) {
+        if (info.addr < 0) {
+            logBoth("\r\n      -: %-10s -- %-10s[%c]",
+                info.devName, "", info.enabled ? 'X' : ' ');
+
+            //logBoth("\r\n\t  %6s   %-10s [NOT ADDRESSED]%s",
+            //     "--", info.devName, info.enabled ? "" : "  [DISABLED]");
+            continue;
+        }
+        logBoth("\r\naddr %2d: %-10s %02X %-10s[%c]",
+             info.addr, info.devName, info.sai & 0xFF, info.sdiName,
+             info.enabled ? 'X' : ' ');
+        //logBoth("\r\n\t  addr %2d: %-10s SAI=0x%02X  \"%s\"%s",
+        //     info.addr, info.devName, info.sai, info.sdiName,
+        //     info.enabled ? "" : "  [DISABLED]");
+    }
+    LOGF("\r\n");
+/***
     auto sendAll = [&](uint32_t frame) -> uint32_t {
         for (CDevice* dev : devices) {
             frame = dev->hpil(static_cast<IL_CMD_t>(frame));
@@ -159,8 +301,10 @@ bool hipi_test(HpIlLoop& loop) {
     uint32_t frame = AAD + 1;
     frame = sendAll(frame);
     const int addressedCount = static_cast<int>(frame) - static_cast<int>(AAD + 1);
-    LOGF("\r\n\t  %d device(s) responded to AAD", addressedCount);
- 
+    LOGF("\r\n%d device(s) responded to AAD", addressedCount);
+    LOGF("\r\nAddr     Name       ID       Enabled"); 
+    LOGF("\r\n------------------------------------");
+
     int addr = 1;
     for (CDevice* dev : devices) {
         // Read the address each device actually ended up with, rather
@@ -173,16 +317,19 @@ bool hipi_test(HpIlLoop& loop) {
         // MAX_ADDR / how AAD/LAD/TAD treat it as the broadcast value).
         const IL_CMD_t devAddr = dev->addr();
         if (devAddr >= 31) {
-            logBoth("\r\naddr --: %-10s -- %-10s[%c]",
+            logBoth("\r\n      -: %-10s -- %-10s[%c]",
                 dev->name(), "", dev->enabled() ? 'X' : ' ');
             continue;
         }
  
+        // Set the selected device as TALKER
         sendAll(static_cast<uint32_t>(TAD + devAddr));
  
+        // Get device ID using SAI command
         const uint32_t sai = sendAll(SAI);
         sendAll(sai);   // confirmation echo, closes out m_sai cleanly
  
+        // Get device name using SDI command
         char nameBuf[32];
         std::size_t n = 0;
         uint32_t c = sendAll(SDI);
@@ -191,13 +338,16 @@ bool hipi_test(HpIlLoop& loop) {
             c = sendAll(0);
         }
         nameBuf[n] = '\0';
- 
+
+        // Add device to log (UART and screen)
         logBoth("\r\naddr %2d: %-10s %02X %-10s[%c]",
              devAddr, dev->name(), sai & 0xFF, nameBuf,
              dev->enabled() ? 'X' : ' ');
-    }
-//    LOGF("\r\n");
+    }***/
 
+    LOGF("\r\n------------------------------------");
+
+    // Restore the trace configuration
     bTrace = config.trace();
     bExtTrace = config.extTrace();
 
