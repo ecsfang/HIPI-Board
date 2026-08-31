@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-namespace hp82163 {
+namespace hipi {
 
 // -----------------------------------------------------------------------
 // Construction & init
@@ -513,6 +513,14 @@ void RA8875::fillRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16
                static_cast<std::int16_t>(y + h - 1), color, true);
 }
 
+void RA8875::clearActiveWindow() {
+    writeReg(MCLR, static_cast<std::uint8_t>(MCLR_START | MCLR_ACTIVE));
+}
+
+void RA8875::beginMemoryWrite() {
+    writeCmd(MRWC);
+}
+
 void RA8875::rect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
                   std::uint16_t color) {
     rectHelper(x, y, static_cast<std::int16_t>(x + w - 1),
@@ -643,4 +651,4 @@ void RA8875::triangleHelper(std::int16_t x1, std::int16_t y1,
     waitPoll(DCR, DCR_LNSQTR_STATUS);
 }
 
-}  // namespace hp82163
+}  // namespace hipi

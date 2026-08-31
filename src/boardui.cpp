@@ -25,14 +25,14 @@
 #include "tusb.h"       // tud_mounted() -- keeps usb_connected live, see boardui_poll()
 #include <algorithm>    // std::max, for the "Devices" dialog's scroll clamping
 
-extern hp82163::Config config;
+extern hipi::Config config;
 extern std::uint8_t hpilDevices;
 
-namespace hp82163 {
+namespace hipi {
 
 namespace {
 
-RA8875* display_ = nullptr;
+DisplayDriver* display_ = nullptr;
 Screen* screen_  = nullptr;
 UiDialog* dialog_ = nullptr;
 const char* version_ = "";
@@ -41,7 +41,7 @@ const char* version_ = "";
 // caching the pixels/dimensions in the out* parameters so a sub-region can
 // be redrawn later without re-reading the file (see redrawButtonRegion()
 // in ui_buttons.hpp).
-bool drawBmpRightAligned(RA8875* display, const char* path,
+bool drawBmpRightAligned(DisplayDriver* display, const char* path,
                          std::uint16_t screen_width, std::uint16_t y0,
                          std::vector<std::uint16_t>* outPixels,
                          std::uint16_t* outWidth,
@@ -518,7 +518,7 @@ void scrollDeviceList(bool down) {
 
 // ── Splash screen ────────────────────────────────────────────────────────
 
-void showSplashScreen(RA8875* display, const char* version,
+void showSplashScreen(DisplayDriver* display, const char* version,
                       std::uint32_t durationMs) {
     // setActiveWindow() hasn't been called yet this early in boot, so the
     // active window is still at its undefined power-on state. rect/circle
@@ -571,7 +571,7 @@ void showSplashScreen(RA8875* display, const char* version,
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-std::uint16_t boardui_loadButtonStrip(RA8875* display, const char* bmpPath) {
+std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPath) {
     display_ = display;
 
     LOGF("\r\n\t* Load buttons ... ");
@@ -765,4 +765,4 @@ void boardui_handleVerticalSwipe(bool down) {
     // No other use for a vertical swipe currently.
 }
 
-}  // namespace hp82163
+}  // namespace hipi

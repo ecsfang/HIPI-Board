@@ -7,10 +7,10 @@
 #include <cstdio>
 #include "usb_serial.h"
 
-namespace hp82163 {
+namespace hipi {
 
 // Forward-declare: vi behöver en funktion vi kan anropa från main
-inline void runDisplayTests(hp82163::RA8875* display) {
+inline void runDisplayTests(hipi::RA8875* display) {
     LOGF("\n=== RA8875 Display Diagnostic Tests ===\n\n");
 
     // ---- TEST 1: Läs status-register ----
@@ -214,4 +214,4 @@ LOGF("\n");
     LOGF("Did you see 'A', 'HELLO', or 'HELLO WORLD!' on screen?\n");
 }
 
-}  // namespace hp82163
+}  // namespace hipi

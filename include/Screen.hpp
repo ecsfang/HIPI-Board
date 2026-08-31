@@ -8,38 +8,38 @@
 //
 // Usage (sketch):
 //
-//   #include "RA8875.hpp"
+//   #include "display_config.h"   // selects RA8875 or LT7683 -- see its own comment
 //   #include "Screen.hpp"
-//   hp82163::MySpiTransport t;        // your platform-specific transport
-//   hp82163::RA8875        display(t);
+//   hipi::MySpiTransport t;        // your platform-specific transport
+//   hipi::DisplayDriver  display(t);
 //   display.begin();                  // initialise display + upload CGRAM font
-//   hp82163::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/200);
+//   hipi::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/200);
 //   for (uint8_t c : "Hello, world!")  screen.pr_char(c);
 //
 // The Screen class consumes HP82163 (HP-IL HP-41 video) byte streams and
-// renders them on the RA8875 display.  See README.md for details.
+// renders them on the display. See README.md for details.
 
 #pragma once
 
-#include "RA8875.hpp"
+#include "display_config.h"
 #include <cstdint>
 #include <vector>
 
-namespace hp82163 {
+namespace hipi {
 
 class Screen {
 public:
-    // Construct a Screen backed by an already-initialised RA8875.
+    // Construct a Screen backed by an already-initialised display driver.
     //
-    //   display    — RA8875 driver (must outlive the Screen)
+    //   display    — display driver (must outlive the Screen)
     //   color      — foreground text colour (RGB565)
     //   size       — text size 0..3 (built-in CGRAM modes) or 4 (custom 10x20 "fon" mode)
     //   brightness — 0..255 backlight duty cycle
     //
     //  The display must be put in 8BPP / 2-layer config and the CGRAM font
     //  must be uploaded *before* constructing the Screen.  See
-    //  RA8875::begin() and the README.
-    Screen(RA8875* display,
+    //  DisplayDriver::begin() and the README.
+    Screen(DisplayDriver* display,
         std::uint16_t color,
         std::uint8_t size,
         std::uint8_t brightness,
@@ -208,7 +208,7 @@ private:
     void fon_mode();
 
     // ---- Members ----
-    RA8875* d_;
+    DisplayDriver* d_;
 
     std::uint16_t color_;
     std::uint8_t brightness_;
@@ -246,4 +246,4 @@ private:
     bool suspended_ = false; // true while a UI dialog owns the display
 };
 
-}  // namespace hp82163
+}  // namespace hipi

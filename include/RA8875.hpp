@@ -14,7 +14,7 @@
 #define SCREEN_MAX_X 		800
 #define SCREEN_MAX_Y 		480
 
-namespace hp82163 {
+namespace hipi {
 
 class RA8875 {
 public:
@@ -222,6 +222,20 @@ public:
     // Primitives
     void pixel   (std::int16_t x, std::int16_t y, std::uint16_t color);
     void fillRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h, std::uint16_t color);
+    // Clears just the current Active Window (set via setActiveWindow())
+    // -- used for redraws that shouldn't touch anything outside it (e.g.
+    // the button strip sitting outside the text area). Runs
+    // asynchronously in hardware; the caller is responsible for waiting
+    // (see Screen::clear()/full()'s own delay) before drawing over it.
+    // Named instead of exposing the raw MCLR register directly, so this
+    // stays the same call for any display driver that implements it
+    // (see display_config.h/DisplayDriver).
+    void clearActiveWindow();
+    // Points the controller's internal register-access pointer at the
+    // memory data port, so subsequent writeData() calls stream straight
+    // into display memory -- needed before any raw byte-stream write
+    // (see Screen::fon_write()'s glyph data).
+    void beginMemoryWrite();
     void rect    (std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h, std::uint16_t color);
     void fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
                         std::uint16_t r, std::uint16_t color);
@@ -300,4 +314,4 @@ private:
 };
 
 
-}  // namespace hp82163
+}  // namespace hipi

@@ -14,7 +14,7 @@
 #include <cstring>
 #include <string>
 
-namespace hp82163 {
+namespace hipi {
 
 class Config {
 public:
@@ -227,4 +227,4 @@ private:
     std::string   disabledDevices_ = "";
 };
 
-}  // namespace hp82163
+}  // namespace hipi

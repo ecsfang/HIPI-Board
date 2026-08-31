@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <ctype.h>
 
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "hpil.h"
 #include "pilbox.h"
 #include "tusb.h" 
@@ -9,7 +9,7 @@
 #include "ui_buttons.hpp"
 #include "pico/time.h"
 
-extern hp82163::RA8875* display;
+extern hipi::DisplayDriver* display;
 
 /*
  * an improved format is using full 8-bit bytes:
@@ -192,7 +192,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             type( NONE );
-            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, false);
+            //hipi::setStatusLed(display, hipi::StatusLed::Pil, false);
             break;
         case CON:                           // CON: Controller ON
             PL_LOG_MODE("CON");
@@ -202,7 +202,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
             type( PILBOX );
-            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+            //hipi::setStatusLed(display, hipi::StatusLed::Pil, true);
             break;
         case COFF:                          // COFF: Controller OFF
             PL_LOG_MODE("COFF");
@@ -213,7 +213,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
             type( PILBOX );
-            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+            //hipi::setStatusLed(display, hipi::StatusLed::Pil, true);
             break;
         case COFI:                          // COFI: Controller OFF with IDY 
             PL_LOG_MODE("COFI");
@@ -223,7 +223,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
             type( PILBOX );
-            //hp82163::setStatusLed(display, hp82163::StatusLed::Pil, true);
+            //hipi::setStatusLed(display, hipi::StatusLed::Pil, true);
             break;
         // default:
             // all other frames are sent on to the HP-IL loop

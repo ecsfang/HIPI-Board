@@ -6,14 +6,14 @@
 // exists once.
 #pragma once
 
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "usb_serial.h"  // LOGF
 #include "ff.h"
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
-namespace hp82163 {
+namespace hipi {
 
 // Quick peek at a BMP's dimensions (opens, reads the 54-byte header, closes)
 // without decoding any pixel data. Useful when you need the width/height
@@ -50,7 +50,7 @@ inline bool peekBmpDimensions(const char* path, std::uint16_t& outWidth, std::ui
 // Optionally also caches the decoded RGB565 pixels (row-major, stride =
 // width) -- e.g. so a button's sub-rectangle can be redrawn later without
 // re-reading the file (see ui_buttons.hpp's redrawButtonRegion()).
-inline bool drawBmpAt(RA8875* display, const char* path,
+inline bool drawBmpAt(DisplayDriver* display, const char* path,
                        std::int16_t x0, std::int16_t y0,
                        std::vector<std::uint16_t>* outPixels = nullptr,
                        std::uint16_t* outWidth = nullptr,
@@ -147,4 +147,4 @@ inline bool drawBmpAt(RA8875* display, const char* path,
     return true;
 }
 
-}  // namespace hp82163
+}  // namespace hipi

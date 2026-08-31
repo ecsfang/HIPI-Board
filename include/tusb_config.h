@@ -6,7 +6,7 @@
 #define CFG_TUSB_RHPORT0_MODE   OPT_MODE_DEVICE
 #endif
 
-// Två CDC:er för hp82163 (itf 0 = debug, itf 1 = data)
+// Två CDC:er för hipi (itf 0 = debug, itf 1 = data)
 #ifndef CFG_TUD_CDC
 #define CFG_TUD_CDC             3
 #endif

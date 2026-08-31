@@ -8,13 +8,13 @@
 #include <algorithm>
 #include <cstring>
 
-namespace hp82163 {
+namespace hipi {
 
 // -----------------------------------------------------------------------
 // Construction
 // -----------------------------------------------------------------------
 
-Screen::Screen(RA8875* display,
+Screen::Screen(DisplayDriver* display,
                std::uint16_t color,
                std::uint8_t size,
                std::uint8_t brightness,
@@ -57,8 +57,7 @@ Screen::Screen(RA8875* display,
 // -----------------------------------------------------------------------
 void Screen::clear() {
     if (!suspended_) {
-        d_->writeReg(RA8875::MCLR,
-                    static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));  // <-- ACTIVE, inte FULL
+        d_->clearActiveWindow();
     }
     lines_.clear();
     lines_.reserve(ROWS_);
@@ -92,12 +91,11 @@ void Screen::full() {
     // color registers on the display and never restored them.
     d_->txtColor(color_, 0);
 
-    // MCLR_ACTIVE, inte MCLR_FULL: full() ska bara rita om textbufferten inom
-    // det aktiva fonstret (satt av setActiveWindow() i pico_main.cpp).
-    // MCLR_FULL rensar HELA skarmens minne, vilket rev bort knapparna
-    // som ligger utanfor det aktiva fonstret.
-    d_->writeReg(RA8875::MCLR,
-                static_cast<std::uint8_t>(RA8875::MCLR_START | RA8875::MCLR_ACTIVE));
+    // ACTIVE, not FULL: full() should only redraw the text buffer within
+    // the active window (set by setActiveWindow() in pico_main.cpp).
+    // A full-screen clear would wipe out the button strip sitting outside
+    // that window.
+    d_->clearActiveWindow();
     d_->spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
                          // ovanpa en pagaende clear.
     set_cursor(0, 0);
@@ -715,7 +713,7 @@ void Screen::fon_mode() {
 void Screen::fon_write(const char* s) {
     if (suspended_) return;
     fon_mode();
-    d_->writeCmd(RA8875::MRWC);
+    d_->beginMemoryWrite();
     for (const char* p = s; *p; ++p) {
         d_->writeData(static_cast<std::uint8_t>(*p));
         if (d_->txtScale() > 0) d_->spiDelayMs(1);
@@ -725,4 +723,4 @@ void Screen::fon_write(const char* s) {
 // Special-case cursor command 37 ("ESC %" with row, col already in pos_)
 namespace {
 }  // namespace
-}  // namespace hp82163
+}  // namespace hipi

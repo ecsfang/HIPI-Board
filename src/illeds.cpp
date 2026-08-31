@@ -2,7 +2,7 @@
 #include <cctype>
 
 #include "PicoSpiTransport.hpp"
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 
 #include "leds.h"

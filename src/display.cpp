@@ -3,10 +3,10 @@
 #include "display.h"
 
 #include "PicoSpiTransport.hpp"
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 
-extern hp82163::Screen *screen;
+extern hipi::Screen *screen;
 
 #include "usb_serial.h"
 void CDisplay::clear(void)

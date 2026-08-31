@@ -15,7 +15,7 @@
 //
 //   cmake -DPICO_SDK_PATH=/path/to/pico-sdk -B build
 //   cmake --build build
-//   picotool load -f build/hp82163_pico_demo.uf2
+//   picotool load -f build/hipi_pico_demo.uf2
 //
 // Touch handling (debounced tap/release state machine) lives in touch.h/
 // touch.cpp. Splash screen, the auto-hiding button strip, the info box,
@@ -36,7 +36,7 @@
 #include "hpil_pio.hpp"
 
 #include "PicoSpiTransport.hpp"
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 #include "touch.h"
 #include "leds.h"
@@ -71,7 +71,7 @@ extern void init_spi(void);
 extern bool SDOK;
 extern void sd_dir();
 
-hp82163::Config config;
+hipi::Config config;
 
 // Run the loop as long as true ...
 bool bRunning = true;
@@ -147,11 +147,11 @@ void SetPinDriveStrength(uint pin, uint mA) {
     }
 }
 
-hp82163::Screen *screen;
-hp82163::UiDialog *dialog = nullptr;
+hipi::Screen *screen;
+hipi::UiDialog *dialog = nullptr;
 
-hp82163::PicoSpiTransport* transport = nullptr;
-hp82163::RA8875* display = nullptr;
+hipi::PicoSpiTransport* transport = nullptr;
+hipi::DisplayDriver* display = nullptr;
 
 FATFS fs;
 
@@ -161,11 +161,11 @@ void initDisplay()
     gpio_set_function(3, GPIO_FUNC_SPI);   // MOSI
     gpio_set_function(0, GPIO_FUNC_SPI);   // MISO
 
-    transport = new hp82163::PicoSpiTransport(spi0,
+    transport = new hipi::PicoSpiTransport(spi0,
                                               /*baudrate=*/6'000'000,
                                               /*cs_gpio=*/1,
-                                              /*rst_gpio=*/hp82163::PicoSpiTransport::NO_RESET_PIN);
-    display = new hp82163::RA8875(*transport, SCREEN_MAX_X, SCREEN_MAX_Y);
+                                              /*rst_gpio=*/hipi::PicoSpiTransport::NO_RESET_PIN);
+    display = new hipi::DisplayDriver(*transport, SCREEN_MAX_X, SCREEN_MAX_Y);
 
     display->begin();
 }
@@ -209,7 +209,7 @@ int main() {
     // Splash screen -- shown as early as possible, stays up for a couple
     // of seconds while the rest of the boot sequence (buttons, SD-card
     // driven config, HP-IL devices) continues below.
-    hp82163::showSplashScreen(display, HIPI_VERSION, 2000);
+    hipi::showSplashScreen(display, HIPI_VERSION, 2000);
 
     absolute_time_t timeout = make_timeout_time_ms(2000);
 
@@ -252,11 +252,11 @@ int main() {
     LOGF("\r\n * Init display ...");
     // Show buttons -- draws and caches the strip, and tells us how wide it
     // is so Screen's initial text width can be sized around it.
-    const std::uint16_t buttonStripWidth = hp82163::boardui_loadButtonStrip(display);
+    const std::uint16_t buttonStripWidth = hipi::boardui_loadButtonStrip(display);
 
     LOGF("\r\n\t* Draw text ... ");
     display->setActiveWindow(0, 0, SCREEN_MAX_X-buttonStripWidth-1, SCREEN_MAX_Y-1);
-    screen = new hp82163::Screen(display, config.textColor(), 1, config.brightness(), SCREEN_MAX_X-buttonStripWidth );
+    screen = new hipi::Screen(display, config.textColor(), 1, config.brightness(), SCREEN_MAX_X-buttonStripWidth );
 
     //screen->setTextSize(0);
     screen->pr_char(27);
@@ -296,7 +296,7 @@ int main() {
     tud_cdc_n_write_flush(0);
     tud_task();
 
-    dialog = new hp82163::UiDialog(display, *screen);
+    dialog = new hipi::UiDialog(display, *screen);
     dialog->setColorChangedCallback([](std::uint16_t c) { config.setTextColor(c); });
     dialog->setTraceChangedCallback([](bool t, bool d) { config.setTraceMode(t, d); });
     dialog->setFontSizeChangedCallback([](std::uint8_t s) { config.setFontSize(s); });
@@ -306,14 +306,14 @@ int main() {
         config.setDeviceEnabled(name, enabled);
     });
 
-    hp82163::boardui_init(screen, dialog, HIPI_VERSION);
+    hipi::boardui_init(screen, dialog, HIPI_VERSION);
 
     // Init touch sensor ...
     LOGF("\r\n * Init touch sensor ...");
     touchInit();
-    touch_set_tap_callback(hp82163::boardui_handleTap);
-    touch_set_release_callback(hp82163::boardui_handleRelease);
-    touch_set_swipe_callback(hp82163::boardui_handleSwipe);
+    touch_set_tap_callback(hipi::boardui_handleTap);
+    touch_set_release_callback(hipi::boardui_handleRelease);
+    touch_set_swipe_callback(hipi::boardui_handleSwipe);
     LOGF("\r\n\t* GSL1680 Boot up completed!");
     tud_task();
 
@@ -328,7 +328,7 @@ int main() {
 
     // Wire up the plotter's live-draw callbacks now that display/screen/
     // plotter all exist (plotter is set inside hipi_init() above).
-    hp82163::plotterview_init(display, screen, plotter);
+    hipi::plotterview_init(display, screen, plotter);
 
     LOGF("\r\n\t* HP-IL initialized");
     {
@@ -360,8 +360,8 @@ int main() {
         usb_serial_flush_boot_log();    // flush buffered boot messages once a terminal connects
         hipi_loop(hpil);                // Check IL for any instruction to send through the loop!
         touch_poll();                   // debounced tap/release detection (touch.h)
-        hp82163::boardui_poll();        // auto-hide timers + status LED poll
-        hp82163::plotterview_poll();    // view-switch splash auto-dismiss timer
+        hipi::boardui_poll();        // auto-hide timers + status LED poll
+        hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
         tight_loop_contents();
     }
 

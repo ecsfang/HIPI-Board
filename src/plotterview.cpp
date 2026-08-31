@@ -5,11 +5,11 @@
 #include <cstring>
 #include "pico/time.h"
 
-namespace hp82163 {
+namespace hipi {
 
 namespace {
 
-RA8875* display_ = nullptr;
+DisplayDriver* display_ = nullptr;
 Screen* screen_ = nullptr;
 CPlotter* plotter_ = nullptr;
 DisplayOutput output_ = DisplayOutput::Display;
@@ -154,7 +154,7 @@ void showSwitchSplash(DisplayOutput mode) {
 
 }  // namespace
 
-void plotterview_init(RA8875* display, Screen* screen, CPlotter* plotter) {
+void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter) {
     display_ = display;
     screen_ = screen;
     plotter_ = plotter;
@@ -240,4 +240,4 @@ void plotterview_clearPlotter() {
 
 bool plotterview_isActive() { return output_ == DisplayOutput::Plotter; }
 
-}  // namespace hp82163
+}  // namespace hipi

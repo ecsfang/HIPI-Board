@@ -4,8 +4,8 @@
 //
 // Uses the pico-sdk SPI master + GPIO helpers.  Build with:
 //
-//   add_library(hp82163_pico STATIC src/PicoSpiTransport.cpp)
-//   target_link_libraries(hp82163_pico pico_stdlib hardware_spi hardware_gpio)
+//   add_library(hipi_pico STATIC src/PicoSpiTransport.cpp)
+//   target_link_libraries(hipi_pico pico_stdlib hardware_spi hardware_gpio)
 //
 // in your CMakeLists.txt.
 
@@ -19,7 +19,7 @@
 
 #include <cstdint>
 
-namespace hp82163 {
+namespace hipi {
 
 class PicoSpiTransport : public RA8875Transport {
 public:
@@ -56,4 +56,4 @@ private:
     std::uint32_t rst_;
 };
 
-}  // namespace hp82163
+}  // namespace hipi

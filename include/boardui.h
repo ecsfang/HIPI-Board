@@ -7,42 +7,42 @@
 // Usage (see pico_main.cpp):
 //
 //   display->begin();
-//   hp82163::showSplashScreen(display, version, 2000);
+//   hipi::showSplashScreen(display, version, 2000);
 //   ...
-//   const std::uint16_t stripWidth = hp82163::boardui_loadButtonStrip(display);
-//   screen = new hp82163::Screen(display, ..., SCREEN_MAX_X - stripWidth);
-//   dialog = new hp82163::UiDialog(display, *screen);
-//   hp82163::boardui_init(screen, dialog, version);
+//   const std::uint16_t stripWidth = hipi::boardui_loadButtonStrip(display);
+//   screen = new hipi::Screen(display, ..., SCREEN_MAX_X - stripWidth);
+//   dialog = new hipi::UiDialog(display, *screen);
+//   hipi::boardui_init(screen, dialog, version);
 //
-//   touch_set_tap_callback(hp82163::boardui_handleTap);
-//   touch_set_release_callback(hp82163::boardui_handleRelease);
-//   touch_set_swipe_callback(hp82163::boardui_handleSwipe);
-//   touch_set_vertical_swipe_callback(hp82163::boardui_handleVerticalSwipe);
+//   touch_set_tap_callback(hipi::boardui_handleTap);
+//   touch_set_release_callback(hipi::boardui_handleRelease);
+//   touch_set_swipe_callback(hipi::boardui_handleSwipe);
+//   touch_set_vertical_swipe_callback(hipi::boardui_handleVerticalSwipe);
 //
 //   while (running) {
 //       touch_poll();
-//       hp82163::boardui_poll();
+//       hipi::boardui_poll();
 //   }
 
 #include <cstdint>
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 #include "uidialog.hpp"
 
-namespace hp82163 {
+namespace hipi {
 
 // Splash screen shown as early as possible at boot, right after
 // display->begin(), before Screen/UiDialog even exist. Blocks for
 // durationMs.
-void showSplashScreen(RA8875* display, const char* version,
+void showSplashScreen(DisplayDriver* display, const char* version,
                       std::uint32_t durationMs = 2000);
 
-// Call once, right after RA8875::begin() and before constructing Screen --
-// draws and caches the button-strip bitmap, and returns its pixel width so
-// the caller can size Screen's initial text width
+// Call once, right after DisplayDriver::begin() and before constructing
+// Screen -- draws and caches the button-strip bitmap, and returns its
+// pixel width so the caller can size Screen's initial text width
 // (SCREEN_MAX_X - returned width). Returns 0 if the bitmap couldn't be
 // loaded (e.g. missing from the SD card).
-std::uint16_t boardui_loadButtonStrip(RA8875* display, const char* bmpPath = "buttons.bmp");
+std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPath = "buttons.bmp");
 
 // Call once, after Screen and UiDialog exist -- wires up the module state
 // needed by the rest of boardui's functions (info box, button strip,
@@ -82,4 +82,4 @@ void boardui_handleVerticalSwipe(bool down);
 // quiet mid-navigation.
 void boardui_onMenuClosed();
 
-}  // namespace hp82163
+}  // namespace hipi

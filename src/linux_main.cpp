@@ -2,14 +2,14 @@
 //
 // Minimal HP82163 demo on Linux over /dev/spidevX.Y.
 //
-// Build (only when HP82163_BUILD_LINUX_EXAMPLE is ON):
+// Build (only when HIPI_BUILD_LINUX_EXAMPLE is ON):
 //
-//   cmake -DHP82163_BUILD_LINUX_EXAMPLE=ON -B build
+//   cmake -DHIPI_BUILD_LINUX_EXAMPLE=ON -B build
 //   cmake --build build
-//   sudo ./build/hp82163_linux_demo /dev/spidev0.0 25 24
+//   sudo ./build/hipi_linux_demo /dev/spidev0.0 25 24
 
 #include "LinuxSpiDevTransport.hpp"
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 
 #include <fcntl.h>
@@ -65,14 +65,14 @@ int main(int argc, char** argv) {
     int fd = ::open(spi_path.c_str(), O_RDWR);
     if (fd < 0) { std::perror("open spidev"); return 1; }
 
-    hp82163::LinuxSpiDevTransport transport(fd, gpioValuePath(cs_pin),
+    hipi::LinuxSpiDevTransport transport(fd, gpioValuePath(cs_pin),
                                             gpioValuePath(rst_pin), 6'000'000);
 
-    hp82163::RA8875 display(transport, 800, 480);
+    hipi::DisplayDriver display(transport, 800, 480);
     display.begin();   // begin() already configures 16bpp by default
     display.set2LayerConfig();
 
-    hp82163::Screen screen(&display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
+    hipi::Screen screen(&display, FONT_COLOR, TEXT_SIZE, BRIGHTNESS);
 
     const char* msg = "HELLO, WORLD!\n> 42\n";
     for (const char* p = msg; *p; ++p) screen.pr_char(*p);

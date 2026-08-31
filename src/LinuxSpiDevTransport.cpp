@@ -13,7 +13,7 @@
 #include <stdexcept>
 #include <thread>
 
-namespace hp82163 {
+namespace hipi {
 
 LinuxSpiDevTransport::LinuxSpiDevTransport(int         spidev_fd,
                                            std::string cs_gpio_path,
@@ -91,4 +91,4 @@ void LinuxSpiDevTransport::delayMs(std::uint32_t ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-}  // namespace hp82163
+}  // namespace hipi

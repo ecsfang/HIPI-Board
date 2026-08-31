@@ -36,7 +36,9 @@ Point to the folder containing `CMakeLists.txt`, select board **pico2**
 ### 4. Build
 - **Build** button in the status bar at the bottom, or `Ctrl+Shift+B`
 - First build takes ~1–2 min
-- The `.uf2` file ends up in `build/hp82163_pico.uf2`
+- Builds **both** panel variants every time: `build/hipi_5_pico.uf2` (5",
+  RA8875) and `build/hipi_7_pico.uf2` (7", LT7683) -- flash whichever
+  matches the board on your desk
 
 ### 5. Flash
 Hold **BOOTSEL** on the Pico 2, release after reset, drag-and-drop the
@@ -55,8 +57,10 @@ Format a micro-SD card FAT32 and place these files at its root:
 
 ## Project structure
 ```
-├── CMakeLists.txt                 ← top-level build (three targets: core lib,
-│                                     Pico transport lib, pico executable)
+├── CMakeLists.txt                 ← top-level build (one target chain per panel --
+│                                     core lib, Pico transport lib, pico executable --
+│                                     built as hipi_5_pico / hipi_7_pico, see
+│                                     hipi_add_pico_targets() inside)
 ├── README.md
 ├── .vscode/
 ├── resources/
@@ -97,7 +101,7 @@ Format a micro-SD card FAT32 and place these files at its root:
     ├── hw_config.cpp                ← FatFS SD-card hardware config
     ├── my_descriptors.c             ← USB descriptors
     ├── PicoSpiTransport.cpp / LinuxSpiDevTransport.cpp
-    └── linux_main.cpp               ← optional Linux demo (HP82163_BUILD_LINUX_EXAMPLE, off by default)
+    └── linux_main.cpp               ← optional Linux demo (HIPI_BUILD_LINUX_EXAMPLE, off by default)
 ```
 
 No local `pico_sdk_import.cmake` needed — the extension sets up the SDK
@@ -118,7 +122,9 @@ via its toolchain file and `CMakeLists.txt` only includes
 export PICO_SDK_PATH=$HOME/.pico-sdk/sdk/2.2.0   # or ~/pico-sdk
 cmake -G Ninja -B build -S .
 cmake --build build
-picotool load -f build/hp82163_pico.uf2
+# Builds both panel variants every time -- flash whichever matches your board:
+picotool load -f build/hipi_5_pico.uf2   # 5" panel (RA8875)
+picotool load -f build/hipi_7_pico.uf2   # 7" panel (LT7683)
 ```
 
 ## Using in your own code
@@ -127,11 +133,11 @@ picotool load -f build/hp82163_pico.uf2
 #include "RA8875.hpp"
 #include "Screen.hpp"
 
-hp82163::PicoSpiTransport t(spi0, 6'000'000, /*cs=*/1, /*rst=*/4);
-hp82163::RA8875 display(t, 800, 480);
+hipi::PicoSpiTransport t(spi0, 6'000'000, /*cs=*/1, /*rst=*/4);
+hipi::RA8875 display(t, 800, 480);
 display.begin();   // configures genuine 16bpp/RGB565 by default (SYSR_16BPP)
 
-hp82163::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/255, /*textWidth=*/680);
+hipi::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/255, /*textWidth=*/680);
 for (uint8_t b : hp41_stream) screen.pr_char(b);
 ```
 `RA8875::set8Bpp()` still exists but isn't used anywhere in the Pico build
@@ -299,5 +305,7 @@ This example starts to blink led 1 forever, on 100ms and off 900ms
 - MicroPython `share.py` + `RA8875.py`: J. Chilla, March 2026
 - HP82163 protocol: HP82163A video display for HP-41
 - RA8875: <https://github.com/adafruit/Adafruit_CircuitPython_RA8875>
+- 5" panel (RA8875, `DISPLAY_5INCH`): <https://www.buydisplay.com/5-inch-tft-lcd-module-800x480-display-controller-i2c-serial-spi>
+- 7" panel (LT7683, `DISPLAY_7INCH`): <https://www.buydisplay.com/spi-7-inch-tft-lcd-dislay-module-1024x600-ra8876-optl-touch-screen-panel>
 - pico-sdk: <https://github.com/raspberrypi/pico-sdk>
 - Pico VS Code extension: <https://github.com/raspberrypi/pico-vscode>

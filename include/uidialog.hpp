@@ -1,6 +1,6 @@
 // UiDialog.hpp
 #pragma once
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 #include "ui_buttons.hpp"
 #include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
@@ -24,7 +24,7 @@ extern bool bExtTrace;
 // these directly (by name()) and toggles their enabled() state.
 extern std::vector<CDevice*> devices;
 
-namespace hp82163 {
+namespace hipi {
 
 // Forward declaration -- defined in boardui.cpp. Not including the whole
 // of boardui.h here since it already includes this file (uidialog.hpp).
@@ -62,7 +62,7 @@ namespace MenuFrame {
     // Thick, rounded frame: fill the whole box yellow (rounded corners),
     // then lay a smaller rounded black rectangle on top, inset by
     // BorderThickness on each side -> leaves an even yellow border.
-    inline void draw(RA8875* d, int x = X, int y = Y, int w = W, int h = H) {
+    inline void draw(DisplayDriver* d, int x = X, int y = Y, int w = W, int h = H) {
         d->txtSize(TextScale);   // force menu's own scale, independent of Screen's
         d->fillRoundRect(x, y, w, h, CornerRadius, Yellow);
         const int innerRadius = CornerRadius > BorderThickness
@@ -79,7 +79,7 @@ namespace MenuFrame {
 
 class UiDialog {
 public:
-    UiDialog(RA8875* display, Screen& screen) : d_(display), screen_(screen) {}
+    UiDialog(DisplayDriver* display, Screen& screen) : d_(display), screen_(screen) {}
 
     // Called with the chosen filename once the user confirms it in the
     // "Open file?" dialog. Decouples UiDialog from whatever device class
@@ -647,7 +647,7 @@ private:
         }
     }
 
-    RA8875* d_;
+    DisplayDriver* d_;
     Screen& screen_;
     State state_ = State::Closed;
     int selected_ = 0;
@@ -665,4 +665,4 @@ private:
     std::function<void(const std::string&, bool)> onDeviceToggled_;
 };
 
-}  // namespace hp82163
+}  // namespace hipi

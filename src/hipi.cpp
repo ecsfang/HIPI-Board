@@ -23,7 +23,7 @@ std::vector<CDevice*> devices;
 CPilBox* pilbox = nullptr;      // Need to be global for UI indication
 CPlotter* plotter = nullptr;    // Need to be global for plotterview.cpp
 
-extern hp82163::Config config;
+extern hipi::Config config;
 
 bool bTrace = false;
 bool bExtTrace = false;
@@ -43,8 +43,8 @@ void extendedTrace(CDevice* dev, IL_CMD_t cmd = 0, IL_CMD_t rtn = 0)
 }
 
 static CTape *cassette = NULL;
-extern hp82163::UiDialog *dialog;
-extern hp82163::Screen *screen;
+extern hipi::UiDialog *dialog;
+extern hipi::Screen *screen;
 
 // Writes to both the USB debug log and the on-board panel (character by
 // character, via Screen::pr_char() -- it already handles CR/LF for line

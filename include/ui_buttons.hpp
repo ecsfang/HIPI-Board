@@ -1,9 +1,9 @@
 // ui_buttons.hpp
 #pragma once
 #include <cstdint>
-#include "RA8875.hpp"
+#include "display_config.h"
 
-namespace hp82163 {
+namespace hipi {
 
 enum class Button : std::uint8_t { None, Shift, Ok, Up, Down, X };
 
@@ -49,7 +49,7 @@ inline Button hitTestButton(std::uint16_t x, std::uint16_t y) {
 //                            your largest press-shift on the "restore to
 //                            normal" calls, so any overflow from a shifted
 //                            press -- in any direction -- gets cleaned up.
-inline void redrawButtonRegion(RA8875* display,
+inline void redrawButtonRegion(DisplayDriver* display,
                                const std::uint16_t* stripPixels,
                                std::uint16_t stripWidth, std::uint16_t stripHeight,
                                std::uint16_t stripScreenX0, std::uint16_t stripScreenY0,
@@ -107,7 +107,7 @@ inline constexpr StatusLedSpec kPilLed = { 763, 452, 10 };
 inline constexpr std::uint16_t kStatusLedOnColor  = 0x07E0;  // green
 inline constexpr std::uint16_t kStatusLedOffColor = 0x0000;  // black
 
-inline void setStatusLed(RA8875* display, StatusLed which, bool on) {
+inline void setStatusLed(DisplayDriver* display, StatusLed which, bool on) {
     const StatusLedSpec& s = (which == StatusLed::Usb) ? kUsbLed : kPilLed;
     const std::int16_t d = static_cast<std::int16_t>(s.radius * 2);
     display->fillRoundRect(static_cast<std::int16_t>(s.cx - s.radius),
@@ -116,4 +116,4 @@ inline void setStatusLed(RA8875* display, StatusLed which, bool on) {
                           on ? kStatusLedOnColor : kStatusLedOffColor);
 }
 
-}  // namespace hp82163
+}  // namespace hipi

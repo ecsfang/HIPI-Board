@@ -7,18 +7,18 @@
 // Usage (see pico_main.cpp):
 //
 //   plotter = new CPlotter("TFPLOT");   // (done inside hipi_init())
-//   hp82163::plotterview_init(display, screen, plotter);
+//   hipi::plotterview_init(display, screen, plotter);
 //
 // The UiDialog "Display" menu calls plotterview_setOutput()/
 // plotterview_clearPlotter()/plotterview_output() directly (see
 // uidialog.hpp) -- there's no separate callback wiring needed here.
 
-#include "RA8875.hpp"
+#include "display_config.h"
 #include "Screen.hpp"
 #include "plotter.h"
 #include <cstdint>
 
-namespace hp82163 {
+namespace hipi {
 
 enum class DisplayOutput { Display, Plotter };
 // Bump this alongside the enum whenever a new view is added (e.g. a future
@@ -27,7 +27,7 @@ enum class DisplayOutput { Display, Plotter };
 constexpr int kDisplayOutputCount = 2;
 
 // Call once, after display/screen/plotter all exist (see hipi_init()).
-void plotterview_init(RA8875* display, Screen* screen, CPlotter* plotter);
+void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter);
 
 // Switches the panel's full-screen output. Handles suspending/resuming
 // Screen and hiding/showing the button strip (Plotter mode uses the full
@@ -82,4 +82,4 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
 // the menu directly.
 bool plotterview_isActive();
 
-}  // namespace hp82163
+}  // namespace hipi
