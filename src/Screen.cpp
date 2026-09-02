@@ -47,8 +47,13 @@ Screen::Screen(DisplayDriver* display,
     d_->txtColor(color, 0);
     d_->brightness(brightness);
     screen_pars(size);
-    // Cursor blinking frequency (register 0x44 = CBLR)
-    d_->writeReg(0x44, 0x0F);
+    // Was writeReg(0x44, 0x0F) here directly (RA8875's CBLR, cursor
+    // blink rate) -- REG[44h] is "Graphic Cursor Color 0" on LT7683, a
+    // completely different register. Blink rate is cosmetic (both chips
+    // still blink at their own default rate without this), so this is
+    // simply dropped rather than adding another chip-specific
+    // abstraction for it -- see setTextCursorVisible()'s own comment for
+    // the cursor-visibility/style bug this project actually needed fixed.
     clear();
 }
 
@@ -99,7 +104,7 @@ void Screen::full() {
     d_->spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
                          // ovanpa en pagaende clear.
     set_cursor(0, 0);
-    d_->writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
+    d_->beginBulkTextDraw();
     for (int row = 0; row < ROWS_; ++row) {
         // Explicit per-row positioning: the RA8875's own auto-wrap kicks in
         // at the active window's full pixel width (i.e. the *max* columns
@@ -126,7 +131,7 @@ void Screen::up(bool roll, bool cmd) {
 
     if (roll) {
         set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        if (!suspended_) d_->writeReg(0x40, 0x80);  // text mode, auto-incrementing, invisible cursor
+        if (!suspended_) d_->beginBulkTextDraw();
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_ > 0 ? offset_ - 1 : 0][col]);
         }
@@ -147,7 +152,7 @@ void Screen::up(bool roll, bool cmd) {
             if (lines_.size() > max_) lines_.pop_back();
         } else {
             set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-            if (!suspended_) d_->writeReg(0x40, 0x80);
+            if (!suspended_) d_->beginBulkTextDraw();
             for (std::uint8_t col = 0; col < COLS_; ++col) {
                 draw_letter(lines_[offset_ - 1][col]);
             }
@@ -172,7 +177,7 @@ void Screen::down(bool cmd) {
                0, static_cast<std::uint16_t>((row - 1) * height()));
     }
     set_cursor(0, 0);
-    if (!suspended_) d_->writeReg(0x40, 0x80);
+    if (!suspended_) d_->beginBulkTextDraw();
     for (std::uint8_t col = 0; col < COLS_; ++col) {
         draw_letter(lines_[offset_ + ROWS_][col]);
     }
@@ -211,7 +216,7 @@ void Screen::scrollBy(int n) {
                    0, static_cast<std::uint16_t>((row - 1) * height()));
         }
         set_cursor(0, 0);
-        if (!suspended_) d_->writeReg(0x40, 0x80);
+        if (!suspended_) d_->beginBulkTextDraw();
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[ROWS_ - 1 + offset_][col]);
         }
@@ -226,7 +231,7 @@ void Screen::scrollBy(int n) {
                static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
                0, height());
         set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        if (!suspended_) d_->writeReg(0x40, 0x80);
+        if (!suspended_) d_->beginBulkTextDraw();
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_][col]);
         }
@@ -643,8 +648,14 @@ void Screen::pr_str(const char *p) {
 
 void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
     if (suspended_) return;
-    d_->writeReg16(0x2A, static_cast<std::uint16_t>(c * width() + ofx_));
-    d_->writeReg16(0x2C, static_cast<std::uint16_t>(r * height() + ofy_));
+    // Was writeReg16(0x2A,...)/writeReg16(0x2C,...) directly -- correct
+    // for RA8875 (cursor X/Y), but REG[2Ah]/[2Ch] mean something
+    // completely different on LT7683 (PIP window screen position).
+    // txtSetCursor() already exists specifically so callers don't need
+    // to know which chip's registers to poke -- each driver's own
+    // implementation targets its own correct address.
+    d_->txtSetCursor(static_cast<std::uint16_t>(c * width() + ofx_),
+                     static_cast<std::uint16_t>(r * height() + ofy_));
 }
 
 void Screen::set_cur() {
@@ -653,14 +664,15 @@ void Screen::set_cur() {
     // of whatever physical row_/col_ is, which is meaningless while
     // scrolled back into history (that row is showing an older line, not
     // where the next character would land).
-    if (cv_ && offset_ == 0) {
-        // text mode + visible blinking cursor + auto-increment disabled
-        d_->writeReg(0x40, 0xE2);
-        if (Ins_) d_->writeReg(0x4F, 0x00);     // underscore cursor
-        else      d_->writeReg(0x4F, 0x0F);     // full-height cursor
-    } else {
-        d_->writeReg(0x40, 0x82);                // invisible cursor
-    }
+    //
+    // Was writeReg(0x40,...)/writeReg(0x4F,...) directly -- correct for
+    // RA8875 (MWCR0 text-mode+cursor-visible bits, cursor-height
+    // register), but on LT7683 those same two addresses are GCHP0
+    // (Graphic Cursor Horizontal Position) and something else entirely,
+    // not cursor visibility/style at all. setTextCursorVisible() exists
+    // so each driver can target its own correct registers -- see its own
+    // header comment for the full story.
+    d_->setTextCursorVisible(cv_ && offset_ == 0, !Ins_);
     set_cursor(col_, row_);
 }
 
@@ -702,6 +714,25 @@ void Screen::draw_letter(std::uint8_t c) {
 void Screen::fon_mode() {
 //    if (d_->mode() != nullptr && std::strcmp(d_->mode(), "fon") == 0) return;
     if (suspended_) return;
+    // KNOWN BUG, not yet fixed (this path -- size_>=4, "custom CGRAM
+    // font" mode -- is currently unused; the project constructs Screen
+    // with size=1 everywhere). Same class of issue already found and
+    // fixed in txt_size() for size_<4: these four register addresses are
+    // RA8875-era assumptions that mean something else entirely on
+    // LT7683. Confirmed against the LT768x datasheet directly:
+    //   REG[21h] is MISA[15:8] -- part of MAIN IMAGE START ADDRESS, not
+    //     "FNCR0/CGRAM" at all. Writing 0x80 here would move Main Image
+    //     Start Address away from 0 -- likely the same "screen goes black
+    //     and stays black" symptom clearActiveWindow()'s old BTE bug had,
+    //     not a harmless no-op.
+    //   REG[2Eh]/REG[29h] are PISA (PIP image address) / MWULY[12:8]
+    //     (Main Window Y high bits) -- see txt_size()'s own comment for
+    //     the full story on these two.
+    //   REG[40h] ("MWCR0: text mode" here) is GCHP0 (Graphic Cursor
+    //     Horizontal Position) on LT7683, not a mode register.
+    // Needs the same careful re-derivation txt_size() got before size=4
+    // is usable on this chip -- don't just copy txt_size()'s fix
+    // verbatim, these are a different set of registers.
     d_->writeReg(0x40, 0x80);  // MWCR0: text mode
     d_->writeReg(0x21, 0x80);  // FNCR0: CGRAM
     d_->writeReg(0x2E, 2);     // horizontal char spacing

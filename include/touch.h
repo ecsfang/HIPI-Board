@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <functional>
 
+extern char gTouchDevice[];
+
 int  touchInit();
 std::uint8_t touch_read();                                // existing, with printf debug
 bool touch_get_point(std::uint16_t& x, std::uint16_t& y); // scaled position

@@ -97,6 +97,14 @@ public:
     // Main window / canvas registers
     static constexpr std::uint8_t MISA0 = 0x20;   // Main Image Start Address
     static constexpr std::uint8_t MIW0  = 0x24;   // Main Image Width
+    static constexpr std::uint8_t MWSXY0 = 0x26;  // Main Window Start X/Y (pan offset within Main Image)
+    static constexpr std::uint8_t CVSSA0 = 0x50;  // Canvas Image Start Address -- the drawing
+                                                   // engine's own target buffer; SEPARATE from
+                                                   // Main Image Start Address (what's actually
+                                                   // scanned out to the panel). Both must point
+                                                   // at the same place for anything drawn to
+                                                   // become visible -- see begin()'s comment.
+    static constexpr std::uint8_t CVS_IMWTH0 = 0x54;  // Canvas Image Width (drawing engine's stride)
 
     // Active window registers (REG[56h]-[5Eh])
     static constexpr std::uint8_t AWUL_X0 = 0x56;
@@ -108,9 +116,15 @@ public:
     // Graphic read/write cursor position (REG[5Fh]-[62h])
     static constexpr std::uint8_t CURH0 = 0x5F;
     static constexpr std::uint8_t CURV0 = 0x61;
-    // Text write cursor position (REG[64h]-[66h])
-    static constexpr std::uint8_t F_CURX0 = 0x64;
-    static constexpr std::uint8_t F_CURY0 = 0x66;
+    // Text write cursor position (REG[63h]-[66h]) -- confirmed against
+    // EastRising's Goto_Text_XY(): X low/high = REG[63h]/[64h], Y
+    // low/high = REG[65h]/[66h]. An earlier pass here had these off by
+    // one byte (F_CURX0=0x64, F_CURY0=0x66 -- X's *high* byte, and Y's
+    // low byte respectively), which sent every text cursor position to
+    // the wrong register pair entirely -- text was being written, just
+    // never at a visible/sane position on screen.
+    static constexpr std::uint8_t F_CURX0 = 0x63;
+    static constexpr std::uint8_t F_CURY0 = 0x65;
 
     // Geometric drawing engine
     static constexpr std::uint8_t DCR0  = 0x67;   // Draw Line/Triangle/Rectangle/... Control 0
@@ -206,16 +220,36 @@ public:
     void spiDelayMs(std::uint32_t ms) { t_.delayMs(ms); }
 
     // -----------------------------------------------------------------------
-    // Block Transfer Engine -- see terminal.cpp/boardui.cpp's button-strip
-    // slide animation for the hard-won lesson on Positive vs Negative
-    // direction move opcodes with overlapping source/destination. NOTE:
-    // per this datasheet's section 12.3.2, LT768x's "Memory Copy with ROP"
-    // (opcode 0010b) explicitly "supports data transfer in positive
-    // direction only" -- there is no Negative Direction equivalent here,
-    // unlike RA8875. Any animation relying on that trick (the hide
-    // animation's rightward, overlapping shift) needs a different approach
-    // on this chip -- e.g. going through the same "SPI-redraw per step"
-    // fallback boardui.cpp already has a precedent for.
+    // Block Transfer Engine.
+    //
+    // STATUS: still unverified/likely broken on real hardware, despite
+    // extensive bring-up testing. Confirmed correct along the way: ROP
+    // codes (0xC2/0xC3, matching RA8875's own convention, both exist and
+    // work the same shape here -- an earlier note claiming only
+    // positive-direction moves were supported was wrong, based on one
+    // misread datasheet line), REG[92h] (BLT_COLR, S0/S1/Destination
+    // colour depth -- missing entirely at first, now set), the trigger/
+    // wait mechanism (tried both blind and read-modify-write REG[90h]
+    // writes, both REG[90h] and the dedicated STATUSREAD command for
+    // polling busy), several S1 register configurations (matching source,
+    // matching destination, all zero, left untouched -- per different
+    // real reference implementations), active window, Main Image/Canvas
+    // addressing, and Display Off/On cycling. All confirmed correct or
+    // healthy right up to and after the trigger -- yet the panel still
+    // ends up showing solid colour that survives even a Display Off/On
+    // toggle (i.e. SDRAM itself keeps getting overwritten, not just a
+    // frozen screen). That's beyond what register-level testing from
+    // here can diagnose further; needs real hardware inspection (e.g. an
+    // oscilloscope on SDRAM signals during a BTE op) to make progress.
+    //
+    // Until then: LT7683::clearActiveWindow() no longer uses this (see
+    // its own comment -- converted to the geometry engine instead, since
+    // Screen::clear()/full() call it on every construction/scroll and
+    // that was freezing the display before any text could be drawn).
+    // boardui.cpp's button-strip slide animation and Screen::bte()'s
+    // scroll/insert/delete-line handling still call this directly and
+    // remain unconverted -- see display_boot_test.hpp's own file-header
+    // note for the full list.
     // -----------------------------------------------------------------------
     void BTE(std::uint8_t  opcode,
              std::uint16_t x1,  std::uint16_t y1,
@@ -250,6 +284,47 @@ public:
     // -----------------------------------------------------------------------
     void setxy   (std::uint16_t x, std::uint16_t y);
     void txtSetCursor(std::uint16_t x, std::uint16_t y);
+    // Shows/hides the hardware blinking text cursor at the position last
+    // set via txtSetCursor(). Confirmed against the datasheet's own
+    // "Graphic / Text Cursor Control Register (GTCCR)" at REG[3Ch] --
+    // bit1=Text Cursor Enable, bit0=Blinking Enable. This is a GENUINELY
+    // SEPARATE feature from the "Graphic Cursor" (a sprite-like overlay,
+    // controlled by REG[40h]/GCHP0 among others) -- Screen.cpp used to
+    // poke REG[0x40]/REG[0x4F] directly on every character printed,
+    // copying RA8875's own MWCR0/cursor-height register addresses
+    // verbatim. On LT7683 those same addresses mean something else
+    // entirely (REG[40h]=GCHP0, REG[2Ah]/REG[2Ch]=PIP window position,
+    // not cursor position at all) -- writing there on every character was
+    // silently corrupting PIP-window/graphic-cursor state instead of
+    // showing a text cursor, which is why nothing displayed correctly
+    // through the Screen class despite the display driver itself working
+    // fine in isolation. blockStyle (underscore vs full-height) isn't
+    // wired up on this chip yet -- deferred, since getting text to show
+    // at all matters more than the cursor's exact shape.
+    //
+    // UPDATE: cursor SIZE and BLINK RATE turned out to matter too --
+    // both were left at power-on defaults that produced a static-looking
+    // "_" on real hardware instead of a blinking block (matching the
+    // other panel's own look): CURVS (REG[3Fh], vertical size) defaults
+    // to 1 pixel, and BTCR (REG[3Dh], blink time) defaults to toggling
+    // every single frame, far too fast to perceive as blinking at all.
+    // Both fixed in the .cpp -- see its own comment.
+    void setTextCursorVisible(bool visible, bool blockStyle);
+    // Prepares for writing many consecutive characters via txtWriteChar()
+    // in a tight loop (Screen's own row/scroll redraws). On LT7683 this
+    // needs nothing beyond txtMode() -- txtWriteChar() writes through
+    // MRWDP (REG[04h]), which auto-increments the cursor on its own in
+    // text mode by design, unlike RA8875's REG[40h]/MWCR0 which needs an
+    // explicit bit set for the same behaviour. Screen.cpp used to call
+    // d_->writeReg(0x40, 0x80) directly here ("text mode, auto-
+    // incrementing, invisible cursor" per its own comment) -- correct for
+    // RA8875, but REG[40h] is GCHP0 (Graphic Cursor Horizontal Position)
+    // on LT7683, not a mode register at all. Harmless in practice (the
+    // Graphic Cursor feature is never independently enabled elsewhere, so
+    // writing its position does nothing visible), since txtWriteChar()
+    // was already self-sufficient regardless -- but misleading to read,
+    // and worth a real, correct equivalent rather than a silent no-op.
+    void beginBulkTextDraw();
     void txtColor(std::uint16_t fg, std::uint16_t bg);
     void txtTrans(std::uint16_t color);
     void txtSize (std::uint8_t scale);
@@ -267,6 +342,16 @@ public:
     void rect    (std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h, std::uint16_t color);
     void fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
                         std::uint16_t r, std::uint16_t color);
+    void roundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
+                    std::uint16_t r, std::uint16_t color);
+    void circle    (std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color);
+    void fillCircle(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color);
+    void ellipse    (std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color);
+    void fillEllipse(std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color);
+    void triangle    (std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                       std::int16_t x2, std::int16_t y2, std::uint16_t color);
+    void fillTriangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                       std::int16_t x2, std::int16_t y2, std::uint16_t color);
     void fill    (std::uint16_t color);
     void hline   (std::int16_t x, std::int16_t y, std::int16_t w, std::uint16_t color);
     void vline   (std::int16_t x, std::int16_t y, std::int16_t h, std::uint16_t color);
@@ -318,12 +403,15 @@ private:
                        std::uint16_t color, bool filled);
     void roundRectHelper(std::int16_t x1, std::int16_t y1, std::int16_t x2, std::int16_t y2,
                          std::uint16_t rr, std::uint16_t color, bool filled);
+    void triangleHelper(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                        std::int16_t x2, std::int16_t y2, std::uint16_t color, bool filled);
 
     RA8875Transport& t_;
     std::uint16_t width_;
     std::uint16_t height_;
     std::uint16_t vertOffset_ = 0;
     std::uint8_t  txtScale_ = 0;
+    bool          pwmInitialized_ = false;
 };
 
 }  // namespace hipi

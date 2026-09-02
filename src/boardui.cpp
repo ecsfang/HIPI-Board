@@ -524,20 +524,31 @@ void showSplashScreen(DisplayDriver* display, const char* version,
     // active window is still at its undefined power-on state. rect/circle
     // draws (which fillRoundRect is built from) are clipped to that window,
     // so without this the corners/edges render incorrectly.
-    display->setActiveWindow(0, 0, 799, 479);
+    //
+    // Panel size read from the driver itself (display->width()/height(),
+    // 800x480 or 1024x600 depending on DISPLAY_5INCH/7INCH -- see
+    // display_config.h) rather than hardcoded -- this used to hardcode
+    // 800/479 directly, which meant the active window (and thus every
+    // draw below, clipped to it) stayed stuck at the 5" panel's size even
+    // when built for the 7" LT7683 panel: only the upper-left 800x480
+    // corner of the real 1024x600 screen ever got used.
+    const int panelW = display->width();
+    const int panelH = display->height();
+    display->setActiveWindow(0, 0, static_cast<std::uint16_t>(panelW - 1),
+                              static_cast<std::uint16_t>(panelH - 1));
 
     // Own box (not MenuFrame::X/Y/W/H), sized for the logo (96x114) + text,
     // and centered on the full display -- the menu's own box is sized/
     // positioned for the touch-button layout, which doesn't apply here.
     constexpr int splashW = 400, splashH = 170;
-    constexpr int splashX = (800 - splashW) / 2;
-    constexpr int splashY = (480 - splashH) / 2;
+    const int splashX = (panelW - splashW) / 2;
+    const int splashY = (panelH - splashH) / 2;
     MenuFrame::draw(display, splashX, splashY, splashW, splashH);
 
     // Logo on the left, vertically centered in the box; if it's missing
     // from the SD card, just skip it and fall back to text-only (same
     // graceful-degradation style as the button strip in boardui_loadButtonStrip()).
-    constexpr int logoX = splashX + 20;
+    const int logoX = splashX + 20;
     std::uint16_t logoW = 0, logoH = 0;
     // Peek dimensions first so we can vertically center whatever size the
     // logo actually is.

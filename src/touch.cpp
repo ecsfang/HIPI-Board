@@ -4,9 +4,6 @@
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
 #include "hardware/i2c.h"
-#include "gslX680fw.h"
-
-#include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "pico/time.h"
 #include <atomic>
@@ -14,36 +11,29 @@
 #include <utility>
 
 #include "usb_serial.h"
+// DISPLAY_5INCH / DISPLAY_7INCH come from CMakeLists.txt's own
+// target_compile_definitions() on the whole target (same as every other
+// file in this project) -- no need to pull in display_config.h here just
+// for these two macros; this file never touches the DisplayDriver type
+// that header also defines.
 
 // Same global trace flag used throughout the project (Config > Trace
 // menu) -- gates the touch-event logging below.
 extern bool bTrace;
 #include "touch.h"
 
-/*
- * Driver for the touch controller GSL1680
- * Description: https://www.buydisplay.com/download/ic/GSL1680.pdf
- * https://weatherhelge.wordpress.com/2015/02/09/5-capacitive-touch-panel-with-gsl1680-upn-running-with-arduino/
- * https://linux-sunxi.org/GSL1680
- * https://github.com/hellange/GSL1680
- * 
-*/
-
+// -----------------------------------------------------------------------
+// Shared between both touch controllers: pin assignments, the raw touch
+// event format, and the IRQ plumbing that feeds touch_poll()'s debounce
+// logic further down. The two panels use different controller chips
+// (GSL1680 on the 5" board, FT5316 on the 7") but the SAME physical I2C/
+// IRQ pins on this board design, and touch_poll()'s tap/release/swipe
+// state machine only ever calls touch_get_point()/touch_is_down() --
+// it doesn't know or care which chip answers those.
+// -----------------------------------------------------------------------
 #define TOUCH_SDA   16
 #define TOUCH_SCL   17
-#define WAKE_PIN    18
 #define IRQ_PIN     19
-
-#define GSLX680_I2C_ADDR    0x40
-
-//#define DEBUG
-
-#define GSL_DATA_REG		0x80
-#define GSL_STATUS_REG		0xe0
-#define GSL_PAGE_REG		0xf0
-
-#define I2CBUF_SIZE         0x20
-#define I2CBUF_MASK         ~(I2CBUF_SIZE-1)
 
 struct Finger {
     uint8_t fingerID;
@@ -59,7 +49,6 @@ struct Touch_event {
 struct Touch_event ts_event;
 
 i2c_inst_t *touch_i2c = i2c0;
-
 
 // volatile/atomic flagga som satts i ISR, lases i main-loopen
 std::atomic<bool> g_dataReadyFlag{false};
@@ -84,15 +73,138 @@ void setupDataReadyInterrupt() {
         &gpio_irq_handler);
 }
 
+#if defined(DISPLAY_7INCH)
+// =========================================================================
+// FT5316 -- 7" panel (ER-TPC070-6)
+//
+// Register map confirmed against hellange/arduino's FT5xx6.h, which
+// documents itself as tested against this exact panel ("Later tested
+// with separate 7" touch panel ER-TPC070-6 with FT5316 controller"):
+// https://github.com/hellange/arduino/blob/master/capacitive_7in_panel/FT5xx6.h
+//
+// Much simpler bring-up than GSL1680 -- no firmware upload needed at
+// all, just a power-on wait and the interrupt pin setup shared above.
+// =========================================================================
+
+char gTouchDevice[] = "FT5316";
+
+#define FT5316_I2C_ADDR   0x38
+
+#define FT5316_TD_STATUS  0x02   // bits[3:0]: number of touch points (0-5)
+#define FT5316_TOUCH1_XH  0x03   // bits[7:6]: event flag (unused here --
+                                  // touch_poll()'s own debounce already
+                                  // handles press/release transitions from
+                                  // just the point count); bits[3:0]: X[11:8]
+#define FT5316_TOUCH1_XL  0x04
+#define FT5316_TOUCH1_YH  0x05   // bits[7:4]: touch/finger ID; bits[3:0]: Y[11:8]
+#define FT5316_TOUCH1_YL  0x06
+
+static int i2c_read(const uint8_t reg, uint8_t *buf, const uint8_t nbytes) {
+    if (nbytes < 1) return 0;
+    i2c_write_blocking(touch_i2c, FT5316_I2C_ADDR, &reg, 1, true);
+    return i2c_read_blocking(touch_i2c, FT5316_I2C_ADDR, buf, nbytes, false);
+}
+
+int touchInit() {
+    i2c_init(touch_i2c, 400 * 1000);
+    gpio_set_function(TOUCH_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(TOUCH_SCL, GPIO_FUNC_I2C);
+
+    // FT5316 needs no firmware upload (unlike GSL1680) -- it's fully
+    // functional right after its own power-on reset settles.
+    sleep_ms(50);
+
+    setupDataReadyInterrupt();
+    return 0;
+}
+
+// Reads TD_STATUS + the first touch point's X/Y/ID in one 5-byte burst
+// (registers 0x02-0x06 are contiguous). verbose controls whether this
+// logs -- mirrors the old touch_read()/touch_read_silent() split, since
+// the silent version is called frequently by touch_poll() and shouldn't
+// spam the console.
+static uint8_t ft5316_read_touches(bool verbose) {
+    uint8_t buf[5] = {0};
+    if (i2c_read(FT5316_TD_STATUS, buf, sizeof(buf)) < 0) {
+        ts_event.NBfingers = 0;
+        return 0;
+    }
+    std::uint8_t n = buf[0] & 0x0F;
+    if (n > 5) n = 0;   // guards against a garbled/mid-transaction read
+    ts_event.NBfingers = n;
+    if (n > 0) {
+        ts_event.fingers[0].x = ((static_cast<uint32_t>(buf[1]) & 0x0F) << 8) | buf[2];
+        ts_event.fingers[0].y = ((static_cast<uint32_t>(buf[3]) & 0x0F) << 8) | buf[4];
+        ts_event.fingers[0].fingerID = static_cast<uint32_t>(buf[3]) >> 4;
+    }
+    if (verbose && n) {
+        LOGF("Finger event: 0(%d): [%d,%d]\r\n",
+             ts_event.fingers[0].fingerID, ts_event.fingers[0].x, ts_event.fingers[0].y);
+    }
+    return n;
+}
+
+uint8_t touch_read() {
+    return ft5316_read_touches(true);
+}
+
+static uint8_t touch_read_silent() {
+    return ft5316_read_touches(false);
+}
+
+// Hamtar forsta fingrets position. Returnerar false om inget finger ar nere.
+//
+// NOTE: FT5316-family controllers are typically factory-calibrated to
+// report coordinates already in the panel's own pixel space (0..1023,
+// 0..599 for this 1024x600 ER-TPC070-6 panel) -- unlike GSL1680's raw
+// 12-bit ADC values, which need scaling (see the DISPLAY_5INCH branch
+// below). No scaling applied here for that reason. If X/Y come out
+// swapped or inverted on real hardware -- a common panel-mounting-
+// orientation gotcha, not something datasheets typically specify -- swap
+// or negate right here rather than touching touch_poll()'s generic
+// debounce logic further down, which doesn't know or care about any of
+// this.
+bool touch_get_point(uint16_t& x, uint16_t& y) {
+    if (touch_read_silent() == 0) return false;
+    x = static_cast<uint16_t>(ts_event.fingers[0].x);
+    y = static_cast<uint16_t>(ts_event.fingers[0].y);
+    return true;
+}
+
+bool touch_is_down() {
+    return touch_read_silent() > 0;
+}
+
+#else  // DISPLAY_5INCH
+// =========================================================================
+// GSL1680 -- 5" panel
+// Description: https://www.buydisplay.com/download/ic/GSL1680.pdf
+// https://weatherhelge.wordpress.com/2015/02/09/5-capacitive-touch-panel-with-gsl1680-upn-running-with-arduino/
+// https://linux-sunxi.org/GSL1680
+// https://github.com/hellange/GSL1680
+// =========================================================================
+#include "gslX680fw.h"
+
+char gTouchDevice[] = "GSL1680";
+
+#define WAKE_PIN    18
+
+#define GSLX680_I2C_ADDR    0x40
+
+//#define DEBUG
+
+#define GSL_DATA_REG		0x80
+#define GSL_STATUS_REG		0xe0
+#define GSL_PAGE_REG		0xf0
+
+#define I2CBUF_SIZE         0x20
+#define I2CBUF_MASK         ~(I2CBUF_SIZE-1)
+
 // I2C reserves some addresses for special purposes. We exclude these from the scan.
 // These are any addresses of the form 000 0xxx or 111 1xxx
 bool reserved_addr(uint8_t addr) {
     return (addr & 0x78) == 0 || (addr & 0x78) == 0x78;
 }
-
-//void i2c_write_byte(uint8_t val) {
-//    i2c_write_blocking(touch_i2c, GSLX680_I2C_ADDR, &val, 1, false);
-//}
 
 int i2c_write(uint8_t val, uint8_t *buf=NULL, uint8_t len=0)
 {
@@ -329,7 +441,14 @@ bool touch_is_down() {
     return touch_read_silent() > 0;
 }
 
-// ── Debounced tap detection ─────────────────────────────────────────────────
+#endif  // DISPLAY_5INCH / DISPLAY_7INCH
+
+// -----------------------------------------------------------------------
+// Debounced tap detection -- shared between both controllers. Only ever
+// calls touch_get_point()/touch_is_down() (via touch_read_silent() inside
+// those, chip-specific above), so nothing here needs to know which chip
+// is actually answering.
+// -----------------------------------------------------------------------
 
 namespace {
 bool touchActive = false;

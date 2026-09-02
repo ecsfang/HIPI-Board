@@ -57,22 +57,37 @@ project(hipi_pico C CXX)
 # ----------------------------------------------------------------------
 # Display panel selection.
 #
-# The Pico firmware is always built for BOTH panels at once (see
+# By default the Pico firmware is built for BOTH panels at once (see
 # hipi_add_pico_targets() below) -- each gets its own fully separate set
 # of libraries and its own executable, named after the panel
 # (hipi_5_pico / hipi_7_pico, and their .uf2/.elf/... outputs), so you can
 # build both in one `cmake --build build` and flash whichever board you
 # actually have on your desk.
 #
-# HIPI_DISPLAY_PANEL only controls the *optional* Linux spidev demo
-# (HIPI_BUILD_LINUX_EXAMPLE, off by default) below, since that one runs
-# against whatever single board happens to be wired up locally, e.g.:
+# To build only one panel (faster iteration while working on just one
+# board), set HIPI_BUILD_PANELS to just that panel's number:
+#
+#   cmake -DHIPI_BUILD_PANELS=7 -B build     # only hipi_7_pico
+#   cmake -DHIPI_BUILD_PANELS=5 -B build     # only hipi_5_pico
+#   cmake -DHIPI_BUILD_PANELS=5;7 -B build   # both (the default)
+#
+# This changes which targets get *created*, not just which get built by
+# default -- so after changing it, a plain "cmake -B build" reconfigure
+# picks it up (no need to delete the build directory, unlike changing
+# CMakeLists.txt's own structure -- see the project's own notes on that).
+#
+#   5 -- RA8875 display controller + GSL1680 capacitive touch
+#   7 -- LT7683 display controller + FT5316 capacitive touch
+#
+# HIPI_DISPLAY_PANEL (separate from the above) only controls the
+# *optional* Linux spidev demo (HIPI_BUILD_LINUX_EXAMPLE, off by
+# default) below, since that one runs against whatever single board
+# happens to be wired up locally, e.g.:
 #
 #   cmake -DHIPI_BUILD_LINUX_EXAMPLE=ON -DHIPI_DISPLAY_PANEL=7INCH -B build
-#
-#   5INCH -- RA8875 display controller + GSL1680 capacitive touch
-#   7INCH -- LT7683 display controller + FT5316 capacitive touch
 # ----------------------------------------------------------------------
+set(HIPI_BUILD_PANELS "5;7" CACHE STRING "Which panel(s) to build Pico firmware for: 5, 7, or 5;7 for both")
+
 set(HIPI_DISPLAY_PANEL "5INCH" CACHE STRING "Panel the optional Linux demo targets: 5INCH or 7INCH")
 set_property(CACHE HIPI_DISPLAY_PANEL PROPERTY STRINGS 5INCH 7INCH)
 if(NOT HIPI_DISPLAY_PANEL STREQUAL "5INCH" AND NOT HIPI_DISPLAY_PANEL STREQUAL "7INCH")
@@ -203,17 +218,44 @@ function(hipi_add_pico_targets PANEL SUFFIX)
     pico_add_extra_outputs(${EXE_TARGET})
 endfunction()
 
-message(STATUS "hipi: building Pico firmware for both panels (hipi_5_pico, hipi_7_pico)")
-hipi_add_pico_targets(5INCH 5)
-hipi_add_pico_targets(7INCH 7)
+if("5" IN_LIST HIPI_BUILD_PANELS)
+    message(STATUS "hipi: building Pico firmware for the 5\" panel (hipi_5_pico)")
+    hipi_add_pico_targets(5INCH 5)
+endif()
+if("7" IN_LIST HIPI_BUILD_PANELS)
+    message(STATUS "hipi: building Pico firmware for the 7\" panel (hipi_7_pico)")
+    hipi_add_pico_targets(7INCH 7)
+endif()
+if(NOT "5" IN_LIST HIPI_BUILD_PANELS AND NOT "7" IN_LIST HIPI_BUILD_PANELS)
+    message(FATAL_ERROR
+        "HIPI_BUILD_PANELS must contain 5, 7, or both -- got: ${HIPI_BUILD_PANELS}")
+endif()
 
 # ----------------------------------------------------------------------
 # Optional: Linux spidev demo (off by default for Pico-focused work).
 # Links against whichever panel's core library HIPI_DISPLAY_PANEL selects
-# (both already exist, built above by hipi_add_pico_targets()).
+# -- which must actually have been built above (i.e. its number must
+# also be in HIPI_BUILD_PANELS), or the link step below would fail on a
+# target that was never created.
 # ----------------------------------------------------------------------
 option(HIPI_BUILD_LINUX_EXAMPLE "Build the Linux spidev demo" OFF)
 if(HIPI_BUILD_LINUX_EXAMPLE)
+    if(HIPI_DISPLAY_PANEL STREQUAL "7INCH")
+        if(NOT "7" IN_LIST HIPI_BUILD_PANELS)
+            message(FATAL_ERROR
+                "HIPI_BUILD_LINUX_EXAMPLE wants the 7\" panel (HIPI_DISPLAY_PANEL=7INCH) "
+                "but HIPI_BUILD_PANELS=${HIPI_BUILD_PANELS} doesn't include 7 -- "
+                "add 7 to HIPI_BUILD_PANELS, or change HIPI_DISPLAY_PANEL.")
+        endif()
+    else()
+        if(NOT "5" IN_LIST HIPI_BUILD_PANELS)
+            message(FATAL_ERROR
+                "HIPI_BUILD_LINUX_EXAMPLE wants the 5\" panel (HIPI_DISPLAY_PANEL=5INCH) "
+                "but HIPI_BUILD_PANELS=${HIPI_BUILD_PANELS} doesn't include 5 -- "
+                "add 5 to HIPI_BUILD_PANELS, or change HIPI_DISPLAY_PANEL.")
+        endif()
+    endif()
+
     message(STATUS "hipi: Linux demo targets DISPLAY_${HIPI_DISPLAY_PANEL}")
     add_executable(hipi_linux_demo
         src/LinuxSpiDevTransport.cpp

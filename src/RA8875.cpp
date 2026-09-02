@@ -401,6 +401,27 @@ void RA8875::txtSetCursor(std::uint16_t x, std::uint16_t y) {
     writeReg16(0x2C, static_cast<std::uint16_t>(y + vertOffset_));
 }
 
+void RA8875::setTextCursorVisible(bool visible, bool blockStyle) {
+    // REG[40h] (MWCR0): text mode + visible blinking cursor + auto-
+    // increment disabled = 0xE2; invisible = 0x82. REG[4Fh]: cursor
+    // height -- 0x00 underscore, 0x0F full character height. Exactly what
+    // Screen::set_cur() used to do directly; moved here so LT7683 can
+    // implement the same call through its own, different registers.
+    if (visible) {
+        writeReg(0x40, 0xE2);
+        writeReg(0x4F, blockStyle ? 0x0F : 0x00);
+    } else {
+        writeReg(0x40, 0x82);
+    }
+}
+
+void RA8875::beginBulkTextDraw() {
+    // REG[40h] (MWCR0) = 0x80: text mode, auto-increment enabled, cursor
+    // hidden -- exactly what Screen.cpp's row/scroll redraws used to
+    // write directly before each tight per-character loop.
+    writeReg(0x40, 0x80);
+}
+
 void RA8875::txtColor(std::uint16_t fg, std::uint16_t bg) {
     setColor(fg);
     setBgColor(bg);
@@ -562,6 +583,63 @@ void RA8875::fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::
 void RA8875::fill(std::uint16_t color) {
     rectHelper(0, 0, static_cast<std::int16_t>(width_  - 1),
                static_cast<std::int16_t>(height_ - 1), color, true);
+}
+
+void RA8875::roundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
+                       std::uint16_t r, std::uint16_t color) {
+    std::uint16_t rr = r;
+    if (static_cast<std::int16_t>(rr * 2) > w) rr = static_cast<std::uint16_t>(w / 2);
+    if (static_cast<std::int16_t>(rr * 2) > h) rr = static_cast<std::uint16_t>(h / 2);
+    if (rr == 0) {
+        rect(x, y, w, h, color);
+        return;
+    }
+    // NOTE: unlike fillRoundRect()'s "4 filled circles + overdraw" trick
+    // (which sidesteps the documented quadrant-curve quirk below), a true
+    // clipped outline would need per-quadrant arcs -- this project's own
+    // earlier testing found RA8875's curveHelper() "only renders two of
+    // its four quadrant codes correctly on this hardware/revision", so an
+    // outline built from it is a known, accepted approximation (corners
+    // may look slightly off on two sides) rather than a verified-correct
+    // primitive. Good enough for panel borders; if pixel-perfect corners
+    // ever matter here, revisit with the same circle-composite approach
+    // fillRoundRect() uses, adapted for outlines.
+    curveHelper(static_cast<std::int16_t>(x + rr),         static_cast<std::int16_t>(y + rr),         rr, rr, 2, color, false);
+    curveHelper(static_cast<std::int16_t>(x + w - rr - 1), static_cast<std::int16_t>(y + rr),         rr, rr, 3, color, false);
+    curveHelper(static_cast<std::int16_t>(x + w - rr - 1), static_cast<std::int16_t>(y + h - rr - 1), rr, rr, 0, color, false);
+    curveHelper(static_cast<std::int16_t>(x + rr),         static_cast<std::int16_t>(y + h - rr - 1), rr, rr, 1, color, false);
+    line(static_cast<std::int16_t>(x + rr), y, static_cast<std::int16_t>(x + w - rr - 1), y, color);
+    line(static_cast<std::int16_t>(x + rr), static_cast<std::int16_t>(y + h - 1),
+         static_cast<std::int16_t>(x + w - rr - 1), static_cast<std::int16_t>(y + h - 1), color);
+    line(x, static_cast<std::int16_t>(y + rr), x, static_cast<std::int16_t>(y + h - rr - 1), color);
+    line(static_cast<std::int16_t>(x + w - 1), static_cast<std::int16_t>(y + rr),
+         static_cast<std::int16_t>(x + w - 1), static_cast<std::int16_t>(y + h - rr - 1), color);
+}
+
+void RA8875::circle(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color) {
+    circleHelper(x, y, r, color, false);
+}
+
+void RA8875::fillCircle(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color) {
+    circleHelper(x, y, r, color, true);
+}
+
+void RA8875::ellipse(std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color) {
+    ellipseHelper(x, y, rx, ry, color, false);
+}
+
+void RA8875::fillEllipse(std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color) {
+    ellipseHelper(x, y, rx, ry, color, true);
+}
+
+void RA8875::triangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                      std::int16_t x2, std::int16_t y2, std::uint16_t color) {
+    triangleHelper(x0, y0, x1, y1, x2, y2, color, false);
+}
+
+void RA8875::fillTriangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                          std::int16_t x2, std::int16_t y2, std::uint16_t color) {
+    triangleHelper(x0, y0, x1, y1, x2, y2, color, true);
 }
 
 void RA8875::hline(std::int16_t x, std::int16_t y, std::int16_t w, std::uint16_t color) {

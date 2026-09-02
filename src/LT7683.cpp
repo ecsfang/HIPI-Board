@@ -78,11 +78,30 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     writeReg(0x12, 0x80);   // REG[12h] bit7=1: PCLK falling edge (matches
                              // LCD_PCLK_Falling_Rising=1 in EastRising's
                              // reference); bit6 (Display On) left 0 here,
-                             // set later by turnOn(true) below.
+                             // set later by turnOn(true) below. Writing
+                             // the full byte (rather than read-modify-
+                             // write) also zeroes bit4/bit3/bit[2:0] --
+                             // HSCAN left-to-right, VSCAN top-to-bottom,
+                             // PDATA=RGB order -- matching the reference's
+                             // own HSCAN_L_to_R()/VSCAN_T_to_B()/
+                             // PDATA_Set_RGB() calls as a side effect.
     writeReg(0x13, 0x00);   // REG[13h]: HSYNC low-active (bit7=0), VSYNC
                              // low-active (bit6=0), DE high-active (bit5=0)
                              // -- matches the reference's Active_Polarity
                              // defines exactly.
+
+    // REG[03h] (ICR) bit[1:0]: memory read/write port target -- confirmed
+    // missing against EastRising's own Memory_Select_SDRAM(), called right
+    // after Graphic_Mode() in their initial(). gfxMode() below only ever
+    // touches bit2 (text/graphic mode select) via read-modify-write,
+    // leaving bit[1:0] at whatever the power-on default happens to be --
+    // if that default doesn't already select SDRAM, every draw/pixel
+    // write goes to the wrong physical memory entirely regardless of how
+    // correct the Canvas/Main Image addresses are. Explicit, one-time
+    // full clear here (not folded into gfxMode() itself, since that's
+    // called repeatedly for routine mode switching and this only needs
+    // setting once).
+    writeData(static_cast<std::uint8_t>(readReg(ICR) & ~0x03));
 
     // ---- LCD timing -- REG[14h]-[1Fh] ----
     // Register locations/formulas were already confirmed against the
@@ -111,9 +130,26 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     writeReg(VPWR, 2);
 
     // Main window: single full-panel canvas, 16bpp, starting at address 0.
+    //
+    // IMPORTANT: Main Image (REG[20h-25h], what's actually scanned out to
+    // the panel) and Canvas Image (REG[50h-55h], what the drawing engine
+    // itself targets) are SEPARATE address registers on this chip -- an
+    // earlier pass here only set Main Image, leaving Canvas at its
+    // power-on-default address/width. Every draw call succeeded (correct
+    // status, no errors) but silently wrote into a region of SDRAM the
+    // panel was never scanning from, so nothing ever appeared on screen.
+    // Confirmed against EastRising's own reference firmware, which always
+    // sets both to the same place (see its main loop() calling
+    // Main_Image_Start_Address()+Canvas_Image_Start_address() together
+    // every frame). Both are kept in lockstep here for the same reason.
     writeReg16(MISA0, 0);
     writeReg16(static_cast<std::uint8_t>(MISA0 + 2), 0);
     writeReg16(MIW0, width_);
+    writeReg16(MWSXY0, 0);                                  // Main Window Start X = 0
+    writeReg16(static_cast<std::uint8_t>(MWSXY0 + 2), 0);   // Main Window Start Y = 0
+    writeReg16(CVSSA0, 0);
+    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
+    writeReg16(CVS_IMWTH0, width_);
     writeReg(0x10, 0x04);    // REG[10h] bit[3:2]=01b: Main Window 16bpp
     writeReg(AW_COLOR, 0x01);  // REG[5Eh] bit[1:0]: Active Window/canvas
                                // memory access mode = 16bpp block (X-Y)
@@ -221,6 +257,21 @@ void LT7683::BTE(std::uint8_t opcode,
                  std::uint16_t x1, std::uint16_t y1,
                  std::uint16_t w, std::uint16_t h,
                  std::uint16_t x0, std::uint16_t y0) {
+    // Confirmed against RA8876_common::bteMemoryCopy()/bteMemoryCopyWithROP():
+    // both check the core ISN'T ALREADY BUSY *before* touching any BTE
+    // register at all, and both explicitly force graphic mode right
+    // before triggering -- neither of which this project's own BTE() did
+    // before now. If whatever drawing call preceded this (e.g. the
+    // fillRect() calls drawing the squares being moved) left the core in
+    // a not-quite-finished state by the time control returned here, an
+    // immediate new trigger could race against that -- this closes that
+    // gap the same way the proven-working reference does.
+    for (int i = 0; i < 50; ++i) {
+        if ((readStatus() & STSR_CORE_BUSY) == 0) break;
+        t_.delayMs(1);
+    }
+    gfxMode();
+
     // S0/S1/DT each have a linear start ADDRESS plus a window X/Y offset
     // within that -- mirrors how the Main Window (MISA/MIW) and Active
     // Window (AWUL_X/Y) work together elsewhere in this chip. Since
@@ -234,11 +285,14 @@ void LT7683::BTE(std::uint8_t opcode,
     writeReg16(S0_X0, x0);
     writeReg16(S0_Y0, y0);
 
-    writeReg16(S1_STR0, 0);
-    writeReg16(static_cast<std::uint8_t>(S1_STR0 + 2), 0);
-    writeReg16(S1_WTH0, width_);
-    writeReg16(S1_X0, x0);
-    writeReg16(S1_Y0, y0);
+    // S1 deliberately left untouched -- confirmed against
+    // RA8876_common::bteMemoryCopy() itself (the plain, no-ROP-exposed
+    // variant, hardcoded to ROP=S0 same as this project always uses):
+    // its S1 calls are explicitly commented out there, never written at
+    // all. The earlier "S1 = all zeros" attempt (including S1 image
+    // WIDTH=0) may well have been actively harmful -- a zero stride is
+    // exactly the kind of value that could make internal address math
+    // misbehave -- unlike simply never touching those registers.
 
     writeReg16(DT_STR0, 0);
     writeReg16(static_cast<std::uint8_t>(DT_STR0 + 2), 0);
@@ -249,9 +303,26 @@ void LT7683::BTE(std::uint8_t opcode,
     writeReg16(BLT_WTH0, w);
     writeReg16(BLT_HIG0, h);
 
+    // REG[92h] (BLT_COLR): S0/S1/Destination colour depth -- confirmed
+    // against EastRising's own reference AND RA8876_common, both of which
+    // always set this before every BTE operation. bit[6:5]=01b (S0
+    // 16bpp), bit[4:2]=001b (S1 16bpp), bit[1:0]=01b (Destination 16bpp).
+    writeReg(BLT_COLR, 0x25);
+
     writeReg(BLT_CTRL1, opcode);   // REG[91h]: ROP[7:4] + operation code[3:0]
-    writeReg(BLT_CTRL0, 0x10);     // REG[90h] bit4: BTE enable/start
-    waitPoll(BLT_CTRL0, 0x10);
+    // REG[90h] bit4: BTE enable/start -- blind write of just bit4,
+    // matching RA8876_Lite's own lcdRegDataWrite(RA8876_BTE_CTRL0,
+    // RA8876_BTE_ENABLE<<4) exactly.
+    writeReg(BLT_CTRL0, 0x10);
+    // Busy-wait via the STATUS register's Core Task Busy bit (bit3, same
+    // STSR_CORE_BUSY used for the pre-check above and the post-reset/
+    // SDRAM-ready checks in begin()) -- matching RA8876_common's own
+    // check2dBusy(), which polls the dedicated STATUSREAD SPI command
+    // rather than a normal register read of REG[90h] itself.
+    for (int i = 0; i < 50; ++i) {
+        if ((readStatus() & STSR_CORE_BUSY) == 0) break;
+        t_.delayMs(1);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -289,9 +360,33 @@ void LT7683::sleep(bool s) {
 }
 
 void LT7683::brightness(std::uint8_t level) {
-    // PWM duty cycle -- REG[88h]/[89h] (PWM0 duty, not itemised in
-    // LT7683.hpp's constant list above since only the prescaler/mux/config
-    // registers were needed elsewhere). Written directly here.
+    // PWM0, normal polarity (duty = level) -- confirmed correct on real
+    // hardware via runBacklightSweepTest() (display_boot_test.hpp), which
+    // swept all 4 channel/polarity combinations; this was the only one
+    // that visibly changed the backlight. (An earlier pass here had
+    // switched to PWM1 based on RA8876_Lite's own backlight example using
+    // that channel -- a reasonable guess from a reference board, but this
+    // board's actual wiring turned out to use PWM0 instead.)
+    //
+    // One-time setup, confirmed against the datasheet's Table 9-1 (REG[85h]
+    // Description): bit[1:0] must be 10b to route Timer-0's PWM output to
+    // the physical XPWM0 pin (left at its power-on default -- plain GPIO
+    // mode -- otherwise, which is why writing only the duty register alone
+    // never had any visible effect before this was added).
+    //
+    // PWM_CLK = CCLK/(Prescaler+1) = 100MHz/100 = 1MHz (REG[84h]=99).
+    // Timer-0 clock divisor left at 00b (/1, REG[85h] bit[5:4]=00), so
+    // Timer-0 counts at 1MHz too. TCNTB0=255 sets the PWM period to 255
+    // clocks (~3.9kHz), matching this function's own 0-255 level range
+    // 1:1 with no scaling needed for the duty write below.
+    if (!pwmInitialized_) {
+        writeReg(PSCLR, 99);      // REG[84h]
+        writeReg(PMUXR, 0x02);    // REG[85h]: bit[1:0]=10b (PWM0->Timer0), bit[5:4]=00b (/1)
+        writeReg16(0x8A, 255);    // REG[8Ah-8Bh] (TCNTB0): period
+        writeReg(PCFGR, 0x03);    // REG[86h]: bit1=1 (auto-reload), bit0=1 (Timer-0 start)
+        pwmInitialized_ = true;
+    }
+    // REG[88h-89h] (TCMPB0): duty cycle. Normal polarity -- confirmed.
     writeReg16(0x88, level);
 }
 
@@ -363,6 +458,45 @@ void LT7683::txtSetCursor(std::uint16_t x, std::uint16_t y) {
     writeReg16(F_CURY0, static_cast<std::uint16_t>(y + vertOffset_));
 }
 
+void LT7683::setTextCursorVisible(bool visible, bool blockStyle) {
+    // REG[3Ch] (GTCCR) bit1=Text Cursor Enable, bit0=Blinking Enable --
+    // see this method's own header comment in the .hpp for why this
+    // (rather than RA8875's REG[40h]/REG[4Fh]) is the correct register
+    // for LT7683.
+    (void)blockStyle;
+    if (visible) {
+        // REG[3Eh] (CURHS) / REG[3Fh] (CURVS): cursor size in BASE
+        // (unscaled) pixels -- confirmed against the datasheet's own note
+        // that "When character is enlarged, the cursor setting will
+        // multiply the same times as the character enlargement", i.e.
+        // the hardware scales this automatically to match whatever
+        // txtSize() enlargement is active, so this only needs setting
+        // once here to the BASE 8x16 font cell, not per txtScale_.
+        // CURHS default (7 -> 8px) already happens to match the base
+        // font's 8px width, left as-is; CURVS's own default (0 -> 1px)
+        // is what was actually producing the thin "_" look reported on
+        // real hardware -- 15 -> 16px matches the base font's height,
+        // giving a real full-height block cursor once scaled.
+        writeReg(0x3E, 7);
+        writeReg(0x3F, 15);
+        // REG[3Dh] (BTCR): blink time, in frame-cycles per toggle. Left
+        // at its power-on default (0x00, "1 Frame Cycle Time") this
+        // toggles every single frame -- at a normal LCD refresh rate
+        // that's far too fast to perceive as blinking at all, which
+        // reads as a solid, non-blinking cursor even with GTCCR's own
+        // blink-enable bit correctly set. ~0.75s per full on/off cycle
+        // at a typical ~60Hz panel refresh.
+        writeReg(0x3D, 0x2D);
+    }
+    writeReg(0x3C, visible ? 0x03 : 0x00);
+}
+
+void LT7683::beginBulkTextDraw() {
+    // See this method's own header comment -- nothing beyond text mode
+    // is actually needed here on LT7683, unlike RA8875's REG[40h] write.
+    txtMode();
+}
+
 void LT7683::txtColor(std::uint16_t fg, std::uint16_t bg) {
     setColor(fg);
     setBgColor(bg);
@@ -381,11 +515,16 @@ void LT7683::txtTrans(std::uint16_t color) {
 void LT7683::txtSize(std::uint8_t scale) {
     txtMode();
     if (scale > 3) scale = 3;
-    // CCR0_TEXT (REG[CCh]) bit[3:2]=vertical enlarge, bit[1:0]=horizontal
-    // enlarge (x1/x2/x3/x4) -- same "duplicate the 2-bit scale into both
-    // nibbles" trick as RA8875's FNCR1, since we only ever want uniform
-    // (not stretched) scaling.
-    writeData(static_cast<std::uint8_t>((readReg(CCR0_TEXT) & ~0x0F) | ((scale << 2) | scale)));
+    // Confirmed against EastRising's Font_Width_X1..X4()/Font_Height_X1..
+    // X4(): horizontal enlargement is REG[CDh] bit[3:2], vertical is
+    // bit[1:0] -- NOT REG[CCh] (CCR0_TEXT), which is font *select*
+    // (internal CGROM vs user-defined, and font height 8x16/12x24/16x32
+    // in its own bit[5:4]) and has nothing to do with enlargement. An
+    // earlier pass here wrote this same (scale<<2)|scale pattern to the
+    // wrong register entirely -- harmless to CCR0_TEXT's own bits (only
+    // ever touched bit[3:0], preserving font-select), but meant the
+    // actual enlarge register never moved off its power-on default.
+    writeData(static_cast<std::uint8_t>((readReg(CCR1_TEXT) & ~0x0F) | ((scale << 2) | scale)));
     txtScale_ = scale;
 }
 
@@ -476,10 +615,22 @@ void LT7683::setActiveWindow(std::uint16_t x0, std::uint16_t y0,
 
 void LT7683::clearActiveWindow() {
     // LT7683 has no single "clear active window" register command like
-    // RA8875's MCLR -- the equivalent here is a Solid Fill BTE operation
-    // (opcode 1100b, section 12.3.3) over the active window's own extent.
-    // Read back the active window we just set so this stays correct
-    // regardless of what it was last configured to.
+    // RA8875's MCLR. This used to go through a BTE Solid Fill operation
+    // (opcode 1100b) -- but BTE on this chip never got past triggering
+    // without freezing the panel (extensively bring-up-tested: every
+    // register involved reads back correct, the core reports idle, yet
+    // the panel stops updating and SDRAM keeps getting overwritten with
+    // whatever colour was last set, surviving even a Display Off/On
+    // cycle -- see display_boot_test.hpp's own notes on this). Since
+    // Screen::clear() calls this on every construction and scroll, that
+    // meant the display froze the moment a Screen object was created,
+    // before any text was even drawn.
+    //
+    // Uses the same geometry-engine rectangle fill (DCR0, via
+    // rectHelper()) that fillRect()/fill() already use -- confirmed
+    // solid throughout every other test -- instead of BTE. Read back the
+    // active window we just set so this stays correct regardless of what
+    // it was last configured to.
     const std::uint16_t x0 = static_cast<std::uint16_t>(
         readReg(AWUL_X0) | (readReg(static_cast<std::uint8_t>(AWUL_X0 + 1)) << 8));
     const std::uint16_t y0 = static_cast<std::uint16_t>(
@@ -488,8 +639,26 @@ void LT7683::clearActiveWindow() {
         readReg(AW_WTH0) | (readReg(static_cast<std::uint8_t>(AW_WTH0 + 1)) << 8));
     const std::uint16_t h = static_cast<std::uint16_t>(
         readReg(AW_HT0) | (readReg(static_cast<std::uint8_t>(AW_HT0 + 1)) << 8));
-    setColor(0x0000);
-    BTE(0xC0 | 0x0C, x0, y0, w, h, x0, y0);  // ROP=S0 (0xC), op=Solid Fill (1100b=0xC) -> 0xCC
+
+    // Save the CURRENT foreground colour before the fill clobbers it --
+    // rectHelper()'s fill uses whatever colour we pass it (black, here),
+    // written to the same FGCR/FGCG/FGCB registers txtColor()'s
+    // foreground half uses. Left unrestored, this used to silently leave
+    // the hardware foreground colour at black after every clear -- which
+    // is exactly what made Screen's very first characters invisible
+    // (black-on-black): its constructor sets white via txtColor() *before*
+    // calling clear() here, but draw_letter() never re-applies colour per
+    // character (see its own comment), so whatever clear() left behind
+    // silently became the "current" colour for everything drawn after.
+    const std::uint8_t savedFgR = readReg(FGCR);
+    const std::uint8_t savedFgG = readReg(FGCG);
+    const std::uint8_t savedFgB = readReg(FGCB);
+    rectHelper(static_cast<std::int16_t>(x0), static_cast<std::int16_t>(y0),
+              static_cast<std::int16_t>(x0 + w - 1), static_cast<std::int16_t>(y0 + h - 1),
+              0x0000, true);
+    writeReg(FGCR, savedFgR);
+    writeReg(FGCG, savedFgG);
+    writeReg(FGCB, savedFgB);
 }
 
 void LT7683::beginMemoryWrite() {
@@ -600,6 +769,64 @@ void LT7683::fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::
     }
     roundRectHelper(x, y, static_cast<std::int16_t>(x + w - 1),
                     static_cast<std::int16_t>(y + h - 1), rr, color, true);
+}
+
+void LT7683::roundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
+                       std::uint16_t r, std::uint16_t color) {
+    std::uint16_t rr = r;
+    if (static_cast<std::int16_t>(rr * 2) > w) rr = static_cast<std::uint16_t>(w / 2);
+    if (static_cast<std::int16_t>(rr * 2) > h) rr = static_cast<std::uint16_t>(h / 2);
+    if (rr == 0) {
+        rect(x, y, w, h, color);
+        return;
+    }
+    roundRectHelper(x, y, static_cast<std::int16_t>(x + w - 1),
+                    static_cast<std::int16_t>(y + h - 1), rr, color, false);
+}
+
+void LT7683::circle(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color) {
+    circleHelper(x, y, r, color, false);
+}
+
+void LT7683::fillCircle(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color) {
+    circleHelper(x, y, r, color, true);
+}
+
+void LT7683::ellipse(std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color) {
+    ellipseHelper(x, y, rx, ry, color, false);
+}
+
+void LT7683::fillEllipse(std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color) {
+    ellipseHelper(x, y, rx, ry, color, true);
+}
+
+// Confirmed against RA8876_Lite::drawTriangle()/drawTriangleFill() --
+// same DCR0 (REG[67h]) register, same shape bits (0001b=Triangle,
+// matching the 0x82/0xA2 opcodes their reference uses: bit7=start,
+// bit5=fill, bit[4:1]=0001b).
+void LT7683::triangleHelper(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                            std::int16_t x2, std::int16_t y2, std::uint16_t color, bool filled) {
+    gfxMode();
+    writeReg16(DLHSR0, static_cast<std::uint16_t>(x0));
+    writeReg16(DLVSR0, static_cast<std::uint16_t>(y0 + vertOffset_));
+    writeReg16(DLHER0, static_cast<std::uint16_t>(x1));
+    writeReg16(DLVER0, static_cast<std::uint16_t>(y1 + vertOffset_));
+    writeReg16(DTPH0, static_cast<std::uint16_t>(x2));
+    writeReg16(DTPV0, static_cast<std::uint16_t>(y2 + vertOffset_));
+    setColor(color);
+    const std::uint8_t shape = 0x01 << 1;
+    writeReg(DCR0, static_cast<std::uint8_t>(0x80 | (filled ? 0x20 : 0x00) | shape));
+    waitPoll(DCR0, 0x80);
+}
+
+void LT7683::triangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                      std::int16_t x2, std::int16_t y2, std::uint16_t color) {
+    triangleHelper(x0, y0, x1, y1, x2, y2, color, false);
+}
+
+void LT7683::fillTriangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                          std::int16_t x2, std::int16_t y2, std::uint16_t color) {
+    triangleHelper(x0, y0, x1, y1, x2, y2, color, true);
 }
 
 // -----------------------------------------------------------------------

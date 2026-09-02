@@ -41,7 +41,7 @@
 #include "touch.h"
 #include "leds.h"
 #ifdef TEST_DISPLAY
-#include "display_test.hpp"
+#include "display_boot_test.hpp"
 #endif
 
 // SD-card support
@@ -249,21 +249,34 @@ int main() {
 
     tud_task();
 
+#ifdef TEST_DISPLAY
+    // Must run *after* the USB CDC wait loops above -- LOGF() output
+    // written before tud_cdc_n_connected(0) goes true is silently
+    // dropped (nothing is listening on the port yet), so placing this
+    // any earlier (e.g. right after initDisplay(), before initSD()) means
+    // the test still runs and drives the display correctly, but every one
+    // of its LOGF() calls vanishes -- no status register readout, no
+    // "Filling screen: ..." lines, nothing. SD-card status being
+    // independent of the display test itself (see initSD()'s own
+    // non-fatal failure handling) is unaffected by this move -- SD just
+    // now happens to run first in *sequence*, not as a dependency.
+    // Comment out (or #undef TEST_DISPLAY above) once the display is
+    // confirmed working.
+    hipi::runDisplayBootTest(display);
+#endif
+
     LOGF("\r\n * Init display ...");
+    LOGF("\r\n\t* %s", DISPLAY_DEVICE);
     // Show buttons -- draws and caches the strip, and tells us how wide it
     // is so Screen's initial text width can be sized around it.
     const std::uint16_t buttonStripWidth = hipi::boardui_loadButtonStrip(display);
-
     LOGF("\r\n\t* Draw text ... ");
     display->setActiveWindow(0, 0, SCREEN_MAX_X-buttonStripWidth-1, SCREEN_MAX_Y-1);
     screen = new hipi::Screen(display, config.textColor(), 1, config.brightness(), SCREEN_MAX_X-buttonStripWidth );
 
-    //screen->setTextSize(0);
     screen->pr_char(27);
     screen->pr_char('<'); // Cursor off
-//    screen->pr_str("###############################");
     screen->pr_str("# HIPI - HP-IL Pico Interface #");
-//    screen->pr_str("###############################");
 
     if( usb_connected )
         screen->pr_str("USB connected!");
@@ -271,7 +284,6 @@ int main() {
         screen->pr_str("Stand alone - no USB");
     {
         char buf[64];
-        //screen->pr_str("Config:");
         sprintf(buf, " * Drive: %.32s", config.filename().c_str() );
         screen->pr_str(buf);
         int z = sprintf(buf, " * Trace: " );
@@ -310,11 +322,15 @@ int main() {
 
     // Init touch sensor ...
     LOGF("\r\n * Init touch sensor ...");
+    // touch.cpp now has a real FT5316 backend for DISPLAY_7INCH (see its
+    // own file header) -- was GSL1680-only before, which would have been
+    // talking the wrong protocol to this board's actual touch chip.
     touchInit();
     touch_set_tap_callback(hipi::boardui_handleTap);
     touch_set_release_callback(hipi::boardui_handleRelease);
     touch_set_swipe_callback(hipi::boardui_handleSwipe);
-    LOGF("\r\n\t* GSL1680 Boot up completed!");
+    LOGF("\r\n\t* %s: Boot up completed!", gTouchDevice);
+
     tud_task();
 
     // Init HPIL scanner ...

@@ -42,11 +42,13 @@
 namespace hipi {
 using DisplayDriver = RA8875;
 }  // namespace hipi
+#define DISPLAY_DEVICE "5\" with RA8875 controller"
 
 #elif defined(DISPLAY_7INCH)
     #include "LT7683.hpp"
 namespace hipi {
 using DisplayDriver = LT7683;
 }  // namespace hipi
+#define DISPLAY_DEVICE "7\" with LT7683 controller"
 
 #endif

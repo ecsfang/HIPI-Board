@@ -213,6 +213,20 @@ public:
     // Cursor + text
     void setxy   (std::uint16_t x, std::uint16_t y);
     void txtSetCursor(std::uint16_t x, std::uint16_t y);
+    // Shows/hides the hardware blinking text cursor at the position last
+    // set via txtSetCursor(), independent of position itself -- used by
+    // Screen (the HP82163 emulator) after every character, so this needs
+    // to be a real method rather than Screen poking registers directly:
+    // RA8875 and LT7683 implement the same visible cursor feature through
+    // completely different registers (see LT7683::setTextCursorVisible()'s
+    // own comment for why that matters).
+    void setTextCursorVisible(bool visible, bool blockStyle);
+    // Prepares for writing many consecutive characters via txtWriteChar()
+    // in a tight loop (Screen's own row/scroll redraws) -- RA8875 needs
+    // REG[40h] (MWCR0) explicitly set for this (text mode + auto-
+    // increment + cursor hidden during the burst); see
+    // LT7683::beginBulkTextDraw()'s own comment for why its needs differ.
+    void beginBulkTextDraw();
     void txtColor(std::uint16_t fg, std::uint16_t bg);
     void txtTrans(std::uint16_t color);
     void txtSize (std::uint8_t scale);
@@ -239,6 +253,16 @@ public:
     void rect    (std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h, std::uint16_t color);
     void fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
                         std::uint16_t r, std::uint16_t color);
+    void roundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
+                    std::uint16_t r, std::uint16_t color);
+    void circle    (std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color);
+    void fillCircle(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color);
+    void ellipse    (std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color);
+    void fillEllipse(std::int16_t x, std::int16_t y, std::uint16_t rx, std::uint16_t ry, std::uint16_t color);
+    void triangle    (std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                       std::int16_t x2, std::int16_t y2, std::uint16_t color);
+    void fillTriangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
+                       std::int16_t x2, std::int16_t y2, std::uint16_t color);
     void fill    (std::uint16_t color);
     void hline   (std::int16_t x, std::int16_t y, std::int16_t w, std::uint16_t color);
     void vline   (std::int16_t x, std::int16_t y, std::int16_t h, std::uint16_t color);
