@@ -72,19 +72,48 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
                              // bit0 (host bus width) left at 0 -- that bit
                              // only applies to parallel host mode, not our
                              // SPI transport.
+    // ---- Display orientation -- reverted to the known-working baseline
+    // (no rotation) after VDIR=1 caused a real regression: with it
+    // active, the screen went black and stopped rendering entirely once
+    // the boot test moved past the touch calibration step (reference
+    // demo, colours, corners, text, splash -- nothing after that point
+    // showed anything at all). Restoring full functionality takes
+    // priority over the orientation fix for now. ----
+    //
+    // What's confirmed so far, for whoever picks this back up:
+    //   - This board's panel shows a TRUE 180° rotation with the chip's
+    //     power-on defaults (confirmed by physically rotating the board:
+    //     everything lines up correctly). Logical (0,0) lands physically
+    //     at bottom-right.
+    //   - VDIR (REG[12h] bit3) = 1 alone correctly undoes the VERTICAL
+    //     half of that (confirmed: text glyphs render right-side-up, not
+    //     upside-down -- the hardware genuinely re-orients glyph shapes,
+    //     not just repositions them). Logical (0,0) then lands at
+    //     top-RIGHT -- horizontal component still wrong.
+    //   - MACR (REG[02h]) bit[2:1]=01b, which datasheet Section 5.4
+    //     documents as exactly the needed horizontal-flip complement
+    //     (Figure 5-13, VDIR+this combo = "Rotated 180°"), produced NO
+    //     observable change when added alongside VDIR=1 -- text stayed
+    //     mirrored (each glyph shape reversed, not just character order),
+    //     identical to VDIR alone. Not yet understood why -- possibly
+    //     this bit doesn't apply to the geometry/text engines' own draws
+    //     the way the datasheet's example implies, possibly something
+    //     else on this specific board overrides it.
+    //   - VDIR=1 ALSO caused the render-failure regression described
+    //     above, on top of not fixing the mirror -- a second, separate
+    //     problem from the MACR question, and not yet root-caused either.
+    // Next step, if revisited: isolate the render-failure regression
+    // first (does it reproduce with VDIR=1 alone, no MACR change, run
+    // for the SAME length of time as one boot-test pass would take,
+    // rather than assuming it's specific to what runs after touch
+    // calibration?), separately from the still-unsolved horizontal-flip
+    // question.
     writeReg(MACR, 0x40);   // REG[02h] bit6=1,bit7=0: 16bpp RGB565 mode 1;
                              // bit[2:1]=00: normal (left-right,top-down)
-                             // memory write direction.
-    writeReg(0x12, 0x80);   // REG[12h] bit7=1: PCLK falling edge (matches
-                             // LCD_PCLK_Falling_Rising=1 in EastRising's
-                             // reference); bit6 (Display On) left 0 here,
-                             // set later by turnOn(true) below. Writing
-                             // the full byte (rather than read-modify-
-                             // write) also zeroes bit4/bit3/bit[2:0] --
-                             // HSCAN left-to-right, VSCAN top-to-bottom,
-                             // PDATA=RGB order -- matching the reference's
-                             // own HSCAN_L_to_R()/VSCAN_T_to_B()/
-                             // PDATA_Set_RGB() calls as a side effect.
+                             // memory write direction (original default).
+    writeReg(0x12, 0x80);   // REG[12h] bit7=1: PCLK falling edge; bit3=0:
+                             // VDIR normal (top-to-bottom, original
+                             // default).
     writeReg(0x13, 0x00);   // REG[13h]: HSYNC low-active (bit7=0), VSYNC
                              // low-active (bit6=0), DE high-active (bit5=0)
                              // -- matches the reference's Active_Polarity
@@ -492,8 +521,21 @@ void LT7683::setTextCursorVisible(bool visible, bool blockStyle) {
 }
 
 void LT7683::beginBulkTextDraw() {
-    // See this method's own header comment -- nothing beyond text mode
-    // is actually needed here on LT7683, unlike RA8875's REG[40h] write.
+    // See this method's own header comment -- text mode is the only part
+    // that needed a real LT7683 equivalent for RA8875's original "auto-
+    // incrementing" intent (txtWriteChar()'s own MRWDP write already
+    // handles that on its own). But RA8875's single REG[40h]=0x80 write
+    // did THREE things at once per its own comment -- "text mode, auto-
+    // incrementing, invisible cursor" -- and this was only replicating
+    // the first two. Confirmed on real hardware: without also hiding the
+    // cursor here, it visibly jumped around the screen during every
+    // clear()/full()/scroll redraw (each draw_letter() repositioning it
+    // along the way), something RA8875 never showed since its own single
+    // write already covered this. setTextCursorVisible() (see its own
+    // comment) is what set_cur() -- always called again right after
+    // these bulk draws finish -- uses to correctly restore visibility
+    // afterward, so this only needs to hide it, not manage restoring it.
+    setTextCursorVisible(false, false);
     txtMode();
 }
 

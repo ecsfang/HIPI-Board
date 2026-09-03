@@ -166,8 +166,26 @@ static uint8_t touch_read_silent() {
 // this.
 bool touch_get_point(uint16_t& x, uint16_t& y) {
     if (touch_read_silent() == 0) return false;
-    x = static_cast<uint16_t>(ts_event.fingers[0].x);
-    y = static_cast<uint16_t>(ts_event.fingers[0].y);
+    // Confirmed via real-hardware calibration: this panel reports raw
+    // coordinates mirrored on BOTH axes relative to the display's own
+    // pixel space -- physical (0,0) read back as roughly (max_x,max_y)
+    // and vice versa (e.g. physical top-left measured ~(970,598) against
+    // a 1024x600 panel, physical bottom-right ~(20,4)). Not a swap, both
+    // axes independently inverted -- consistent with this panel being
+    // mounted rotated 180 degrees relative to the controller's own
+    // default orientation, which (like the earlier "does X/Y need
+    // swapping" question this function's own comment already flagged as
+    // unconfirmed) isn't something the datasheet specifies up front.
+    //
+    // Local constants rather than LT7683.hpp's SCREEN_MAX_X/Y -- this
+    // file deliberately doesn't pull in display_config.h (see the note
+    // where usb_serial.h is included above), and this panel's resolution
+    // is already effectively hardcoded throughout this branch anyway
+    // (same as GSL1680's own TOUCH_RAW_MAX_X/Y below).
+    constexpr uint16_t kPanelMaxX = 1024;
+    constexpr uint16_t kPanelMaxY = 600;
+    x = static_cast<uint16_t>((kPanelMaxX - 1) - ts_event.fingers[0].x);
+    y = static_cast<uint16_t>((kPanelMaxY - 1) - ts_event.fingers[0].y);
     return true;
 }
 

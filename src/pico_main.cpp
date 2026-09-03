@@ -22,7 +22,7 @@
 // and the USB/PILBOX status LEDs live in boardui.h/boardui.cpp. This file
 // just wires everything together.
 
-//#define TEST_DISPLAY
+#define TEST_DISPLAY
 
 #include <stdlib.h>
 #include <cstring>
@@ -239,6 +239,7 @@ int main() {
 
     // First here we know if the debug-port is open or not (usb_connected)
     LOGF("\r\n\nHIPI Board v%s\r\n", HIPI_VERSION);
+    LOGF("MACR (REG[02h]) currently reads: 0x%02X\r\n", display->readReg(0x02));
     LOGF("======================");
     LOGF("\r\n * Init SD-card ... ");
     if (FR_OK != fr) {

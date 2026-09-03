@@ -103,8 +103,13 @@ void Screen::full() {
     d_->clearActiveWindow();
     d_->spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
                          // ovanpa en pagaende clear.
-    set_cursor(0, 0);
+    // beginBulkTextDraw() BEFORE set_cursor() -- hides the cursor first,
+    // so the position change right after doesn't cause a brief visible
+    // jump to (0,0) before it's hidden (confirmed on real hardware: with
+    // the reverse order, that jump was still visible even though the
+    // subsequent per-row jumping was already fixed by hiding it at all).
     d_->beginBulkTextDraw();
+    set_cursor(0, 0);
     for (int row = 0; row < ROWS_; ++row) {
         // Explicit per-row positioning: the RA8875's own auto-wrap kicks in
         // at the active window's full pixel width (i.e. the *max* columns
@@ -130,8 +135,8 @@ void Screen::up(bool roll, bool cmd) {
            0, height());
 
     if (roll) {
-        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
         if (!suspended_) d_->beginBulkTextDraw();
+        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_ > 0 ? offset_ - 1 : 0][col]);
         }
@@ -151,8 +156,8 @@ void Screen::up(bool roll, bool cmd) {
             lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
             if (lines_.size() > max_) lines_.pop_back();
         } else {
-            set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
             if (!suspended_) d_->beginBulkTextDraw();
+            set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
             for (std::uint8_t col = 0; col < COLS_; ++col) {
                 draw_letter(lines_[offset_ - 1][col]);
             }
@@ -176,8 +181,8 @@ void Screen::down(bool cmd) {
                height(),
                0, static_cast<std::uint16_t>((row - 1) * height()));
     }
-    set_cursor(0, 0);
     if (!suspended_) d_->beginBulkTextDraw();
+    set_cursor(0, 0);
     for (std::uint8_t col = 0; col < COLS_; ++col) {
         draw_letter(lines_[offset_ + ROWS_][col]);
     }
@@ -215,8 +220,8 @@ void Screen::scrollBy(int n) {
                    height(),
                    0, static_cast<std::uint16_t>((row - 1) * height()));
         }
-        set_cursor(0, 0);
         if (!suspended_) d_->beginBulkTextDraw();
+        set_cursor(0, 0);
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[ROWS_ - 1 + offset_][col]);
         }
@@ -230,8 +235,8 @@ void Screen::scrollBy(int n) {
                static_cast<std::uint16_t>(COLS_ * width()),
                static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
                0, height());
-        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
         if (!suspended_) d_->beginBulkTextDraw();
+        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(lines_[offset_][col]);
         }
