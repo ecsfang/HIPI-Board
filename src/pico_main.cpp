@@ -22,7 +22,7 @@
 // and the USB/PILBOX status LEDs live in boardui.h/boardui.cpp. This file
 // just wires everything together.
 
-#define TEST_DISPLAY
+//#define TEST_DISPLAY
 
 #include <stdlib.h>
 #include <cstring>
@@ -49,6 +49,7 @@
 #include "f_util.h"
 #include "hw_config.h"
 #include "hpil.h"
+#include "display.h"  // videoDisplay -- see its own comment for why
 
 #include "bsp/board.h"   // for board_init()
 #include "usb_serial.h"
@@ -123,7 +124,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "1.0";
+constexpr const char* HIPI_VERSION = "2.0(beta)";  // shown on splash screen
 }  // namespace
 
 extern void hipi_init(void);
@@ -239,7 +240,6 @@ int main() {
 
     // First here we know if the debug-port is open or not (usb_connected)
     LOGF("\r\n\nHIPI Board v%s\r\n", HIPI_VERSION);
-    LOGF("MACR (REG[02h]) currently reads: 0x%02X\r\n", display->readReg(0x02));
     LOGF("======================");
     LOGF("\r\n * Init SD-card ... ");
     if (FR_OK != fr) {
@@ -379,6 +379,7 @@ int main() {
         touch_poll();                   // debounced tap/release detection (touch.h)
         hipi::boardui_poll();        // auto-hide timers + status LED poll
         hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
+
         tight_loop_contents();
     }
 

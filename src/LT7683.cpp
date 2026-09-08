@@ -5,6 +5,7 @@
 
 #include "LT7683.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace hipi {
@@ -44,15 +45,18 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
         t_.delayMs(1);
     }
 
-    pllInit();
+    // ROOT CAUSE FOUND: pllInit() -- skipped entirely. Confirmed on real
+    // hardware: commenting out this single call made the long-hunted
+    // "cursor moves, nothing shows" glitch disappear completely, no
+    // other change needed. Leaving the chip on its own power-on-default
+    // clock configuration instead of reprogramming the PLL. Every other
+    // change made during that investigation (caching, register-path
+    // switches, SDRAM refresh values, active-window toggling, etc.) was
+    // chasing a symptom of this, not a cause -- reverted back out below
+    // to keep this simple and fast again.
+    //pllInit();
 
     // ---- SDRAM (Display RAM) init -- section 8 ----
-    // REG[E0h]/[E1h] match this project's own earlier datasheet-table
-    // values exactly. REG[E2h]/[E3h] (refresh interval) use EastRising's
-    // own reference calculation instead of the datasheet's generic table,
-    // since it's tailored to the *actual* MCLK we configure in pllInit()
-    // (100MHz) rather than whatever MCLK the datasheet's own table
-    // assumed: sdram_itv = ((64000000/8192)/(1000/60))-2 = 486 (0x1E6).
     writeReg(SDRAR, 0x29);
     writeReg(SDRMD, 0x03);
     writeReg(SDR_REF0, 0xE6);
@@ -72,45 +76,61 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
                              // bit0 (host bus width) left at 0 -- that bit
                              // only applies to parallel host mode, not our
                              // SPI transport.
-    // ---- Display orientation -- reverted to the known-working baseline
-    // (no rotation) after VDIR=1 caused a real regression: with it
-    // active, the screen went black and stopped rendering entirely once
-    // the boot test moved past the touch calibration step (reference
-    // demo, colours, corners, text, splash -- nothing after that point
-    // showed anything at all). Restoring full functionality takes
-    // priority over the orientation fix for now. ----
+    // ---- Display orientation -- CLOSED, confirmed by the manufacturer.
+    // This board's panel shows a TRUE 180° rotation with the chip's
+    // power-on defaults (confirmed by physically rotating the board:
+    // everything then lines up correctly). VDIR (REG[12h] bit3) = 1
+    // correctly undoes the vertical half (confirmed: text glyphs render
+    // right-side-up, not upside-down -- genuinely re-oriented by the
+    // hardware, not just repositioned). MACR (REG[02h]) bit[2:1], which
+    // the datasheet's Section 5.4 documents as the horizontal-flip
+    // complement needed alongside VDIR for a full 180°, never produced
+    // any visible change to actual UI content in ANY combination tried
+    // (confirmed not specific to this project's own code -- a second,
+    // independent LT7683 driver, ToSStudio's library ported to the Pico
+    // SDK, showed the same "no effect" result on the same hardware).
+    // Root cause since confirmed directly by the manufacturer: MACR
+    // bit[2:1] only affects operations where the HOST itself streams
+    // pixel bytes into display RAM via MRWDP -- i.e. loading a bitmap
+    // image, matching what this project separately worked out for
+    // itself (see drawBitmap565Cropped()'s own comments). It does NOT
+    // affect the Geometry Engine or text engine's own internally-
+    // generated output, which is almost everything this project actually
+    // draws (buttons, panels, text) -- so it was never going to rotate
+    // the visible UI, regardless of which combination was tried.
     //
-    // What's confirmed so far, for whoever picks this back up:
-    //   - This board's panel shows a TRUE 180° rotation with the chip's
-    //     power-on defaults (confirmed by physically rotating the board:
-    //     everything lines up correctly). Logical (0,0) lands physically
-    //     at bottom-right.
-    //   - VDIR (REG[12h] bit3) = 1 alone correctly undoes the VERTICAL
-    //     half of that (confirmed: text glyphs render right-side-up, not
-    //     upside-down -- the hardware genuinely re-orients glyph shapes,
-    //     not just repositions them). Logical (0,0) then lands at
-    //     top-RIGHT -- horizontal component still wrong.
-    //   - MACR (REG[02h]) bit[2:1]=01b, which datasheet Section 5.4
-    //     documents as exactly the needed horizontal-flip complement
-    //     (Figure 5-13, VDIR+this combo = "Rotated 180°"), produced NO
-    //     observable change when added alongside VDIR=1 -- text stayed
-    //     mirrored (each glyph shape reversed, not just character order),
-    //     identical to VDIR alone. Not yet understood why -- possibly
-    //     this bit doesn't apply to the geometry/text engines' own draws
-    //     the way the datasheet's example implies, possibly something
-    //     else on this specific board overrides it.
-    //   - VDIR=1 ALSO caused the render-failure regression described
-    //     above, on top of not fixing the mirror -- a second, separate
-    //     problem from the MACR question, and not yet root-caused either.
-    // Next step, if revisited: isolate the render-failure regression
-    // first (does it reproduce with VDIR=1 alone, no MACR change, run
-    // for the SAME length of time as one boot-test pass would take,
-    // rather than assuming it's specific to what runs after touch
-    // calibration?), separately from the still-unsolved horizontal-flip
-    // question.
-    writeReg(MACR, 0x40);   // REG[02h] bit6=1,bit7=0: 16bpp RGB565 mode 1;
-                             // bit[2:1]=00: normal (left-right,top-down)
-                             // memory write direction (original default).
+    // The manufacturer also confirmed there is NO register or mechanism
+    // on the LT7683 that rotates/mirrors the final panel scan-out itself
+    // (the one thing that WOULD affect everything uniformly, the way
+    // VDIR does for the vertical axis alone) -- so a real, complete 180°
+    // rotation genuinely isn't achievable via registers on this chip.
+    // Reverted to the chip's original, unrotated defaults for that
+    // reason -- the panel needs to be physically mounted/viewed
+    // upside-down.
+    //
+    // One loose end from this investigation, for whoever revisits VDIR=1
+    // in the future: this project separately observed the display stop
+    // rendering entirely partway through a boot test with VDIR=1 active,
+    // which the manufacturer says shouldn't happen from VDIR=1 alone.
+    // Given several OTHER active-window-related rendering bugs were
+    // found and fixed elsewhere in this same session (button-strip
+    // redraws, status LEDs) that produced superficially similar
+    // "stops rendering"/corruption symptoms from an unrelated cause each
+    // time, the VDIR=1 regression was most likely one of those same
+    // active-window bugs coinciding with VDIR testing, not something
+    // VDIR itself caused -- never conclusively re-isolated, though.
+    //
+    // One confirmed, unrelated correctness fix along the way: bit[7:6] of
+    // MACR is "Host Read/Write Image Data Format" (0.0b = Direct Write,
+    // correct for this project's SPI interface) -- NOT a colour-depth
+    // selector as an earlier pass here assumed, which is why it was
+    // wrongly set to 1 (0x40/0x42). Confirmed against the datasheet's own
+    // register table, and against a fresh, independent init sequence
+    // (the same ported library above) using 0x00 for this register's
+    // baseline. Doesn't fix the rotation mystery, but was a real bug
+    // regardless -- corrected below.
+    writeReg(MACR, 0x00);   // REG[02h]: bit[7:6]=00b (Direct Write, correct
+                             // for SPI); bit[2:1]=00b (no rotation/flip).
     writeReg(0x12, 0x80);   // REG[12h] bit7=1: PCLK falling edge; bit3=0:
                              // VDIR normal (top-to-bottom, original
                              // default).
@@ -262,19 +282,21 @@ std::uint8_t LT7683::readStatus() {
 }
 
 void LT7683::waitPoll(std::uint8_t reg, std::uint8_t mask) {
-    // Check immediately first, then delay if still busy -- see RA8875's
-    // own waitPoll() for why (a real test confirmed sleeping before the
-    // first check just wastes ~1ms on nearly every hardware draw call).
-    for (int i = 0; i < 50; ++i) {
+    // Check immediately first, then delay if still busy -- sleeping
+    // before the first check just wastes time on nearly every hardware
+    // draw call, since the bit is very often already clear.
+    for (int i = 0; i < 2500; ++i) {
         if ((readReg(reg) & mask) == 0) return;
-        t_.delayMs(1);
+        t_.delayUs(20);
     }
+    // Reached the end of the loop without the busy bit ever clearing --
+    // give up and let the caller carry on rather than hang forever.
 }
 
 void LT7683::waitStatus(std::uint8_t mask) {
-    for (int i = 0; i < 50; ++i) {
+    for (int i = 0; i < 2500; ++i) {
         if ((readStatus() & mask) == 0) return;
-        t_.delayMs(1);
+        t_.delayUs(20);
     }
 }
 
@@ -452,11 +474,26 @@ void LT7683::pllInit() {
 // -----------------------------------------------------------------------
 
 void LT7683::gfxMode() {
-    writeData(static_cast<std::uint8_t>(readReg(ICR) & ~0x04));  // ICR bit2=0: graphic mode
+    // Writes the full, known-correct ICR byte directly (bits[1:0]=00b
+    // always, matching the one-time SDRAM-target clear done in begin();
+    // bit2 the only thing that ever changes) instead of a read-modify-
+    // write -- avoids ever reading ICR back (a read that, if ever wrong,
+    // could permanently redirect MRWDP writes off-screen -- see ICR's
+    // own bit[1:0] description). Cached-and-skipped when already in this
+    // mode -- cheap, and safe now that the actual root cause (pllInit()
+    // misconfiguring the clock -- see begin()'s own comment) is gone.
+    if (currentGfxTxtMode_ == GfxTxtMode::Graphic) return;
+    writeCmd(ICR);
+    writeData(0x00);  // ICR = 0x00: bit2=0 (graphic mode), bits[1:0]=00b (Display RAM)
+    currentGfxTxtMode_ = GfxTxtMode::Graphic;
 }
 
 void LT7683::txtMode() {
-    writeData(static_cast<std::uint8_t>(readReg(ICR) | 0x04));   // ICR bit2=1: text mode
+    // See gfxMode()'s own comment.
+    if (currentGfxTxtMode_ == GfxTxtMode::Text) return;
+    writeCmd(ICR);
+    writeData(0x04);  // ICR = 0x04: bit2=1 (text mode), bits[1:0]=00b (Display RAM)
+    currentGfxTxtMode_ = GfxTxtMode::Text;
 }
 
 // -----------------------------------------------------------------------
@@ -488,6 +525,14 @@ void LT7683::txtSetCursor(std::uint16_t x, std::uint16_t y) {
 }
 
 void LT7683::setTextCursorVisible(bool visible, bool blockStyle) {
+    // Screen's own set_cur() (which calls this) fires after every
+    // printable character during ordinary typing, not just on scroll/
+    // redraw -- cached and skipped when visible/blockStyle are unchanged
+    // from the previous call (the overwhelming majority of calls) to
+    // avoid 4 redundant register writes (REG[3Ch]-[3Fh]) per character.
+    if (cursorVisibleCached_ == visible && cursorBlockStyleCached_ == blockStyle) return;
+    cursorVisibleCached_ = visible;
+    cursorBlockStyleCached_ = blockStyle;
     // REG[3Ch] (GTCCR) bit1=Text Cursor Enable, bit0=Blinking Enable --
     // see this method's own header comment in the .hpp for why this
     // (rather than RA8875's REG[40h]/REG[4Fh]) is the correct register
@@ -544,14 +589,22 @@ void LT7683::txtColor(std::uint16_t fg, std::uint16_t bg) {
     setBgColor(bg);
     // CCR1_TEXT (REG[CDh]) bit6: background transparency -- 0=opaque
     // (uses BGC*), matches RA8875's txtColor() semantics (opaque, not
-    // transparent background).
-    writeData(static_cast<std::uint8_t>(readReg(CCR1_TEXT) & ~(1 << 6)));
+    // transparent background). Cached and skipped when already opaque
+    // (the overwhelming majority of calls -- txtTrans() is the only
+    // thing that ever sets transparent).
+    if (opaqueTextCached_ != 1) {
+        writeData(static_cast<std::uint8_t>(readReg(CCR1_TEXT) & ~(1 << 6)));
+        opaqueTextCached_ = 1;
+    }
 }
 
 void LT7683::txtTrans(std::uint16_t color) {
     txtMode();
     setColor(color);
-    writeData(static_cast<std::uint8_t>(readReg(CCR1_TEXT) | (1 << 6)));
+    if (opaqueTextCached_ != 0) {
+        writeData(static_cast<std::uint8_t>(readReg(CCR1_TEXT) | (1 << 6)));
+        opaqueTextCached_ = 0;
+    }
 }
 
 void LT7683::txtSize(std::uint8_t scale) {
@@ -587,7 +640,8 @@ void LT7683::txtWrite(const char* s) {
             ++p;
         }
         writeData(out);
-        if (txtScale_ > 0) t_.delayMs(1);
+        // See txtWriteChar()'s own comment for why this matters.
+        waitStatus(STSR_CORE_BUSY);
     }
 }
 
@@ -595,7 +649,15 @@ void LT7683::txtWriteChar(std::uint8_t c) {
     txtMode();
     writeCmd(MRWDP);
     writeData(c);
-    if (txtScale_ > 0) t_.delayMs(1);
+    // Matches the reference driver's own Check_Busy_Draw() -- an
+    // unconditional wait for STSR_CORE_BUSY to clear after every single
+    // character write. Not just PLL-timing compensation: removing this
+    // entirely (as an earlier cleanup pass mistakenly did, along with
+    // genuinely unnecessary settling margins/FIFO polling) caused
+    // corrupted glyph rendering at every font size, including the
+    // splash dialog's own unscaled text -- the chip needs this to
+    // finish rendering one character before the next write arrives.
+    waitStatus(STSR_CORE_BUSY);
 }
 
 // -----------------------------------------------------------------------
@@ -625,16 +687,71 @@ void LT7683::drawBitmap565Cropped(std::int16_t x, std::int16_t y,
     static std::uint8_t rowBuf[1024 * 2];
     if (drawWidth > 1024) return;
 
+    // Chunked, FIFO-aware writes -- confirmed necessary on real hardware:
+    // without this, wide bitmaps (button strip, logo) came out with
+    // horizontal colour banding. writeData(buf, len)'s bulk overload
+    // blasts the whole buffer over SPI in one continuous transfer with no
+    // flow control at all, trusting the chip's own Memory Write FIFO to
+    // keep up -- reasonable for the short bursts every OTHER caller uses
+    // it for (a handful of register bytes), but a full-width row here can
+    // be far larger than that FIFO's actual depth. Reference libraries
+    // consulted throughout this project's LT7683 bring-up (RA8876_Lite,
+    // TeensyRA8876) all poll Status Register bit7 (Write FIFO Full)
+    // during exactly this kind of bulk pixel transfer -- this does the
+    // same, breaking each row into fixed-size chunks and waiting for the
+    // FIFO to drain between them, rather than assuming a single
+    // buf/len write is always safe.
+    constexpr std::size_t kChunkBytes = 64;
+
     for (std::uint16_t row = 0; row < h; ++row) {
-        setxy(static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y + row));
+        // NOT calling setxy() here -- it calls gfxMode() internally on
+        // every single call, which itself does a full ICR read-then-
+        // write (two separate SPI transactions) every time. For a tall
+        // bitmap that meant 480-600 completely redundant ICR round-trips
+        // per draw (already confirmed to be in graphics mode once, right
+        // above, before this loop even starts) -- confirmed on real
+        // hardware to correlate with severe colour corruption (wrong
+        // hues, e.g. a yellow frame rendering pink/violet, black
+        // rendering light green) alongside the horizontal banding this
+        // function's chunking fix was originally meant to solve.
+        // Positioning directly via the same two registers setxy() itself
+        // uses, minus its gfxMode() call, removes that redundant
+        // per-row SPI traffic entirely.
+        writeReg16(CURH0, static_cast<std::uint16_t>(x));
+        writeReg16(CURV0, static_cast<std::uint16_t>(y + row + vertOffset_));
         writeCmd(MRWDP);
 
         const std::uint16_t* src = data + static_cast<std::size_t>(row) * srcStride;
         for (std::uint16_t col = 0; col < drawWidth; ++col) {
-            rowBuf[col * 2]     = static_cast<std::uint8_t>(src[col] >> 8);
-            rowBuf[col * 2 + 1] = static_cast<std::uint8_t>(src[col] & 0xFF);
+            // Low byte first, then high -- confirmed backwards before this
+            // fix. This is the ONLY code path in the whole project that
+            // sends a packed 16-bit RGB565 value as two raw bytes over
+            // MRWDP -- every other colour operation (fillRect, text, etc.)
+            // goes through setColor(), which writes R/G/B to three
+            // SEPARATE 8-bit registers (FGCR/FGCG/FGCB), not a packed
+            // 16-bit value at all -- so this specific byte order was never
+            // actually exercised/validated anywhere else in this project.
+            // Confirmed wrong on real hardware via the colour math: a
+            // source yellow (R=255,G=255,B=0 -> RGB565 0xFFE0) sent
+            // high-byte-first reconstructs, if the chip actually wants
+            // low-byte-first, as 0xE0FF -- which decodes to high red, LOW
+            // green, high blue: magenta/pink. That's exactly the reported
+            // symptom (a yellow frame rendering pink/violet).
+            rowBuf[col * 2]     = static_cast<std::uint8_t>(src[col] & 0xFF);
+            rowBuf[col * 2 + 1] = static_cast<std::uint8_t>(src[col] >> 8);
         }
-        writeData(rowBuf, static_cast<std::size_t>(drawWidth) * 2);
+
+        const std::size_t totalBytes = static_cast<std::size_t>(drawWidth) * 2;
+        std::size_t offset = 0;
+        while (offset < totalBytes) {
+            const std::size_t n = std::min(kChunkBytes, totalBytes - offset);
+            for (int i = 0; i < 100; ++i) {
+                if ((readStatus() & STSR_WR_FIFO_FULL) == 0) break;
+                t_.delayMs(1);
+            }
+            writeData(rowBuf + offset, n);
+            offset += n;
+        }
     }
 }
 
@@ -653,34 +770,24 @@ void LT7683::setActiveWindow(std::uint16_t x0, std::uint16_t y0,
     writeReg16(AWUL_Y0, static_cast<std::uint16_t>(y0 + vertOffset_));
     writeReg16(AW_WTH0, static_cast<std::uint16_t>(x1 - x0 + 1));
     writeReg16(AW_HT0, static_cast<std::uint16_t>(y1 - y0 + 1));
+    // Cached for clearActiveWindow() to use directly, instead of reading
+    // these back from the chip every single scroll.
+    activeWindowX0Cached_ = x0;
+    activeWindowY0Cached_ = static_cast<std::uint16_t>(y0 + vertOffset_);
+    activeWindowWCached_ = static_cast<std::uint16_t>(x1 - x0 + 1);
+    activeWindowHCached_ = static_cast<std::uint16_t>(y1 - y0 + 1);
 }
 
 void LT7683::clearActiveWindow() {
     // LT7683 has no single "clear active window" register command like
-    // RA8875's MCLR. This used to go through a BTE Solid Fill operation
-    // (opcode 1100b) -- but BTE on this chip never got past triggering
-    // without freezing the panel (extensively bring-up-tested: every
-    // register involved reads back correct, the core reports idle, yet
-    // the panel stops updating and SDRAM keeps getting overwritten with
-    // whatever colour was last set, surviving even a Display Off/On
-    // cycle -- see display_boot_test.hpp's own notes on this). Since
-    // Screen::clear() calls this on every construction and scroll, that
-    // meant the display froze the moment a Screen object was created,
-    // before any text was even drawn.
-    //
-    // Uses the same geometry-engine rectangle fill (DCR0, via
-    // rectHelper()) that fillRect()/fill() already use -- confirmed
-    // solid throughout every other test -- instead of BTE. Read back the
-    // active window we just set so this stays correct regardless of what
-    // it was last configured to.
-    const std::uint16_t x0 = static_cast<std::uint16_t>(
-        readReg(AWUL_X0) | (readReg(static_cast<std::uint8_t>(AWUL_X0 + 1)) << 8));
-    const std::uint16_t y0 = static_cast<std::uint16_t>(
-        readReg(AWUL_Y0) | (readReg(static_cast<std::uint8_t>(AWUL_Y0 + 1)) << 8));
-    const std::uint16_t w = static_cast<std::uint16_t>(
-        readReg(AW_WTH0) | (readReg(static_cast<std::uint8_t>(AW_WTH0 + 1)) << 8));
-    const std::uint16_t h = static_cast<std::uint16_t>(
-        readReg(AW_HT0) | (readReg(static_cast<std::uint8_t>(AW_HT0 + 1)) << 8));
+    // RA8875's MCLR -- uses the geometry engine's own rectangle fill
+    // (rectHelper()) over the same region instead. Uses the cached
+    // values setActiveWindow() itself already computed and wrote,
+    // instead of reading them back from the chip.
+    const std::uint16_t x0 = activeWindowX0Cached_;
+    const std::uint16_t y0 = activeWindowY0Cached_;
+    const std::uint16_t w = activeWindowWCached_;
+    const std::uint16_t h = activeWindowHCached_;
 
     // Save the CURRENT foreground colour before the fill clobbers it --
     // rectHelper()'s fill uses whatever colour we pass it (black, here),
@@ -716,10 +823,13 @@ void LT7683::rectHelper(std::int16_t x1, std::int16_t y1,
     writeReg16(DLHER0, static_cast<std::uint16_t>(x2));
     writeReg16(DLVER0, static_cast<std::uint16_t>(y2 + vertOffset_));
     setColor(color);
-    // DCR0 (REG[67h]): bit7=start, bit5=fill, bit[4:1]=shape (0010b=Rectangle)
-    const std::uint8_t shape = 0x02 << 1;
-    writeReg(DCR0, static_cast<std::uint8_t>(0x80 | (filled ? 0x20 : 0x00) | shape));
-    waitPoll(DCR0, 0x80);
+    // DCR1 (REG[76h])'s "10b: Draw Rectangle" path -- proven reliable,
+    // also used by roundRectHelper() for rounded rectangles. Coordinate
+    // registers (DLHSR0-DLVER0, REG[68h]-[6Fh]) set above are the same
+    // regardless of which control register triggers the fill.
+    const std::uint8_t shape = 0x02 << 4;  // bit[5:4]=10b: Draw Rectangle
+    writeReg(DCR1, static_cast<std::uint8_t>(0x80 | (filled ? 0x40 : 0x00) | shape));
+    waitPoll(DCR1, 0x80);
 }
 
 void LT7683::rect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
@@ -802,9 +912,19 @@ void LT7683::roundRectHelper(std::int16_t x1, std::int16_t y1,
 
 void LT7683::fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
                            std::uint16_t r, std::uint16_t color) {
+    // Datasheet section 6.6 ("Drawing Rounded-Rectangle"), Note1/Note2:
+    // "DLHER-DLHSR must [be] large[r] than 2*R1+1" (same for Y/R2) --
+    // i.e. w/h must be STRICTLY GREATER than 2*r+1, not merely >= 2*r.
+    // Confirmed on real hardware that violating this (even by exactly
+    // 1 -- e.g. w=h=20 with r=10, where 2*10+1=21 and 20 is not greater)
+    // produces undefined behaviour: a status-LED circle at exactly this
+    // boundary rendered as a long streak extending to the bottom of the
+    // panel instead of a small circle. The old clamp here
+    // (`rr*2 > w` before reducing rr) missed the "+1", so this exact
+    // boundary case slipped through unclamped.
     std::uint16_t rr = r;
-    if (static_cast<std::int16_t>(rr * 2) > w) rr = static_cast<std::uint16_t>(w / 2);
-    if (static_cast<std::int16_t>(rr * 2) > h) rr = static_cast<std::uint16_t>(h / 2);
+    if (static_cast<std::int16_t>(rr * 2 + 1) >= w) rr = static_cast<std::uint16_t>((w - 1) / 2);
+    if (static_cast<std::int16_t>(rr * 2 + 1) >= h) rr = static_cast<std::uint16_t>((h - 1) / 2);
     if (rr == 0) {
         fillRect(x, y, w, h, color);
         return;
@@ -815,9 +935,10 @@ void LT7683::fillRoundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::
 
 void LT7683::roundRect(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h,
                        std::uint16_t r, std::uint16_t color) {
+    // Same clamp fix as fillRoundRect() above -- see its own comment.
     std::uint16_t rr = r;
-    if (static_cast<std::int16_t>(rr * 2) > w) rr = static_cast<std::uint16_t>(w / 2);
-    if (static_cast<std::int16_t>(rr * 2) > h) rr = static_cast<std::uint16_t>(h / 2);
+    if (static_cast<std::int16_t>(rr * 2 + 1) >= w) rr = static_cast<std::uint16_t>((w - 1) / 2);
+    if (static_cast<std::int16_t>(rr * 2 + 1) >= h) rr = static_cast<std::uint16_t>((h - 1) / 2);
     if (rr == 0) {
         rect(x, y, w, h, color);
         return;

@@ -32,6 +32,18 @@ public:
 
     // Millisecond delay.
     virtual void delayMs(std::uint32_t ms) = 0;
+
+    // Microsecond delay -- for fine-grained busy-wait polling (see
+    // LT7683::waitStatus()'s own comment for why this matters: polling
+    // at 1ms granularity when the actual wait is more like tens of
+    // microseconds wastes far more time than necessary, once every
+    // character write ends with one of these waits). Default falls back
+    // to delayMs() (rounded up to at least 1ms) for any transport that
+    // doesn't override this with a real microsecond-granularity sleep --
+    // correct either way, just coarser/slower on such a transport.
+    virtual void delayUs(std::uint32_t us) {
+        delayMs(us == 0 ? 0 : (us + 999) / 1000);
+    }
 };
 
 }  // namespace hipi

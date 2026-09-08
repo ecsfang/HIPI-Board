@@ -89,6 +89,10 @@ void drawMappedSegment(std::int16_t x0, std::int16_t y0,
 void onPlotterDraw(std::int16_t x0, std::int16_t y0,
                    std::int16_t x1, std::int16_t y1, std::uint8_t pen) {
     if (output_ != DisplayOutput::Plotter) return;
+    // Same reasoning as Screen::full()'s own suspended_ check: a UiDialog
+    // owns the screen while it's open, so plotter data arriving over
+    // HP-IL during that time shouldn't draw straight over it.
+    if (screen_->isSuspended()) return;
     drawMappedSegment(x0, y0, x1, y1, penColor(pen));
     // line()/pixel() go through gfxMode(), which blindly zeros MWCR0 (the
     // same text-mode/cursor-visible register Screen owns) -- same fix
@@ -101,6 +105,7 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
 // Device). Only touches the screen if Plotter output is actually showing.
 void onPlotterClear() {
     if (output_ != DisplayOutput::Plotter) return;
+    if (screen_->isSuspended()) return;  // see onPlotterDraw()'s own comment
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
     screen_->refreshCursor();
 }

@@ -70,4 +70,8 @@ void PicoSpiTransport::delayMs(std::uint32_t ms) {
     sleep_ms(ms);
 }
 
+void PicoSpiTransport::delayUs(std::uint32_t us) {
+    sleep_us(us);
+}
+
 }  // namespace hipi

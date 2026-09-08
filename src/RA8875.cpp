@@ -286,16 +286,20 @@ void RA8875::waitPoll(std::uint8_t reg, std::uint8_t mask) {
     // waiting to nearly every single hardware draw call, even though the
     // operation was already done by the time the first check happened.
     // Still a 50ms safety-net timeout overall, just not front-loaded.
-    for (int i = 0; i < 50; ++i) {
+    // Polls every 20us rather than every 1ms for the same reason LT7683's
+    // own waitPoll()/waitStatus() were changed this way -- see their own
+    // comment. 2500 iterations at 20us keeps the same ~50ms timeout.
+    for (int i = 0; i < 2500; ++i) {
         if ((readReg(reg) & mask) == 0) return;
-        t_.delayMs(1);
+        t_.delayUs(20);
     }
 }
 
 void RA8875::waitStatus(std::uint8_t mask) {
-    for (int i = 0; i < 50; ++i) {
+    // Same 20us polling granularity as waitPoll() -- see its own comment.
+    for (int i = 0; i < 2500; ++i) {
         if ((readStatus() & mask) == 0) return;
-        t_.delayMs(1);
+        t_.delayUs(20);
     }
 }
 

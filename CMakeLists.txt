@@ -15,7 +15,20 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ====================================================================================
-set(PICO_BOARD pico2_w CACHE STRING "Board type")
+# CORRECTED: the actual hardware is a plain Pico 2 (RP2350), NOT a
+# Pico 2 W -- confirmed directly by the user. This was building against
+# the WRONG board definition the entire time. Board-specific header
+# files in the Pico SDK set board-specific defaults (clock/crystal
+# configuration, default pin assignments, etc.) that a "_w" variant's
+# own headers may specify differently than what's actually present on
+# a plain Pico 2 -- SPI baud rates are computed from the system clock
+# frequency, so a mismatched clock config here could produce SPI timing
+# subtly different from what the code intends, without any of the
+# actual bytes sent being wrong -- exactly the kind of thing that
+# wouldn't show up in a byte-level SPI transaction log. This was never
+# caught earlier because none of the isolated stress-test rounds (touch,
+# HP-IL, bitmap draws, LED timer) tested the board definition itself.
+set(PICO_BOARD pico2 CACHE STRING "Board type")
 
 # SPDX-License-Identifier: MIT
 #
@@ -197,7 +210,10 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         tinyusb_device          # ← replace pico_stdio_usb with this
         tinyusb_board
     #    pico_bootsel_via_double_reset
-        # pico_cyw43_arch_none   # Pico 2 W: behövs för cyw43_arch_*
+        # pico_cyw43_arch_none   # Only needed if targeting a "_w" board
+                                  # variant with the CYW43 wifi/bt chip --
+                                  # not applicable now that PICO_BOARD is
+                                  # correctly set to plain "pico2" above.
     )
 
     target_compile_definitions(${EXE_TARGET} PRIVATE

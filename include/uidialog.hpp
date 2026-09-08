@@ -7,6 +7,7 @@
 #include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "ff.h"
+#include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include <vector>
 #include <string>
 #include <cstring>
@@ -270,8 +271,8 @@ private:
     static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace" };
     static constexpr int kConfigMenuCount = 2;
 
-    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns" };
-    static constexpr int kSettingsMenuCount = 4;
+    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns", "Bootsel mode" };
+    static constexpr int kSettingsMenuCount = 5;
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
     static constexpr const char*   kColorLabels[] = { "White", "Yellow", "Green", "Cyan", "Red" };
@@ -307,12 +308,20 @@ private:
     // "Display"/"Plotter" pick which full-screen output is showing (see
     // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
     // not a pickable state, so it doesn't need a selected_-tracked value.
-    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Clear plotter" };
-    static constexpr int kDisplayMenuCount = 3;
+    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Clear plotter", "Clear screen" };
+    static constexpr int kDisplayMenuCount = 4;
 
     void openMainMenu() {
         screen_.suspend();  // idempotent if already open; stops screen_.pr_char()
                              // from drawing over the dialog while it's showing
+        // Hide the hardware blinking cursor too -- suspend() alone only
+        // stops FURTHER drawing, it doesn't touch the cursor already left
+        // blinking at wherever Screen's text last positioned it, which
+        // otherwise shows through/behind the menu box's own text.
+        // close() doesn't need a matching "show it again" call: resume()
+        // -> full() already ends with set_cur(), which re-asserts
+        // visibility from Screen's own cv_ state (see its own comment).
+        d_->setTextCursorVisible(false, false);
         state_ = State::MainMenu;
         selected_ = 0;
         drawBox();
@@ -340,8 +349,19 @@ private:
         } else if (selected_ == 1) {
             plotterview_setOutput(DisplayOutput::Plotter);
             close();
-        } else {
+        } else if (selected_ == 2) {
             plotterview_clearPlotter();
+            close();
+        } else {
+            // Clear screen -- immediate action, like "Clear plotter"
+            // above: wipes the text buffer, clears the panel, and homes
+            // the cursor (Screen::clear()'s own documented behaviour,
+            // matching the HP82163's own "Clear Device" semantics).
+            // close() itself calls screen_.resume() -> full(), which
+            // would just redraw the now-empty buffer -- harmless, but
+            // clear() already leaves the screen correctly blank on its
+            // own, so nothing further is needed here.
+            screen_.clear();
             close();
         }
     }
@@ -375,8 +395,15 @@ private:
             openFontSizeMenu();
         } else if (selected_ == 2) {
             openBrightnessMenu();
-        } else {
+        } else if (selected_ == 3) {
             openColumnsMenu();
+        } else {
+            // Bootsel mode -- immediate action (like "Clear plotter" in
+            // the Display menu), not a pickable state: reboots straight
+            // into the RP2350's USB mass-storage bootloader, ready for a
+            // new .uf2 to be dragged onto it. Never returns -- no close()
+            // call needed/reachable after this.
+            reset_usb_boot(0, 0);
         }
     }
 

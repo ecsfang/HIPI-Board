@@ -131,8 +131,9 @@ public:
         if (_count < MAX_LEDS)
             _instances[_count++] = this;
 
-        if (_count == 1)
+        if (_count == 1) {
             add_repeating_timer_ms(-TICK_MS, _timerCB, nullptr, &_timer);
+        }
     }
 
     ~CLedDriver() {

@@ -49,6 +49,7 @@ public:
                      std::size_t         len) override;
 
     void delayMs(std::uint32_t ms) override;
+    void delayUs(std::uint32_t us) override;
 
 private:
     spi_inst_t* spi_;

@@ -12,6 +12,7 @@
 #include "boardui.h"
 
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "bmp_loader.hpp"
@@ -136,48 +137,56 @@ void computeSegmentWidths(std::uint16_t* out) {
 
 void showButtonStrip() {
     if (buttonStripVisible) return;
+    // Reset the active window to the full panel before drawing -- without
+    // this, the very first call after boot inherited whatever narrower
+    // window the "Draw text" step at startup had set (which deliberately
+    // excludes the button-strip area, since buttons aren't shown yet at
+    // that point), causing the bitmap to draw clipped/mispositioned.
+    // hideButtonStrip() already does this at ITS OWN start, which is why
+    // every call AFTER the first one (following a hide) worked fine --
+    // only the very first show, with no prior hide to reset it, was
+    // affected.
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
     // Builds the strip up in kSlideSteps horizontal slices, entirely
-    // on-screen -- no off-screen/layer addressing at all this time (a
-    // previous attempt at staging the bitmap off-screen for speed smeared
-    // it across the whole panel; see the conversation this came from).
-    // Each step draws just the next slice -- a small SPI transfer, not
-    // the whole bitmap -- into the fresh sliver peeking in at the panel's
-    // right edge, then a single hardware BTE move (0xC2, the same
-    // block-move opcode Screen::bte() already uses for its own text
-    // scrolling) shifts everything assembled so far left by exactly the
-    // next slice's width, making room for it. Both the draw and the move
-    // only ever touch on-screen coordinates (0..SCREEN_MAX_X-1).
+    // on-screen. NOT using BTE (see hideButtonStrip()'s own comment for
+    // why -- same reasoning applies to both directions, confirmed on
+    // real hardware: BTE freezes/corrupts the display on this board
+    // regardless of direction, not just the overlapping-move case this
+    // comment originally worried about). Instead, each step redraws the
+    // WHOLE currently-visible portion fresh from buttonStripPixels
+    // (already sitting in MCU memory) at its new position -- more data
+    // moved per step than a true incremental shift would need, but no
+    // hardware block-move involved at all. Same technique proven out
+    // with a plain colour box in display_boot_test.hpp's
+    // runNoBteSlideTest() before being applied here to the real bitmap.
     std::uint16_t segW[kSlideSteps];
     computeSegmentWidths(segW);
 
-    std::uint16_t srcOffset = 0;   // how much of the bitmap's own width has been drawn so far
-    std::uint16_t accumWidth = 0;  // width of the currently-assembled on-screen block
+    std::uint16_t accumWidth = 0;
     for (int i = 0; i < kSlideSteps; ++i) {
-        const std::uint16_t w = segW[i];
-        const auto destX = static_cast<std::int16_t>(SCREEN_MAX_X - w);
-        display_->drawBitmap565Cropped(destX, 0, w, buttonStripHeight,
+        accumWidth = static_cast<std::uint16_t>(accumWidth + segW[i]);
+        const auto destX = static_cast<std::int16_t>(SCREEN_MAX_X - accumWidth);
+        // Crop the LEFTMOST `accumWidth` columns of the source bitmap --
+        // i.e. always starting from column 0, growing -- so the reveal
+        // shows the bitmap's own content in its natural left-to-right
+        // order as it grows (first slice shows the start of the strip,
+        // not its end). Confirmed backwards before this fix: with the
+        // crop starting from (buttonStripWidth - accumWidth) instead,
+        // each step showed progressively MORE of the bitmap's END first,
+        // which is backwards from how the strip's own content should
+        // build up on screen. buttonStripWidth is passed as the crop
+        // function's srcStride so it still steps between rows using the
+        // bitmap's own real width, not the (narrower) width actually
+        // being drawn this step.
+        display_->drawBitmap565Cropped(destX, 0, accumWidth, buttonStripHeight,
                                        buttonStripWidth,
-                                       buttonStripPixels.data() + srcOffset);
-        srcOffset  = static_cast<std::uint16_t>(srcOffset + w);
-        accumWidth = static_cast<std::uint16_t>(accumWidth + w);
+                                       buttonStripPixels.data());
         sleep_ms(kSlideStepDelayMs);
-
-        if (i < kSlideSteps - 1) {
-            const std::uint16_t nextW = segW[i + 1];
-            const auto srcX = static_cast<std::uint16_t>(SCREEN_MAX_X - accumWidth);
-            const auto dstX = static_cast<std::uint16_t>(srcX - nextW);
-            display_->BTE(0xC2, dstX, 0, accumWidth, buttonStripHeight, srcX, 0);
-            sleep_ms(kSlideStepDelayMs);
-        }
     }
-    // The last slice above already lands exactly at buttonStripScreenX0
-    // (SCREEN_MAX_X - its own width, which equals the final resting
-    // position for the last slice by construction) -- no separate final
-    // full-bitmap draw needed.
 
-    setStatusLed(display_, StatusLed::Usb, usbLedOn);
-    setStatusLed(display_, StatusLed::Pil, pilLedOn);
+    setStatusLed(display_, StatusLed::Usb, usbLedOn, buttonStripScreenX0, buttonStripHeight);
+    setStatusLed(display_, StatusLed::Pil, pilLedOn, buttonStripScreenX0, buttonStripHeight);
 
     // Now narrow the active window/text area back and let Screen reflow
     // into it.
@@ -190,21 +199,16 @@ void showButtonStrip() {
 void hideButtonStrip() {
     if (!buttonStripVisible) return;
 
-    // Real hardware slide, not a wipe: each step moves the remaining
-    // visible block one slice further right (source and destination
-    // DO overlap here, since dest > src), then blackens the sliver that
-    // move newly exposed. An earlier attempt at exactly this used BTE
-    // opcode 0xC2 ("Move BTE in Positive Direction") and produced
-    // repeated ghost fragments -- the datasheet explains why: for an
-    // overlapping move where destination > source, the copy has to scan
-    // from the END backward (like memmove choosing its direction based
-    // on which end overlaps), or it overwrites source bytes before
-    // they've been read. That's opcode 0xC3 ("Negative Direction"),
-    // confirmed correct in a byte-level simulation that reproduced the
-    // exact ghosting bug with 0xC2 and a clean shift with 0xC3.
-    // showButtonStrip()'s own leftward shifts (dest < src) are the
-    // opposite overlap case, correctly handled by 0xC2 already -- that's
-    // also why show never showed this problem.
+    // NOT using BTE, for either direction -- an earlier version of this
+    // function used opcode 0xC3 ("Negative Direction") for its
+    // overlapping (dest > src) shift, reasoning through the datasheet's
+    // own description of how that opcode should behave. Turned out to
+    // be moot: on real hardware, BTE itself never got past triggering
+    // without corrupting/freezing the whole display, confirmed across
+    // extensive testing (see LT7683::BTE()'s own comment for the full
+    // story) -- not something fixable by picking the right opcode or
+    // corner convention. Same fresh-redraw-from-source approach as
+    // showButtonStrip() above, just shrinking instead of growing.
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
     std::uint16_t segW[kSlideSteps];
@@ -215,29 +219,20 @@ void hideButtonStrip() {
         const std::uint16_t lastW = segW[i];
         const auto keepWidth = static_cast<std::uint16_t>(accumWidth - lastW);
         const auto srcX = static_cast<std::uint16_t>(SCREEN_MAX_X - accumWidth);
-        if (keepWidth > 0) {
-            const auto dstX = static_cast<std::uint16_t>(SCREEN_MAX_X - keepWidth);
-            // EXPERIMENTAL: passing the bottom-right corner of each
-            // rectangle here instead of the top-left (unlike the
-            // Positive-direction calls in showButtonStrip(), which do
-            // use top-left) -- the datasheet describes Negative
-            // Direction as processing "the latest data of source/
-            // destination" first, which may mean it expects coordinates
-            // for that end of the rectangle, not the start. Observed
-            // behavior with top-left coordinates matched exactly what
-            // an off-by-one/wrong-corner bug would produce (the last
-            // slice never touched, one slice's worth of content lost).
-            // If this doesn't fix it, fall back to the plain SPI
-            // redraw approach used before -- see conversation history.
-            const auto srcXEnd = static_cast<std::uint16_t>(srcX + keepWidth - 1);
-            const auto dstXEnd = static_cast<std::uint16_t>(dstX + keepWidth - 1);
-            const auto yEnd = static_cast<std::uint16_t>(buttonStripHeight - 1);
-            display_->BTE(0xC3, dstXEnd, yEnd, keepWidth, buttonStripHeight, srcXEnd, yEnd);
-        }
-        // The sliver this step's shift no longer covers -- always
-        // exactly lastW wide, starting right where the block used to.
+        // Blacken the whole previously-visible block first (simpler than
+        // computing just the newly-exposed sliver, and cheap: fillRect()
+        // is a single hardware geometry-engine call, not a per-pixel
+        // transfer), then redraw the shrunk remainder fresh on top.
         display_->fillRect(static_cast<std::int16_t>(srcX), 0,
-                           lastW, buttonStripHeight, 0x0000);
+                           static_cast<std::int16_t>(accumWidth), buttonStripHeight, 0x0000);
+        if (keepWidth > 0) {
+            const auto dstX = static_cast<std::int16_t>(SCREEN_MAX_X - keepWidth);
+            // Same fix as showButtonStrip() above -- crop from source
+            // column 0, growing/shrinking, not from (width - keepWidth).
+            display_->drawBitmap565Cropped(dstX, 0, keepWidth, buttonStripHeight,
+                                           buttonStripWidth,
+                                           buttonStripPixels.data());
+        }
         accumWidth = keepWidth;
         sleep_ms(kHideStepDelayMs);
     }
@@ -273,7 +268,20 @@ void updateStatusLed(StatusLed which, bool& cached, bool newState) {
     if (newState == cached) return;
     cached = newState;
     if (buttonStripVisible) {
-        setStatusLed(display_, which, cached);
+        // Same active-window reset as boardui_handleTap()/handleRelease()
+        // above, for the same reason -- this runs independently of
+        // showButtonStrip()'s own flow (triggered by a live USB/PILBOX
+        // state change, via boardui_poll()), so it can run at any time
+        // the strip is visible -- including while Screen's own text area
+        // has the active window narrowed to exclude the strip, same as
+        // the button-press case.
+        display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+        setStatusLed(display_, which, cached, buttonStripScreenX0, buttonStripHeight);
+        // Restore it afterward -- left at "full panel", a later
+        // Screen::full() (e.g. on menu close) would clear the whole
+        // display instead of just its own text area. Same bug/fix as
+        // boardui_handleTap()'s own matching restore.
+        display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
     }
 }
 
@@ -600,6 +608,36 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPat
         LOGF("\r\n ### Failed to draw buttons ... ");
         return 0;
     }
+
+    // Scale vertically to fill this panel's real height -- buttons.bmp
+    // was made for the 5" board's 480px-tall panel; this board's is
+    // 600px (SCREEN_MAX_Y). Nearest-neighbor, not interpolated -- keeps
+    // button edges crisp rather than blurring them across a soft
+    // gradient, which matters more here than smooth scaling would.
+    // Width is untouched -- only height needs adapting, since the strip
+    // is already correctly right-aligned regardless of panel width (see
+    // drawBmpRightAligned() above).
+    //
+    // NOTE: this scales the BITMAP itself, not the hit-test rectangles
+    // in ui_buttons.hpp -- those are still hardcoded to the 5" board's
+    // pixel coordinates (already flagged as a known, separate issue
+    // needing its own fix) and won't line up with where the now-taller
+    // buttons actually appear until they're updated too.
+    if (buttonStripHeight != SCREEN_MAX_Y && buttonStripHeight > 0) {
+        std::vector<std::uint16_t> scaled(
+            static_cast<std::size_t>(buttonStripWidth) * SCREEN_MAX_Y);
+        for (std::uint16_t y = 0; y < SCREEN_MAX_Y; ++y) {
+            const std::uint16_t srcY = static_cast<std::uint16_t>(
+                (static_cast<std::uint32_t>(y) * buttonStripHeight) / SCREEN_MAX_Y);
+            std::memcpy(scaled.data() + static_cast<std::size_t>(y) * buttonStripWidth,
+                       buttonStripPixels.data() + static_cast<std::size_t>(srcY) * buttonStripWidth,
+                       static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
+        }
+        buttonStripPixels = std::move(scaled);
+        LOGF("(scaled %u -> %u tall) ", buttonStripHeight, SCREEN_MAX_Y);
+        buttonStripHeight = SCREEN_MAX_Y;
+    }
+
     return buttonStripWidth;
 }
 
@@ -680,9 +718,11 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // region wakes/keeps it up -- a tap elsewhere (e.g. the left side,
         // reserved for the swipe gesture -- see boardui_handleSwipe()) no
         // longer wakes it "blindly" the way any touch anywhere used to.
-        // hitTestButton() still works on fixed coordinates regardless of
-        // visibility, so a tap within the strip's region wakes it even
-        // while nothing is drawn there yet.
+        // hitTestButton() still works regardless of visibility (it just
+        // computes against the strip's current screen position/height,
+        // not whether anything is actually drawn there yet), so a tap
+        // within the strip's region wakes it even while nothing is drawn
+        // there yet.
         const bool inStripZone = (x >= buttonStripScreenX0);
         if (bTrace) {
             LOGF("\r\n[TOUCH] tap (%u,%u) inStripZone=%d stripVisible=%d",
@@ -691,15 +731,25 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         if (!inStripZone) return;
 
         const bool wasHidden = !buttonStripVisible;
-        if (wasHidden) showButtonStrip();
+        if (wasHidden) {
+            showButtonStrip();
+        }
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
 
-        Button b = hitTestButton(x, y);
+        Button b = hitTestButton(x, y, buttonStripScreenX0, buttonStripHeight);
         // The touch that just woke the strip up is consumed by the reveal
         // itself -- don't also act on it as a press, since the user
         // couldn't see what they were touching.
         if (!wasHidden && b != Button::None) {
             pressedButton = b;
+            // Reset the active window to the full panel before drawing --
+            // confirmed necessary on real hardware: showButtonStrip()
+            // narrows the active window (to exclude the strip's own area)
+            // once it finishes, so a later redraw INTO that excluded area
+            // (exactly what the press-feedback shift below does) landed
+            // at the wrong screen position entirely -- reported as
+            // appearing on the left side of the panel -- without this.
+            display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
             // Visual feedback: redraw just this button's bitmap region
             // shifted, so it looks pressed in. The baseline/restore
             // redraws use a margin larger than the shift, sourced from the
@@ -717,6 +767,19 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
                 buttonStripWidth, buttonStripHeight,
                 buttonStripScreenX0, /*stripScreenY0=*/0, b,
                 kPressDx, kPressDy);
+            // Restore the narrowed active window (excluding the strip's
+            // own area) that showButtonStrip() originally set -- the
+            // reset above was only meant to be temporary, for these two
+            // redraws. Left at "full panel" (as it was before this fix),
+            // Screen::full()'s own clearActiveWindow() -- called when the
+            // menu closes just below, via dialog_->handleButton() ->
+            // close() -> screen_.resume() -- would wipe the ENTIRE
+            // screen instead of just its own text area, which is exactly
+            // what full()'s own comment says clearActiveWindow() must
+            // NOT do (confirmed on real hardware: the whole display went
+            // black for several seconds on menu close, until the button
+            // strip reappeared and re-hid itself).
+            display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
             // The redraws above went through RA8875::drawBitmap565(), which
             // switches to graphics mode (gfxMode()) and blindly zeros
             // MWCR0 -- the same register that holds the cursor-visible
@@ -731,6 +794,10 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 
 void boardui_handleRelease() {
     if (pressedButton == Button::None) return;
+    // Same active-window reset as boardui_handleTap() above, and for the
+    // same reason -- restoring the button's normal appearance here draws
+    // into the strip's own area too.
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     // Restore the button's bitmap to its normal position (with the same
     // margin, to clean up any overflow from the shift regardless of
     // direction).
@@ -739,6 +806,11 @@ void boardui_handleRelease() {
         buttonStripWidth, buttonStripHeight,
         buttonStripScreenX0, /*stripScreenY0=*/0, pressedButton, 0, 0,
         kPressMargin);
+    // Restore the narrowed active window -- see boardui_handleTap()'s own
+    // matching restore for why this matters (a later Screen::full(), on
+    // menu close, would otherwise clear the whole panel instead of just
+    // its own text area).
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
     screen_->refreshCursor();  // same MWCR0-clobber fix as on press
     pressedButton = Button::None;
 }

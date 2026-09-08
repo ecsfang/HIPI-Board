@@ -109,8 +109,9 @@ public:
     void down(bool cmd = true);
 
     // Layer-2 helpers (the RA8875 is configured for 2 layers in begin()).
-    void store();    // copy visible layer -> layer 2
-    void recall();   // copy layer 2 -> visible layer
+    // store()/recall() removed -- were BTE-based off-screen staging
+    // helpers only used by the old inschar() implementation, which no
+    // longer needs them (see its own comment in Screen.cpp).
 
     // Recompute layout parameters for a given text size (0..4).
     void screen_pars(std::uint8_t size);
@@ -130,6 +131,25 @@ public:
     std::uint8_t cols()    const { return COLS_; }
     std::uint8_t row()     const { return row_; }
     std::uint8_t col()     const { return col_; }
+    // Whether an ESC sequence is currently mid-parse (waiting for more
+    // bytes) -- exposed for boardui.cpp's own diagnostic logging around
+    // showButtonStrip(), since Screen.cpp itself can't use LOGF (it's
+    // part of the platform-neutral hipi_core library, no TinyUSB link).
+    bool escInProgress()   const { return escN_; }
+    // Diagnostic accessors -- see boardui.cpp's own unconditional
+    // per-tap state dump for why these are here (testing whether row_/
+    // col_/numLines_/offset_ ever drift out of their expected bounds,
+    // which would explain text landing off-screen while the cursor
+    // register write itself still "succeeds").
+    std::size_t numLines() const { return numLines_; }
+    std::size_t scrollOffset() const { return offset_; }
+    // Running count of characters actually drawn via draw_letter() --
+    // same reasoning as escInProgress() for why this is here instead of
+    // a direct LOGF call. Lets pico_main.cpp's own periodic diagnostic
+    // compare this against how many characters actually arrived over
+    // HP-IL (CDisplay::doListener()'s own "Push" log), to see whether
+    // drawing silently falls behind/stops relative to reception.
+    std::uint32_t charsDrawn() const { return charsDrawn_; }
     std::uint16_t width()  const { return width_; }
     std::uint16_t height() const { return height_; }
     std::uint8_t size()    const { return size_; }
@@ -178,6 +198,16 @@ public:
     // Change text size at runtime (0..3 -> built-in CGRAM modes). This
     // recomputes the row/column layout and clears the screen, same as
     // the HP82163 ESC [ / ESC ] stream commands do internally.
+    // reflow() (not clear()) -- preserves existing buffer content,
+    // reformatted to the new font's row/column layout, rather than
+    // wiping it. The original "old text flashes at the new size" symptom
+    // this used to work around wasn't actually about stale content --
+    // it was full() drawing without checking suspended_ (see full()'s
+    // own comment, now fixed centrally there), so an ESC sequence
+    // arriving from HP-IL while the dialog was still open could trigger
+    // an extra, premature redraw. With that fixed, reflow() here is
+    // correct: setTextWidth() below uses the same approach for the same
+    // reason (e.g. the button strip narrowing/widening the text area).
     void setTextSize(std::uint8_t size) { screen_pars(size); reflow(); }
 
     // Cursor-mode commands (HP82163 ESC-60/62, 81/82, 65..68, 72, 37).
@@ -197,12 +227,9 @@ private:
     void draw_letter(std::uint8_t c);
     void fon_write(const char* s);
 
-    // Forwards to d_->BTE(), but does nothing while suspended_ is true.
-    // All Screen-internal BTE calls go through this single choke point.
-    void bte(std::uint8_t opcode,
-             std::uint16_t x1, std::uint16_t y1,
-             std::uint16_t w, std::uint16_t h,
-             std::uint16_t x0 = 0, std::uint16_t y0 = 0);
+    // bte() removed -- every internal call site was converted to redraw
+    // affected rows from lines_ instead; see Screen.cpp's own comment
+    // (up() specifically) for why.
 
     // ---- Mode switch ----
     void fon_mode();
@@ -230,15 +257,51 @@ private:
     bool flag_;
     bool nline_;
     bool escN_;
+    std::uint32_t charsDrawn_ = 0;  // see charsDrawn()'s own comment
     bool Ins_;      // insert-mode toggle (full block vs. underscore cursor)
     bool cv_;       // cursor-visible toggle
     int  n_;        // ESC % sequence state: -1=just ESC, 0=awaiting row, 1=awaiting col
     std::uint8_t pos_[2];  // ESC % row/col coordinates
 
-    // Line buffer for scroll-back (one virtual line per screen line; Max + ROWS).
-    std::vector<std::vector<std::uint8_t>> lines_;
+    // Line buffer for scroll-back -- a SINGLE, FIXED-SIZE flat allocation
+    // (max_ * colsCapacity_ bytes, sized once and never grown/shrunk
+    // during scrolling), not the previous std::vector<std::vector<uint8_t>>
+    // (one separate heap allocation per line). That design meant every
+    // single scroll event allocated a fresh line and freed the oldest one
+    // -- confirmed on real hardware that this fragments the heap on this
+    // embedded platform badly enough to crash after only ~80-115 lines
+    // (varying between boots -- the classic signature of fragmentation,
+    // not a fixed/deterministic limit), independent of how high max_
+    // itself was set. A flat buffer makes ordinary scrolling (see up()'s
+    // own comment) a single memmove -- no allocation at all, ever, after
+    // construction. Matches the HP82163 Owner's Manual's own scope for
+    // this (31 lines of buffered history) rather than trying to keep
+    // hundreds of lines of scroll-back, which was never actually needed.
+    //
+    // rowPtr(i) returns a pointer to logical row i's colsCapacity_ bytes
+    // (i=0 is the newest row, matching the old lines_[0] convention).
+    std::vector<std::uint8_t> lines_;
+    std::uint16_t colsCapacity_;  // bytes reserved per row in lines_ (>= any COLS_ this
+                                    // Screen will ever use, computed once in screen_pars())
+    std::size_t numLines_;    // how many of max_ rows are actually populated (grows
+                                // from ROWS_ up to max_, then stays there)
+    // One row's worth of reusable scratch space -- only needed for ESC-S's
+    // top-around rotation (see up()'s own comment), which is relatively
+    // rare (user-triggered, not per-character) but still shouldn't
+    // allocate fresh every time it's used. Sized/filled alongside lines_
+    // in screen_pars().
+    std::vector<std::uint8_t> scratch_;
+    std::uint8_t* rowPtr(std::size_t logicalIdx) {
+        return lines_.data() + logicalIdx * colsCapacity_;
+    }
+    const std::uint8_t* rowPtr(std::size_t logicalIdx) const {
+        return lines_.data() + logicalIdx * colsCapacity_;
+    }
     std::size_t offset_;     // top-of-screen offset in lines_ (used by up/down(cmd=false))
-    std::size_t max_;        // soft cap on lines_.size()
+    std::size_t max_;        // row capacity of lines_ -- computed once in the
+                              // constructor from the panel's actual height (must be
+                              // >= the largest possible ROWS_, see the constructor's
+                              // own comment for why a fixed "31" wasn't safe)
 
     std::uint8_t cnt_;       // chars in current physical line
     std::uint8_t cp_;        // cursor position within current physical line

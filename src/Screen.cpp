@@ -40,10 +40,36 @@ Screen::Screen(DisplayDriver* display,
       n_(-1),
       pos_{0, 0},
       lines_(),
+      colsCapacity_(0),
+      numLines_(0),
       offset_(0),
-      max_(200),
+      max_(0),  // computed properly in the constructor body below, once
+                 // d_ (needed for d_->height()) is available -- see there
+                 // for why this can't just be a fixed constant like the
+                 // manual's own "31 lines" figure.
       cnt_(0),
       cp_(0) {
+    // max_ MUST be at least as large as the largest ROWS_ this Screen
+    // could ever need (the smallest font size, size=0, needs the most
+    // rows to fill the panel) -- otherwise the flat buffer in lines_ is
+    // too small to even hold one full screen's worth of rows, and
+    // anything indexing past max_ reads/writes out of bounds. Confirmed
+    // on real hardware: max_ fixed at 31 (matching the HP82163 Owner's
+    // Manual's own scroll-back depth, reasonable in general) while this
+    // board's actual ROWS_ at size=0 is 37 (600px panel / 16px per row)
+    // corrupted exactly the 6 rows past the buffer's end -- matching the
+    // "first ~6 rows go blank" symptom precisely. The manual's own "31
+    // lines" was sized for its own small, fixed-resolution CRT display,
+    // which never had to accommodate a taller panel or a smaller font
+    // needing more physical rows than that.
+    constexpr std::uint16_t kMinHeightPerRow = 16;  // height_ at size=0 (the smallest, most-rows case)
+    const std::uint8_t maxPossibleRows =
+        static_cast<std::uint8_t>(display->height() / kMinHeightPerRow);
+    // A small amount of headroom above "exactly one full screen" for
+    // genuine scroll-back history -- not the old, much larger (200, then
+    // 60) caps that were never actually needed, just enough to page back
+    // a few lines.
+    max_ = static_cast<std::size_t>(maxPossibleRows) + 10;
     d_->txtColor(color, 0);
     d_->brightness(brightness);
     screen_pars(size);
@@ -64,11 +90,10 @@ void Screen::clear() {
     if (!suspended_) {
         d_->clearActiveWindow();
     }
-    lines_.clear();
-    lines_.reserve(ROWS_);
-    for (std::uint8_t i = 0; i < ROWS_; ++i) {
-        lines_.emplace_back(COLS_, 32);   // fill with spaces
-    }
+    // Blank the whole fixed buffer (a single std::fill over the flat
+    // array -- no allocation at all, unlike the old per-line vectors).
+    std::fill(lines_.begin(), lines_.end(), 32);
+    numLines_ = ROWS_;
     row_ = 0;
     col_ = 0;
     cnt_ = 0;
@@ -91,6 +116,16 @@ void Screen::clear() {
 }
 
 void Screen::full() {
+    // Centralised here so every caller (ESC J/K, ESC L, ESC M, ESC O,
+    // resume(), etc.) automatically respects a currently-open UiDialog,
+    // instead of each one needing to remember its own suspended_ check.
+    // Previously several of those ESC-sequence handlers called this
+    // unconditionally -- if HP-IL data triggering one of them arrived
+    // while a dialog was still open, this would draw straight over it.
+    // resume() itself still works correctly: it sets suspended_ = false
+    // BEFORE calling this, so its own redraw goes through normally.
+    if (suspended_) return;
+
     // Always restore our own foreground/background color before redrawing.
     // Something else (e.g. a UiDialog) may have changed the shared FG/BG
     // color registers on the display and never restored them.
@@ -101,8 +136,14 @@ void Screen::full() {
     // A full-screen clear would wipe out the button strip sitting outside
     // that window.
     d_->clearActiveWindow();
-    d_->spiDelayMs(100);  // vanta in hardvaru-clearen, annars ritar vi texten
-                         // ovanpa en pagaende clear.
+    // No extra delay needed here -- clearActiveWindow() already waits
+    // synchronously for the geometry engine to finish internally (its own
+    // rectHelper() call ends with waitPoll(), which blocks on the status
+    // register until DCR0 reports done). A blind spiDelayMs(100) used to
+    // sit here too, left over from when this went through BTE and its own
+    // completion status wasn't trusted -- now that full() runs on every
+    // single scroll event (not just occasionally), that redundant 100ms
+    // was adding up to real, noticeable scroll lag on real hardware.
     // beginBulkTextDraw() BEFORE set_cursor() -- hides the cursor first,
     // so the position change right after doesn't cause a brief visible
     // jump to (0,0) before it's hidden (confirmed on real hardware: with
@@ -117,7 +158,9 @@ void Screen::full() {
         // via the Columns menu). Without this, a full repaint would wrap
         // at the hardware's width instead of ours.
         set_cursor(0, static_cast<std::uint8_t>(row));
-        const auto& line = lines_[ROWS_ - 1 - row + offset_];
+        const std::size_t idx = static_cast<std::size_t>(ROWS_ - 1 - row + offset_);
+        if (idx >= numLines_) continue;  // shouldn't happen; guards against it regardless
+        const std::uint8_t* line = rowPtr(idx);
         for (std::uint8_t col = 0; col < COLS_; ++col) {
             draw_letter(line[col]);
         }
@@ -128,79 +171,65 @@ void Screen::full() {
 void Screen::up(bool roll, bool cmd) {
     if (!cmd && offset_ == 0) return;
 
-    // BTE scroll screen content up by one line.
-    bte(0xC2, 0, 0,
-           static_cast<std::uint16_t>(COLS_ * width()),
-           static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
-           0, height());
-
+    // Was per-scroll heap allocation (a fresh std::vector<uint8_t> line
+    // created and the oldest one freed every single scroll event) --
+    // replaced by a single memmove within the fixed-size flat buffer
+    // (see lines_'s own comment for why: the old design fragmented the
+    // heap badly enough to crash this embedded platform after only
+    // ~80-115 lines, regardless of how high the old max_ cap was set).
+    // No allocation happens here at all, ever, after construction.
     if (roll) {
-        if (!suspended_) d_->beginBulkTextDraw();
-        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        for (std::uint8_t col = 0; col < COLS_; ++col) {
-            draw_letter(lines_[offset_ > 0 ? offset_ - 1 : 0][col]);
-        }
-        set_cur();  // re-asserts cursor visibility/style too, not just position
         if (cmd) {
-            auto last = std::move(lines_.back());
-            lines_.pop_back();
-            lines_.insert(lines_.begin(), std::move(last));
+            // Top-around rotation (ESC-S): the last row wraps to become
+            // the new first row, nothing is discarded or blanked.
+            std::copy(rowPtr(numLines_ - 1), rowPtr(numLines_ - 1) + colsCapacity_,
+                     scratch_.begin());
+            std::memmove(rowPtr(1), rowPtr(0),
+                        (numLines_ - 1) * static_cast<std::size_t>(colsCapacity_));
+            std::copy(scratch_.begin(), scratch_.begin() + colsCapacity_, rowPtr(0));
         } else {
             offset_ = (offset_ > 0) ? offset_ - 1 : 0;
         }
     } else {
         if (cmd) {
-            bte(0x06, 0, static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
-                   static_cast<std::uint16_t>(width() * COLS_),
-                   height());   // blank last line
-            lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
-            if (lines_.size() > max_) lines_.pop_back();
+            // Natural scroll from new output: grow numLines_ toward max_
+            // first (if not there yet), THEN shift everything back by one
+            // slot and blank row 0 -- at max_ already, the row that would
+            // have landed past the end (the oldest) is simply never
+            // copied anywhere, i.e. naturally evicted.
+            const std::size_t usedAfter = (numLines_ < max_) ? numLines_ + 1 : max_;
+            std::memmove(rowPtr(1), rowPtr(0),
+                        (usedAfter - 1) * static_cast<std::size_t>(colsCapacity_));
+            std::fill(rowPtr(0), rowPtr(0) + colsCapacity_, 32);
+            numLines_ = usedAfter;
         } else {
-            if (!suspended_) d_->beginBulkTextDraw();
-            set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-            for (std::uint8_t col = 0; col < COLS_; ++col) {
-                draw_letter(lines_[offset_ - 1][col]);
-            }
-            set_cur();  // re-asserts cursor visibility/style too, not just position
             offset_ = (offset_ > 0) ? offset_ - 1 : 0;
         }
     }
+    full();
 }
 
 void Screen::down(bool cmd) {
-    if (!cmd && offset_ >= lines_.size() - ROWS_) return;
+    if (!cmd && offset_ >= numLines_ - ROWS_) return;
 
-    // Shift rows 0..ROWS_-2 down into rows 1..ROWS_-1. Previously ran from
-    // row=ROWS_ (not ROWS_-1), whose first iteration wrote a row's worth of
-    // pixels to y=ROWS_*height() -- one row past the bottom of the visible
-    // screen, off-screen (and potentially aliasing/corrupting other RA8875
-    // memory depending on how it handles addresses past the active window).
-    for (int row = ROWS_ - 1; row > 0; --row) {
-        bte(0xC2, 0, static_cast<std::uint16_t>(row * height()),
-               static_cast<std::uint16_t>(COLS_ * width()),
-               height(),
-               0, static_cast<std::uint16_t>((row - 1) * height()));
-    }
-    if (!suspended_) d_->beginBulkTextDraw();
-    set_cursor(0, 0);
-    for (std::uint8_t col = 0; col < COLS_; ++col) {
-        draw_letter(lines_[offset_ + ROWS_][col]);
-    }
-    set_cur();  // re-asserts cursor visibility/style too, not just position
-
+    // Same flat-buffer, allocation-free approach as up() above -- see its
+    // own comment. This rotates the opposite direction: row 0 (newest)
+    // wraps around to become the last row.
     if (cmd) {
-        auto first = std::move(lines_.front());
-        lines_.erase(lines_.begin());
-        lines_.push_back(std::move(first));
+        std::copy(rowPtr(0), rowPtr(0) + colsCapacity_, scratch_.begin());
+        std::memmove(rowPtr(0), rowPtr(1),
+                    (numLines_ - 1) * static_cast<std::size_t>(colsCapacity_));
+        std::copy(scratch_.begin(), scratch_.begin() + colsCapacity_, rowPtr(numLines_ - 1));
     } else {
-        const std::size_t cap = lines_.size() > ROWS_ ? lines_.size() - ROWS_ : 0;
+        const std::size_t cap = numLines_ > ROWS_ ? numLines_ - ROWS_ : 0;
         offset_ = (offset_ + 1 <= cap) ? offset_ + 1 : cap;
     }
+    full();
 }
 
 void Screen::scrollBy(int n) {
-    if (lines_.size() <= ROWS_) return;   // nothing buffered beyond one screen
-    const long maxOffset = static_cast<long>(lines_.size() - ROWS_);
+    if (numLines_ <= ROWS_) return;   // nothing buffered beyond one screen
+    const long maxOffset = static_cast<long>(numLines_ - ROWS_);
     long newOffset = static_cast<long>(offset_) + n;
     if (newOffset < 0) newOffset = 0;
     if (newOffset > maxOffset) newOffset = maxOffset;
@@ -209,44 +238,12 @@ void Screen::scrollBy(int n) {
     const long actualDelta = newOffset - static_cast<long>(offset_);
     offset_ = static_cast<std::size_t>(newOffset);
 
-    if (actualDelta == 1) {
-        // One step further into history: shift the whole screen DOWN by one
-        // row via BTE (same row-by-row block-move pattern as down()'s own
-        // paper-feed scroll) and draw just the newly revealed older row at
-        // the top -- much cheaper than a full repaint of every row.
-        for (int row = ROWS_ - 1; row > 0; --row) {
-            bte(0xC2, 0, static_cast<std::uint16_t>(row * height()),
-                   static_cast<std::uint16_t>(COLS_ * width()),
-                   height(),
-                   0, static_cast<std::uint16_t>((row - 1) * height()));
-        }
-        if (!suspended_) d_->beginBulkTextDraw();
-        set_cursor(0, 0);
-        for (std::uint8_t col = 0; col < COLS_; ++col) {
-            draw_letter(lines_[ROWS_ - 1 + offset_][col]);
-        }
-        set_cur();  // re-asserts cursor visibility/style too, not just position
-    } else if (actualDelta == -1) {
-        // One step back toward the live view: shift the whole screen UP by
-        // one row via a single BTE block move (same pattern as up()'s own
-        // paper-feed scroll) and draw just the newly revealed newer row at
-        // the bottom.
-        bte(0xC2, 0, 0,
-               static_cast<std::uint16_t>(COLS_ * width()),
-               static_cast<std::uint16_t>(height() * (ROWS_ - 1)),
-               0, height());
-        if (!suspended_) d_->beginBulkTextDraw();
-        set_cursor(0, static_cast<std::uint8_t>(ROWS_ - 1));
-        for (std::uint8_t col = 0; col < COLS_; ++col) {
-            draw_letter(lines_[offset_][col]);
-        }
-        set_cur();  // re-asserts cursor visibility/style too, not just position
-    } else {
-        // Multi-line jump (e.g. Shift+Up/Down page scroll): more rows change
-        // than not, so a full repaint is cheaper than many individual
-        // BTE row-shifts.
-        full();
-    }
+    // Was two separate BTE block-move fast paths for actualDelta==+-1
+    // (avoiding a full repaint for the common single-step case) -- same
+    // BTE-avoidance fix as up()/down() above, for the same reason. Every
+    // delta now just goes through full(), which was already the
+    // multi-line-jump fallback below.
+    full();
 }
 
 void Screen::scrollToLive() {
@@ -255,61 +252,44 @@ void Screen::scrollToLive() {
     full();
 }
 
-void Screen::store() {
-    bte(0xC2, 0, 0x8000, 800, 480);
-}
-
-void Screen::recall() {
-    bte(0xC2, 0, 0, 800, 480, 0, 0x8000);
-}
-
 void Screen::inschar() {
-    auto& line = lines_[ROWS_ - 1 - row_];
-    std::uint8_t last = line.back();
-    line.pop_back();
+    // Same flat-buffer approach as up()/down() -- operates directly on
+    // this row's byte range within lines_ via memmove, instead of the
+    // std::vector<uint8_t>::insert()/erase() the old per-line-vector
+    // design used (see lines_'s own comment for why that mattered).
+    std::uint8_t* line = rowPtr(ROWS_ - 1 - row_);
+    const std::uint8_t last = line[COLS_ - 1];
+    // Open a gap at col_: shift [col_, COLS_-1) right by one byte.
+    std::memmove(line + col_ + 1, line + col_, COLS_ - 1 - col_);
+    line[col_] = ' ';
 
-    bte(0xC2, 0, 0x8000, 800, static_cast<std::uint16_t>(height()), 0,
-           static_cast<std::uint16_t>(row_ * height()));   // store line
-
-    if (col_ != COLS_ - 1) {
-        bte(0xC2,
-               (col() + 1) * width(),
-               row() * height(),
-               800 - (col() + 1) * width(),
-               height(),
-               col() * width(),
-               0x8000);                                    // restore shifted line
-        for (std::size_t i = COLS_ - 1 - row_; i < lines_.size(); ++i) {
-            // shift within logical buffer
-        }
-        // Python: lines[ROWS-1-row][col+1:] = lines[ROWS-1-row][col:]
-        // (operates on a different copy of the row buffer; equivalent to)
-        auto& L = lines_[ROWS_ - 1 - row_];
-        L.insert(L.begin() + col_ + 1, L.begin() + col_, L.end() - 1);
-    } else {
-        line.push_back(last);
-    }
-
+    bool cascaded = false;
     if (!((cnt_ < COLS_) || (cp_ > COLS_))) {
         if ((cnt_ == COLS_) && (row_ == ROWS_ - 1)) {
             up();
             row_ = static_cast<std::uint8_t>(row_ - 1);
+            line = rowPtr(ROWS_ - 1 - row_);  // up() shifted everything -- re-fetch
         }
-        // insert first char of next line at end of current line
-        auto& prev = lines_[ROWS_ - 2 - row_];
-        prev.insert(prev.begin(), last);
-        std::uint8_t prev_last = prev.back();
-        prev.pop_back();
-        bte(0xC2, 0, 0x8000, width(), height(),
-               static_cast<std::uint16_t>(800 - width()), 0x8000);
-        bte(0xC2, width(), 0x8000,
-               static_cast<std::uint16_t>(800 - width()),
-               height(), 0,
-               static_cast<std::uint16_t>((row_ + 1) * height()));
-        bte(0xC2, 0, static_cast<std::uint16_t>((row_ + 1) * height()),
-               800, height(), 0, 0x8000);
-        last = prev_last;
+        // The character pushed off the end of this row becomes the new
+        // first character of the next row, which in turn pushes ITS own
+        // last character further along -- same cascade the original
+        // design implemented.
+        std::uint8_t* next = rowPtr(ROWS_ - 2 - row_);
+        std::memmove(next + 1, next, COLS_ - 1);
+        next[0] = last;
+        cascaded = true;
     }
+
+    if (!suspended_) d_->beginBulkTextDraw();
+    set_cursor(0, row_);
+    for (std::uint8_t c = 0; c < COLS_; ++c) draw_letter(line[c]);
+    if (cascaded) {
+        set_cursor(0, static_cast<std::uint8_t>(row_ + 1));
+        const std::uint8_t* next = rowPtr(ROWS_ - 2 - row_);
+        for (std::uint8_t c = 0; c < COLS_; ++c) draw_letter(next[c]);
+    }
+    set_cur();  // re-asserts cursor visibility/style too, not just position
+
     cnt_ = static_cast<std::uint8_t>(cnt_ + 1);
 }
 
@@ -327,6 +307,50 @@ void Screen::txt_size(std::uint8_t size) {
 
 void Screen::screen_pars(std::uint8_t size) {
     size_ = size;
+    // Captured before being overwritten below -- needed by the
+    // pre-scroll normalisation step further down (see its own comment).
+    const std::uint8_t oldROWS = ROWS_;
+    // Computed once, independent of the size being switched to: the
+    // largest COLS_ this Screen could ever need across ANY font size
+    // (the smallest character width, 8px at size=0, gives the most
+    // columns). lines_ (see its own comment) is sized off this so it
+    // never needs reallocating just because the font size changes later
+    // -- allocated/grown here (screen_pars() only runs on construction or
+    // an explicit size change, never per-scroll) rather than in clear()
+    // or up(), which both run far more often.
+    {
+        const std::uint16_t maxPossibleCols = static_cast<std::uint16_t>(textWidth_ / 8);
+        if (maxPossibleCols > colsCapacity_) {
+            // FIXED: used to just lines_.assign(...) a fresh, all-blank
+            // buffer at the new (wider) stride and reset numLines_ to 0
+            // -- silently wiping every existing line of text. This path
+            // isn't rare: hideButtonStrip() calls setTextWidth() with the
+            // FULL panel width every time the button strip auto-hides
+            // (see its own kButtonStripHideMs timeout in boardui.cpp),
+            // which is wider than the narrower width Screen is
+            // constructed with in pico_main.cpp (SCREEN_MAX_X minus the
+            // button strip) -- so simply typing normally, with the strip
+            // hiding itself in the background sometime after a font-size
+            // or other menu change, was enough to trigger this and blank
+            // the screen down to just whatever's typed after. Grows the
+            // buffer's per-row stride while copying each existing row's
+            // content into the new, wider layout instead -- the extra
+            // columns each row gains are blank-padded, everything already
+            // there is preserved, and numLines_ is untouched.
+            const std::uint16_t oldColsCapacity = colsCapacity_;
+            const std::vector<std::uint8_t> oldLines = std::move(lines_);
+            colsCapacity_ = maxPossibleCols;
+            lines_.assign(static_cast<std::size_t>(max_) * colsCapacity_, 32);
+            if (oldColsCapacity > 0) {
+                for (std::size_t row = 0; row < max_; ++row) {
+                    const std::uint8_t* src = oldLines.data() + row * oldColsCapacity;
+                    std::uint8_t* dst = lines_.data() + row * static_cast<std::size_t>(colsCapacity_);
+                    std::copy(src, src + oldColsCapacity, dst);
+                }
+            }
+            scratch_.assign(colsCapacity_, 32);
+        }
+    }
     if (size < 4) {
         const std::uint8_t k = static_cast<std::uint8_t>(1 + size);
         width_  = static_cast<std::uint16_t>(8 * k);
@@ -334,7 +358,20 @@ void Screen::screen_pars(std::uint8_t size) {
         COLS_   = (columnsOverride_ > 0 && columnsOverride_ <= maxCols)
                       ? columnsOverride_ : maxCols;
         height_ = static_cast<std::uint16_t>(16 * k);
-        ROWS_   = static_cast<std::uint8_t>(30 / k);
+        // Was a flat 30/k -- correct for the original HP82163's 480px-tall
+        // panel (15 rows * 32px = 480 at size=1), but hardcoded rather than
+        // actually based on the real panel height. This board's own panel
+        // is taller (600px) -- computed from d_->height() instead, the
+        // same way COLS_ above is already computed from the real available
+        // width (textWidth_) rather than a fixed column count. Confirmed
+        // against the HP82163 Owner's Manual (uploaded to this
+        // conversation) that ROWS_ itself has no fixed "must be N" spec to
+        // preserve -- the manual's own "up to 16 lines" figure is
+        // specific to ITS panel's fixed resolution, not a protocol
+        // requirement; the escape-sequence/scrolling behaviour it
+        // documents is defined in terms of "the display", not a literal
+        // row count.
+        ROWS_   = static_cast<std::uint8_t>(d_->height() / height_);
         ofx_ = 0;
         ofy_ = 0;
     } else {
@@ -345,29 +382,93 @@ void Screen::screen_pars(std::uint8_t size) {
         ofx_ = 0;
         ofy_ = 3;
     }
+
+    // Pre-scroll normalisation: content written since the last clear(),
+    // BEFORE the screen has ever actually scrolled (up() never called --
+    // numLines_ is still sitting at its post-clear() initial value of
+    // oldROWS, not grown past it), was positioned using rowPtr(oldROWS-1
+    // -row_) -- i.e. tied to the OLD ROWS_ that was in effect at write
+    // time. full()'s own drawing loop (and up()'s own scroll logic)
+    // both assume the OPPOSITE convention: buffer index 0 is always the
+    // most-recently-written line, growing toward higher indices for
+    // older ones, independent of ROWS_. Those only actually agree once
+    // row_ has reached the bottom of a full screen and up() has shifted
+    // things at least once -- until then, changing ROWS_ (a font-size
+    // switch) left old content sitting at buffer positions that no
+    // longer corresponded to what the new ROWS_-based draw loop expected
+    // -- confirmed on real hardware: switching from a small font with
+    // ~20 lines already typed (never having filled/scrolled that many
+    // rows) to a larger font showed only the last couple of lines,
+    // shoved to the top of the screen, with the cursor and new typing
+    // landing far below with a gap of blank lines in between.
+    //
+    // Shifts the (row_ + 1) rows written so far -- everything from the
+    // very first line down through the current, possibly still-partial
+    // one -- so the most recent lands at index 0, matching the
+    // convention every other consumer of this buffer already expects,
+    // and updates numLines_ to the ACTUAL count of lines written (row_ +
+    // 1), not the stale "as many as the old ROWS_" value clear() left
+    // it at. row_ itself is left as-is: reflow()'s own existing clamp
+    // (run right after this, back in setTextSize()/setTextWidth()) already
+    // reduces it to (new ROWS_ - 1) if the new screen can't fit
+    // everything, or leaves it alone otherwise -- exactly the right
+    // behaviour either way once numLines_ is correct.
+    if (oldROWS > 0 && numLines_ == oldROWS && row_ < oldROWS) {
+        const std::size_t linesWritten = static_cast<std::size_t>(row_) + 1;
+        const std::size_t srcIndex = static_cast<std::size_t>(oldROWS) - linesWritten;
+        if (srcIndex > 0) {
+            std::memmove(lines_.data(),
+                        lines_.data() + srcIndex * static_cast<std::size_t>(colsCapacity_),
+                        linesWritten * static_cast<std::size_t>(colsCapacity_));
+        }
+        // FIXED: the memmove above only ever overwrites the FIRST
+        // linesWritten rows -- with overlapping src/dst ranges (moving
+        // toward index 0), the tail of the original range, indices
+        // [linesWritten, oldROWS), is left completely untouched, still
+        // holding a stale copy of exactly the content that was just
+        // moved. Harmless on its own (those indices are past numLines_,
+        // which full()'s own drawing loop skips) -- until later, a
+        // SUBSEQUENT reflow() (e.g. switching to yet another font size,
+        // this time with a LARGER ROWS_) pads numLines_ back UP toward
+        // that larger ROWS_ to show genuinely blank rows for the part
+        // of the screen with no real content yet -- exposing these
+        // stale leftovers instead of blank ones. Confirmed on real
+        // hardware: switching between a couple of font sizes after
+        // scrolling showed old content duplicated further down the
+        // screen. Blanked explicitly here so there's nothing stale left
+        // for a later reflow() to ever expose.
+        if (linesWritten < static_cast<std::size_t>(oldROWS)) {
+            std::fill(lines_.data() + linesWritten * static_cast<std::size_t>(colsCapacity_),
+                     lines_.data() + static_cast<std::size_t>(oldROWS) * static_cast<std::size_t>(colsCapacity_),
+                     32);
+        }
+        numLines_ = linesWritten;
+    }
+
     txt_size(size);
 }
 
 void Screen::reflow() {
-    // Grow each line's storage to the new COLS_ if it's wider than before,
-    // but never shrink it if narrower. full() only ever draws the first
-    // COLS_ characters of each line regardless of how much more is
-    // stored, so a narrower COLS_ just means the tail isn't drawn for
+    // The flat buffer's rows are already colsCapacity_ bytes wide -- sized
+    // for the largest COLS_ this Screen can ever use (see screen_pars()'s
+    // own comment) -- so unlike the old per-line vectors, there's nothing
+    // to grow here just because COLS_ changed. full() only ever draws the
+    // first COLS_ bytes of each row regardless of how much more capacity
+    // exists, so a narrower COLS_ just means the tail isn't drawn for
     // now -- it's not lost, and reappears once COLS_ grows again (e.g.
-    // the button strip hiding widens the text area back out). Shrinking
-    // the vector here would permanently delete that tail instead.
-    for (auto& line : lines_) {
-        if (line.size() < COLS_) line.resize(COLS_, 32);
-    }
-    // Make sure there are enough buffered lines to fill the new ROWS_
-    // (pad blank lines at the front -- lines_[0] is the newest -- so
-    // full()'s indexing never goes out of bounds).
-    while (lines_.size() < ROWS_) {
-        lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
-    }
+    // the button strip hiding widens the text area back out).
+    //
+    // Captured before being padded below -- see the row_ repositioning
+    // fix further down for why this is needed.
+    const std::size_t actualNumLines = numLines_;
+    // Pad numLines_ up to ROWS_ if needed (ROWS_ depends on panel height,
+    // not width, so this is mostly theoretical for a text-width-only
+    // reflow -- but safe regardless: any not-yet-used rows are still
+    // blank from screen_pars()'s own initial fill).
+    if (numLines_ < ROWS_) numLines_ = ROWS_;
     // Clamp the scroll-back offset in case ROWS_ grew.
-    if (lines_.size() > ROWS_) {
-        const std::size_t maxOffset = lines_.size() - ROWS_;
+    if (numLines_ > ROWS_) {
+        const std::size_t maxOffset = numLines_ - ROWS_;
         if (offset_ > maxOffset) offset_ = maxOffset;
     } else {
         offset_ = 0;
@@ -375,7 +476,27 @@ void Screen::reflow() {
     // Clamp the live cursor/line-tracking state to the new dimensions so
     // it doesn't point past the (possibly narrower/shorter) new layout.
     if (col_ >= COLS_) col_ = static_cast<std::uint8_t>(COLS_ > 0 ? COLS_ - 1 : 0);
-    if (row_ >= ROWS_) row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
+    // FIXED: was just "if (row_ >= ROWS_) row_ = ROWS_ - 1" -- only ever
+    // handles ROWS_ SHRINKING (row_ now overflows the smaller screen).
+    // Switching to a LARGER ROWS_ (e.g. a smaller font, after the screen
+    // had already scrolled at the previous, smaller ROWS_) left row_
+    // completely unchanged at its old, smaller-screen-relative value --
+    // confirmed on real hardware: the cursor (and all new typing) landed
+    // stuck partway down the new, taller screen, with a gap of blank
+    // rows both above AND below it, rather than moving to sit right
+    // after the actual most-recent content the way it should. Only
+    // meaningful for the "live" view (offset_ == 0) -- while scrolled
+    // back into history (offset_ > 0), the cursor isn't visible on
+    // screen at all regardless, so its exact row_ value doesn't matter
+    // until the user scrolls back to live view anyway (which resets
+    // offset_ to 0, at which point this same formula applies again
+    // naturally on the next reflow()).
+    if (offset_ == 0) {
+        const std::size_t visibleLines = actualNumLines < ROWS_ ? actualNumLines : ROWS_;
+        row_ = static_cast<std::uint8_t>(visibleLines > 0 ? visibleLines - 1 : 0);
+    } else if (row_ >= ROWS_) {
+        row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
+    }
     if (cnt_ > COLS_) cnt_ = COLS_;
     if (cp_  > COLS_) cp_  = COLS_;
 
@@ -487,98 +608,64 @@ void Screen::pr_char(std::uint8_t c) {
         } else if (c == 69) {            // ESC E -> clear
             clear();
         } else if (c == 74 || c == 75) { // ESC J/K -> clear to EOL / EOS
-            for (std::uint8_t cc = col_; cc < COLS_; ++cc) {
-                lines_[ROWS_ - 1 - row_][cc] = 32;
-            }
-            bte(0x06,
-                   col_ * width(),
-                   row_ * height(),
-                   width() * (COLS_ - col_),
-                   height());
+            std::uint8_t* cur = rowPtr(ROWS_ - 1 - row_);
+            std::fill(cur + col_, cur + COLS_, 32);
             if (c == 74) {
                 for (std::uint8_t i = 0; i < ROWS_ - 1 - row_; ++i) {
-                    lines_[i].assign(COLS_, 32);
-                }
-                if (row_ != ROWS_ - 1) {
-                    bte(0x06, 0,
-                           height() * (row_ + 1),
-                           width() * COLS_,
-                           height() * (ROWS_ - row_ - 1));
+                    std::fill(rowPtr(i), rowPtr(i) + COLS_, 32);
                 }
             }
+            full();
         } else if (c == 76) {            // ESC L -> insert line
-            if (row_ != ROWS_ - 1) {
-                bte(0xC2, 0, 0x8000, 800,
-                       (ROWS_ - 1 - row_) * height(),
-                       0, height() * row_);
-                bte(0xC2, 0,
-                       height() * (row_ + 1), 800,
-                       (ROWS_ - 1 - row_) * height(),
-                       0, 0x8000);
+            // Flat-buffer equivalent of the old vector insert-then-erase
+            // (see lines_'s own comment for why that mattered): elements
+            // [1, K) shift left to [0, K-1) (discarding what was newest,
+            // at index 0), and a fresh blank row appears at K-1, where
+            // K = ROWS_-1-row_. Everything from K onward is untouched.
+            {
+                const std::size_t K = ROWS_ - 1 - row_;
+                if (K > 0) {
+                    std::memmove(rowPtr(0), rowPtr(1), (K - 1) * static_cast<std::size_t>(colsCapacity_));
+                    std::fill(rowPtr(K - 1), rowPtr(K - 1) + colsCapacity_, 32);
+                }
             }
-            bte(0x06, 0, height() * row(),
-                   width() * cols(), height());
-            lines_.insert(lines_.begin() + (ROWS_ - 1 - row_),
-                          std::vector<std::uint8_t>(COLS_, 32));
-            if (lines_.size() > 0) lines_.erase(lines_.begin());
             col_ = 0;
-            set_cur();  // re-asserts cursor visibility/style too, not just position
+            full();  // also re-asserts cursor visibility/style, via its own set_cur()
         } else if (c == 77) {            // ESC M -> delete line
-            if (row_ != ROWS_ - 1) {
-                bte(0xC2, 0, row_ * height(),
-                       COLS_ * width(),
-                       height() * (ROWS_ - 1 - row_),
-                       0, height() * (row_ + 1));
+            // Flat-buffer equivalent of the old vector erase-then-insert:
+            // elements [0, K) shift right to [1, K+1) (discarding what was
+            // at K), and a fresh blank row appears at index 0.
+            {
+                const std::size_t K = ROWS_ - 1 - row_;
+                std::memmove(rowPtr(1), rowPtr(0), K * static_cast<std::size_t>(colsCapacity_));
+                std::fill(rowPtr(0), rowPtr(0) + colsCapacity_, 32);
             }
-            bte(0x06, 0, height() * (ROWS_ - 1),
-                   width() * COLS_, height());
-            lines_.erase(lines_.begin() + (ROWS_ - 1 - row_));
-            lines_.insert(lines_.begin(), std::vector<std::uint8_t>(COLS_, 32));
+            full();
         } else if (c == 78) {            // ESC N -> enter insert mode
             escN_ = true;
         } else if (c == 79) {            // ESC O -> delete character
-            {
-                auto& line = lines_[ROWS_ - 1 - row_];
-                if ((uint8_t)(col_ + 1) < line.size()) {
-                    line.erase(line.begin() + col_, line.begin() + col_ + 1);
-                }
-            }
-            if (col_ != COLS_ - 1) {
-                bte(0xC2,
-                       col_ * width(),
-                       row_ * height(),
-                       width() * (COLS_ - col_ - 1),
-                       height(),
-                       (col_ + 1) * width(),
-                       row_ * height());
-            }
+            std::uint8_t* line = rowPtr(ROWS_ - 1 - row_);
+            // Close the gap at col_: shift (col_, COLS_) left by one byte.
+            std::memmove(line + col_, line + col_ + 1, COLS_ - 1 - col_);
+            bool cascaded = false;
             if ((cnt_ < COLS_) || (cp_ > COLS_)) {
-                lines_[ROWS_ - 1 - row_].push_back(32);
-                bte(0x06,
-                       (COLS_ - 1) * width(),
-                       row_ * height(),
-                       width(), height());
+                line[COLS_ - 1] = 32;
             } else {
-                lines_[ROWS_ - 1 - row_].push_back(lines_[ROWS_ - 2 - row_][0]);
-                bte(0xC2,
-                       (COLS_ - 1) * width(),
-                       row_ * height(),
-                       width(), height(),
-                       0, (row_ + 1) * height());
-                {
-                    auto& prev = lines_[ROWS_ - 2 - row_];
-                    prev.erase(prev.begin());
-                }
-                bte(0xC2, 0, (row_ + 1) * height(),
-                       width() * (COLS_ - 1),
-                       height(),
-                       width(), (row_ + 1) * height());
-                lines_[ROWS_ - 2 - row_].push_back(32);
-                bte(0x06,
-                       (COLS_ - 1) * width(),
-                       (row_ + 1) * height(),
-                       width(), height());
+                std::uint8_t* next = rowPtr(ROWS_ - 2 - row_);
+                line[COLS_ - 1] = next[0];
+                std::memmove(next, next + 1, COLS_ - 1);
+                next[COLS_ - 1] = 32;
+                cascaded = true;
             }
+            if (!suspended_) d_->beginBulkTextDraw();
+            set_cursor(0, row_);
+            for (std::uint8_t cc = 0; cc < COLS_; ++cc) draw_letter(line[cc]);
+            if (cascaded) {
+                set_cursor(0, static_cast<std::uint8_t>(row_ + 1));
+                const std::uint8_t* next = rowPtr(ROWS_ - 2 - row_);
+                for (std::uint8_t cc = 0; cc < COLS_; ++cc) draw_letter(next[cc]);
+            }
+            set_cur();  // re-asserts cursor visibility/style too, not just position
             if (cp_ != cnt_)
                 cnt_ = (cnt_ > 0) ? cnt_ - 1 : 0;
         } else if (c == 91 || c == 93) {  // ESC [ / ] -> size 0/1
@@ -620,7 +707,7 @@ void Screen::pr_char(std::uint8_t c) {
             nline_ = false;
             if (escN_)
                 inschar();
-            lines_[ROWS_ - 1 - row_][col_] = c;
+            rowPtr(ROWS_ - 1 - row_)[col_] = c;
             draw_letter(c);
             col_++;
             if (cp_ == cnt_)
@@ -681,16 +768,15 @@ void Screen::set_cur() {
     set_cursor(col_, row_);
 }
 
-void Screen::bte(std::uint8_t opcode,
-                 std::uint16_t x1, std::uint16_t y1,
-                 std::uint16_t w, std::uint16_t h,
-                 std::uint16_t x0, std::uint16_t y0) {
-    if (suspended_) return;
-    d_->BTE(opcode, x1, y1, w, h, x0, y0);
-}
+// bte() (forwarded to d_->BTE()) removed -- every call site in this file
+// has been converted to redraw the affected row(s) from lines_ instead
+// (see up()'s own comment for the full story: BTE never got past
+// triggering without freezing/corrupting the display on this hardware).
+// Nothing else in the project called it either.
 
 void Screen::draw_letter(std::uint8_t c) {
     if (suspended_) return;
+    ++charsDrawn_;
     if (c > 127) {
         if (size_ < 4) {
             d_->txtColor(0, color_);

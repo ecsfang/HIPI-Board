@@ -21,6 +21,9 @@
 
 std::vector<CDevice*> devices;
 CPilBox* pilbox = nullptr;      // Need to be global for UI indication
+CDisplay* videoDisplay = nullptr;  // Same pattern -- needed for pico_main.cpp's
+                                     // own periodic fifoSize() diagnostic (see
+                                     // display.h's own comment on fifoSize()).
 CPlotter* plotter = nullptr;    // Need to be global for plotterview.cpp
 
 extern hipi::Config config;
@@ -79,7 +82,8 @@ void hipi_init()
         config.setFilename(filename);
     });
 
-    devices.push_back(new CDisplay("TFDISPLAY", 0x3E));
+    videoDisplay = new CDisplay("TFDISPLAY", 0x3E);
+    devices.push_back(videoDisplay);
     devices.push_back(new CDrive("TFDRIVE", cassette));
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
     pilbox = new CPilBox("PILBOX");

@@ -26,12 +26,18 @@
 //     Still genuinely unverified: this project's own SPI transport timing
 //     against the chip's actual electrical requirements, and anything
 //     that can only be confirmed by seeing the panel light up correctly.
-//   - The exact DCR1 (REG[76h]) semantics for plain "Draw Rectangle"
-//     (bit[5:4]=10b) vs. the DCR0 (REG[67h]) "0010b: Rectangle" option --
-//     both exist in this datasheet revision; rect()/fillRect() below use
-//     the DCR0 corner-point path (simpler, matches Line/Triangle's own
-//     coordinate convention) and leave DCR1's alternate path unused for
-//     now.
+//   - DCR1 (REG[76h]) IS used, for circle/ellipse/rounded-rectangle
+//     (bit[5:4]=11b) -- rect()/fillRect() use DCR0's own "0010b:
+//     Rectangle" option instead for plain rectangles (simpler, matches
+//     Line/Triangle's own coordinate convention), leaving DCR1's
+//     alternate plain-rectangle option (bit[5:4]=10b) unused. One
+//     DCR1 constraint confirmed the hard way on real hardware: section
+//     6.6's Note1/Note2 require the bounding width/height to be
+//     STRICTLY GREATER than 2*radius+1, not merely >=2*radius --
+//     violating this by exactly 1 (e.g. a 20x20 circle via radius=10)
+//     produced a corrupted draw (a long streak to the bottom of the
+//     panel) instead of a clipped/adjusted shape. fillRoundRect()/
+//     roundRect() clamp for this correctly now -- see their own comments.
 //   - 2-layer/PIP-equivalent config (RA8875::set2LayerConfig() etc.) --
 //     not yet mapped to LT7683's rather different (Picture-in-Picture,
 //     multi-buffer) model; stubbed out for now, see the .cpp.
@@ -41,6 +47,7 @@
 #include "RA8875Transport.hpp"   // same transport interface (SPI byte-level) -- shared, not chip-specific
 #include "hp82163_font.hpp"
 #include <cstdint>
+#include <cstdio>
 
 #define SCREEN_MAX_X        1024
 #define SCREEN_MAX_Y        600
@@ -188,6 +195,9 @@ public:
     static constexpr std::uint8_t STSR_CORE_BUSY   = 0x08;  // bit3: BTE/geometry/DMA/text/graphic busy
     static constexpr std::uint8_t STSR_RAM_READY   = 0x04;  // bit2: Display RAM ready
     static constexpr std::uint8_t STSR_INHIBIT     = 0x02;  // bit1: 1 = inhibited (reset/init/power-save)
+    static constexpr std::uint8_t STSR_WR_FIFO_FULL = 0x80; // bit7: Memory Write FIFO full -- writeData()'s
+                                                              // bulk overload never checked this; drawBitmap565Cropped()
+                                                              // now does, see its own comment.
 
     // -----------------------------------------------------------------------
     // Construction / init
@@ -412,6 +422,31 @@ private:
     std::uint16_t vertOffset_ = 0;
     std::uint8_t  txtScale_ = 0;
     bool          pwmInitialized_ = false;
+    // Software-tracked cache of ICR bit2 (graphic/text mode) -- see
+    // gfxMode()/txtMode()'s own comment for why this replaces reading
+    // ICR back on every single call.
+    enum class GfxTxtMode : std::uint8_t { Unknown, Graphic, Text };
+    GfxTxtMode currentGfxTxtMode_ = GfxTxtMode::Unknown;
+    // Software-tracked cache of CCR1_TEXT bit6 (text background opacity)
+    // -- see txtColor()/txtTrans()'s own comments. -1 = unknown (forces
+    // the first call to actually read-modify-write and establish a known
+    // baseline), 0 = transparent, 1 = opaque.
+    std::int8_t opaqueTextCached_ = -1;
+    // Software-tracked cache of setTextCursorVisible()'s last-applied
+    // parameters -- see its own comment. -1 = unknown (forces the first
+    // call to actually write and establish a known baseline).
+    std::int8_t cursorVisibleCached_ = -1;
+    std::int8_t cursorBlockStyleCached_ = -1;
+
+public:
+private:
+    // Cache of the last values written via setActiveWindow() -- avoids
+    // reading them back from the chip every single scroll (used by
+    // clearActiveWindow()'s own fillRect()).
+    std::uint16_t activeWindowX0Cached_ = 0;
+    std::uint16_t activeWindowY0Cached_ = 0;
+    std::uint16_t activeWindowWCached_ = 0;
+    std::uint16_t activeWindowHCached_ = 0;
 };
 
 }  // namespace hipi
