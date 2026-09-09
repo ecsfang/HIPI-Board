@@ -24,7 +24,13 @@ PicoSpiTransport::PicoSpiTransport(spi_inst_t* spi_inst,
     // Bring up the SPI peripheral at the requested baudrate.  The caller
     // is responsible for configuring SCK/MOSI/MISO function-select via
     // gpio_set_function() — see examples/pico_main.cpp.
-    spi_init(spi_, baudrate);
+    // spi_init() returns the ACTUAL baudrate the peripheral could
+    // achieve (the RP2350's clock divider can't hit every requested
+    // value exactly) -- captured here so a caller can verify/log what
+    // clock speed is really in effect, e.g. after raising the requested
+    // value toward this chip's own documented 50MHz maximum (LT7683.pdf
+    // Table A-21, "CLK SPI Input Clock ... Max. 50 MHz").
+    actualBaudrate_ = spi_init(spi_, baudrate);
 
     // CS pin: drive high initially (inactive).
     gpio_init(cs_);

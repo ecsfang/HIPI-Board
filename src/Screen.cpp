@@ -388,67 +388,78 @@ void Screen::screen_pars(std::uint8_t size) {
     // numLines_ is still sitting at its post-clear() initial value of
     // oldROWS, not grown past it), was positioned using rowPtr(oldROWS-1
     // -row_) -- i.e. tied to the OLD ROWS_ that was in effect at write
-    // time. full()'s own drawing loop (and up()'s own scroll logic)
-    // both assume the OPPOSITE convention: buffer index 0 is always the
-    // most-recently-written line, growing toward higher indices for
-    // older ones, independent of ROWS_. Those only actually agree once
-    // row_ has reached the bottom of a full screen and up() has shifted
-    // things at least once -- until then, changing ROWS_ (a font-size
-    // switch) left old content sitting at buffer positions that no
-    // longer corresponded to what the new ROWS_-based draw loop expected
-    // -- confirmed on real hardware: switching from a small font with
-    // ~20 lines already typed (never having filled/scrolled that many
-    // rows) to a larger font showed only the last couple of lines,
-    // shoved to the top of the screen, with the cursor and new typing
-    // landing far below with a gap of blank lines in between.
+    // time. When ROWS_ changes (a real font-size switch), that mapping
+    // no longer lines up with the same rowPtr(ROWS_-1-row_) formula
+    // every other consumer (full()'s own draw loop, and pr_char()'s own
+    // write path for whatever gets typed next) now uses with the NEW
+    // ROWS_ -- so the content has to be physically repositioned to match.
     //
-    // Shifts the (row_ + 1) rows written so far -- everything from the
-    // very first line down through the current, possibly still-partial
-    // one -- so the most recent lands at index 0, matching the
-    // convention every other consumer of this buffer already expects,
-    // and updates numLines_ to the ACTUAL count of lines written (row_ +
-    // 1), not the stale "as many as the old ROWS_" value clear() left
-    // it at. row_ itself is left as-is: reflow()'s own existing clamp
-    // (run right after this, back in setTextSize()/setTextWidth()) already
-    // reduces it to (new ROWS_ - 1) if the new screen can't fit
-    // everything, or leaves it alone otherwise -- exactly the right
-    // behaviour either way once numLines_ is correct.
-    if (oldROWS > 0 && numLines_ == oldROWS && row_ < oldROWS) {
+    // FIXED (again): the previous version of this always moved content
+    // to buffer index 0, on the theory that this matches "index 0 =
+    // most recent", the convention up()'s own post-scroll shifting
+    // uses. That's only actually correct when the moved content fills
+    // the ENTIRE new screen (row_ + 1 >= new ROWS_) -- confirmed on real
+    // hardware with exactly that case (~20 lines moving to an 18-row
+    // screen) working fine. But for fewer lines than the new ROWS_ (e.g.
+    // 4 lines, cursor still well short of a full screen), the correct
+    // target position for the most-recently-written line is NOT index 0
+    // -- it's (new ROWS_ - 1), matching reflow()'s own row_
+    // repositioning right after this (row_ = min(linesWritten, ROWS_) -
+    // 1) via the SAME rowPtr(ROWS_-1-row_) formula pr_char() itself
+    // uses. Shifting to index 0 regardless left the cursor correctly
+    // repositioned (a separate, correct computation) while the actual
+    // TEXT ended up several rows away from it, with a gap of blank space
+    // in between -- confirmed on real hardware: 4 lines typed at a
+    // larger font, switched to a smaller font (fewer, taller rows), text
+    // reappeared crammed at the bottom of the screen while the cursor
+    // itself landed at the right row.
+    //
+    // keptLines: how many of the written lines actually fit in the new
+    // ROWS_ -- if there are more written lines than the new, smaller
+    // screen can show at once, the OLDEST ones are the ones that
+    // scroll off (dropped here, not copied anywhere), matching normal
+    // scroll behaviour.
+    if (oldROWS > 0 && ROWS_ != oldROWS && numLines_ == oldROWS && row_ < oldROWS) {
         const std::size_t linesWritten = static_cast<std::size_t>(row_) + 1;
-        const std::size_t srcIndex = static_cast<std::size_t>(oldROWS) - linesWritten;
-        if (srcIndex > 0) {
-            std::memmove(lines_.data(),
-                        lines_.data() + srcIndex * static_cast<std::size_t>(colsCapacity_),
-                        linesWritten * static_cast<std::size_t>(colsCapacity_));
+        const std::size_t keptLines = std::min(linesWritten, static_cast<std::size_t>(ROWS_));
+        const std::size_t srcIndex = static_cast<std::size_t>(oldROWS) - keptLines;
+        const std::size_t dstIndex = static_cast<std::size_t>(ROWS_) - keptLines;
+        const std::size_t stride = static_cast<std::size_t>(colsCapacity_);
+
+        if (srcIndex != dstIndex) {
+            // A plain memmove isn't safe here -- unlike the old "always
+            // to index 0" version, src and dst can now be in either
+            // order relative to each other (oldROWS vs ROWS_ can go
+            // either way), so an in-place shift could clobber data it
+            // still needs to read. Copies through a small scratch buffer
+            // instead -- keptLines is at most a couple of dozen rows, so
+            // this is cheap and only happens on an actual font-size
+            // switch, not per character.
+            std::vector<std::uint8_t> scratch(keptLines * stride);
+            std::memcpy(scratch.data(), lines_.data() + srcIndex * stride, keptLines * stride);
+            // Blank the entire old occupied range first -- covers both
+            // the case where dst doesn't fully overlap src, and where
+            // the OLD range was wider than what's kept (some of the
+            // oldest lines being dropped, per keptLines < linesWritten).
+            std::fill(lines_.data() + srcIndex * stride,
+                     lines_.data() + static_cast<std::size_t>(oldROWS) * stride, 32);
+            std::memcpy(lines_.data() + dstIndex * stride, scratch.data(), keptLines * stride);
         }
-        // FIXED: the memmove above only ever overwrites the FIRST
-        // linesWritten rows -- with overlapping src/dst ranges (moving
-        // toward index 0), the tail of the original range, indices
-        // [linesWritten, oldROWS), is left completely untouched, still
-        // holding a stale copy of exactly the content that was just
-        // moved. Harmless on its own (those indices are past numLines_,
-        // which full()'s own drawing loop skips) -- until later, a
-        // SUBSEQUENT reflow() (e.g. switching to yet another font size,
-        // this time with a LARGER ROWS_) pads numLines_ back UP toward
-        // that larger ROWS_ to show genuinely blank rows for the part
-        // of the screen with no real content yet -- exposing these
-        // stale leftovers instead of blank ones. Confirmed on real
-        // hardware: switching between a couple of font sizes after
-        // scrolling showed old content duplicated further down the
-        // screen. Blanked explicitly here so there's nothing stale left
-        // for a later reflow() to ever expose.
-        if (linesWritten < static_cast<std::size_t>(oldROWS)) {
-            std::fill(lines_.data() + linesWritten * static_cast<std::size_t>(colsCapacity_),
-                     lines_.data() + static_cast<std::size_t>(oldROWS) * static_cast<std::size_t>(colsCapacity_),
-                     32);
+        // Blank whatever's above the moved content in the NEW layout too
+        // (e.g. indices [0, dstIndex) when dstIndex > 0) -- otherwise
+        // that range could still hold whatever was there before this
+        // Screen was ever constructed, or from an earlier, different
+        // font size's own now-unrelated content.
+        if (dstIndex > 0) {
+            std::fill(lines_.data(), lines_.data() + dstIndex * stride, 32);
         }
-        numLines_ = linesWritten;
+        numLines_ = keptLines;
     }
 
     txt_size(size);
 }
 
-void Screen::reflow() {
+void Screen::reflow(std::uint8_t oldROWS) {
     // The flat buffer's rows are already colsCapacity_ bytes wide -- sized
     // for the largest COLS_ this Screen can ever use (see screen_pars()'s
     // own comment) -- so unlike the old per-line vectors, there's nothing
@@ -476,25 +487,39 @@ void Screen::reflow() {
     // Clamp the live cursor/line-tracking state to the new dimensions so
     // it doesn't point past the (possibly narrower/shorter) new layout.
     if (col_ >= COLS_) col_ = static_cast<std::uint8_t>(COLS_ > 0 ? COLS_ - 1 : 0);
-    // FIXED: was just "if (row_ >= ROWS_) row_ = ROWS_ - 1" -- only ever
-    // handles ROWS_ SHRINKING (row_ now overflows the smaller screen).
-    // Switching to a LARGER ROWS_ (e.g. a smaller font, after the screen
-    // had already scrolled at the previous, smaller ROWS_) left row_
-    // completely unchanged at its old, smaller-screen-relative value --
-    // confirmed on real hardware: the cursor (and all new typing) landed
-    // stuck partway down the new, taller screen, with a gap of blank
-    // rows both above AND below it, rather than moving to sit right
-    // after the actual most-recent content the way it should. Only
-    // meaningful for the "live" view (offset_ == 0) -- while scrolled
-    // back into history (offset_ > 0), the cursor isn't visible on
-    // screen at all regardless, so its exact row_ value doesn't matter
-    // until the user scrolls back to live view anyway (which resets
-    // offset_ to 0, at which point this same formula applies again
-    // naturally on the next reflow()).
-    if (offset_ == 0) {
-        const std::size_t visibleLines = actualNumLines < ROWS_ ? actualNumLines : ROWS_;
-        row_ = static_cast<std::uint8_t>(visibleLines > 0 ? visibleLines - 1 : 0);
+    // FIXED (again): the repositioning below -- correct and needed for a
+    // REAL vertical layout change (a font-size switch changing ROWS_) --
+    // was firing unconditionally, on EVERY reflow() call, including pure
+    // width-only ones (the button strip narrowing text width, e.g. when
+    // the menu opens) that never touch ROWS_ at all. It used numLines_ to
+    // recompute row_ -- but numLines_ was still sitting at its stale
+    // pre-scroll value (see screen_pars()'s own oldROWS check, which now
+    // correctly skips ITS OWN fix-up for the same width-only case) for
+    // any screen that hadn't scrolled yet, so this recomputed row_ as if
+    // the screen were full, yanking already-correctly-positioned text
+    // (and the cursor) down to the bottom -- confirmed on real hardware:
+    // opening the menu alone, font size never touched, did exactly this.
+    // Only apply the repositioning when the caller actually says ROWS_
+    // changed (oldROWS passed in, and different from the CURRENT ROWS_,
+    // already updated by screen_pars() before this runs) -- true for
+    // setTextSize()'s own call, false for setTextWidth()'s.
+    if (oldROWS != 0 && oldROWS != ROWS_) {
+        // Only meaningful for the "live" view (offset_ == 0) -- while
+        // scrolled back into history (offset_ > 0), the cursor isn't
+        // visible on screen at all regardless, so its exact row_ value
+        // doesn't matter until the user scrolls back to live view anyway
+        // (which resets offset_ to 0, at which point this same formula
+        // applies again naturally on the next real ROWS_ change).
+        if (offset_ == 0) {
+            const std::size_t visibleLines = actualNumLines < ROWS_ ? actualNumLines : ROWS_;
+            row_ = static_cast<std::uint8_t>(visibleLines > 0 ? visibleLines - 1 : 0);
+        } else if (row_ >= ROWS_) {
+            row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
+        }
     } else if (row_ >= ROWS_) {
+        // Safety clamp regardless of the above -- shouldn't normally
+        // trigger when ROWS_ itself never changed, but guards against
+        // row_ ever being left out of bounds for some other reason.
         row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
     }
     if (cnt_ > COLS_) cnt_ = COLS_;

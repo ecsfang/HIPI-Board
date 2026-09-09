@@ -116,11 +116,11 @@ Button pressedButton = Button::None;
 // short enough to feel snappy, several steps so the motion actually reads
 // as a slide rather than a jump.
 constexpr int kSlideSteps = 8;
-constexpr std::uint32_t kSlideStepDelayMs = 12;
+constexpr std::uint32_t kSlideStepDelayMs = 30;
 // Hiding felt rushed at the same pace as showing -- a bit longer per
 // step here specifically, so it reads as a deliberate slide rather than
 // a blink.
-constexpr std::uint32_t kHideStepDelayMs = 24;
+constexpr std::uint32_t kHideStepDelayMs = 40;
 
 // Splits buttonStripWidth into kSlideSteps horizontal slices (the last
 // one absorbs whatever doesn't divide evenly) -- used by
@@ -149,17 +149,29 @@ void showButtonStrip() {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
     // Builds the strip up in kSlideSteps horizontal slices, entirely
-    // on-screen. NOT using BTE (see hideButtonStrip()'s own comment for
-    // why -- same reasoning applies to both directions, confirmed on
-    // real hardware: BTE freezes/corrupts the display on this board
-    // regardless of direction, not just the overlapping-move case this
-    // comment originally worried about). Instead, each step redraws the
-    // WHOLE currently-visible portion fresh from buttonStripPixels
-    // (already sitting in MCU memory) at its new position -- more data
-    // moved per step than a true incremental shift would need, but no
-    // hardware block-move involved at all. Same technique proven out
-    // with a plain colour box in display_boot_test.hpp's
-    // runNoBteSlideTest() before being applied here to the real bitmap.
+    // on-screen. NOT using BTE for a MOVE (see hideButtonStrip()'s own
+    // comment for why -- confirmed on real hardware that BTE's own
+    // "Memory Copy" mode froze/corrupted the display, root-caused since
+    // to using the SAME SDRAM address for source and destination -- see
+    // LT7683::bteMcuWriteBitmap()'s own file-header comment for the full
+    // story and the now-working, correctly-addressed BTE path for
+    // straight MCU-write draws).
+    //
+    // Each step redraws the WHOLE currently-visible portion fresh from
+    // buttonStripPixels (already sitting in MCU memory) at its new
+    // position. An attempt at only drawing each step's own newly-
+    // revealed slice (skipping the redundant redraw of the rest) was
+    // tried and reverted: because this always crops from SOURCE column
+    // 0 (see the comment on that below), the on-screen position of
+    // already-drawn content actually shifts left a little on EVERY step
+    // (not just the leading edge) -- correctly reproducing that shift
+    // without redrawing needs an actual pixel MOVE in SDRAM (BTE's
+    // "Memory Copy" mode), not just skipping work, and confirmed on
+    // real hardware that skipping the shift step entirely mirrored the
+    // bitmap left-right once fully revealed. 30MHz SPI (raised from the
+    // original 6MHz -- see initDisplay()'s own comment) made the full
+    // redraw here fast enough that this was no longer the bottleneck it
+    // once was anyway.
     std::uint16_t segW[kSlideSteps];
     computeSegmentWidths(segW);
 
@@ -207,8 +219,26 @@ void hideButtonStrip() {
     // without corrupting/freezing the whole display, confirmed across
     // extensive testing (see LT7683::BTE()'s own comment for the full
     // story) -- not something fixable by picking the right opcode or
-    // corner convention. Same fresh-redraw-from-source approach as
-    // showButtonStrip() above, just shrinking instead of growing.
+    // corner convention.
+    //
+    // This DOES need to redraw the remaining, still-visible content
+    // fresh every step, not just clear the vacated edge -- a mistake
+    // made (and confirmed wrong on real hardware) more than once already
+    // in this same investigation, worth spelling out clearly: since
+    // showButtonStrip() always crops from SOURCE column 0 (see its own
+    // comment for why), the on-screen position of every already-drawn
+    // pixel is tied to the CURRENT accumulated width, not fixed -- e.g.
+    // source column 0 sits at screen X = (SCREEN_MAX_X - accumWidth),
+    // which moves right by exactly this step's own shrink amount every
+    // time accumWidth shrinks. Only clearing the newly-vacated sliver
+    // and leaving the rest alone (tried and reverted) leaves the
+    // remaining pixels sitting at their OLD screen positions -- visibly
+    // wrong: chopping off the source bitmap's OWN left edge in place,
+    // rather than the correct behaviour (matching showButtonStrip()'s
+    // own reveal, played backwards): the whole remaining image shifting
+    // right, uncovering blank space on the left, with the source
+    // bitmap's own trailing (right) edge the part that actually
+    // disappears off the panel's edge each step.
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
     std::uint16_t segW[kSlideSteps];
@@ -219,16 +249,24 @@ void hideButtonStrip() {
         const std::uint16_t lastW = segW[i];
         const auto keepWidth = static_cast<std::uint16_t>(accumWidth - lastW);
         const auto srcX = static_cast<std::uint16_t>(SCREEN_MAX_X - accumWidth);
-        // Blacken the whole previously-visible block first (simpler than
-        // computing just the newly-exposed sliver, and cheap: fillRect()
-        // is a single hardware geometry-engine call, not a per-pixel
-        // transfer), then redraw the shrunk remainder fresh on top.
+        // FIXED: was blackening the WHOLE previously-visible block
+        // (width=accumWidth) every step, even though the very next line
+        // immediately redraws most of that same area right back --
+        // exactly the extra work (and extra hardware geometry-engine
+        // call, complete with its own completion wait) that made this
+        // direction visibly choppier than showButtonStrip()'s own single-
+        // call-per-step reveal. Only the newly-vacated sliver (this
+        // step's own shrink amount, srcX to dstX below) actually needs
+        // clearing -- the rest of the old area gets fully covered by the
+        // redraw immediately after anyway.
         display_->fillRect(static_cast<std::int16_t>(srcX), 0,
-                           static_cast<std::int16_t>(accumWidth), buttonStripHeight, 0x0000);
+                           static_cast<std::int16_t>(lastW), buttonStripHeight, 0x0000);
         if (keepWidth > 0) {
             const auto dstX = static_cast<std::int16_t>(SCREEN_MAX_X - keepWidth);
-            // Same fix as showButtonStrip() above -- crop from source
-            // column 0, growing/shrinking, not from (width - keepWidth).
+            // Crop from source column 0, same convention as
+            // showButtonStrip() -- NOT from (width - keepWidth), which
+            // would show the bitmap's trailing columns instead of its
+            // leading ones (backwards from how it was revealed).
             display_->drawBitmap565Cropped(dstX, 0, keepWidth, buttonStripHeight,
                                            buttonStripWidth,
                                            buttonStripPixels.data());
@@ -646,6 +684,13 @@ void boardui_init(Screen* screen, UiDialog* dialog, const char* version) {
     dialog_  = dialog;
     version_ = version;
 
+    // Shift+Ok ("EXIT") always means "leave and hide the buttons" -- see
+    // UiDialog::setExitRequestedCallback()'s own comment for why this
+    // needs to live here rather than inside UiDialog itself.
+    dialog_->setExitRequestedCallback([]() {
+        hideButtonStrip();
+    });
+
     // Initial USB/PILBOX status LED state is picked up by the periodic
     // updateStatusLed() check in boardui_poll() (runs on the very first
     // call too), so no one-shot draw is needed here.
@@ -794,6 +839,18 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 
 void boardui_handleRelease() {
     if (pressedButton == Button::None) return;
+    // The button strip may have been hidden entirely DURING the press
+    // (e.g. Shift+Ok -- see UiDialog::setExitRequestedCallback()'s own
+    // comment -- calls hideButtonStrip() from inside boardui_handleTap()
+    // itself, before this release ever fires). Without this check, the
+    // redraw below would blindly restore the pressed button's "normal"
+    // look onto what should now be a blank area -- confirmed on real
+    // hardware as a leftover "ghost" Ok button visible after Shift+Ok
+    // hid everything else.
+    if (!buttonStripVisible) {
+        pressedButton = Button::None;
+        return;
+    }
     // Same active-window reset as boardui_handleTap() above, and for the
     // same reason -- restoring the button's normal appearance here draws
     // into the strip's own area too.

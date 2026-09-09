@@ -51,10 +51,15 @@ public:
     void delayMs(std::uint32_t ms) override;
     void delayUs(std::uint32_t us) override;
 
+    // See this class's own .cpp constructor comment for why this can
+    // differ from what was requested.
+    std::uint32_t actualBaudrate() const { return actualBaudrate_; }
+
 private:
     spi_inst_t* spi_;
     std::uint32_t cs_;
     std::uint32_t rst_;
+    std::uint32_t actualBaudrate_ = 0;
 };
 
 }  // namespace hipi

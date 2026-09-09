@@ -121,7 +121,14 @@ public:
     // to fill the current ROWS_, instead of wiping the buffer outright.
     // Used by setTextSize()/setColumns() so changing font size or column
     // count preserves existing text.
-    void reflow();
+    // oldROWS: the ROWS_ value from just before the caller's own
+    // screen_pars() call -- 0 (the default) means "not applicable, skip
+    // the row_-repositioning logic that needs it" (matches every OTHER
+    // caller of reflow() throughout Screen.cpp, none of which change
+    // ROWS_ at all -- only setTextSize()/setTextWidth() do, and both now
+    // pass their own captured value explicitly). See reflow()'s own .cpp
+    // comment for why this matters.
+    void reflow(std::uint8_t oldROWS = 0);
 
     // Change text size (0..3 -> built-in CGRAM, 4 -> custom "fon" mode).
     void txt_size(std::uint8_t size);
@@ -181,9 +188,10 @@ public:
     // no knowledge of where the button strip lives on screen).
     std::uint16_t textWidth() const { return textWidth_; }
     void setTextWidth(std::uint16_t w) {
+        const std::uint8_t oldROWS = ROWS_;
         textWidth_ = w;
         screen_pars(size_);
-        reflow();
+        reflow(oldROWS);
     }
 
     // Change the screen's own foreground text color (persisted -- survives
@@ -208,7 +216,11 @@ public:
     // an extra, premature redraw. With that fixed, reflow() here is
     // correct: setTextWidth() below uses the same approach for the same
     // reason (e.g. the button strip narrowing/widening the text area).
-    void setTextSize(std::uint8_t size) { screen_pars(size); reflow(); }
+    void setTextSize(std::uint8_t size) {
+        const std::uint8_t oldROWS = ROWS_;
+        screen_pars(size);
+        reflow(oldROWS);
+    }
 
     // Cursor-mode commands (HP82163 ESC-60/62, 81/82, 65..68, 72, 37).
     void cursor(std::uint8_t cur);

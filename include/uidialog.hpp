@@ -99,6 +99,26 @@ public:
     void setColorChangedCallback(std::function<void(std::uint16_t)> cb) {
         onColorChanged_ = std::move(cb);
     }
+    // Shift+Ok ("EXIT" on the button graphic) -- called whenever that
+    // combo is pressed, whether or not a menu was actually open at the
+    // time (see handleButton()'s own comment for why this now fires
+    // unconditionally). boardui.cpp registers this to actually hide the
+    // button strip -- UiDialog itself has no access to that (it lives
+    // in a different file/namespace), only to its own menu state.
+    void setExitRequestedCallback(std::function<void()> cb) {
+        onExitRequested_ = std::move(cb);
+    }
+    // Called once at startup (from pico_main.cpp, right after config's
+    // own filename() is known) so openFilePicker() can highlight the
+    // file that was actually loaded at boot -- without this, only a
+    // file picked LATER via the menu itself (which sets this same
+    // member, in applyFile()) would ever get highlighted; the very
+    // first time the menu is opened, before the user has ever used it
+    // to pick anything, it fell back to the list's first entry
+    // regardless of what was actually loaded.
+    void setCurrentFile(const std::string& filename) {
+        lastAppliedFile_ = filename;
+    }
 
     // Called with the newly chosen (trace, debug) pair whenever the user
     // picks Off/On/Extended in the "Trace" menu (after the globals bTrace
@@ -140,8 +160,15 @@ public:
     bool isOpen() const { return state_ != State::Closed; }
 
     // Anropas fran huvudloopen nar en knapp-touch upptäcks.
+    // Shift+Ok closes the menu from any depth (see the check right
+    // below). A Shift tap is consumed just like any other button press
+    // by the "touch that woke the strip is consumed" skip in
+    // boardui.cpp -- confirmed intentional/expected: waking the strip
+    // and pressing a button are deliberately kept as two separate taps,
+    // so the very first tap after the strip's been hidden never presses
+    // anything, Shift included, even if it happens to land on the
+    // Shift button's own position.
     void handleButton(Button b) {
-
         if (b == Button::Shift) {
             shiftPending_ = true;   // latch for the *next* button press
             return;
@@ -149,10 +176,21 @@ public:
         const bool shifted = shiftPending_;
         shiftPending_ = false;      // consumed by this button press, whatever it is
 
-        // Shift+OK ("EXIT" on the button graphic) leaves the menu entirely,
-        // from any depth -- unlike X ("<--"), which only goes up one level.
-        if (shifted && b == Button::Ok && isOpen()) {
+        // Shift+OK ("EXIT" on the button graphic) always means "leave
+        // entirely and hide the buttons" -- whether or not a menu
+        // happens to be open at the time. Previously required isOpen(),
+        // so pressing Shift+Ok with the strip showing but no menu open
+        // (e.g. right after the strip's own wake tap, before a
+        // separate Ok has actually opened anything) fell through to
+        // ordinary Ok handling instead (opening the menu, since
+        // Button::Ok normally does that from State::Closed) -- confirmed
+        // as genuinely confusing, not the intended behaviour. close()
+        // itself is harmless to call even when already closed (just a
+        // redundant, cheap re-resume/redraw), so no isOpen() guard is
+        // needed here at all any more.
+        if (shifted && b == Button::Ok) {
             close();
+            if (onExitRequested_) onExitRequested_();
             return;
         }
 
@@ -224,8 +262,8 @@ public:
                 break;
 
             case State::FilePicker:
-                if (b == Button::Up)   moveSelection(-1, static_cast<int>(files_.size()));
-                if (b == Button::Down) moveSelection(+1, static_cast<int>(files_.size()));
+                if (b == Button::Up)   moveFileSelection(-1);
+                if (b == Button::Down) moveFileSelection(+1);
                 if (b == Button::Ok)   openConfirmFile(files_[selected_]);
                 if (b == Button::X)    openConfigMenu();
                 break;
@@ -388,9 +426,12 @@ private:
     void enterSettingsMenuItem() {
         if (selected_ == 0) {
             state_ = State::ColorPicker;
-            selected_ = 0;
+            selected_ = 0;  // "White" if no exact match found below
+            for (int i = 0; i < kColorCount; ++i) {
+                if (kColors[i] == screen_.color()) { selected_ = i; break; }
+            }
             drawBox();
-            for (int i = 0; i < kColorCount; ++i) drawRow(i, kColorLabels[i]);
+            drawColorList();
         } else if (selected_ == 1) {
             openFontSizeMenu();
         } else if (selected_ == 2) {
@@ -401,8 +442,20 @@ private:
             // Bootsel mode -- immediate action (like "Clear plotter" in
             // the Display menu), not a pickable state: reboots straight
             // into the RP2350's USB mass-storage bootloader, ready for a
-            // new .uf2 to be dragged onto it. Never returns -- no close()
-            // call needed/reachable after this.
+            // new .uf2 to be dragged onto it. reset_usb_boot() never
+            // returns, so there's no "after" state to show -- the
+            // feedback message has to be drawn and actually visible
+            // BEFORE calling it, not something the user navigates away
+            // from afterward.
+            drawBox();
+            d_->txtColor(0xFFFF, 0x0000);
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+            d_->txtWrite("Entering Bootsel mode...");
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+            d_->txtWrite("Drag a new .uf2 onto the");
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
+            d_->txtWrite("drive that appears.");
+            sleep_ms(1500);  // long enough to actually read before reboot
             reset_usb_boot(0, 0);
         }
     }
@@ -485,11 +538,70 @@ private:
             f_closedir(&dir);
         }
         state_ = State::FilePicker;
+        // Find and highlight the last file actually applied, same idea
+        // as every other multi-choice menu (Textcolor/Font size/
+        // Brightness/Columns) -- falls back to index 0 (the first file
+        // in the list) if it's not found (e.g. nothing's ever been
+        // applied yet this session, or that file's been deleted/renamed
+        // since).
         selected_ = 0;
-        drawBox();
-        for (std::size_t i = 0; i < files_.size() && i < static_cast<std::size_t>(kMaxFilesShown); ++i) {
-            drawRow(static_cast<int>(i), files_[i].c_str());
+        for (std::size_t i = 0; i < files_.size(); ++i) {
+            if (files_[i] == lastAppliedFile_) { selected_ = static_cast<int>(i); break; }
         }
+        // Unlike every other menu here, this list can hold more entries
+        // than fit in the box at once (kMaxFilesShown) -- previously
+        // always showed just the first kMaxFilesShown files regardless
+        // of where the selection actually was, silently hiding it
+        // whenever it fell further down the list than that. Scrolls the
+        // window so the selected entry is visible from the start now,
+        // same as moveFileSelection() keeps it during Up/Down navigation.
+        fileScrollOffset_ = 0;
+        if (selected_ >= kMaxFilesShown) {
+            fileScrollOffset_ = selected_ - kMaxFilesShown + 1;
+        }
+        drawBox();
+        drawFileList();
+    }
+
+    // Redraws the currently-scrolled-to window of files_ into the menu
+    // box -- shared by openFilePicker() (initial draw) and
+    // moveFileSelection() (whenever scrolling is needed after Up/Down).
+    void drawFileList() {
+        for (int row = 0; row < kMaxFilesShown; ++row) {
+            const std::size_t fileIndex = static_cast<std::size_t>(fileScrollOffset_ + row);
+            if (fileIndex >= files_.size()) break;
+            // drawRow()'s own highlight check compares against selected_
+            // directly (an absolute files_ index), but its own cursor
+            // positioning uses its "index" argument for the row's Y
+            // position -- pass the SCREEN row here, but fake selected_
+            // temporarily isn't needed since drawRow() takes the label
+            // separately; just need the highlight test itself to use the
+            // right (absolute) index. Simplest: reimplement the same two
+            // lines drawRow() itself uses, with row for position and
+            // fileIndex for the highlight comparison.
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
+            const bool isSelected = (static_cast<int>(fileIndex) == selected_);
+            d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
+            d_->txtWrite(files_[fileIndex].c_str());
+        }
+    }
+
+    // Up/Down navigation for State::FilePicker specifically -- moveSelection()
+    // (used by every other, always-fits-on-screen menu) only ever redraws
+    // the two rows whose highlight changed, which isn't enough here: when
+    // the selection moves past the edge of the currently-visible window,
+    // the window itself has to scroll, and every visible row's actual
+    // file content (not just which one is highlighted) changes at once.
+    void moveFileSelection(int delta) {
+        const int count = static_cast<int>(files_.size());
+        if (count == 0) return;
+        selected_ = (selected_ + delta + count) % count;
+        if (selected_ < fileScrollOffset_) {
+            fileScrollOffset_ = selected_;
+        } else if (selected_ >= fileScrollOffset_ + kMaxFilesShown) {
+            fileScrollOffset_ = selected_ - kMaxFilesShown + 1;
+        }
+        drawFileList();
     }
 
     // Shows every device in the HP-IL chain (see the `devices` global from
@@ -605,7 +717,33 @@ private:
 
     void applyFile(const std::string& filename) {
         LOGF("\r\n * Selected file: %s", filename.c_str());
+        lastAppliedFile_ = filename;  // see openFilePicker()'s own comment
         if (onFileSelected_) onFileSelected_(filename);
+    }
+
+    // Draws every entry in kColorLabels using ITS OWN colour (kColors[i])
+    // as the text colour, rather than the generic white/black scheme
+    // drawRow() uses everywhere else -- makes each option visually show
+    // what picking it actually looks like, not just its name. Selection
+    // is shown via a neutral dark grey background instead of drawRow()'s
+    // own yellow -- a fixed highlight colour couldn't work here (e.g.
+    // yellow text would vanish against a yellow highlight), while the
+    // background/text colours staying independent works for all of them,
+    // including White and Yellow themselves.
+    // See drawColorList()'s own comment for why this differs from
+    // drawRow(). Single-row version so highlightRow() (redraws just the
+    // one row whose highlight changed, on Up/Down) doesn't need to
+    // redraw all of kColorLabels every time the way drawColorList()
+    // itself does for the initial, full draw.
+    void drawColorRow(int i) {
+        constexpr std::uint16_t kSelectedBg = 0x39E7;  // neutral dark grey
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + i * MenuFrame::RowPitch);
+        d_->txtColor(kColors[i], i == selected_ ? kSelectedBg : 0x0000);
+        d_->txtWrite(kColorLabels[i]);
+    }
+
+    void drawColorList() {
+        for (int i = 0; i < kColorCount; ++i) drawColorRow(i);
     }
 
     void drawBox() {
@@ -637,7 +775,7 @@ private:
                 break;
             case State::ColorPicker:
                 if (index >= 0 && index < kColorCount)
-                    drawRow(index, kColorLabels[index]);
+                    drawColorRow(index);
                 break;
             case State::FontSizeMenu:
                 if (index >= 0 && index < kFontSizeCount)
@@ -681,10 +819,15 @@ private:
     bool shiftPending_ = false;   // latched by Button::Shift (any state),
                                     // consumed by the next button press
     std::vector<std::string> files_;
+    // See openFilePicker()'s own comment for why these exist -- neither
+    // did before.
+    int fileScrollOffset_ = 0;
+    std::string lastAppliedFile_;
     std::string pendingFile_;
     std::vector<std::string> deviceLabels_;
     std::function<void(const std::string&)> onFileSelected_;
     std::function<void(std::uint16_t)> onColorChanged_;
+    std::function<void()> onExitRequested_;
     std::function<void(bool, bool)> onTraceChanged_;
     std::function<void(std::uint8_t)> onFontSizeChanged_;
     std::function<void(std::uint8_t)> onBrightnessChanged_;

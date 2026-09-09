@@ -5,6 +5,7 @@
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
+#include "hardware/resets.h"
 #include "pico/time.h"
 #include "hpil.pio.h"
 #include "usb_serial.h"
@@ -141,6 +142,22 @@ public:
 
 private:
     void init() {
+        // Explicit hardware reset of the whole PIO0 block first, before
+        // touching anything else. RP2040/RP2350's PIO peripherals are
+        // NOT reset by a software/watchdog reset -- only by a full power
+        // cycle (or this explicit RESETS-block reset) -- so any state
+        // left over from a previous run (a crash, a watchdog reboot, or
+        // even just a debugger-triggered restart) can leave a state
+        // machine mid-program, its FIFOs non-empty, or its GPIO function
+        // assignments stale, none of which pio_sm_init() below alone
+        // guarantees is cleared (it resets the state machine's OWN
+        // program counter/config, not the block's overall hardware
+        // state). Matches "sometimes HP-IL just doesn't come up, but a
+        // restart fixes it" exactly -- a power-on boot always starts
+        // clean, but a soft reset doesn't reliably.
+        reset_block(RESETS_RESET_PIO0_BITS);
+        unreset_block_wait(RESETS_RESET_PIO0_BITS);
+
         sm_rx_ = pio_claim_unused_sm(pio0, true);
         sm_tx_ = pio_claim_unused_sm(pio0, true);
         uint rx_offset = pio_add_program(pio0, &frame_rx_program);

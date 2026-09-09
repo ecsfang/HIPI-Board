@@ -266,6 +266,46 @@ public:
              std::uint16_t w,   std::uint16_t h,
              std::uint16_t x0 = 0, std::uint16_t y0 = 0);
 
+    // See its own file-header comment in the .cpp for the full story --
+    // this is the actual, working BTE implementation (BTE_MCU_Write with
+    // ROP, per the manufacturer's own Application Note), meant as a
+    // faster alternative to drawBitmap565Cropped() for exactly the same
+    // signature/use case (the button strip's own sliding-bitmap
+    // animation, drawn via plain MRWDP so far).
+    void bteMcuWriteBitmap(std::int16_t x, std::int16_t y,
+                           std::uint16_t drawWidth, std::uint16_t h,
+                           std::uint16_t srcStride,
+                           const std::uint16_t* data);
+    // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
+    // 0 ("BTE function is idle") -- per the datasheet's own note that
+    // normal host read/write through the canvas/active window isn't
+    // allowed while this bit is still 1, this must be called (and
+    // return) before any other drawing call that follows a BTE
+    // operation.
+    // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
+    // 0 ("BTE function is idle") -- per the datasheet's own note that
+    // normal host read/write through the canvas/active window isn't
+    // allowed while this bit is still 1, this must be called (and
+    // return) before any other drawing call that follows a BTE
+    // operation. Returns how many 1ms polling iterations it actually
+    // took (0..499), or -1 if it timed out without the bit ever
+    // clearing -- see lastBteIdleWaitIters() for why this is tracked.
+    int waitBteIdle();
+    // How many iterations (or -1 for timeout) the most recent
+    // waitBteIdle() call took -- exposed for diagnosing BTE performance
+    // (bteMcuWriteBitmap() was confirmed several times slower than the
+    // plain MRWDP path it was meant to speed up; this pinpoints whether
+    // that's really this wait specifically, and how close to timing out
+    // it's actually getting, rather than continuing to guess).
+    int lastBteIdleWaitIters() const { return lastBteIdleWaitIters_; }
+    // One full 16bpp framebuffer's worth of SDRAM (1024*600*2 bytes)
+    // away from address 0 (this project's own live display) -- the
+    // manufacturer's own examples always space S0/S1/Destination this
+    // far apart; see bteMcuWriteBitmap()'s own comment for why S1 needs
+    // a real, distinct address here even though its contents are never
+    // actually used.
+    static constexpr std::uint32_t kBteLayer2Addr = 1024UL * 600UL * 2UL;
+
     // -----------------------------------------------------------------------
     // Power / reset / backlight
     // -----------------------------------------------------------------------
@@ -406,6 +446,8 @@ public:
     std::uint8_t  txtScale()   const { return txtScale_; }
 
 private:
+    // See lastBteIdleWaitIters()'s own comment.
+    int lastBteIdleWaitIters_ = 0;
     void rectHelper (std::int16_t x1, std::int16_t y1, std::int16_t x2, std::int16_t y2,
                      std::uint16_t color, bool filled);
     void circleHelper(std::int16_t x, std::int16_t y, std::uint16_t r, std::uint16_t color, bool filled);

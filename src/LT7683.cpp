@@ -308,72 +308,164 @@ void LT7683::BTE(std::uint8_t opcode,
                  std::uint16_t x1, std::uint16_t y1,
                  std::uint16_t w, std::uint16_t h,
                  std::uint16_t x0, std::uint16_t y0) {
-    // Confirmed against RA8876_common::bteMemoryCopy()/bteMemoryCopyWithROP():
-    // both check the core ISN'T ALREADY BUSY *before* touching any BTE
-    // register at all, and both explicitly force graphic mode right
-    // before triggering -- neither of which this project's own BTE() did
-    // before now. If whatever drawing call preceded this (e.g. the
-    // fillRect() calls drawing the squares being moved) left the core in
-    // a not-quite-finished state by the time control returned here, an
-    // immediate new trigger could race against that -- this closes that
-    // gap the same way the proven-working reference does.
-    for (int i = 0; i < 50; ++i) {
-        if ((readStatus() & STSR_CORE_BUSY) == 0) break;
-        t_.delayMs(1);
-    }
+    // Kept only for interface compatibility -- unused parameters silence
+    // warnings. See bteMcuWriteBitmap() below for the actual, working
+    // BTE implementation this project now uses.
+    (void)opcode; (void)x1; (void)y1; (void)w; (void)h; (void)x0; (void)y0;
+}
+
+// -----------------------------------------------------------------------
+// BTE MCU Write with ROP -- streams pixel data from MCU memory straight
+// into a rectangular region of the visible display, via the BTE engine
+// instead of plain MRWDP writes (see drawBitmap565Cropped() for the
+// non-BTE equivalent this is meant to speed up).
+//
+// Root-caused via the manufacturer's own Application Note
+// (L768_AP-Note_ENG_V1_2.pdf, sections 10.1/10.2.1, pages 61 and 63-64)
+// and a follow-up direct answer from the manufacturer's own engineer,
+// after every earlier attempt at BTE on this project froze the panel:
+//
+// 1. S1 must ALWAYS be configured with a valid start address, even in
+//    operation modes (like this one) whose ROP function completely
+//    ignores S1's actual contents -- confirmed by BOTH official example
+//    flowcharts (Memory Copy AND MCU Write) always including an S1 setup
+//    step. This project's own earlier attempt left S1 untouched entirely
+//    (following a different, unrelated reference driver's own -- for
+//    this chip, incorrect -- assumption that S1 could be skipped).
+//
+// 2. S0, S1, and Destination must use DISTINCT, non-overlapping SDRAM
+//    addresses -- confirmed directly by the manufacturer ("you need to
+//    be very careful with each layer's SDRAM address") and by every
+//    official example, which always spaces them a full layer apart
+//    (1024*600*2 bytes, one whole 16bpp framebuffer's worth) -- e.g.
+//    layer1=0 (the live, actively-scanned-out display), layer2=1024*600*2,
+//    layer3=1024*600*2*2, etc. This project's own earlier attempt used
+//    address 0 for BOTH the source AND destination of a Memory Copy --
+//    reading from and writing to the SAME live framebuffer region BTE
+//    was simultaneously scanning out to the panel, which is almost
+//    certainly what actually froze the display, independent of the
+//    missing-S1 issue above.
+//
+// This function sidesteps the address-collision risk entirely by using
+// BTE's own "MCU Write with ROP" mode (opcode 0000b) instead of "Memory
+// Copy" (0010b): the real pixel data streams directly from MCU RAM (this
+// project's own buttonStripPixels, exactly like drawBitmap565Cropped()
+// already does over plain MRWDP) rather than needing to be pre-loaded
+// into a second SDRAM layer first. S1 still needs a valid, distinct
+// address (see point 1 above) even though ROP 0xC ("DT = S0") means its
+// contents are completely ignored -- kBteLayer2Addr, one full layer away
+// from the live display at address 0, same spacing the manufacturer's
+// own examples use.
+void LT7683::bteMcuWriteBitmap(std::int16_t destX, std::int16_t destY,
+                               std::uint16_t drawWidth, std::uint16_t h,
+                               std::uint16_t srcStride,
+                               const std::uint16_t* data) {
+    // Precondition per the datasheet's own REG[90h] bit4 description:
+    // "When BTE function enable, Normal Host R/W memory through canvas
+    // doesn't allow" -- i.e. a PRIOR BTE operation must be fully
+    // finished (not just triggered) before starting a new one, or before
+    // this project's own other drawing calls touch the canvas at all.
+    waitBteIdle();
+
     gfxMode();
 
-    // S0/S1/DT each have a linear start ADDRESS plus a window X/Y offset
-    // within that -- mirrors how the Main Window (MISA/MIW) and Active
-    // Window (AWUL_X/Y) work together elsewhere in this chip. Since
-    // everything here operates within the single full-panel framebuffer
-    // starting at address 0, the start address is always 0 and the
-    // "width" is always the panel's own stride -- only the X/Y window
-    // offsets actually vary per call.
-    writeReg16(S0_STR0, 0);
-    writeReg16(static_cast<std::uint8_t>(S0_STR0 + 2), 0);
-    writeReg16(S0_WTH0, width_);
-    writeReg16(S0_X0, x0);
-    writeReg16(S0_Y0, y0);
+    // ---- S1: valid, distinct, off-screen address -- see this
+    // function's own file-header comment for why this can't just be
+    // skipped or left at 0 despite never actually being read for this
+    // ROP mode. Width/X/Y are otherwise irrelevant (never used by ROP
+    // 0xC), kept minimal but valid (4 is the smallest legal width, since
+    // REG[A1h] bit[1:0] must be 0 as documented, i.e. divisible by 4).
+    writeReg16(S1_STR0, static_cast<std::uint16_t>(kBteLayer2Addr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(S1_STR0 + 2),
+              static_cast<std::uint16_t>((kBteLayer2Addr >> 16) & 0xFFFF));
+    writeReg16(S1_WTH0, 4);
+    writeReg16(S1_X0, 0);
+    writeReg16(S1_Y0, 0);
 
-    // S1 deliberately left untouched -- confirmed against
-    // RA8876_common::bteMemoryCopy() itself (the plain, no-ROP-exposed
-    // variant, hardcoded to ROP=S0 same as this project always uses):
-    // its S1 calls are explicitly commented out there, never written at
-    // all. The earlier "S1 = all zeros" attempt (including S1 image
-    // WIDTH=0) may well have been actively harmful -- a zero stride is
-    // exactly the kind of value that could make internal address math
-    // misbehave -- unlike simply never touching those registers.
-
+    // ---- Destination: address 0 -- this project's own live display
+    // (layer1, per the manufacturer's own addressing scheme), at its
+    // real, full panel stride (NOT drawWidth -- DT_WTH0 is address-0's
+    // own natural row width, independent of how wide THIS PARTICULAR
+    // draw's BTE window is).
     writeReg16(DT_STR0, 0);
     writeReg16(static_cast<std::uint8_t>(DT_STR0 + 2), 0);
     writeReg16(DT_WTH0, width_);
-    writeReg16(DT_X0, x1);
-    writeReg16(DT_Y0, y1);
+    writeReg16(DT_X0, static_cast<std::uint16_t>(destX));
+    writeReg16(DT_Y0, static_cast<std::uint16_t>(destY + vertOffset_));
 
-    writeReg16(BLT_WTH0, w);
+    // ---- BTE window: how many pixels this specific draw covers.
+    writeReg16(BLT_WTH0, drawWidth);
     writeReg16(BLT_HIG0, h);
 
-    // REG[92h] (BLT_COLR): S0/S1/Destination colour depth -- confirmed
-    // against EastRising's own reference AND RA8876_common, both of which
-    // always set this before every BTE operation. bit[6:5]=01b (S0
-    // 16bpp), bit[4:2]=001b (S1 16bpp), bit[1:0]=01b (Destination 16bpp).
+    // REG[92h] (BLT_COLR): bit[6:5]=01b (S0 16bpp), bit[4:2]=001b (S1
+    // 16bpp), bit[1:0]=01b (Destination 16bpp).
     writeReg(BLT_COLR, 0x25);
 
-    writeReg(BLT_CTRL1, opcode);   // REG[91h]: ROP[7:4] + operation code[3:0]
-    // REG[90h] bit4: BTE enable/start -- blind write of just bit4,
-    // matching RA8876_Lite's own lcdRegDataWrite(RA8876_BTE_CTRL0,
-    // RA8876_BTE_ENABLE<<4) exactly.
+    // REG[91h]: ROP[7:4]=0xC ("DT = S0", i.e. show only the MCU-streamed
+    // data, completely ignoring S1) | operation code[3:0]=0000b (MCU
+    // Write with ROP).
+    writeReg(BLT_CTRL1, 0xC0);
+
+    // REG[90h] bit4=1: BTE enable/start.
     writeReg(BLT_CTRL0, 0x10);
-    // Busy-wait via the STATUS register's Core Task Busy bit (bit3, same
-    // STSR_CORE_BUSY used for the pre-check above and the post-reset/
-    // SDRAM-ready checks in begin()) -- matching RA8876_common's own
-    // check2dBusy(), which polls the dedicated STATUSREAD SPI command
-    // rather than a normal register read of REG[90h] itself.
-    for (int i = 0; i < 50; ++i) {
-        if ((readStatus() & STSR_CORE_BUSY) == 0) break;
+
+    // Stream the pixel data in fixed-size chunks -- matches
+    // drawBitmap565Cropped()'s own approach exactly (see its own
+    // comment for why chunking + a FIFO check per chunk, rather than
+    // per pixel, matters). The first (much slower) version of this
+    // function checked the FIFO and called writeData() twice PER PIXEL
+    // -- each writeData() call is its own individual SPI transaction
+    // (CS toggled low/high around just 2 bytes), so that was 3 separate
+    // SPI transactions per pixel (one FIFO-status read, two 1-byte
+    // writes) versus this chunked version's one FIFO-status read plus
+    // one bulk write per 32 pixels -- confirmed on real hardware to be
+    // the actual reason BTE measured *slower* than the plain MRWDP path
+    // it was meant to speed up, not BTE itself or waitBteIdle() (that
+    // measured instantly, 0 iterations, every time).
+    //
+    // Unlike drawBitmap565Cropped(), this can stream the ENTIRE region
+    // as one continuous run of chunks -- no per-row cursor repositioning
+    // needed, since BTE's own BLT_WTH0/BLT_HIG0 window (configured
+    // above) already tells the chip where each row wraps internally.
+    static std::uint8_t chunkBuf[1024 * 2];
+    constexpr std::size_t kChunkBytes = 64;
+    writeCmd(MRWDP);
+    for (std::uint16_t row = 0; row < h; ++row) {
+        const std::uint16_t* src = data + static_cast<std::size_t>(row) * srcStride;
+        for (std::uint16_t col = 0; col < drawWidth; ++col) {
+            chunkBuf[col * 2]     = static_cast<std::uint8_t>(src[col] & 0xFF);
+            chunkBuf[col * 2 + 1] = static_cast<std::uint8_t>(src[col] >> 8);
+        }
+        const std::size_t totalBytes = static_cast<std::size_t>(drawWidth) * 2;
+        std::size_t offset = 0;
+        while (offset < totalBytes) {
+            const std::size_t n = std::min(kChunkBytes, totalBytes - offset);
+            for (int i = 0; i < 100; ++i) {
+                if ((readStatus() & STSR_WR_FIFO_FULL) == 0) break;
+                t_.delayMs(1);
+            }
+            writeData(chunkBuf + offset, n);
+            offset += n;
+        }
+    }
+
+    // Wait for BTE to actually finish (REG[90h] bit4 back to 0) before
+    // returning -- see this function's own comment on why leaving it
+    // busy would block any of this project's other drawing calls that
+    // follow.
+    waitBteIdle();
+}
+
+int LT7683::waitBteIdle() {
+    for (int i = 0; i < 500; ++i) {
+        if ((readReg(BLT_CTRL0) & 0x10) == 0) {
+            lastBteIdleWaitIters_ = i;
+            return i;
+        }
         t_.delayMs(1);
     }
+    lastBteIdleWaitIters_ = -1;
+    return -1;  // timed out
 }
 
 // -----------------------------------------------------------------------

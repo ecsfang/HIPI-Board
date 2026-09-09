@@ -162,10 +162,24 @@ void initDisplay()
     gpio_set_function(3, GPIO_FUNC_SPI);   // MOSI
     gpio_set_function(0, GPIO_FUNC_SPI);   // MISO
 
+    // Raised from the original 6MHz -- confirmed against LT7683.pdf's
+    // own electrical characteristics table (Table A-21, "CLK SPI Input
+    // Clock ... Max. 50 MHz") that this chip is rated far higher; 6MHz
+    // was leaving most of the chip's own bandwidth unused, and was
+    // confirmed to be the dominant cost in a full-screen bitmap redraw
+    // (the button strip's own slide animation) on real hardware -- both
+    // the BTE and non-BTE draw paths measured close to the theoretical
+    // minimum SPI transfer time for the amount of pixel data involved,
+    // regardless of which draw path or how efficiently it batched
+    // writes. 30MHz leaves some margin below the chip's own 50MHz
+    // maximum for real-world signal integrity (wire length, etc.) while
+    // still being a large, direct multiple of the old speed.
     transport = new hipi::PicoSpiTransport(spi0,
-                                              /*baudrate=*/6'000'000,
+                                              /*baudrate=*/30'000'000,
                                               /*cs_gpio=*/1,
                                               /*rst_gpio=*/hipi::PicoSpiTransport::NO_RESET_PIN);
+    LOGF("\r\n * SPI baudrate: requested 30000000, actual %lu",
+         static_cast<unsigned long>(transport->actualBaudrate()));
     display = new hipi::DisplayDriver(*transport, SCREEN_MAX_X, SCREEN_MAX_Y);
 
     display->begin();
@@ -310,6 +324,7 @@ int main() {
     tud_task();
 
     dialog = new hipi::UiDialog(display, *screen);
+    dialog->setCurrentFile(config.filename());  // see its own comment
     dialog->setColorChangedCallback([](std::uint16_t c) { config.setTextColor(c); });
     dialog->setTraceChangedCallback([](bool t, bool d) { config.setTraceMode(t, d); });
     dialog->setFontSizeChangedCallback([](std::uint8_t s) { config.setFontSize(s); });
@@ -356,6 +371,24 @@ int main() {
     // Done! Start the HPIL monoitoring ...
     LOGF("\r\n=============================");
     LOGF("\r\nUp and running ...\r\n");
+
+    // Drain any stale/spurious touch state before waiting for a real
+    // one below -- the FT5316 controller can report a false "touch
+    // down" for a moment right after its own wake sequence (the WAKE_PIN
+    // toggling in touchInit(), or general power-up electrical noise on
+    // the panel), and touch_is_down() reads the controller live with no
+    // caching, so a stale reading here would make the wait loop below
+    // exit immediately, as if someone had already tapped the screen.
+    // Confirmed as intermittent, not every boot -- exactly what a
+    // power-up transient racing against this code's own timing would
+    // look like. Several reads with a small settle delay between them,
+    // discarding all of them, rather than just one -- a single extra
+    // read could still land during the same transient if it's longer
+    // than one iteration.
+    for (int i = 0; i < 5; ++i) {
+        touch_is_down();
+        sleep_ms(20);
+    }
 
     while (!time_reached(infoTimeout)) {
         tud_task();
