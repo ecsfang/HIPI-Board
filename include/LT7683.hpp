@@ -276,6 +276,48 @@ public:
                            std::uint16_t drawWidth, std::uint16_t h,
                            std::uint16_t srcStride,
                            const std::uint16_t* data);
+    // Low-level BTE "Memory Copy with ROP" (opcode 0010b, ROP 0xC --
+    // "DT = S0", same reasoning as bteMcuWriteBitmap()'s own ROP choice)
+    // -- moves a w x h pixel region from one SDRAM address/window to
+    // another, entirely within the chip, no SPI pixel data at all. NOT
+    // safe to call directly with source and destination regions that
+    // overlap in memory -- see bteScrollShift()'s own comment for why,
+    // and for the safe way to do an overlapping (in-place) shift.
+    // Unlike most other drawing calls in this class, this does NOT
+    // auto-apply vertOffset_ to srcY/dstY -- srcAddr/dstAddr can be
+    // arbitrary SDRAM layers (not just the live, address-0 panel this
+    // project's own vertical offset quirk applies to), so callers need
+    // to add it themselves for whichever of the two actually lands on
+    // the panel (see bteScrollShift()'s own use for an example).
+    void bteMemoryCopy(std::uint32_t srcAddr, std::uint16_t srcStride,
+                       std::int16_t srcX, std::int16_t srcY,
+                       std::uint32_t dstAddr, std::uint16_t dstStride,
+                       std::int16_t dstX, std::int16_t dstY,
+                       std::uint16_t w, std::uint16_t h);
+    // Shifts a w x h region UP by shiftRows pixel rows, entirely via BTE
+    // (no SPI pixel data), safely handling the fact that source and
+    // destination overlap when done in-place (moving content up within
+    // the SAME on-screen region: destination Y is LOWER than source Y,
+    // but by less than the full region height, so they cover common
+    // ground). Neither this chip's datasheet nor the manufacturer's own
+    // Application Note documents how (or whether) a single Memory Copy
+    // call handles that overlap safely on its own -- rather than risk
+    // it (BTE has already been confirmed, once, to corrupt/freeze this
+    // exact panel from a different addressing mistake -- see
+    // bteMcuWriteBitmap()'s own file-header comment), this goes via an
+    // intermediate staging copy in a third, entirely separate SDRAM
+    // layer instead: copy the region to be kept out to staging first
+    // (source and staging never overlap, regardless of scan order),
+    // then copy it back from staging to its new, shifted position
+    // (staging and the final destination never overlap either). Costs
+    // one extra SDRAM-to-SDRAM copy over a single, hardware-handled
+    // in-place shift would need, but that's still entirely internal to
+    // the chip -- no SPI pixel streaming either way -- and correctness
+    // doesn't depend on an internal scan-order guarantee this project
+    // has no way to confirm from the documentation available.
+    void bteScrollShift(std::int16_t x, std::int16_t y,
+                        std::uint16_t w, std::uint16_t h,
+                        std::uint16_t shiftRows);
     // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
     // 0 ("BTE function is idle") -- per the datasheet's own note that
     // normal host read/write through the canvas/active window isn't
@@ -305,6 +347,11 @@ public:
     // a real, distinct address here even though its contents are never
     // actually used.
     static constexpr std::uint32_t kBteLayer2Addr = 1024UL * 600UL * 2UL;
+    // One more full layer away from kBteLayer2Addr -- used as a staging
+    // area by bteScrollShift() below, kept entirely separate from
+    // kBteLayer2Addr's own role (S1's "valid but never read" address)
+    // so the two never risk colliding.
+    static constexpr std::uint32_t kBteLayer3Addr = 1024UL * 600UL * 2UL * 2UL;
 
     // -----------------------------------------------------------------------
     // Power / reset / backlight

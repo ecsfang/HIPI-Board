@@ -193,6 +193,10 @@ public:
              std::uint16_t x1,  std::uint16_t y1,
              std::uint16_t w,   std::uint16_t h,
              std::uint16_t x0 = 0, std::uint16_t y0 = 0);
+    void bteScrollShift(std::int16_t x, std::int16_t y,
+                            std::uint16_t w, std::uint16_t h,
+                            std::uint16_t shiftRows) {}
+
     // Matches LT7683::bteMcuWriteBitmap()/waitBteIdle() for interface
     // consistency -- not implemented for RA8875 (this project's own use
     // of BTE only exists on the 7" LT7683 panel so far), falls back to

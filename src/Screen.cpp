@@ -202,6 +202,42 @@ void Screen::up(bool roll, bool cmd) {
                         (usedAfter - 1) * static_cast<std::size_t>(colsCapacity_));
             std::fill(rowPtr(0), rowPtr(0) + colsCapacity_, 32);
             numLines_ = usedAfter;
+
+            // BTE fast path: this is the single most frequent redraw this
+            // whole class ever does (a natural scroll happens on every
+            // new line once the screen's full, i.e. constantly during
+            // normal HP-IL terminal use) -- full()'s own text-engine
+            // redraw re-renders every character of every visible row from
+            // scratch each time, even though ROWS_-1 of those rows'
+            // pixels are already correctly on screen, just one row
+            // higher than where they need to be. Shifts the RENDERED
+            // pixels up by one row's height entirely via BTE (no SPI
+            // pixel data at all -- see LT7683::bteScrollShift()'s own
+            // comment for how this avoids the overlapping-copy risk),
+            // then just blanks the newly-exposed bottom row -- the new
+            // line's own text isn't drawn here at all, it arrives via
+            // the normal, unchanged pr_char() path right after up()
+            // returns, same as it always has.
+            //
+            // Only safe/meaningful in the live view (offset_ == 0) --
+            // scrolled back into history, the newly-arrived line isn't
+            // even necessarily visible on screen at all, and full()'s
+            // own offset_-aware indexing already handles that case
+            // correctly; not worth the complexity of teaching this fast
+            // path the same logic when it's a comparatively rare case.
+            if (!suspended_ && offset_ == 0 && bteScrollEnabled_) {
+                const std::uint16_t pixelWidth =
+                    static_cast<std::uint16_t>(COLS_ * width_);
+                const std::uint16_t pixelHeight =
+                    static_cast<std::uint16_t>(ROWS_ * height_);
+                d_->bteScrollShift(0, 0, pixelWidth, pixelHeight, height_);
+                d_->fillRect(0, static_cast<std::int16_t>(pixelHeight - height_),
+                            pixelWidth, height_, 0x0000);
+                // fillRect() ändrar foreground color.
+                // Återställ Screen's textfärg innan pr_char() fortsätter skriva.
+                d_->txtColor(color_, 0);
+                return;
+            }
         } else {
             offset_ = (offset_ > 0) ? offset_ - 1 : 0;
         }

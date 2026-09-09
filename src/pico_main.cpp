@@ -69,6 +69,10 @@ extern void init_spi(void);
 
 #include <cstdio>
 
+// NeoPixel support
+#include "../PicoLed/PicoLed.hpp"
+#include "../PicoLed/Effects/Bounce.hpp"
+
 extern bool SDOK;
 extern void sd_dir();
 
@@ -148,6 +152,54 @@ void SetPinDriveStrength(uint pin, uint mA) {
     }
 }
 
+#define LED_PIN 26
+#define LED_LENGTH 2
+#define LED_PIO pio2
+
+// NeoPixels test
+void neoTest()
+{
+    // 0. Initialize LED strip
+    LOGF("\n\r0. Initialize LED strip\n\r");
+    auto ledStrip = PicoLed::addLeds<PicoLed::WS2812B>(LED_PIO, 0, LED_PIN, LED_LENGTH, PicoLed::FORMAT_GRB);
+    //if( !ledStrip ) {
+    //    LOGF("Failed to initialize LED strip on PIO %d, state machine %d, pin %d\n\r", LED_PIO, 0, LED_PIN);
+    //    return;
+    //}
+    ledStrip.setBrightness(64);
+    LOGF("1. Clear the strip!\n\r");
+    
+    // 1. Set all LEDs to red!
+    LOGF("1. Set all LEDs to red!\n\r");
+    ledStrip.fill( PicoLed::RGB(255, 0, 0) );
+    ledStrip.show();
+    sleep_ms(500);
+
+    // 2. Set all LEDs to green!
+    LOGF("2. Set all LEDs to green!\n\r");
+    ledStrip.fill( PicoLed::RGB(0, 255, 0) );
+    ledStrip.show();
+    sleep_ms(500);
+
+    // 3. Set all LEDs to blue!
+    LOGF("3. Set all LEDs to blue!\n\r");
+    ledStrip.fill( PicoLed::RGB(0, 0, 255) );
+    ledStrip.show();
+    sleep_ms(500);
+
+    // 4. Set half LEDs to red and half to blue!
+    LOGF("4. Set gradient from red to blue!\n\r");
+    ledStrip.fillGradient( PicoLed::RGB(255, 0, 0), PicoLed::RGB(0, 0, 255) );
+    ledStrip.show();
+    sleep_ms(1000);
+
+    // 5. Set half LEDs to red and half to blue!
+    LOGF("5. Set rainbow colors!\n\r");
+    ledStrip.fillRainbow(0, 255 / LED_LENGTH);
+    ledStrip.show();
+    sleep_ms(1000);
+}
+
 hipi::Screen *screen;
 hipi::UiDialog *dialog = nullptr;
 
@@ -210,7 +262,8 @@ int main() {
     //alienBegin();
     //alienStartup(2000);
 
-    ledA.blink(100, 150);
+    //ledA.blink(100, 150);
+    neoTest();
 
     initDisplay();
 

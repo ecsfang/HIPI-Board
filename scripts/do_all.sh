@@ -1,11 +1,77 @@
 #!/bin/bash
 
-set -e
+set -u
 
 PROJECT_DIR="$HOME/Projects/HIPI-Board"
 DOWNLOAD_DIR="$HOME/Downloads"
 PICO_MOUNT="/media/thomas/RP2350"
-UF2_FILE="$PROJECT_DIR/build/hipi_7_pico.uf2"
+
+# Defaults
+PANEL="7"
+FULL_BUILD=false
+ZIP_FILE=""
+
+
+# ------------------------------------------------------------
+# Tolka parametrar
+#
+# Tillåt:
+#   zip-fil
+#   5 eller 7
+#   ALL
+#
+# Argumenten kan anges i valfri ordning.
+# ------------------------------------------------------------
+
+for ARG in "$@"; do
+
+    case "$ARG" in
+
+        5)
+            PANEL="5"
+            ;;
+
+        7)
+            PANEL="7"
+            ;;
+
+        ALL)
+            FULL_BUILD=true
+            ;;
+
+        *.zip)
+            ZIP_FILE="$ARG"
+            ;;
+
+        *)
+            echo "FEL: Okänd parameter: $ARG"
+            echo
+            echo "Användning:"
+            echo "  $0 [zip-fil] [5|7] [ALL]"
+            echo
+            echo "Exempel:"
+            echo "  $0"
+            echo "  $0 ALL"
+            echo "  $0 5"
+            echo "  $0 5 ALL"
+            echo "  $0 projekt.zip"
+            echo "  $0 projekt.zip ALL"
+            echo "  $0 projekt.zip 5"
+            echo "  $0 projekt.zip 5 ALL"
+            exit 1
+            ;;
+
+    esac
+
+done
+
+
+# ------------------------------------------------------------
+# Filnamn för firmware
+# ------------------------------------------------------------
+
+UF2_FILE="$PROJECT_DIR/build/hipi_${PANEL}_pico.uf2"
+
 BUILD_LOG="/tmp/hipi_build.log"
 
 
@@ -20,24 +86,24 @@ pushd "$PROJECT_DIR" > /dev/null
 # Packa upp projekt om en zip-fil angivits
 # ------------------------------------------------------------
 
-if [ -n "$1" ]; then
+if [ -n "$ZIP_FILE" ]; then
 
-    ZIP_FILE="$DOWNLOAD_DIR/$1"
+    ZIP_PATH="$DOWNLOAD_DIR/$ZIP_FILE"
 
-    if [ -f "$ZIP_FILE" ]; then
+    if [ -f "$ZIP_PATH" ]; then
 
         echo
-        echo "=== Packar upp $1 ==="
+        echo "=== Packar upp $ZIP_FILE ==="
 
-        unzip -o "$ZIP_FILE" -x "scripts/*"
+        unzip -o "$ZIP_PATH" -x "scripts/*"
 
-        rm "$ZIP_FILE"
+        rm "$ZIP_PATH"
 
     else
 
         echo
         echo "FEL: Filen finns inte:"
-        echo "  $ZIP_FILE"
+        echo "  $ZIP_PATH"
         echo
 
         read -n 1 -s -r -p "Tryck på en tangent för att fortsätta..."
@@ -55,43 +121,74 @@ fi
 
 
 # ------------------------------------------------------------
-# Full eller incremental build
+# Visa vald konfiguration
 # ------------------------------------------------------------
 
-if [ "$2" = "ALL" ]; then
+echo
+echo "============================================================"
+echo " HIPI BUILD"
+echo "============================================================"
+echo
+echo "Panel: ${PANEL}\""
 
-    echo
+if [ "$FULL_BUILD" = true ]; then
+    echo "Build: FULL"
+else
+    echo "Build: incremental"
+fi
+
+echo
+
+
+# ------------------------------------------------------------
+# Full build
+# ------------------------------------------------------------
+
+if [ "$FULL_BUILD" = true ]; then
+
     echo "=== Full build ==="
 
     rm -rf build
 
-    cmake -DHIPI_BUILD_PANELS=7 -B build > "$BUILD_LOG" 2>&1
+    cmake -DHIPI_BUILD_PANELS="$PANEL" -B build > "$BUILD_LOG" 2>&1
 
-else
+    CMAKE_RESULT=$?
 
-    echo
-    echo "=== Incremental build ==="
+    if [ "$CMAKE_RESULT" -ne 0 ]; then
 
-    # Tvinga ombyggnad av projektets källkod
-    touch include/*
-    touch src/*
+        echo
+        echo "============================================================"
+        echo " FEL: CMAKE MISSLYCKADES"
+        echo "============================================================"
+        echo
+
+        cat "$BUILD_LOG"
+
+        echo
+        popd > /dev/null
+        exit 1
+
+    fi
 
 fi
 
 
 # ------------------------------------------------------------
-# Build med progress-indikator
+# Build
 # ------------------------------------------------------------
 
+echo "=== Building hipi_${PANEL}_pico ==="
 echo
-echo "=== Building ==="
 
-# Kör bygget i bakgrunden och spara all output
+
 cmake --build build -j"$(nproc)" > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 
 
-# Enkel progress-indikator
+# ------------------------------------------------------------
+# Enkel spinner medan bygget pågår
+# ------------------------------------------------------------
+
 SPINNER='|/-\'
 I=0
 
@@ -106,7 +203,10 @@ while kill -0 "$BUILD_PID" 2>/dev/null; do
 done
 
 
-# Hämta resultatet från build-processen
+# ------------------------------------------------------------
+# Hämta resultat från build-processen
+# ------------------------------------------------------------
+
 wait "$BUILD_PID"
 BUILD_RESULT=$?
 
@@ -140,14 +240,19 @@ printf "\rBuilding... KLART!\n"
 
 
 # ------------------------------------------------------------
-# Kontrollera att UF2-filen skapades
+# Kontrollera UF2-filen
 # ------------------------------------------------------------
 
 if [ ! -f "$UF2_FILE" ]; then
 
     echo
-    echo "FEL: UF2-filen skapades inte:"
+    echo "============================================================"
+    echo " FEL: UF2-FILEN SKAPADES INTE"
+    echo "============================================================"
+    echo
+    echo "Förväntad fil:"
     echo "  $UF2_FILE"
+    echo
 
     popd > /dev/null
     exit 1
@@ -161,17 +266,24 @@ fi
 
 echo
 echo "=== Väntar på Pico 2 i BOOTSEL-läge ==="
+echo
+echo "Panel:    ${PANEL}\""
+echo "Firmware: hipi_${PANEL}_pico.uf2"
+echo
 echo "Sätt Pico 2 i BOOTSEL om den inte redan är det."
+
 
 while [ ! -d "$PICO_MOUNT" ]; do
     sleep 1
 done
 
+
+echo
 echo "Pico hittad: $PICO_MOUNT"
 
 
 # ------------------------------------------------------------
-# Kopiera firmware
+# Flash
 # ------------------------------------------------------------
 
 echo
@@ -185,7 +297,13 @@ cp "$UF2_FILE" "$PICO_MOUNT/"
 # ------------------------------------------------------------
 
 echo
-echo "=== KLART ==="
-echo "Firmware flashad."
+echo "============================================================"
+echo " KLART!"
+echo "============================================================"
+echo
+echo "Panel:    ${PANEL}\""
+echo "Firmware: hipi_${PANEL}_pico.uf2"
+echo
+
 
 popd > /dev/null

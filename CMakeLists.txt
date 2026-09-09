@@ -137,6 +137,9 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 # ----------------------------------------------------------------------
 add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
 
+include("PicoLed/PicoLed.cmake")
+set(PICO_CXX_ENABLE_EXCEPTIONS 1)
+
 # ----------------------------------------------------------------------
 # Defines one full target chain (core lib -> Pico transport lib -> Pico
 # executable) for a given panel. Called once per panel below, so both
@@ -214,6 +217,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
                                   # variant with the CYW43 wifi/bt chip --
                                   # not applicable now that PICO_BOARD is
                                   # correctly set to plain "pico2" above.
+        PicoLed
     )
 
     target_compile_definitions(${EXE_TARGET} PRIVATE

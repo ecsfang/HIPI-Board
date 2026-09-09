@@ -216,6 +216,17 @@ public:
     // an extra, premature redraw. With that fixed, reflow() here is
     // correct: setTextWidth() below uses the same approach for the same
     // reason (e.g. the button strip narrowing/widening the text area).
+    //
+    // A/B toggle for up()'s own BTE-accelerated natural-scroll fast path
+    // (see its own comment there) -- defaults on. Exists purely so a
+    // comparison test (main_scroll_bte_test.cpp, in the isolated driver
+    // test project) can flip it at runtime and directly compare BTE vs.
+    // the plain text-engine redraw in a single run on real hardware,
+    // since BTE's "Memory Copy" mode is new/unproven here (unlike the
+    // already-validated "MCU Write" mode the button strip uses). Not
+    // meant as a permanent, user-facing setting.
+    void setBteScrollEnabled(bool enabled) { bteScrollEnabled_ = enabled; }
+
     void setTextSize(std::uint8_t size) {
         const std::uint8_t oldROWS = ROWS_;
         screen_pars(size);
@@ -319,6 +330,7 @@ private:
     std::uint8_t cp_;        // cursor position within current physical line
 
     bool suspended_ = false; // true while a UI dialog owns the display
+    bool bteScrollEnabled_ = true;  // see setBteScrollEnabled()'s own comment
 };
 
 }  // namespace hipi

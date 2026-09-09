@@ -468,6 +468,104 @@ int LT7683::waitBteIdle() {
     return -1;  // timed out
 }
 
+void LT7683::bteMemoryCopy(std::uint32_t srcAddr, std::uint16_t srcStride,
+                           std::int16_t srcX, std::int16_t srcY,
+                           std::uint32_t dstAddr, std::uint16_t dstStride,
+                           std::int16_t dstX, std::int16_t dstY,
+                           std::uint16_t w, std::uint16_t h) {
+    // Same precondition as bteMcuWriteBitmap() -- see its own comment.
+    waitBteIdle();
+
+    gfxMode();
+
+    // ---- S0: the actual source region to copy.
+    writeReg16(S0_STR0, static_cast<std::uint16_t>(srcAddr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(S0_STR0 + 2),
+              static_cast<std::uint16_t>((srcAddr >> 16) & 0xFFFF));
+    writeReg16(S0_WTH0, srcStride);
+    writeReg16(S0_X0, static_cast<std::uint16_t>(srcX));
+    writeReg16(S0_Y0, static_cast<std::uint16_t>(srcY));
+
+    // ---- S1: valid, distinct, never-read address -- same reasoning as
+    // bteMcuWriteBitmap()'s own comment on why this can't be skipped or
+    // left at 0. kBteLayer2Addr specifically (not kBteLayer3Addr, the
+    // staging area bteScrollShift() itself uses) so this never collides
+    // with an in-flight staging copy either.
+    writeReg16(S1_STR0, static_cast<std::uint16_t>(kBteLayer2Addr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(S1_STR0 + 2),
+              static_cast<std::uint16_t>((kBteLayer2Addr >> 16) & 0xFFFF));
+    writeReg16(S1_WTH0, 4);
+    writeReg16(S1_X0, 0);
+    writeReg16(S1_Y0, 0);
+
+    // ---- Destination.
+    writeReg16(DT_STR0, static_cast<std::uint16_t>(dstAddr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(DT_STR0 + 2),
+              static_cast<std::uint16_t>((dstAddr >> 16) & 0xFFFF));
+    writeReg16(DT_WTH0, dstStride);
+    writeReg16(DT_X0, static_cast<std::uint16_t>(dstX));
+    writeReg16(DT_Y0, static_cast<std::uint16_t>(dstY));
+
+    // ---- BTE window: how many pixels this copy covers.
+    writeReg16(BLT_WTH0, w);
+    writeReg16(BLT_HIG0, h);
+
+    // REG[92h] (BLT_COLR): all three at 16bpp, same as bteMcuWriteBitmap().
+    writeReg(BLT_COLR, 0x25);
+
+    // REG[91h]: ROP[7:4]=0xC ("DT = S0") | operation code[3:0]=0010b
+    // (Memory Copy with ROP) -- the ONLY difference from
+    // bteMcuWriteBitmap()'s own REG[91h] value (0xC0, opcode 0000b) is
+    // this opcode nibble, matching Table 7-1's own "0010b: Memory Copy
+    // (move) with ROP".
+    writeReg(BLT_CTRL1, 0xC2);
+
+    // REG[90h] bit4=1: BTE enable/start -- unlike bteMcuWriteBitmap(),
+    // there's no pixel data for this project's own code to stream
+    // afterward; the chip does the whole copy internally once triggered.
+    writeReg(BLT_CTRL0, 0x10);
+
+    // Wait for the chip to actually finish the copy before returning --
+    // essential here (unlike the MCU-write path, where the MCU's own
+    // pixel-streaming loop naturally paces things): this call returns
+    // immediately after triggering, so without this wait, a caller
+    // chaining a second copy (bteScrollShift() does exactly that, copy-
+    // out then copy-back) could start the next one before the chip's own
+    // internal SDRAM-to-SDRAM transfer has actually finished.
+    waitBteIdle();
+}
+
+void LT7683::bteScrollShift(std::int16_t x, std::int16_t y,
+                            std::uint16_t w, std::uint16_t h,
+                            std::uint16_t shiftRows) {
+    if (shiftRows == 0 || shiftRows >= h) return;
+    const std::uint16_t keepRows = static_cast<std::uint16_t>(h - shiftRows);
+    // vertOffset_ applied explicitly here (matching every other on-panel
+    // drawing call's own convention -- see e.g. rectHelper()) for the
+    // TWO addresses that actually land on the live, address-0 panel
+    // (source read and final destination write) -- NOT for the staging
+    // copy's own coordinates, which are always (0,0) in an entirely
+    // separate SDRAM layer that isn't being scanned out to any physical
+    // panel at all, so this project's own panel-specific vertical
+    // offset quirk doesn't apply there.
+    const std::int16_t panelSrcY = static_cast<std::int16_t>(y + shiftRows + vertOffset_);
+    const std::int16_t panelDstY = static_cast<std::int16_t>(y + vertOffset_);
+    // Stage 1: copy the region to be kept (skipping the rows about to
+    // scroll off) out to the third layer. Can't overlap anything --
+    // kBteLayer3Addr is an entirely separate SDRAM region from address 0
+    // (where x/y/w/h live) and from kBteLayer2Addr (S1's own address,
+    // per bteMemoryCopy()'s own comment).
+    bteMemoryCopy(/*srcAddr=*/0, width_, x, panelSrcY,
+                 /*dstAddr=*/kBteLayer3Addr, w, 0, 0,
+                 w, keepRows);
+    // Stage 2: copy it back from staging to its new, shifted-up position
+    // (the top of the original region) -- again no overlap, staging and
+    // the live display are different SDRAM regions.
+    bteMemoryCopy(/*srcAddr=*/kBteLayer3Addr, w, 0, 0,
+                 /*dstAddr=*/0, width_, x, panelDstY,
+                 w, keepRows);
+}
+
 // -----------------------------------------------------------------------
 // Power / reset / PLL / backlight
 // -----------------------------------------------------------------------
