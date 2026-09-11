@@ -82,4 +82,13 @@ void boardui_handleVerticalSwipe(bool down);
 // quiet mid-navigation.
 void boardui_onMenuClosed();
 
+// True while the on-screen menu (UiDialog) is actually open -- distinct
+// from Screen::isSuspended(), which is ALSO true whenever Plotter output
+// is showing (see plotterview.cpp's own comment for why conflating the
+// two there silently blocked every plot draw). Callers that specifically
+// need "is the menu covering the screen right now" (as opposed to "is
+// Screen's own text rendering paused, for whatever reason") should use
+// this instead.
+bool boardui_isMenuOpen();
+
 }  // namespace hipi

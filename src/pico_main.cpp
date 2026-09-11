@@ -66,15 +66,13 @@ extern void init_spi(void);
 #include "boardui.h"
 #include "plotterview.h"
 #include "config.hpp"
+#include "drive.h"
 
 #include <cstdio>
 
 // NeoPixel support
 #include "../PicoLed/PicoLed.hpp"
 #include "../PicoLed/Effects/Bounce.hpp"
-
-extern bool SDOK;
-extern void sd_dir();
 
 hipi::Config config;
 
@@ -128,7 +126,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.0(beta)";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.1(beta)";  // shown on splash screen
 }  // namespace
 
 extern void hipi_init(void);
@@ -244,9 +242,9 @@ FRESULT initSD()
     init_spi();
     FRESULT fr = f_mount(&fs, "", 1);
     if (FR_OK != fr) {
-        SDOK = false;
+        disableSD();
     } else {
-        SDOK = true;
+        enableSD();
         config.load();
         bTrace = config.trace();
         bExtTrace = config.extTrace();

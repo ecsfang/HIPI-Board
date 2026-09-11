@@ -13,9 +13,20 @@ Media_t mediaInfo[] = {
     { "unknown",                      0, 0,   0 }
 };
 
-//bool TapeOK = false;
-bool SDOK = false;
+static bool SDOK = false;
 const char *share_Tape = MEDIA_NAME;
+
+void disableSD() {
+    SDOK = false;
+    LOGF("\r\n * SD card access disabled");
+}
+void enableSD() {
+    SDOK = true;
+    LOGF("\r\n * SD card access enabled");
+}
+bool sdCardOK() {
+    return SDOK;
+}
 
 int findMedia(unsigned int s)
 {
@@ -323,7 +334,7 @@ void CDrive::writeblock()
 bool CDrive::check()
 {
     if( !tape->ok() ) {
-        if( SDOK ) {
+        if( sdCardOK() ) {
             if( tape->media() && *tape->media() ) {
                 LOGF("$$$ Opening tape file: %s ", tape->media());
                 tud_cdc_n_write_flush(0);

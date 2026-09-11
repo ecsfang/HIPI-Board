@@ -3,6 +3,7 @@
 #include "usb_serial.h"
 #include <cmath>
 #include <cstring>
+#include <algorithm>
 #include "pico/time.h"
 
 namespace hipi {
@@ -89,10 +90,35 @@ void drawMappedSegment(std::int16_t x0, std::int16_t y0,
 void onPlotterDraw(std::int16_t x0, std::int16_t y0,
                    std::int16_t x1, std::int16_t y1, std::uint8_t pen) {
     if (output_ != DisplayOutput::Plotter) return;
-    // Same reasoning as Screen::full()'s own suspended_ check: a UiDialog
-    // owns the screen while it's open, so plotter data arriving over
-    // HP-IL during that time shouldn't draw straight over it.
-    if (screen_->isSuspended()) return;
+#ifndef DISPLAY_7INCH
+    // FIXED: was checking screen_->isSuspended() here -- but
+    // plotterview_setOutput() itself calls screen_->suspend() the moment
+    // Plotter output is selected (deliberately, so Screen's own text
+    // rendering doesn't draw over the plot -- see its own comment), so
+    // that flag is ALWAYS true throughout completely normal Plotter
+    // operation, not just while a menu happens to be open. Checking it
+    // here meant this function returned immediately on every single
+    // call once Plotter mode was active -- no plot data ever actually
+    // reached the screen, confirmed as exactly the "tried plotting
+    // something, but it doesn't work" symptom.
+    //
+    // On the 5" panel (no PIP hardware -- see LT7683::beginOverlayDraw()'s
+    // own comment for what that means), the menu genuinely takes over the
+    // one and only framebuffer while open (Screen's suspend() here is a
+    // real, literal pause), so a plot draw landing on top of it WOULD
+    // corrupt both -- boardui_isMenuOpen() still guards that case here.
+    // On the 7" panel, drawing calls made from HP-IL processing (i.e.
+    // from here, never from inside the menu's own beginOverlayDraw()/
+    // endOverlayDraw() bracket) always target canvas address 0 -- the
+    // live main window -- regardless of whether the menu is open, since
+    // only the menu's own drawing code ever redirects the canvas
+    // elsewhere. The menu shows as a PIP overlay on a separate SDRAM
+    // layer instead of actually occupying the main window, so there's
+    // nothing to guard against here at all: the plot keeps drawing
+    // live, right through/around the menu, exactly like Screen's own
+    // text does elsewhere (see uidialog.hpp's PIP work).
+    if (boardui_isMenuOpen()) return;
+#endif
     drawMappedSegment(x0, y0, x1, y1, penColor(pen));
     // line()/pixel() go through gfxMode(), which blindly zeros MWCR0 (the
     // same text-mode/cursor-visible register Screen owns) -- same fix
@@ -105,7 +131,9 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
 // Device). Only touches the screen if Plotter output is actually showing.
 void onPlotterClear() {
     if (output_ != DisplayOutput::Plotter) return;
-    if (screen_->isSuspended()) return;  // see onPlotterDraw()'s own comment
+#ifndef DISPLAY_7INCH
+    if (boardui_isMenuOpen()) return;  // see onPlotterDraw()'s own comment
+#endif
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
     screen_->refreshCursor();
 }
@@ -179,13 +207,51 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
                               std::int16_t w, std::int16_t h) {
     // Narrow the active window to just this region -- replaying every
     // segment below then only actually draws the parts that fall inside
-    // it (the RA8875 clips the rest away in hardware), avoiding the need
-    // to do our own segment/rectangle intersection math.
+    // it (the LT7683/RA8875 clip the rest away in hardware), avoiding the
+    // need to do our own segment/rectangle intersection math for the
+    // PIXELS actually drawn.
     display_->setActiveWindow(static_cast<std::uint16_t>(x0), static_cast<std::uint16_t>(y0),
                               static_cast<std::uint16_t>(x0 + w - 1),
                               static_cast<std::uint16_t>(y0 + h - 1));
     display_->fillRect(x0, y0, w, h, 0x0000);
+    // BTE (memory-copy) doesn't apply here: this region's own pixels
+    // were never drawn in the first place (the content area is
+    // NARROWER than the full panel for as long as the button strip is
+    // up -- see boardui.cpp's showButtonStrip()), so there's no prior
+    // rendered state anywhere in SDRAM to copy from, only source segment
+    // data to compute fresh from. showButtonStrip()/hideButtonStrip()
+    // already DO use BTE for their own part of this (sliding the
+    // existing, already-rendered pixels on EITHER side of this region
+    // out of/back into the way -- pure hardware memory moves, content-
+    // agnostic, so they work identically whether Display or Plotter
+    // output is underneath) -- this function only ever needs to fill
+    // the one sliver those shifts can't fill by themselves.
+    //
+    // What CAN help here, short of an actual memory-copy: skip the
+    // hardware line-draw engine call entirely for any segment whose own
+    // screen-space bounding box doesn't even overlap this region at all
+    // -- the LT7683's own hardware clipping (via the active window set
+    // above) would have discarded it anyway, but only AFTER the
+    // DLHSR0-DLVER0 coordinate registers and DCR0 trigger were all
+    // still written over SPI first. For a plot with many segments and a
+    // narrow target region (exactly this call's own use case -- the
+    // vacated button-strip sliver), most segments fall outside it
+    // entirely, so this check trades a handful of cheap integer
+    // comparisons for what would otherwise be a full, wasted SPI
+    // register-write sequence per skipped segment.
+    const std::int16_t regionRight = static_cast<std::int16_t>(x0 + w);
+    const std::int16_t regionBottom = static_cast<std::int16_t>(y0 + h);
     for (const PlotSegment& seg : plotter_->segments()) {
+        const std::int16_t sx0 = mapX(seg.x0), sy0 = mapY(seg.y0);
+        const std::int16_t sx1 = mapX(seg.x1), sy1 = mapY(seg.y1);
+        const std::int16_t segLeft = std::min(sx0, sx1);
+        const std::int16_t segRight = std::max(sx0, sx1);
+        const std::int16_t segTop = std::min(sy0, sy1);
+        const std::int16_t segBottom = std::max(sy0, sy1);
+        if (segRight < x0 || segLeft > regionRight ||
+            segBottom < y0 || segTop > regionBottom) {
+            continue;  // bounding box entirely outside the region -- skip
+        }
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
     }
     // Restore the full-screen active window Plotter mode normally runs

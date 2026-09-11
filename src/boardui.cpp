@@ -858,6 +858,10 @@ void boardui_onMenuClosed() {
     }
 }
 
+bool boardui_isMenuOpen() {
+    return dialog_ != nullptr && dialog_->isOpen();
+}
+
 void boardui_handleVerticalSwipe(bool down) {
     if (bTrace) {
         LOGF("\r\n[TOUCH] vertical swipe down=%d deviceListVisible=%d", down, deviceListVisible);

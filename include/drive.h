@@ -4,6 +4,11 @@
 #include "hpil.h"
 #include "tape.h"   // CTape, CTapeSD, CTapeMem, CTapeFlash
 
+extern void disableSD();
+extern void enableSD();
+extern bool sdCardOK();
+extern void sd_dir();
+
 typedef enum {
     WRITE_MODE,
     PARTIAL_MODE
@@ -72,6 +77,5 @@ public:
     }
 };
 
-extern void sd_dir();
 
 #endif//__DRIVE_H__

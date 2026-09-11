@@ -70,18 +70,30 @@ public:
     void resume()   { suspended_ = false; txt_size(size_); full(); }
     bool isSuspended() const { return suspended_; }
 
-    // Explicitly turns off the hardware cursor (MWCR0's visible/blink
-    // bits) without touching cv_ (the user's own cursor-visible HP-41
-    // stream setting) -- suspend() alone only stops OUR OWN future draws;
-    // it doesn't touch whatever cursor state the RA8875 already had
-    // active, which otherwise just keeps blinking autonomously via the
-    // chip's own hardware timer regardless of software suspension. Used
-    // when an alternate full-screen view (see plotterview.h) takes over
-    // the panel. resume()'s full() call (which ends with set_cur())
-    // correctly restores the cursor afterward, based on the unchanged
-    // cv_, so this doesn't need an explicit "undo".
+    // Explicitly turns off the hardware cursor without touching cv_ (the
+    // user's own cursor-visible HP-41 stream setting) -- suspend() alone
+    // only stops OUR OWN future draws; it doesn't touch whatever cursor
+    // state the chip already had active, which otherwise just keeps
+    // blinking autonomously via its own hardware timer regardless of
+    // software suspension. Used when an alternate full-screen view (see
+    // plotterview.h) takes over the panel. resume()'s full() call (which
+    // ends with set_cur()) correctly restores the cursor afterward,
+    // based on the unchanged cv_, so this doesn't need an explicit
+    // "undo".
+    //
+    // FIXED: was d_->writeReg(0x40, 0x82) directly ("text mode, invisible
+    // cursor, auto-increment off") -- correct for RA8875 (MWCR0), but
+    // REG[40h] is GCHP0 (Graphic Cursor Horizontal Position) on LT7683,
+    // not a mode/cursor-visibility register at all -- see
+    // setTextCursorVisible()'s own header comment (LT7683.hpp) for the
+    // full story on this exact mistake, already found and fixed
+    // elsewhere (set_cur() below). This call site used the same wrong
+    // pattern independently -- confirmed on real hardware as the
+    // blinking text cursor staying put, visible, right on top of
+    // whatever the plotter drew, since the write here never actually
+    // reached LT7683's real cursor-visibility register at all.
     void hideCursorHardware() {
-        d_->writeReg(0x40, 0x82);  // text mode, invisible cursor, auto-increment off
+        d_->setTextCursorVisible(false, false);
     }
 
     // Re-asserts the cursor's visibility/style/position. Call this after
