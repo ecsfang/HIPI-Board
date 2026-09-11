@@ -8,6 +8,7 @@
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
+#include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
 #include <vector>
 #include <string>
 #include <cstring>
@@ -168,6 +169,38 @@ public:
     // so the very first tap after the strip's been hidden never presses
     // anything, Shift included, even if it happens to land on the
     // Shift button's own position.
+    // Wraps a single call to a Screen-mutating method that ends in a full
+    // redraw (setTextSize()/setColumns()/clear(), all of which call
+    // Screen::full() internally) -- these can be triggered from WITHIN
+    // the menu's own button handling (Font size/Columns/"Clear screen"),
+    // which on the 7" panel runs with the canvas still pointed at the
+    // menu's own overlay layer (see handleButton()'s own
+    // beginOverlayDraw()/endOverlayDraw() wrapping). Without this,
+    // full()'s entire "redraw every visible line" pass -- which is
+    // exactly what's needed to re-render EXISTING text at a newly
+    // picked font size -- silently drew to the invisible menu layer
+    // instead of the main window: confirmed on real hardware as the
+    // cursor moving and new text appearing at the new size, but already-
+    // written text staying at the old size until something else (the
+    // next natural scroll, once the menu had closed and the canvas was
+    // back to normal) finally redrew it correctly. Temporarily restores
+    // the canvas to the main window for just the one call, then switches
+    // back to the menu layer afterward so the rest of the calling
+    // function (e.g. openSettingsMenu(), called right after
+    // applyFontSize() returns) can keep drawing the menu itself
+    // normally. On the 5" panel, where none of this canvas-switching
+    // concept exists, this just calls fn() directly.
+    template <typename F>
+    void withMainCanvas(F&& fn) {
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        fn();
+        d_->beginOverlayDraw();
+#else
+        fn();
+#endif
+    }
+
     void handleButton(Button b) {
         if (b == Button::Shift) {
             shiftPending_ = true;   // latch for the *next* button press
@@ -190,9 +223,32 @@ public:
         // needed here at all any more.
         if (shifted && b == Button::Ok) {
             close();
+#ifdef DISPLAY_7INCH
+            // Canvas is still address 0 here (this path returns before
+            // ever calling beginOverlayDraw()), so it's safe to restore
+            // the cursor directly -- see the end-of-function version of
+            // this same call for the full reasoning on why it can't run
+            // any earlier than "canvas is definitely back at the main
+            // window".
+            screen_.refreshCursor();
+#endif
             if (onExitRequested_) onExitRequested_();
             return;
         }
+
+#ifdef DISPLAY_7INCH
+        // Every state OTHER than Closed only ever draws menu content
+        // (highlighting a row, opening a sub-menu, closing) -- Closed
+        // itself is the one case that can go either way: Ok opens the
+        // main menu (menu content), but Up/Down/X there scroll or clear
+        // the live text screen instead (Screen::scrollBy()/clear()/
+        // scrollToLive() -- NOT menu content, must NOT be redirected to
+        // the menu layer). willDrawMenu covers exactly the cases that
+        // actually draw the menu, matching the switch below case by
+        // case.
+        const bool willDrawMenu = !(state_ == State::Closed && b != Button::Ok);
+        if (willDrawMenu) d_->beginOverlayDraw();
+#endif
 
         switch (state_) {
             case State::Closed:
@@ -294,6 +350,56 @@ public:
                 if (b == Button::X)    openMainMenu();
                 break;
         }
+
+#ifdef DISPLAY_7INCH
+        if (willDrawMenu) {
+            d_->endOverlayDraw();
+            // MenuFrame::draw() (called by every open*Menu()) and the
+            // menu's own row/highlight drawing (drawRow(), drawColorRow(),
+            // fillRect()-based highlight backgrounds, etc.) all set the
+            // hardware text-size and foreground-colour registers to
+            // their OWN values -- both are single, global registers, not
+            // tied to which canvas is currently selected, so they stay
+            // at whatever the menu last set them to even after switching
+            // the canvas back to the main window above. Previously
+            // harmless (Screen was suspended the whole time a menu was
+            // open, so it never drew anything in between), but now that
+            // Screen keeps drawing live even while the menu is open (any
+            // HP-IL data arriving asynchronously), leaving these
+            // un-restored made whatever Screen drew next silently render
+            // at the menu's own font size/colour instead of Screen's own
+            // -- confirmed on real hardware (text size first, then
+            // colour and the menu's own highlight backgrounds bleeding
+            // into Screen's text too). reassertRenderState() re-applies
+            // both (two register writes, not a layout recalculation or
+            // redraw) every time the menu has drawn anything at all,
+            // whether it just opened, is still open (navigating between
+            // items), or just closed.
+            screen_.reassertRenderState();
+            if (state_ != State::Closed) {
+                // Show (or refresh, if already showing -- harmless,
+                // idempotent) the freshly-drawn menu content as a PIP
+                // overlay. If state_ IS Closed here, this button press
+                // just closed the menu (X, or Shift+Ok handled earlier)
+                // -- close() already called hidePipOverlay() itself,
+                // nothing more to do.
+                d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+            } else {
+                // openMainMenu() (and every other open*Menu()) hides the
+                // hardware blinking cursor before drawing -- restore it
+                // now that the canvas is safely back at the main window
+                // (CURH/CURV, which the cursor's own position rides on,
+                // are interpreted relative to whatever the canvas
+                // currently is -- doing this any earlier, while the
+                // canvas was still the menu layer, would have positioned
+                // it there instead of the main window). refreshCursor()
+                // re-applies Screen's own last-known visibility/position
+                // without a full redraw (nothing to redraw anyway -- the
+                // main window's own content was never touched).
+                screen_.refreshCursor();
+            }
+        }
+#endif
     }
 
 private:
@@ -306,8 +412,8 @@ private:
     static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
     static constexpr int kMainMenuCount = 4;
 
-    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace" };
-    static constexpr int kConfigMenuCount = 2;
+    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC" };
+    static constexpr int kConfigMenuCount = 3;
 
     static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns", "Bootsel mode" };
     static constexpr int kSettingsMenuCount = 5;
@@ -350,8 +456,15 @@ private:
     static constexpr int kDisplayMenuCount = 4;
 
     void openMainMenu() {
+#ifndef DISPLAY_7INCH
+        // Only needed on the 5" (RA8875) path -- the 7" (LT7683) path
+        // draws the menu to its own separate PIP layer instead (see
+        // handleButton()'s own overlay-wrapping), so the live text
+        // screen never needs pausing at all; it just gets visually
+        // covered wherever the PIP overlay sits on top.
         screen_.suspend();  // idempotent if already open; stops screen_.pr_char()
                              // from drawing over the dialog while it's showing
+#endif
         // Hide the hardware blinking cursor too -- suspend() alone only
         // stops FURTHER drawing, it doesn't touch the cursor already left
         // blinking at wherever Screen's text last positioned it, which
@@ -395,11 +508,13 @@ private:
             // above: wipes the text buffer, clears the panel, and homes
             // the cursor (Screen::clear()'s own documented behaviour,
             // matching the HP82163's own "Clear Device" semantics).
-            // close() itself calls screen_.resume() -> full(), which
-            // would just redraw the now-empty buffer -- harmless, but
-            // clear() already leaves the screen correctly blank on its
-            // own, so nothing further is needed here.
-            screen_.clear();
+            // Wrapped in withMainCanvas() -- see its own comment -- since
+            // this runs from within the menu's own button handling,
+            // where (on the 7" panel) the canvas is still pointed at the
+            // menu's own overlay layer; without it, clear()'s own redraw
+            // of the now-empty buffer would silently happen on the
+            // invisible menu layer instead of the actual panel.
+            withMainCanvas([&]{ screen_.clear(); });
             close();
         }
     }
@@ -408,12 +523,54 @@ private:
         state_ = State::ConfigMenu;
         selected_ = 0;
         drawBox();
-        for (int i = 0; i < kConfigMenuCount; ++i) drawRow(i, kConfigMenuLabels[i]);
+        drawConfigMenuRows();
+    }
+
+    // Row 2 ("Connect to PC" / "Disconnect from PC") reflects the
+    // current mode dynamically -- everything else just uses the fixed
+    // labels. Shared between openConfigMenu() (full redraw) and
+    // highlightRow()'s own State::ConfigMenu case (single-row redraw
+    // during Up/Down navigation).
+    void drawConfigMenuRows() {
+        drawRow(0, kConfigMenuLabels[0]);
+        drawRow(1, kConfigMenuLabels[1]);
+        drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
     }
 
     void enterConfigMenuItem() {
-        if (selected_ == 0) openFilePicker();
-        else                openTraceMenu();
+        if (selected_ == 0) {
+            openFilePicker();
+        } else if (selected_ == 1) {
+            openTraceMenu();
+        } else {
+            // "Connect to PC" / "Disconnect from PC" -- toggles USB MSC
+            // mode (see usb_msc.h for the full story). Shows explicit
+            // feedback either way, then returns to this same menu (with
+            // its label now reflecting the new state) rather than
+            // acting like "Bootsel mode"'s one-way, device-reboots
+            // action -- this one's reversible, and the user needs to
+            // see the result to know it's safe to unplug/plug back in.
+            const bool wasActive = usbMscModeActive();
+            const bool nowActive = wasActive ? (exitUsbMscMode(), false) : enterUsbMscMode();
+            drawBox();
+            d_->txtColor(0xFFFF, 0x0000);
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+            if (wasActive) {
+                d_->txtWrite("Disconnected from PC.");
+                d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+                d_->txtWrite("HP-IL drive access resumed.");
+            } else if (nowActive) {
+                d_->txtWrite("Connected -- SD card is now");
+                d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+                d_->txtWrite("visible as a USB drive on the PC.");
+                d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
+                d_->txtWrite("HP-IL drive access paused.");
+            } else {
+                d_->txtWrite("Couldn't connect -- no SD card?");
+            }
+            sleep_ms(1500);
+            openConfigMenu();
+        }
     }
 
     void openSettingsMenu() {
@@ -455,6 +612,16 @@ private:
             d_->txtWrite("Drag a new .uf2 onto the");
             d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
             d_->txtWrite("drive that appears.");
+#ifdef DISPLAY_7INCH
+            // handleButton()'s own end-of-function overlay show (see its
+            // own comment) never runs for this path -- reset_usb_boot()
+            // below never returns, so this message needs to be made
+            // visible right here, or it would sit drawn-but-invisible on
+            // the menu layer while the PIP overlay kept showing whatever
+            // was on screen before this button press.
+            d_->endOverlayDraw();
+            d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
             sleep_ms(1500);  // long enough to actually read before reboot
             reset_usb_boot(0, 0);
         }
@@ -567,6 +734,12 @@ private:
     // box -- shared by openFilePicker() (initial draw) and
     // moveFileSelection() (whenever scrolling is needed after Up/Down).
     void drawFileList() {
+        // See drawColorRow()'s own comment for why this is needed here
+        // too -- called on its own during Up/Down navigation (see
+        // moveFileSelection()), without drawBox() running again first.
+        // Once per call (not per row) is enough -- every row below uses
+        // the same scale.
+        d_->txtSize(MenuFrame::TextScale);
         for (int row = 0; row < kMaxFilesShown; ++row) {
             const std::size_t fileIndex = static_cast<std::size_t>(fileScrollOffset_ + row);
             if (fileIndex >= files_.size()) break;
@@ -656,6 +829,16 @@ private:
         boardui_onMenuClosed();  // shortens the button strip's auto-hide
                                   // countdown -- see its definition in
                                   // boardui.cpp for why
+#ifdef DISPLAY_7INCH
+        // The menu was only ever a PIP overlay on top of whatever's
+        // actually showing on the main window (text, a plotter view, a
+        // splash screen) -- none of that was ever hidden or paused, just
+        // visually covered. Disabling the overlay uncovers it again
+        // immediately, correct regardless of what it turns out to be --
+        // none of the splash/plotter special-casing the 5" path below
+        // still needs is necessary here.
+        d_->hidePipOverlay();
+#else
         if (plotterview_isSplashVisible()) {
             // A view switch just happened (this menu action selected a
             // new Display/Plotter output) -- the splash announcing it
@@ -675,6 +858,7 @@ private:
         screen_.resume();   // re-enables output and redraws the buffer,
                              // catching up on anything written while the
                              // dialog was open
+#endif
     }
 
     void moveSelection(int delta, int count) {
@@ -691,7 +875,7 @@ private:
     }
 
     void applyFontSize(int index) {
-        screen_.setTextSize(static_cast<std::uint8_t>(index));
+        withMainCanvas([&]{ screen_.setTextSize(static_cast<std::uint8_t>(index)); });
         if (onFontSizeChanged_) onFontSizeChanged_(static_cast<std::uint8_t>(index));
     }
 
@@ -703,7 +887,7 @@ private:
 
     void applyColumns(int index) {
         const std::uint8_t cols = kColumnsValues[index];
-        screen_.setColumns(cols);
+        withMainCanvas([&]{ screen_.setColumns(cols); });
         if (onColumnsChanged_) onColumnsChanged_(cols);
     }
 
@@ -737,6 +921,15 @@ private:
     // itself does for the initial, full draw.
     void drawColorRow(int i) {
         constexpr std::uint16_t kSelectedBg = 0x39E7;  // neutral dark grey
+        // Explicitly (re-)asserts the menu's own fixed text scale --
+        // see Screen::draw_letter()'s own comment for the full story on
+        // why neither side can rely on the shared hardware register
+        // still being whatever it last set it to. Needed here
+        // specifically because this (like drawRow()/drawFileList()) can
+        // be called on its own during Up/Down navigation within an
+        // already-open menu, without drawBox()/MenuFrame::draw() (the
+        // only other thing that sets this) running again first.
+        d_->txtSize(MenuFrame::TextScale);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + i * MenuFrame::RowPitch);
         d_->txtColor(kColors[i], i == selected_ ? kSelectedBg : 0x0000);
         d_->txtWrite(kColorLabels[i]);
@@ -751,6 +944,10 @@ private:
     }
 
     void drawRow(int index, const char* label) {
+        // See drawColorRow()'s own comment for why this is needed here
+        // too -- called on its own during Up/Down navigation, without
+        // drawBox() running again first.
+        d_->txtSize(MenuFrame::TextScale);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
         d_->txtColor(index == selected_ ? 0x0000 : 0xFFFF,
                     index == selected_ ? MenuFrame::Yellow : 0x0000);
@@ -766,7 +963,8 @@ private:
                     drawRow(index, kMainMenuLabels[index]);
                 break;
             case State::ConfigMenu:
-                if (index >= 0 && index < kConfigMenuCount)
+                if (index == 2) drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
+                else if (index >= 0 && index < kConfigMenuCount)
                     drawRow(index, kConfigMenuLabels[index]);
                 break;
             case State::SettingsMenu:

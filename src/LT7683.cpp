@@ -550,20 +550,169 @@ void LT7683::bteScrollShift(std::int16_t x, std::int16_t y,
     // offset quirk doesn't apply there.
     const std::int16_t panelSrcY = static_cast<std::int16_t>(y + shiftRows + vertOffset_);
     const std::int16_t panelDstY = static_cast<std::int16_t>(y + vertOffset_);
+    // Staging buffer stride padded up to a multiple of 4 -- the
+    // datasheet's own register reference for S0_WTH/DT_WTH (REG[97h-98h]
+    // / REG[ABh-ACh]) is explicit that Image Width "must be divisible by
+    // 4". w here (Screen::up()'s own COLS_*width_) happens to already
+    // always be a multiple of 4 in practice, so this was never actually
+    // observed to misbehave for scrolling specifically -- applied anyway
+    // for correctness and to not depend on that happening to hold (see
+    // bteHorizontalShift()'s own comment below for where skipping this
+    // WAS observed to corrupt real content).
+    const std::uint16_t stagingStride = static_cast<std::uint16_t>((w + 3) & ~0x3);
     // Stage 1: copy the region to be kept (skipping the rows about to
     // scroll off) out to the third layer. Can't overlap anything --
     // kBteLayer3Addr is an entirely separate SDRAM region from address 0
     // (where x/y/w/h live) and from kBteLayer2Addr (S1's own address,
     // per bteMemoryCopy()'s own comment).
     bteMemoryCopy(/*srcAddr=*/0, width_, x, panelSrcY,
-                 /*dstAddr=*/kBteLayer3Addr, w, 0, 0,
+                 /*dstAddr=*/kBteLayer3Addr, stagingStride, 0, 0,
                  w, keepRows);
     // Stage 2: copy it back from staging to its new, shifted-up position
     // (the top of the original region) -- again no overlap, staging and
     // the live display are different SDRAM regions.
-    bteMemoryCopy(/*srcAddr=*/kBteLayer3Addr, w, 0, 0,
+    bteMemoryCopy(/*srcAddr=*/kBteLayer3Addr, stagingStride, 0, 0,
                  /*dstAddr=*/0, width_, x, panelDstY,
                  w, keepRows);
+}
+
+void LT7683::bteHorizontalShift(std::int16_t x, std::int16_t y,
+                                std::uint16_t w, std::uint16_t h,
+                                std::int16_t dx) {
+    if (dx == 0 || w == 0) return;
+    // w is the EXACT width of the region to move -- the whole thing
+    // shifts, nothing is dropped (unlike bteScrollShift()'s own h, which
+    // includes a row that's meant to fall off the edge -- there's no
+    // equivalent concept here since this function's own callers, the
+    // button strip's own showButtonStrip()/hideButtonStrip(), always
+    // already know precisely which pixels should move and pass exactly
+    // that width). dx can be negative (shift left) or positive (shift
+    // right).
+    const std::int16_t srcX = x;
+    const std::int16_t dstX = static_cast<std::int16_t>(x + dx);
+    // Same vertOffset_ handling as bteScrollShift() -- see its own
+    // comment: applies to the two addresses that land on the live,
+    // address-0 panel, not to the staging layer's own (0,0) coordinates.
+    const std::int16_t panelY = static_cast<std::int16_t>(y + vertOffset_);
+    // Staging buffer stride padded up to a multiple of 4 -- same hardware
+    // requirement as bteScrollShift()'s own stagingStride (see its own
+    // comment), but NOT optional here: button-strip slide segment widths
+    // have no reason to happen to be multiples of 4, and confirmed on
+    // real hardware (a real bitmap, not a flat test pattern) that
+    // skipping this padding made the bitmap's own left edge reappear
+    // repeatedly down the image -- writing a non-multiple-of-4 stride
+    // doesn't cleanly error, it silently changes what stride the chip
+    // actually uses internally, and for a multi-row copy a wrong stride
+    // drifts the row-to-row addressing further off with every row,
+    // eventually wrapping back into content already read. The actual
+    // per-row pixel count copied (BLT_WTH0, set from w below, which has
+    // no divisible-by-4 requirement) and the X coordinates (none
+    // documented for those either) stay exact -- only the staging
+    // buffer's OWN stride is padded, purely for this register's own
+    // hardware constraint; the extra padding columns are simply never
+    // read or written.
+    const std::uint16_t stagingStride = static_cast<std::uint16_t>((w + 3) & ~0x3);
+    bteMemoryCopy(/*srcAddr=*/0, width_, srcX, panelY,
+                 /*dstAddr=*/kBteLayer3Addr, stagingStride, 0, 0,
+                 w, h);
+    bteMemoryCopy(/*srcAddr=*/kBteLayer3Addr, stagingStride, 0, 0,
+                 /*dstAddr=*/0, width_, dstX, panelY,
+                 w, h);
+}
+
+void LT7683::beginOverlayDraw() {
+    // Redirects the drawing engine's own canvas to the menu's dedicated
+    // layer -- see this function's own header comment. Canvas Image
+    // Width (stride) is set to width_ (the panel's own width, same as
+    // the main window uses) -- the menu is drawn using the SAME
+    // coordinate space as the panel itself (MenuFrame's own X/Y are
+    // already real screen coordinates), so no separate, narrower stride
+    // is needed for the menu layer.
+    writeReg16(CVSSA0, static_cast<std::uint16_t>(kMenuLayerAddr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2),
+              static_cast<std::uint16_t>((kMenuLayerAddr >> 16) & 0xFFFF));
+    writeReg16(CVS_IMWTH0, width_);
+}
+
+void LT7683::endOverlayDraw() {
+    // Restores the canvas back to the main window (address 0) -- must
+    // be called before any OTHER drawing call anywhere in this codebase
+    // runs again (Screen's own text drawing very much included), since
+    // none of them expect the canvas to still be pointed at the menu
+    // layer.
+    writeReg16(CVSSA0, 0);
+    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
+    writeReg16(CVS_IMWTH0, width_);
+}
+
+void LT7683::showPipOverlay(std::int16_t x, std::int16_t y,
+                            std::uint16_t w, std::uint16_t h) {
+    // x must be a multiple of 4 (REG[2Ah] bit[1:0] fixed at 0) -- round
+    // down, and grow w by the same amount so the overlay's own RIGHT
+    // edge still lands where requested (rounding x down without
+    // widening w would leave the rightmost few pixels of the intended
+    // area uncovered). w itself also needs its own multiple-of-4
+    // rounding (REG[32h]/REG[38h]), applied after the above growth.
+    const std::int16_t alignedX = static_cast<std::int16_t>(x & ~0x3);
+    const std::uint16_t growBy = static_cast<std::uint16_t>(x - alignedX);
+    const std::uint16_t alignedW = static_cast<std::uint16_t>((w + growBy + 3) & ~0x3);
+    // Same vertOffset_ handling as every other on-panel drawing call
+    // (see e.g. rectHelper()) -- the menu's own content was drawn via
+    // ordinary drawing calls (txtSetCursor(), fillRect(), etc., all of
+    // which already add vertOffset_ internally) while the canvas was
+    // pointed at the menu layer, so the content actually landed at
+    // physical Y = (logical Y + vertOffset_) within that layer -- PWIULY
+    // (where to read FROM within the layer) must match that same
+    // physical position, and PWDULY (where to show it ON the panel)
+    // needs it too, for the same reason every other panel Y-coordinate
+    // register does.
+    const std::int16_t panelY = static_cast<std::int16_t>(y + vertOffset_);
+
+    // Select PIP-1's own parameters (bit4=0) before writing any of the
+    // shared position/size/address registers below -- REG[10h] bit4
+    // decides which of PIP-1/PIP-2 they apply to, and PIP-1 is always
+    // drawn on top of PIP-2 (irrelevant here since PIP-2 is never used,
+    // but PIP-1 is the natural choice as the "the one and only overlay"
+    // regardless).
+    const std::uint8_t mpwctr = readReg(MPWCTR);
+    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctr & ~0x10));
+
+    // On-screen position -- where the overlay actually appears.
+    writeReg16(PWDULX0, static_cast<std::uint16_t>(alignedX));
+    writeReg16(PWDULY0, static_cast<std::uint16_t>(panelY));
+    // Source: the menu layer, at its own stride (width_ -- see
+    // beginOverlayDraw()'s own comment for why).
+    writeReg16(PISA0, static_cast<std::uint16_t>(kMenuLayerAddr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(PISA0 + 2),
+              static_cast<std::uint16_t>((kMenuLayerAddr >> 16) & 0xFFFF));
+    writeReg16(PIW0, width_);
+    // Where within the source layer to read from -- the SAME coordinates
+    // as the on-screen position, since the menu was drawn (via
+    // beginOverlayDraw()) directly at its own real screen coordinates,
+    // not into a separate, zero-based sub-image.
+    writeReg16(PWIULX0, static_cast<std::uint16_t>(alignedX));
+    writeReg16(PWIULY0, static_cast<std::uint16_t>(panelY));
+    // Window size -- how much of the source actually gets shown.
+    writeReg16(PWW0, alignedW);
+    writeReg16(PWH0, h);
+
+    // PIP-1 color depth: bits[3:2] of REG[11h] = 01b (16bpp), matching
+    // every other drawing/BTE colour-depth setting in this driver.
+    // Leave PIP-2's own bits[1:0] untouched (read-modify-write) since
+    // PIP-2 is never used, but nothing guarantees the chip's own
+    // power-on default there is harmless to overwrite blindly.
+    const std::uint8_t pipcdep = readReg(PIPCDEP);
+    writeReg(PIPCDEP, static_cast<std::uint8_t>((pipcdep & 0x03) | 0x04));
+
+    // Enable PIP-1 (bit7) -- read-modify-write to leave PIP-2's own
+    // enable bit (6) and the unrelated bits below it untouched.
+    const std::uint8_t mpwctrEnable = readReg(MPWCTR);
+    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | 0x80));
+}
+
+void LT7683::hidePipOverlay() {
+    const std::uint8_t mpwctr = readReg(MPWCTR);
+    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctr & ~0x80));
 }
 
 // -----------------------------------------------------------------------

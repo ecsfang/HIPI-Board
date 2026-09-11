@@ -196,6 +196,19 @@ public:
     void bteScrollShift(std::int16_t x, std::int16_t y,
                             std::uint16_t w, std::uint16_t h,
                             std::uint16_t shiftRows) {}
+    void bteHorizontalShift(std::int16_t x, std::int16_t y,
+                            std::uint16_t w, std::uint16_t h,
+                            std::int16_t dx) {}
+    // RA8875 has no PIP equivalent -- these are never actually called
+    // (uidialog.hpp guards every call site with #ifdef DISPLAY_7INCH,
+    // keeping the 5" panel on the older Screen::suspend()/resume()
+    // approach instead), kept only so the DisplayDriver interface stays
+    // consistent between panel types.
+    void beginOverlayDraw() {}
+    void endOverlayDraw() {}
+    void showPipOverlay(std::int16_t x, std::int16_t y,
+                        std::uint16_t w, std::uint16_t h) {}
+    void hidePipOverlay() {}
 
     // Matches LT7683::bteMcuWriteBitmap()/waitBteIdle() for interface
     // consistency -- not implemented for RA8875 (this project's own use

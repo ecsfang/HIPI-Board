@@ -113,6 +113,28 @@ public:
                                                    // become visible -- see begin()'s comment.
     static constexpr std::uint8_t CVS_IMWTH0 = 0x54;  // Canvas Image Width (drawing engine's stride)
 
+    // PIP (Picture-in-Picture) registers -- see beginOverlayDraw()'s own
+    // comment for the full story of how these are used to show the menu
+    // without ever pausing the main window's own live updates.
+    static constexpr std::uint8_t MPWCTR  = 0x10;  // Main/PIP Window Control -- PIP-1/2 enable bits,
+                                                    // and which of PIP-1/2 the registers below
+                                                    // configure (bit4: 0=PIP-1, 1=PIP-2)
+    static constexpr std::uint8_t PIPCDEP = 0x11;  // PIP-1/2 Window Color Depth
+    static constexpr std::uint8_t PWDULX0 = 0x2A;  // PIP Window Display Upper-Left X (on-screen
+                                                    // position) -- bit[1:0] must be 0 (4-pixel unit)
+    static constexpr std::uint8_t PWDULY0 = 0x2C;  // PIP Window Display Upper-Left Y (on-screen)
+    static constexpr std::uint8_t PISA0   = 0x2E;  // PIP Image Start Address (4 bytes) -- bit[1:0]
+                                                    // of the low byte must be 0
+    static constexpr std::uint8_t PIW0    = 0x32;  // PIP Image Width (source layer's own stride) --
+                                                    // bit[1:0] must be 0
+    static constexpr std::uint8_t PWIULX0 = 0x34;  // PIP Window Image Upper-Left X (where within
+                                                    // the source image to start reading) --
+                                                    // bit[1:0] must be 0
+    static constexpr std::uint8_t PWIULY0 = 0x36;  // PIP Window Image Upper-Left Y
+    static constexpr std::uint8_t PWW0    = 0x38;  // PIP Window Width (how wide the on-screen
+                                                    // overlay is) -- bit[1:0] must be 0
+    static constexpr std::uint8_t PWH0    = 0x3A;  // PIP Window Height
+
     // Active window registers (REG[56h]-[5Eh])
     static constexpr std::uint8_t AWUL_X0 = 0x56;
     static constexpr std::uint8_t AWUL_Y0 = 0x58;
@@ -318,6 +340,69 @@ public:
     void bteScrollShift(std::int16_t x, std::int16_t y,
                         std::uint16_t w, std::uint16_t h,
                         std::uint16_t shiftRows);
+    // Same idea and same reasoning as bteScrollShift() (see its own
+    // comment for why this goes via a staging copy rather than a single,
+    // potentially-overlapping in-place move), but shifts horizontally --
+    // used by the button strip's own slide animation to move its
+    // already-drawn pixels instead of re-streaming them from the MCU
+    // every step.
+    //
+    // Unlike bteScrollShift(), w here is the EXACT width of the region
+    // to move -- the whole thing shifts, nothing is dropped
+    // (bteScrollShift()'s own h includes a row that's meant to fall off
+    // the edge; there's no equivalent concept here since this function's
+    // own callers always already know precisely which pixels should
+    // move and pass exactly that width). dx can be negative (shift
+    // left) or positive (shift right).
+    void bteHorizontalShift(std::int16_t x, std::int16_t y,
+                            std::uint16_t w, std::uint16_t h,
+                            std::int16_t dx);
+
+    // ---- PIP menu overlay ----
+    // Together, these let UiDialog draw and show the menu as a
+    // Picture-in-Picture overlay on a dedicated SDRAM layer
+    // (kMenuLayerAddr), entirely separate from the main window (address
+    // 0) that the live text screen keeps drawing to underneath -- so
+    // opening a menu no longer needs to pause the text screen at all
+    // (no more Screen::suspend()/resume()): whatever's on the main
+    // window keeps updating live the whole time, just visually covered
+    // wherever the PIP window overlaps it.
+    //
+    // Redirects the drawing engine's own target (Canvas Start Address,
+    // CVSSA -- see its own comment in the register list above for why
+    // this is a SEPARATE register from Main Image Start Address/MISA,
+    // and so doesn't affect what's actually scanned out to the panel at
+    // all) to kMenuLayerAddr. Call this before any UiDialog drawing call
+    // (drawBox(), drawRow(), txtWrite(), fillRect(), etc.) that's meant
+    // to render the menu -- those calls are otherwise unchanged, they
+    // just end up writing to the menu's own layer instead of the live
+    // main window. Always pair with a matching endOverlayDraw() call
+    // once done, even if returning early/on an exception path, since
+    // every OTHER drawing call anywhere in this codebase (Screen's own
+    // scrolling/new-text included) assumes the canvas is address 0.
+    void beginOverlayDraw();
+    // Restores CVSSA/CVS_IMWTH0 back to the main window (address 0,
+    // width_) -- see beginOverlayDraw()'s own comment.
+    void endOverlayDraw();
+    // Configures and enables PIP-1 to show the menu layer's own
+    // (x,y,w,h) region as an on-screen overlay at that same (x,y,w,h)
+    // position -- i.e. the menu is drawn (via beginOverlayDraw()) at
+    // the exact screen coordinates it's meant to appear at, and shown
+    // from that same region of the layer, so no separate "windowing"
+    // math is needed between where content was drawn and where it's
+    // displayed. x and w are rounded down/up respectively to the
+    // nearest multiple of 4 -- both REG[2Ah] (on-screen X) and REG[2Eh]/
+    // REG[32h] (image address alignment/width) require it (see their
+    // own comments in the register list above); y and h have no such
+    // requirement (1-pixel vertical unit).
+    void showPipOverlay(std::int16_t x, std::int16_t y,
+                        std::uint16_t w, std::uint16_t h);
+    // Disables PIP-1 -- whatever was already showing on the main window
+    // underneath (text, a plotter view, a splash screen -- it was never
+    // actually hidden, just covered) becomes visible again immediately,
+    // with no redraw needed.
+    void hidePipOverlay();
+
     // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
     // 0 ("BTE function is idle") -- per the datasheet's own note that
     // normal host read/write through the canvas/active window isn't
@@ -352,6 +437,13 @@ public:
     // kBteLayer2Addr's own role (S1's "valid but never read" address)
     // so the two never risk colliding.
     static constexpr std::uint32_t kBteLayer3Addr = 1024UL * 600UL * 2UL * 2UL;
+    // A fourth, dedicated layer for the menu's own rendered content --
+    // see beginOverlayDraw()'s own comment. Kept entirely separate from
+    // the BTE staging layers above (kBteLayer2Addr/kBteLayer3Addr) so a
+    // BTE operation mid-flight (e.g. the button strip's own slide
+    // animation, or a scroll shift) can never collide with the menu's
+    // own, independently-rendered content, and vice versa.
+    static constexpr std::uint32_t kMenuLayerAddr = 1024UL * 600UL * 2UL * 3UL;
 
     // -----------------------------------------------------------------------
     // Power / reset / backlight

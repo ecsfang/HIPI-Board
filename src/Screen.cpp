@@ -343,6 +343,11 @@ void Screen::txt_size(std::uint8_t size) {
 
 void Screen::screen_pars(std::uint8_t size) {
     size_ = size;
+    // Reset each call -- reflects only whether THIS call's own
+    // normalisation block (further down) actually ran, not some earlier
+    // call's. See its own declaration in Screen.hpp for why reflow()
+    // needs this.
+    preScrollNormalized_ = false;
     // Captured before being overwritten below -- needed by the
     // pre-scroll normalisation step further down (see its own comment).
     const std::uint8_t oldROWS = ROWS_;
@@ -456,6 +461,7 @@ void Screen::screen_pars(std::uint8_t size) {
     // scroll off (dropped here, not copied anywhere), matching normal
     // scroll behaviour.
     if (oldROWS > 0 && ROWS_ != oldROWS && numLines_ == oldROWS && row_ < oldROWS) {
+        preScrollNormalized_ = true;
         const std::size_t linesWritten = static_cast<std::size_t>(row_) + 1;
         const std::size_t keptLines = std::min(linesWritten, static_cast<std::size_t>(ROWS_));
         const std::size_t srcIndex = static_cast<std::size_t>(oldROWS) - keptLines;
@@ -547,8 +553,32 @@ void Screen::reflow(std::uint8_t oldROWS) {
         // (which resets offset_ to 0, at which point this same formula
         // applies again naturally on the next real ROWS_ change).
         if (offset_ == 0) {
-            const std::size_t visibleLines = actualNumLines < ROWS_ ? actualNumLines : ROWS_;
-            row_ = static_cast<std::uint8_t>(visibleLines > 0 ? visibleLines - 1 : 0);
+            // FIXED: was always using "min(actualNumLines, ROWS_) - 1"
+            // here -- correct ONLY when screen_pars()'s own pre-scroll
+            // normalisation just ran (preScrollNormalized_), which
+            // physically moves content to match this exact formula (see
+            // its own comment). But when the screen had ALREADY scrolled
+            // at least once before this switch (up() had already run),
+            // that normalisation block is skipped entirely -- the
+            // existing content keeps following up()'s OWN, different
+            // convention instead ("index 0 = most recent", which
+            // full()'s own draw loop always shows at the BOTTOM screen
+            // row, i.e. ROWS_-1, regardless of how many real lines exist
+            // -- unlike the pre-scroll convention, this one was never
+            // tied to numLines_ at all). Using the pre-scroll formula
+            // for this second case put the cursor wherever numLines_
+            // happened to suggest, completely disconnected from where
+            // the actual most-recent line was drawn -- confirmed on real
+            // hardware as the cursor landing well away from the true end
+            // of the text after switching fonts with a partially-scrolled
+            // screen (enough text to have scrolled at the OLD, smaller
+            // ROWS_, but not enough to fill the NEW, larger one).
+            if (preScrollNormalized_) {
+                const std::size_t visibleLines = actualNumLines < ROWS_ ? actualNumLines : ROWS_;
+                row_ = static_cast<std::uint8_t>(visibleLines > 0 ? visibleLines - 1 : 0);
+            } else {
+                row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
+            }
         } else if (row_ >= ROWS_) {
             row_ = static_cast<std::uint8_t>(ROWS_ > 0 ? ROWS_ - 1 : 0);
         }
@@ -838,6 +868,28 @@ void Screen::set_cur() {
 void Screen::draw_letter(std::uint8_t c) {
     if (suspended_) return;
     ++charsDrawn_;
+    // Explicitly (re-)asserts both the hardware text-size register and
+    // (for the normal, <=127 path just below) the foreground colour,
+    // rather than relying on them still being whatever this Screen last
+    // set them to. Both are single, global hardware registers, not
+    // private to Screen -- on the 7" panel, the PIP menu overlay draws
+    // to the SAME registers via its own txtSize()/txtColor() calls
+    // (openMainMenu()'s own MenuFrame::draw(), row highlighting, etc.),
+    // and can do so at any time a button is pressed, independently of
+    // when Screen itself happens to draw next (new HP-IL data arriving
+    // asynchronously). A one-sided fix that only restored Screen's own
+    // state AFTER the menu finished drawing (tried first) doesn't cover
+    // this: it doesn't know Screen might draw again before the NEXT
+    // menu redraw, at which point the register could be back at the
+    // menu's own value from something in between. Making Screen assert
+    // its own values immediately before every character drawn removes
+    // the dependency on timing/ordering with the menu entirely -- costs
+    // a couple of extra register writes per character, negligible next
+    // to the actual per-character SPI transfer itself, and only ever
+    // matters on the 7" panel (the 5" path never has anything else
+    // drawing to the shared registers in between, since it still
+    // suspends Screen while a menu is open).
+    d_->txtSize(size_);
     if (c > 127) {
         if (size_ < 4) {
             d_->txtColor(0, color_);
@@ -854,6 +906,7 @@ void Screen::draw_letter(std::uint8_t c) {
         }
         d_->txtColor(color_, 0);
     } else {
+        d_->txtColor(color_, 0);
         if (size_ < 4) {
             d_->txtWriteChar(c);
         } else {

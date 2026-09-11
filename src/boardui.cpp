@@ -149,51 +149,44 @@ void showButtonStrip() {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
     // Builds the strip up in kSlideSteps horizontal slices, entirely
-    // on-screen. NOT using BTE for a MOVE (see hideButtonStrip()'s own
-    // comment for why -- confirmed on real hardware that BTE's own
-    // "Memory Copy" mode froze/corrupted the display, root-caused since
-    // to using the SAME SDRAM address for source and destination -- see
-    // LT7683::bteMcuWriteBitmap()'s own file-header comment for the full
-    // story and the now-working, correctly-addressed BTE path for
-    // straight MCU-write draws).
-    //
-    // Each step redraws the WHOLE currently-visible portion fresh from
-    // buttonStripPixels (already sitting in MCU memory) at its new
-    // position. An attempt at only drawing each step's own newly-
-    // revealed slice (skipping the redundant redraw of the rest) was
-    // tried and reverted: because this always crops from SOURCE column
-    // 0 (see the comment on that below), the on-screen position of
-    // already-drawn content actually shifts left a little on EVERY step
-    // (not just the leading edge) -- correctly reproducing that shift
-    // without redrawing needs an actual pixel MOVE in SDRAM (BTE's
-    // "Memory Copy" mode), not just skipping work, and confirmed on
-    // real hardware that skipping the shift step entirely mirrored the
-    // bitmap left-right once fully revealed. 30MHz SPI (raised from the
-    // original 6MHz -- see initDisplay()'s own comment) made the full
-    // redraw here fast enough that this was no longer the bottleneck it
-    // once was anyway.
+    // on-screen. Verified geometry (worth spelling out precisely, since
+    // getting this backwards once already produced a mirrored result):
+    // because this always crops from SOURCE column 0 growing (see
+    // below for why), EVERY already-drawn pixel's own screen X position
+    // shifts LEFT by exactly this step's own growth amount every step --
+    // e.g. with "ABCDEF" revealed 3 letters at a time, after step 1
+    // "ABC" sits at the panel's own right edge; after step 2, "ABC" has
+    // moved 3px left, and "DEF" (the newly-revealed slice) now occupies
+    // the right edge "ABC" used to sit at. So each step: (1) BTE-shift
+    // the existing, already-visible content LEFT by this step's own
+    // growth amount -- pure hardware SDRAM-to-SDRAM move, no SPI pixel
+    // data at all (see LT7683::bteHorizontalShift()'s own comment for
+    // how this avoids the overlapping-copy risk bteScrollShift() also
+    // avoids), (2) draw ONLY the newly-revealed slice, at the panel's
+    // own right edge, via the proven MCU-write BTE path -- not the whole
+    // accumulated width from scratch.
     std::uint16_t segW[kSlideSteps];
     computeSegmentWidths(segW);
 
     std::uint16_t accumWidth = 0;
     for (int i = 0; i < kSlideSteps; ++i) {
+        const std::uint16_t prevAccumWidth = accumWidth;
         accumWidth = static_cast<std::uint16_t>(accumWidth + segW[i]);
-        const auto destX = static_cast<std::int16_t>(SCREEN_MAX_X - accumWidth);
-        // Crop the LEFTMOST `accumWidth` columns of the source bitmap --
-        // i.e. always starting from column 0, growing -- so the reveal
-        // shows the bitmap's own content in its natural left-to-right
-        // order as it grows (first slice shows the start of the strip,
-        // not its end). Confirmed backwards before this fix: with the
-        // crop starting from (buttonStripWidth - accumWidth) instead,
-        // each step showed progressively MORE of the bitmap's END first,
-        // which is backwards from how the strip's own content should
-        // build up on screen. buttonStripWidth is passed as the crop
-        // function's srcStride so it still steps between rows using the
-        // bitmap's own real width, not the (narrower) width actually
-        // being drawn this step.
-        display_->drawBitmap565Cropped(destX, 0, accumWidth, buttonStripHeight,
-                                       buttonStripWidth,
-                                       buttonStripPixels.data());
+        if (prevAccumWidth > 0) {
+            // Shift the existing [SCREEN_MAX_X-prevAccumWidth,
+            // SCREEN_MAX_X) block left by segW[i].
+            display_->bteHorizontalShift(
+                static_cast<std::int16_t>(SCREEN_MAX_X - prevAccumWidth), 0,
+                prevAccumWidth, buttonStripHeight,
+                -static_cast<std::int16_t>(segW[i]));
+        }
+        // The newly-revealed slice -- source columns [prevAccumWidth,
+        // accumWidth) -- lands at the panel's own right edge, in the
+        // space the shift above just vacated.
+        const auto sliceDestX = static_cast<std::int16_t>(SCREEN_MAX_X - segW[i]);
+        display_->bteMcuWriteBitmap(sliceDestX, 0, segW[i], buttonStripHeight,
+                                    buttonStripWidth,
+                                    buttonStripPixels.data() + prevAccumWidth);
         sleep_ms(kSlideStepDelayMs);
     }
 
@@ -211,34 +204,18 @@ void showButtonStrip() {
 void hideButtonStrip() {
     if (!buttonStripVisible) return;
 
-    // NOT using BTE, for either direction -- an earlier version of this
-    // function used opcode 0xC3 ("Negative Direction") for its
-    // overlapping (dest > src) shift, reasoning through the datasheet's
-    // own description of how that opcode should behave. Turned out to
-    // be moot: on real hardware, BTE itself never got past triggering
-    // without corrupting/freezing the whole display, confirmed across
-    // extensive testing (see LT7683::BTE()'s own comment for the full
-    // story) -- not something fixable by picking the right opcode or
-    // corner convention.
-    //
-    // This DOES need to redraw the remaining, still-visible content
-    // fresh every step, not just clear the vacated edge -- a mistake
-    // made (and confirmed wrong on real hardware) more than once already
-    // in this same investigation, worth spelling out clearly: since
-    // showButtonStrip() always crops from SOURCE column 0 (see its own
-    // comment for why), the on-screen position of every already-drawn
-    // pixel is tied to the CURRENT accumulated width, not fixed -- e.g.
-    // source column 0 sits at screen X = (SCREEN_MAX_X - accumWidth),
-    // which moves right by exactly this step's own shrink amount every
-    // time accumWidth shrinks. Only clearing the newly-vacated sliver
-    // and leaving the rest alone (tried and reverted) leaves the
-    // remaining pixels sitting at their OLD screen positions -- visibly
-    // wrong: chopping off the source bitmap's OWN left edge in place,
-    // rather than the correct behaviour (matching showButtonStrip()'s
-    // own reveal, played backwards): the whole remaining image shifting
-    // right, uncovering blank space on the left, with the source
-    // bitmap's own trailing (right) edge the part that actually
-    // disappears off the panel's edge each step.
+    // Verified geometry (see showButtonStrip()'s own comment for the
+    // full "ABCDEF" walkthrough this mirrors): the KEPT portion (source
+    // columns [0, keepWidth), i.e. everything except the trailing slice
+    // about to disappear) shifts RIGHT by this step's own shrink amount,
+    // uncovering blank space on the left -- the source bitmap's own
+    // trailing (right) edge is what actually falls off the panel's edge
+    // each step, not its leading edge. Each step now: (1) BTE-shift the
+    // kept region right -- pure hardware SDRAM-to-SDRAM move, no SPI
+    // pixel data (see LT7683::bteHorizontalShift()'s own comment), (2)
+    // clear only the newly-vacated sliver on the left -- no redraw of
+    // anything else needed, since the shift already moved the real
+    // pixels to their correct new position.
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
     std::uint16_t segW[kSlideSteps];
@@ -248,29 +225,15 @@ void hideButtonStrip() {
     for (int i = kSlideSteps - 1; i >= 0; --i) {
         const std::uint16_t lastW = segW[i];
         const auto keepWidth = static_cast<std::uint16_t>(accumWidth - lastW);
-        const auto srcX = static_cast<std::uint16_t>(SCREEN_MAX_X - accumWidth);
-        // FIXED: was blackening the WHOLE previously-visible block
-        // (width=accumWidth) every step, even though the very next line
-        // immediately redraws most of that same area right back --
-        // exactly the extra work (and extra hardware geometry-engine
-        // call, complete with its own completion wait) that made this
-        // direction visibly choppier than showButtonStrip()'s own single-
-        // call-per-step reveal. Only the newly-vacated sliver (this
-        // step's own shrink amount, srcX to dstX below) actually needs
-        // clearing -- the rest of the old area gets fully covered by the
-        // redraw immediately after anyway.
-        display_->fillRect(static_cast<std::int16_t>(srcX), 0,
-                           static_cast<std::int16_t>(lastW), buttonStripHeight, 0x0000);
+        const auto oldX = static_cast<std::int16_t>(SCREEN_MAX_X - accumWidth);
         if (keepWidth > 0) {
-            const auto dstX = static_cast<std::int16_t>(SCREEN_MAX_X - keepWidth);
-            // Crop from source column 0, same convention as
-            // showButtonStrip() -- NOT from (width - keepWidth), which
-            // would show the bitmap's trailing columns instead of its
-            // leading ones (backwards from how it was revealed).
-            display_->drawBitmap565Cropped(dstX, 0, keepWidth, buttonStripHeight,
-                                           buttonStripWidth,
-                                           buttonStripPixels.data());
+            // Shift the [oldX, oldX+keepWidth) block right by lastW.
+            display_->bteHorizontalShift(oldX, 0, keepWidth, buttonStripHeight,
+                                         static_cast<std::int16_t>(lastW));
         }
+        // The vacated sliver, now on the left -- [oldX, oldX+lastW).
+        display_->fillRect(oldX, 0, static_cast<std::int16_t>(lastW),
+                           buttonStripHeight, 0x0000);
         accumWidth = keepWidth;
         sleep_ms(kHideStepDelayMs);
     }

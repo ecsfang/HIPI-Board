@@ -92,6 +92,34 @@ public:
     // display, bypassing Screen entirely) blindly zeros that register.
     void refreshCursor() { set_cur(); }
 
+    // Re-applies the shared hardware rendering state Screen itself
+    // owns -- text size and foreground colour -- in one call. Needed
+    // after ANYTHING outside Screen has been drawing to the same panel
+    // using these same registers (they're global chip state, not tied
+    // to any particular caller): confirmed necessary for the PIP menu
+    // overlay on the 7" panel specifically, since the menu keeps
+    // drawing to (and thus repeatedly re-stealing) these same registers
+    // via its own txtSize()/txtColor()/fillRect() calls, while Screen
+    // itself never stops drawing live in between (unlike the older
+    // suspend()/resume() approach, where Screen simply didn't draw
+    // anything at all while a menu was open, so the theft never
+    // mattered). draw_letter()'s own normal-character path in
+    // particular never re-asserts colour before each character (see its
+    // own code) -- it was always relying on nothing else having changed
+    // it since the last explicit set, an assumption the PIP overlay
+    // breaks. Deliberately does NOT touch the cursor (unlike
+    // refreshCursor()) -- call that separately, and only once the menu
+    // has actually closed: the menu deliberately hides the hardware
+    // cursor for as long as it's open (openMainMenu()'s own
+    // setTextCursorVisible(false, false)), and re-running set_cur()
+    // here unconditionally (e.g. while just navigating between menu
+    // items, menu still open) would undo that, since it doesn't know
+    // the menu wants it to stay hidden.
+    void reassertRenderState() {
+        txt_size(size_);
+        d_->txtColor(color_, 0);
+    }
+
     // Manual scroll-back, independent of the HP-41 stream's own animated
     // roll/paper-feed commands (up()/down() above). Positive n moves
     // further into history (older content); negative moves back toward
@@ -325,6 +353,16 @@ private:
                               // constructor from the panel's actual height (must be
                               // >= the largest possible ROWS_, see the constructor's
                               // own comment for why a fixed "31" wasn't safe)
+    // Set by screen_pars() each time its own pre-scroll normalisation
+    // block actually runs (moving content to match the new ROWS_'s own
+    // "ROWS_-1-row_" convention) -- see reflow()'s own comment for why
+    // it needs to know this to compute row_ correctly: the two cases
+    // (content just normalised vs. already following the OTHER,
+    // unchanged "index 0 = newest, always shown at the bottom row"
+    // convention from a prior scroll) need different formulas, and
+    // can't be told apart from numLines_ alone after the fact (both can
+    // land on the same value).
+    bool preScrollNormalized_ = false;
 
     std::uint8_t cnt_;       // chars in current physical line
     std::uint8_t cp_;        // cursor position within current physical line

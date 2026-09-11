@@ -75,7 +75,7 @@ public:
         return _open;
     }
     void select(const char *name) {
-        if( ok() )
+        if( ok() ) // Close any previously open tape
             close();
         strcpy(_name, name);
     }
@@ -111,10 +111,15 @@ public:
     CTapeSD(const char *name = MEDIA_NAME) : CTape(name) {
     }
     unsigned int tell(void) {
-        return f_tell(&_tape);
+        return _open ? f_tell(&_tape) : 0;
     }
     void read(unsigned char *buf) {
         unsigned int n = 0;
+        if( !_open ) {
+            error("read: tape not open");
+            memset(buf, 255, BUF_SIZE);
+            return;
+        }
         _fr = f_read(&_tape, buf, BUF_SIZE, &n);
         if (FR_OK != _fr) {
             error( "f_read" );
@@ -128,6 +133,10 @@ public:
     unsigned int readByte() {
         unsigned int n;
         unsigned char b;
+        if( !_open ) {
+            error("readByte: tape not open");
+            return 0;
+        }
         _fr = f_read(&_tape, &b, 1, &n);
         if (FR_OK != _fr) {
             error( "f_read" );
@@ -150,11 +159,19 @@ public:
     void write(unsigned char *buf) {
         //printf("Writing %d bytes to tape at %d\n", BUF_SIZE, tell());
         unsigned int n;
+        if( !_open ) {
+            error("write: tape not open");
+            return;
+        }
         _fr = f_write(&_tape, buf, BUF_SIZE, &n);
         if (FR_OK != _fr)
             error("f_write");
     }
     void seek(unsigned int s) {
+        if( !_open ) {
+            error("seek: tape not open");
+            return;
+        }
         _fr = f_lseek(&_tape, (FSIZE_t)s);
         if (_fr != FR_OK)
             error("f_lseek");
@@ -177,10 +194,16 @@ public:
         LOGF("Closing tape SD-file: [%s]\r\n", _name);
         tud_cdc_n_write_flush(0);
         tud_task();
+        if( !_open ) {
+            LOGF("Nothing to close for: [%s]\r\n", _name);
+            return;
+        }
         _fr = f_close(&_tape);
+        LOGF("Closing file ...\r\n");
         if (_fr != FR_OK)
             error("f_close");
         _open = false;
+        LOGF("Done closing\r\n");
     }
 };
 

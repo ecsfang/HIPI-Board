@@ -8,6 +8,7 @@
 
 #include "usb_serial.h"  // LOGF
 #include "ff.h"
+#include "usb_msc.h"     // usbMscModeActive(), for save()'s own guard
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,18 @@ public:
     // by every setter below -- you normally don't need to call this
     // yourself.
     void save() {
+        // The SD card's raw blocks belong to the PC while "Connect to
+        // PC" mode is active (see usb_msc.h) -- writing via FatFs here
+        // at the same time would race the PC's own filesystem driver
+        // over the same underlying storage. Settings changes made from
+        // the menu during this window simply aren't persisted (the menu
+        // itself, and every other setter below, still updates its own
+        // in-memory value normally either way -- only the SD card write
+        // is skipped), rather than risking that race.
+        if (usbMscModeActive()) {
+            LOGF("\r\n * Config: save skipped, SD card is connected to PC");
+            return;
+        }
         FIL file;
         if (f_open(&file, kPath, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
             LOGF("\r\n * Config: failed to save %s", kPath);
