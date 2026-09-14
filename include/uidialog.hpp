@@ -9,6 +9,7 @@
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
+#include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
 #include <vector>
 #include <string>
 #include <cstring>
@@ -158,7 +159,56 @@ public:
         onDeviceToggled_ = std::move(cb);
     }
 
+    // Called to actually run the physical HP-IL loopback test (see
+    // hipi.h's own hipi_loopbackTest()) when the user confirms the
+    // "Loopback test" Config menu item's own dialog. Wired up by
+    // pico_main.cpp, which is the only place that actually owns the
+    // HpIlLoop instance this needs -- UiDialog itself has no business
+    // knowing about the physical loop directly, same reasoning as every
+    // other on*Changed_ callback here.
+    //
+    // The callback itself takes a progress-report function as its own
+    // argument (matching hipi_loopbackTest()'s own onProgress parameter)
+    // -- runLoopbackTest() below passes one in that redraws the dialog's
+    // progress bar, called roughly once a second from partway through
+    // the (otherwise fully synchronous, blocking) test itself.
+    using LoopbackProgressFn = std::function<void(int tested, int total, std::uint32_t lastCmd)>;
+    using LoopbackTestFn = std::function<LoopbackResult(LoopbackProgressFn)>;
+    void setLoopbackTestCallback(LoopbackTestFn cb) {
+        onLoopbackTest_ = std::move(cb);
+    }
+
     bool isOpen() const { return state_ != State::Closed; }
+
+    // Used by boardui.cpp's boardui_handleTap() to detect/dismiss the
+    // loopback test's own result dialog on any touch -- same pattern as
+    // its own infoBoxVisible/deviceListVisible checks, just routed
+    // through UiDialog since this result IS one of its own menu states
+    // (see openLoopbackConfirm()/runLoopbackTest() further down) rather
+    // than a separate corner-tap box like infoBox/deviceList are.
+    bool isShowingLoopbackResult() const { return state_ == State::LoopbackResult; }
+    void dismissLoopbackResult() {
+        if (state_ != State::LoopbackResult) return;
+        // Called from boardui_handleTap() -- a completely separate call
+        // path from handleButton(), which normally provides the
+        // beginOverlayDraw()/endOverlayDraw()+showPipOverlay() wrapping
+        // every other menu-drawing call in this file relies on (see
+        // handleButton()'s own end-of-function sequence). openConfigMenu()
+        // below draws menu content exactly like any other open*Menu(), so
+        // it needs that same wrapping here explicitly, or it would (on
+        // the 7" panel) draw straight to the main window's canvas instead
+        // of the PIP layer -- confirmed as corrupting the live content
+        // underneath rather than showing the Config menu at all.
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        openConfigMenu();
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+    }
 
     // Anropas fran huvudloopen nar en knapp-touch upptäcks.
     // Shift+Ok closes the menu from any depth (see the check right
@@ -349,6 +399,20 @@ public:
                 if (b == Button::Ok)   enterDisplayMenuItem();
                 if (b == Button::X)    openMainMenu();
                 break;
+
+            case State::LoopbackConfirm:
+                if (b == Button::Ok) runLoopbackTest();
+                if (b == Button::X)  openConfigMenu();
+                break;
+
+            case State::LoopbackResult:
+                // Primarily dismissed by a touch, anywhere on screen --
+                // see boardui.cpp's boardui_handleTap(), which checks
+                // isShowingLoopbackResult()/dismissLoopbackResult() for
+                // this. Ok/X here too, for anyone navigating by buttons
+                // alone.
+                if (b == Button::Ok || b == Button::X) openConfigMenu();
+                break;
         }
 
 #ifdef DISPLAY_7INCH
@@ -406,14 +470,15 @@ private:
     enum class State {
         Closed, MainMenu, ConfigMenu, SettingsMenu,
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
-        FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu
+        FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
+        LoopbackConfirm, LoopbackResult
     };
 
     static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
     static constexpr int kMainMenuCount = 4;
 
-    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC" };
-    static constexpr int kConfigMenuCount = 3;
+    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC", "Loopback test" };
+    static constexpr int kConfigMenuCount = 4;
 
     static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns", "Bootsel mode" };
     static constexpr int kSettingsMenuCount = 5;
@@ -535,6 +600,7 @@ private:
         drawRow(0, kConfigMenuLabels[0]);
         drawRow(1, kConfigMenuLabels[1]);
         drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
+        drawRow(3, kConfigMenuLabels[3]);
     }
 
     void enterConfigMenuItem() {
@@ -542,7 +608,7 @@ private:
             openFilePicker();
         } else if (selected_ == 1) {
             openTraceMenu();
-        } else {
+        } else if (selected_ == 2) {
             // "Connect to PC" / "Disconnect from PC" -- toggles USB MSC
             // mode (see usb_msc.h for the full story). Shows explicit
             // feedback either way, then returns to this same menu (with
@@ -570,8 +636,96 @@ private:
             }
             sleep_ms(1500);
             openConfigMenu();
+        } else {
+            openLoopbackConfirm();
         }
     }
+
+    // "Loopback test" -- first shows a confirmation dialog explaining
+    // the physical jumper it needs (Button::Ok proceeds to actually run
+    // it; Button::X backs out to the Config menu without running
+    // anything).
+    void openLoopbackConfirm() {
+        state_ = State::LoopbackConfirm;
+        drawBox();
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        d_->txtWrite("Connect the HP-IL loop cable,");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+        d_->txtWrite("then press OK to test.");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 3 * MenuFrame::RowPitch);
+        d_->txtWrite("X to cancel.");
+    }
+
+    // Draws (or redraws) just the progress line + bar -- called both to
+    // set up the initial 0% state and, roughly once a second, from
+    // partway through the test itself (via the onProgress callback
+    // passed into onLoopbackTest_() below). Only touches the two rows it
+    // owns (text line + bar), not the whole box, so it doesn't need
+    // drawBox() run again each time.
+    void drawLoopbackProgress(int tested, int total, std::uint32_t lastCmd) {
+        const int pct = total > 0 ? (tested * 100) / total : 0;
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "Testing... %d%% (0x%03X)",
+                      pct, static_cast<unsigned>(lastCmd));
+
+        const int textX = MenuFrame::X + 20, textY = MenuFrame::Y + 20;
+        d_->fillRect(textX, textY, MenuFrame::W - 40, MenuFrame::RowPitch, 0x0000);
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtSetCursor(textX, textY);
+        d_->txtWrite(buf);
+
+        const int barX = MenuFrame::X + 20, barY = MenuFrame::Y + 20 + MenuFrame::RowPitch;
+        const int barW = MenuFrame::W - 40, barH = 20;
+        d_->fillRect(barX, barY, barW, barH, 0x0000);
+        d_->rect(barX, barY, barW, barH, 0xFFFF);
+        const int fillW = (barW - 2) * pct / 100;
+        if (fillW > 0) d_->fillRect(barX + 1, barY + 1, fillW, barH - 2, 0x07E0);
+    }
+
+    // Actually runs the test (via the callback pico_main.cpp wired up --
+    // see setLoopbackTestCallback()) and shows the result. This call
+    // blocks for as long as the test itself takes; drawLoopbackProgress()
+    // above is called roughly once a second from partway through it (see
+    // hipi_loopbackTest()'s own onProgress parameter) so the bar/percent
+    // actually advances instead of the screen just looking frozen.
+    // Stops at the very first failure rather than working through the
+    // whole range regardless -- confirmed painfully slow otherwise with
+    // nothing connected (every one of ~1000 values timing out in turn).
+    // Touch is the primary way to dismiss the result afterward (see
+    // boardui.cpp's own boardui_handleTap(), which checks
+    // isShowingLoopbackResult()/dismissLoopbackResult() for this) --
+    // Button::Ok/X in State::LoopbackResult below also work, for anyone
+    // navigating by buttons alone.
+    void runLoopbackTest() {
+        state_ = State::LoopbackResult;
+        drawBox();
+        drawLoopbackProgress(0, 1, 0);
+
+        const LoopbackResult result = onLoopbackTest_
+            ? onLoopbackTest_([this](int tested, int total, std::uint32_t lastCmd) {
+                  drawLoopbackProgress(tested, total, lastCmd);
+              })
+            : LoopbackResult{0, 0, 0};
+
+        drawBox();  // clear the progress line/bar before showing the result
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        char buf[48];
+        if (result.errors == 0) {
+            std::snprintf(buf, sizeof(buf), "Loopback OK! (%d/%d)", result.tested, result.tested);
+        } else {
+            std::snprintf(buf, sizeof(buf), "Loopback FAILED at 0x%03X",
+                          static_cast<unsigned>(result.failedCmd));
+        }
+        d_->txtWrite(buf);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
+        d_->txtWrite("Touch anywhere to continue.");
+    }
+
 
     void openSettingsMenu() {
         state_ = State::SettingsMenu;
@@ -1007,6 +1161,10 @@ private:
                 break;
             case State::ConfirmFile:
                 break;
+            case State::LoopbackConfirm:
+                break;
+            case State::LoopbackResult:
+                break;
         }
     }
 
@@ -1031,6 +1189,7 @@ private:
     std::function<void(std::uint8_t)> onBrightnessChanged_;
     std::function<void(std::uint8_t)> onColumnsChanged_;
     std::function<void(const std::string&, bool)> onDeviceToggled_;
+    LoopbackTestFn onLoopbackTest_;
 };
 
 }  // namespace hipi

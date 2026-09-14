@@ -33,7 +33,7 @@
 #include <pico/stdio.h>
 #include <cstdint>
 
-#include "hpil_pio.hpp"
+#include "hipi.h"
 
 #include "PicoSpiTransport.hpp"
 #include "display_config.h"
@@ -126,12 +126,8 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.1(beta)";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.2(beta)";  // shown on splash screen
 }  // namespace
-
-extern void hipi_init(void);
-extern bool hipi_loop(HpIlLoop& loop);
-extern bool hipi_test(HpIlLoop& loop);
 
 bool usb_connected = false;
 
@@ -406,6 +402,15 @@ int main() {
     // Init HPIL scanner ...
     HpIlLoop hpil(IN_M_PIN, IN_P_PIN, OUT_M_PIN, OUT_P_PIN);
 
+    // Wired up here (rather than alongside the other dialog->set*Callback
+    // calls above) since it needs hpil itself, which doesn't exist yet at
+    // that point. Captured by reference -- hpil lives for main()'s own
+    // (effectively unbounded, this never returns) lifetime, same as
+    // every other object main() hands the dialog a callback into.
+    dialog->setLoopbackTestCallback([&hpil](hipi::UiDialog::LoopbackProgressFn onProgress) {
+        return hipi_loopbackTest(hpil, onProgress);
+    });
+
     // Setup all devices in the HPIL loop (display, drive, LEDs, PILBox)
     hipi_init();
 
@@ -415,8 +420,8 @@ int main() {
 
     LOGF("\r\n\t* HP-IL initialized");
     {
-        LOGF("\r\n\t* Loop-back test");
-        hipi_test(hpil);
+        LOGF("\r\n\t* Device self-check");
+        hipi_test();
     }
 
     // Done! Start the HPIL monoitoring ...

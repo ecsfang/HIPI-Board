@@ -706,7 +706,18 @@ void boardui_poll() {
 }
 
 void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
-    if (infoBoxVisible) {
+    if (dialog_ != nullptr && dialog_->isShowingLoopbackResult()) {
+        // Any touch anywhere dismisses the loopback test's own result
+        // dialog -- same "any touch while it's up" pattern as
+        // infoBoxVisible below, just routed through UiDialog since this
+        // result is one of its own menu states (see uidialog.hpp's
+        // openLoopbackConfirm()/runLoopbackTest()) rather than a
+        // separate corner-tap box like infoBox/deviceList are. Checked
+        // first, same priority reasoning as infoBoxVisible/
+        // deviceListVisible below -- consumed here, not treated as a
+        // button-strip wake/press or corner-tap.
+        dialog_->dismissLoopbackResult();
+    } else if (infoBoxVisible) {
         // Any touch while it's up dismisses it early -- consumed here, not
         // treated as a button-strip wake/press or another corner-tap.
         hideInfoBox();

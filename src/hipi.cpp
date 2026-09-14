@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <ctype.h>
 
-#include "hpil_pio.hpp"
 #include "pilbox.h"
 #include "plotter.h"
 #include "terminal.h"
@@ -217,23 +216,60 @@ std::vector<DeviceInfo> hipi_enumerateDevices() {
     return result;
 }
 
-bool hipi_test(HpIlLoop& loop) {
-    uint32_t rx_frame   = 0x01BC;
-    uint32_t rtn        = 0x0000;
-    absolute_time_t cdcTimeout = make_timeout_time_ms(500);
+LoopbackResult hipi_loopbackTest(
+        HpIlLoop& loop,
+        std::function<void(int tested, int total, uint32_t lastCmd)> onProgress) {
+    uint32_t rtn  = 0x0000;
+    constexpr uint32_t kMinCmd = 0x0001, kMaxCmd = 0x7FF;
+    constexpr int kTotal = static_cast<int>(kMaxCmd - kMinCmd + 1);
 
-    do {
-        tud_task();
-        sleep_ms(10);
-        loop.sendFrame(rx_frame);
-    } while (!loop.receiveFrame(rtn) && !time_reached(cdcTimeout));
+    int tested = 0;
+    // Gates onProgress to roughly once a second rather than every value
+    // -- see hipi_loopbackTest()'s own header comment for why.
+    absolute_time_t nextProgressReport = make_timeout_time_ms(1000);
 
-    LOGF("\r\n\t\t* Loopback ");
-    if( rx_frame == rtn )
-        LOGF("OK! (0x%03X)", rtn);
-    else
-        LOGF("failed: 0x%03X -> 0x%03X", rx_frame, rtn);
+    for (uint32_t cmd = kMinCmd; cmd <= kMaxCmd; cmd++) {
+        // Drain any stale, unread echo left over from a previous
+        // iteration before sending this value -- otherwise an old hit
+        // can get picked up here instead of what we're about to send.
+        // Re-sending the same cmd repeatedly inside the wait loop below
+        // (an earlier version of this test did) produces more than one
+        // echo per iteration, only one of which ever gets consumed -- the
+        // rest silently carry over and get mistaken for the NEXT
+        // iteration's own answer ("always one behind": 0x002 -> 0x001,
+        // 0x003 -> 0x002, ...), confirmed on real hardware.
+        uint32_t stale;
+        while (loop.receiveFrame(stale)) {}
 
+        loop.sendFrame(cmd);   // send exactly once per value
+        absolute_time_t cdcTimeout = make_timeout_time_ms(100);
+        bool timedOut = false;
+        while (!loop.receiveFrame(rtn)) {
+            tud_task();
+            sleep_us(2500);
+            if (time_reached(cdcTimeout)) { timedOut = true; break; }
+        }
+        ++tested;
+
+        if (timedOut) {
+            LOGF("\r\n\t\t* Loopback TIMEOUT waiting for 0x%03X -- stopping", cmd);
+            return LoopbackResult{ tested, 1, cmd };
+        }
+        if (rtn != cmd) {
+            LOGF("\r\n\t\t* Loopback failed: 0x%03X -> 0x%03X -- stopping", cmd, rtn);
+            return LoopbackResult{ tested, 1, cmd };
+        }
+
+        if (onProgress && time_reached(nextProgressReport)) {
+            onProgress(tested, kTotal, cmd);
+            nextProgressReport = make_timeout_time_ms(1000);
+        }
+    }
+    LOGF("\r\n\t\t* Loopback OK!");
+    return LoopbackResult{ tested, 0, 0 };
+}
+
+bool hipi_test() {
     // ── Device self-check ────────────────────────────────────────────
     // Deliberately does NOT touch the physical loop at all (no
     // loop.sendFrame()/receiveFrame()) -- we don't know whether a real
