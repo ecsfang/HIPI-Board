@@ -107,6 +107,7 @@ typedef enum {
     DISPLAY,
     DRIVE,
     LED,
+    PIXEL,
     PILBOX,
     PLOTTER,
     TERMINAL

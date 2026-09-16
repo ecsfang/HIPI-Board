@@ -70,10 +70,6 @@ extern void init_spi(void);
 
 #include <cstdio>
 
-// NeoPixel support
-#include "../PicoLed/PicoLed.hpp"
-#include "../PicoLed/Effects/Bounce.hpp"
-
 hipi::Config config;
 
 // Run the loop as long as true ...
@@ -126,7 +122,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.2(beta)";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.1(beta)";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -146,53 +142,10 @@ void SetPinDriveStrength(uint pin, uint mA) {
     }
 }
 
-#define LED_PIN 26
-#define LED_LENGTH 2
-#define LED_PIO pio2
-
-// NeoPixels test
-void neoTest()
-{
-    // 0. Initialize LED strip
-    LOGF("\n\r0. Initialize LED strip\n\r");
-    auto ledStrip = PicoLed::addLeds<PicoLed::WS2812B>(LED_PIO, 0, LED_PIN, LED_LENGTH, PicoLed::FORMAT_GRB);
-    //if( !ledStrip ) {
-    //    LOGF("Failed to initialize LED strip on PIO %d, state machine %d, pin %d\n\r", LED_PIO, 0, LED_PIN);
-    //    return;
-    //}
-    ledStrip.setBrightness(64);
-    LOGF("1. Clear the strip!\n\r");
-    
-    // 1. Set all LEDs to red!
-    LOGF("1. Set all LEDs to red!\n\r");
-    ledStrip.fill( PicoLed::RGB(255, 0, 0) );
-    ledStrip.show();
-    sleep_ms(500);
-
-    // 2. Set all LEDs to green!
-    LOGF("2. Set all LEDs to green!\n\r");
-    ledStrip.fill( PicoLed::RGB(0, 255, 0) );
-    ledStrip.show();
-    sleep_ms(500);
-
-    // 3. Set all LEDs to blue!
-    LOGF("3. Set all LEDs to blue!\n\r");
-    ledStrip.fill( PicoLed::RGB(0, 0, 255) );
-    ledStrip.show();
-    sleep_ms(500);
-
-    // 4. Set half LEDs to red and half to blue!
-    LOGF("4. Set gradient from red to blue!\n\r");
-    ledStrip.fillGradient( PicoLed::RGB(255, 0, 0), PicoLed::RGB(0, 0, 255) );
-    ledStrip.show();
-    sleep_ms(1000);
-
-    // 5. Set half LEDs to red and half to blue!
-    LOGF("5. Set rainbow colors!\n\r");
-    ledStrip.fillRainbow(0, 255 / LED_LENGTH);
-    ledStrip.show();
-    sleep_ms(1000);
-}
+// NeoPixel support: see ilpixels.h/pixels.h -- the real CHipiPixel device
+// (registered in hipi_init()) supersedes this file's own earlier
+// neoTest() prototype (send/receive over HP-IL like every other device,
+// rather than a fixed boot-time color-cycle demo run directly from here).
 
 hipi::Screen *screen;
 hipi::UiDialog *dialog = nullptr;
@@ -257,7 +210,12 @@ int main() {
     //alienStartup(2000);
 
     //ledA.blink(100, 150);
-    neoTest();
+    // neoTest() removed -- superseded by the real CHipiPixel device (see
+    // ilpixels.h/hipi_init()), which uses the very same PIXEL_PIN/PIXEL_PIO
+    // via the global pixelStrip instance (pixels.cpp). That instance is
+    // constructed before main() even runs (static init order), so calling
+    // neoTest() here too would have doubly claimed the same PIO state
+    // machine/pin.
 
     initDisplay();
 

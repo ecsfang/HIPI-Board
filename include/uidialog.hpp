@@ -387,8 +387,8 @@ public:
                 break;
 
             case State::DeviceList:
-                if (b == Button::Up)   moveSelection(-1, static_cast<int>(devices.size()));
-                if (b == Button::Down) moveSelection(+1, static_cast<int>(devices.size()));
+                if (b == Button::Up)   moveDeviceSelection(-1);
+                if (b == Button::Down) moveDeviceSelection(+1);
                 if (b == Button::Ok)   toggleDevice(selected_);
                 if (b == Button::X)    openMainMenu();
                 break;
@@ -843,6 +843,9 @@ private:
 
     // How many rows fit in the box at MenuFrame::RowPitch, minus top/bottom
     // margin. Was a plain "10" sized for the old, tighter 24px pitch.
+    // Shared by every scrollable list in this file (FilePicker,
+    // DeviceList) -- purely geometric, nothing file-specific about it
+    // despite the name.
     static constexpr int kMaxFilesShown =
         (MenuFrame::H - 40) / MenuFrame::RowPitch;
 
@@ -887,6 +890,35 @@ private:
     // Redraws the currently-scrolled-to window of files_ into the menu
     // box -- shared by openFilePicker() (initial draw) and
     // moveFileSelection() (whenever scrolling is needed after Up/Down).
+    // Draws small "more above"/"more below" markers in the box's top-right
+    // and bottom-right corners whenever the list has more entries than fit
+    // in the visible kMaxFilesShown-row window at the current scroll
+    // position. Shared by every scrollable list (drawFileList(),
+    // drawDeviceList()) -- clears both corners first each time, since a
+    // shorter list scrolled to afterward could otherwise leave a stale
+    // arrow from a longer one showing.
+    void drawScrollIndicators(int scrollOffset, int totalCount) {
+        const int indicatorX = MenuFrame::X + MenuFrame::W - 34;
+        const int topY = MenuFrame::Y + 6;
+        const int bottomY = MenuFrame::Y + MenuFrame::H - 29;  // 3px higher than
+                                                                 // before -- was
+                                                                 // overwriting the
+                                                                 // frame's own
+                                                                 // bottom border
+        d_->fillRect(indicatorX, topY, 24, 20, 0x0000);
+        d_->fillRect(indicatorX, bottomY, 24, 20, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtColor(0xFFFF, 0x0000);
+        if (scrollOffset > 0) {
+            d_->txtSetCursor(indicatorX, topY);
+            d_->txtWrite("^");
+        }
+        if (scrollOffset + kMaxFilesShown < totalCount) {
+            d_->txtSetCursor(indicatorX, bottomY);
+            d_->txtWrite("v");
+        }
+    }
+
     void drawFileList() {
         // See drawColorRow()'s own comment for why this is needed here
         // too -- called on its own during Up/Down navigation (see
@@ -896,7 +928,17 @@ private:
         d_->txtSize(MenuFrame::TextScale);
         for (int row = 0; row < kMaxFilesShown; ++row) {
             const std::size_t fileIndex = static_cast<std::size_t>(fileScrollOffset_ + row);
-            if (fileIndex >= files_.size()) break;
+            const bool hasEntry = fileIndex < files_.size();
+            const bool isSelected = hasEntry && (static_cast<int>(fileIndex) == selected_);
+            // Clears this row's slot EVERY time, whether or not it ends
+            // up holding text -- without this, (a) a shorter replacement
+            // string leaves a trailing "tail" of the longer one it
+            // replaced still visible, and (b) a row that held an entry
+            // last draw but doesn't this time (the list got shorter, or
+            // scrolled past its own end) keeps showing that old entry
+            // forever, since nothing ever overwrote it.
+            _clearRowBackground(row, isSelected ? MenuFrame::Yellow : 0x0000);
+            if (!hasEntry) continue;
             // drawRow()'s own highlight check compares against selected_
             // directly (an absolute files_ index), but its own cursor
             // positioning uses its "index" argument for the row's Y
@@ -907,10 +949,10 @@ private:
             // lines drawRow() itself uses, with row for position and
             // fileIndex for the highlight comparison.
             d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
-            const bool isSelected = (static_cast<int>(fileIndex) == selected_);
             d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
             d_->txtWrite(files_[fileIndex].c_str());
         }
+        drawScrollIndicators(fileScrollOffset_, static_cast<int>(files_.size()));
     }
 
     // Up/Down navigation for State::FilePicker specifically -- moveSelection()
@@ -942,14 +984,54 @@ private:
         }
         state_ = State::DeviceList;
         selected_ = 0;
+        deviceScrollOffset_ = 0;
         drawBox();
-        for (std::size_t i = 0; i < deviceLabels_.size() && i < static_cast<std::size_t>(kMaxFilesShown); ++i) {
-            drawRow(static_cast<int>(i), deviceLabels_[i].c_str());
-        }
+        drawDeviceList();
     }
 
     static std::string deviceLabel(CDevice* dev) {
         return std::string(dev->name()) + (dev->enabled() ? " [ON]" : " [OFF]");
+    }
+
+    // Redraws the currently-scrolled-to window of deviceLabels_ into the
+    // menu box -- shared by openDeviceList() (initial draw) and
+    // moveDeviceSelection() (whenever scrolling is needed after Up/Down).
+    // Mirrors drawFileList() exactly -- see its own comment for why this
+    // reimplements drawRow()'s own two lines rather than calling it
+    // directly (screen row for position, absolute index for the
+    // highlight comparison).
+    void drawDeviceList() {
+        d_->txtSize(MenuFrame::TextScale);
+        for (int row = 0; row < kMaxFilesShown; ++row) {
+            const std::size_t devIndex = static_cast<std::size_t>(deviceScrollOffset_ + row);
+            const bool hasEntry = devIndex < deviceLabels_.size();
+            const bool isSelected = hasEntry && (static_cast<int>(devIndex) == selected_);
+            // See drawFileList()'s own comment on _clearRowBackground()
+            // for why this always runs, entry or not.
+            _clearRowBackground(row, isSelected ? MenuFrame::Yellow : 0x0000);
+            if (!hasEntry) continue;
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
+            d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
+            d_->txtWrite(deviceLabels_[devIndex].c_str());
+        }
+        drawScrollIndicators(deviceScrollOffset_, static_cast<int>(deviceLabels_.size()));
+    }
+
+    // Up/Down navigation for State::DeviceList specifically -- mirrors
+    // moveFileSelection() exactly; see its own comment for why the
+    // generic moveSelection() (every other, always-fits-on-screen menu)
+    // isn't enough once there are more devices than fit in the box at
+    // once.
+    void moveDeviceSelection(int delta) {
+        const int count = static_cast<int>(deviceLabels_.size());
+        if (count == 0) return;
+        selected_ = (selected_ + delta + count) % count;
+        if (selected_ < deviceScrollOffset_) {
+            deviceScrollOffset_ = selected_;
+        } else if (selected_ >= deviceScrollOffset_ + kMaxFilesShown) {
+            deviceScrollOffset_ = selected_ - kMaxFilesShown + 1;
+        }
+        drawDeviceList();
     }
 
     void toggleDevice(int index) {
@@ -957,7 +1039,24 @@ private:
         CDevice* dev = devices[index];
         dev->toggleEnabled();
         deviceLabels_[static_cast<std::size_t>(index)] = deviceLabel(dev);
-        drawRow(index, deviceLabels_[static_cast<std::size_t>(index)].c_str());
+        // Only actually redraw if this device's own row is within the
+        // currently-visible scrolled window -- toggleDevice() is only
+        // ever called for the currently-selected device (see
+        // handleButton()'s own State::DeviceList case), which
+        // moveDeviceSelection() already keeps scrolled into view, so
+        // this is really just a safety check rather than a normal case.
+        const int row = index - deviceScrollOffset_;
+        if (row >= 0 && row < kMaxFilesShown) {
+            d_->txtSize(MenuFrame::TextScale);
+            // [ON] and [OFF] are different lengths -- without clearing
+            // first, toggling OFF->ON leaves a trailing character from
+            // "[OFF]" still showing past the end of the now-shorter
+            // "[ON]".
+            _clearRowBackground(row, MenuFrame::Yellow);
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
+            d_->txtColor(0x0000, MenuFrame::Yellow);  // selected row's own highlight colors
+            d_->txtWrite(deviceLabels_[static_cast<std::size_t>(index)].c_str());
+        }
         if (onDeviceToggled_) onDeviceToggled_(dev->name(), dev->enabled());
     }
 
@@ -1097,14 +1196,36 @@ private:
         MenuFrame::draw(d_);
     }
 
+    // Clears the full width of one menu row's own slot to the given
+    // background color, BEFORE any text gets written there -- without
+    // this, a row that previously held a longer string (or was
+    // highlighted, i.e. had a different background) than what's about to
+    // be drawn on it leaves a leftover "tail" of the old content/color
+    // showing past the end of the new, shorter text. Shared by drawRow()
+    // (the common case, one label per row) and drawFileList()/
+    // drawDeviceList() (their own scrolled windows, where the very same
+    // screen row can go from a long entry to a short one, or from
+    // selected to not, on every single Up/Down press).
+    //
+    // Width stops at MenuFrame::W - 60 rather than the box's own right
+    // edge -- leaves the scroll-indicator column (see
+    // drawScrollIndicators(), which sits at MenuFrame::W - 34) alone, so
+    // clearing a row's own text never also erases the "more above/below"
+    // arrows drawn independently of it.
+    void _clearRowBackground(int row, std::uint16_t bg) {
+        d_->fillRect(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch,
+                     MenuFrame::W - 60, MenuFrame::RowPitch, bg);
+    }
+
     void drawRow(int index, const char* label) {
         // See drawColorRow()'s own comment for why this is needed here
         // too -- called on its own during Up/Down navigation, without
         // drawBox() running again first.
         d_->txtSize(MenuFrame::TextScale);
+        const bool isSelected = (index == selected_);
+        _clearRowBackground(index, isSelected ? MenuFrame::Yellow : 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
-        d_->txtColor(index == selected_ ? 0x0000 : 0xFFFF,
-                    index == selected_ ? MenuFrame::Yellow : 0x0000);
+        d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
         d_->txtWrite(label);
     }
 
@@ -1178,6 +1299,7 @@ private:
     // See openFilePicker()'s own comment for why these exist -- neither
     // did before.
     int fileScrollOffset_ = 0;
+    int deviceScrollOffset_ = 0;
     std::string lastAppliedFile_;
     std::string pendingFile_;
     std::vector<std::string> deviceLabels_;

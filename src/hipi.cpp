@@ -9,6 +9,7 @@
 #include "display.h"
 #include "drive.h"
 #include "illeds.h"
+#include "ilpixels.h"
 #include "touch.h"
 #include "uidialog.hpp"
 #include "config.hpp"
@@ -85,6 +86,11 @@ void hipi_init()
     devices.push_back(videoDisplay);
     devices.push_back(new CDrive("TFDRIVE", cassette));
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
+    // 0xED -- adjacent to TFLEDS's own 0xEE, both being "indicator"-class
+    // accessories; no formal Accessory ID table entry exists for a NeoPixel
+    // strip specifically, so this just needs to be distinct from every
+    // other device's own SAI, which it is.
+    devices.push_back(new CHipiPixel("TFPIXEL", 0xED));
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
     plotter = new CPlotter("TFPLOT");
@@ -220,7 +226,7 @@ LoopbackResult hipi_loopbackTest(
         HpIlLoop& loop,
         std::function<void(int tested, int total, uint32_t lastCmd)> onProgress) {
     uint32_t rtn  = 0x0000;
-    constexpr uint32_t kMinCmd = 0x0001, kMaxCmd = 0x7FF;
+    constexpr uint32_t kMinCmd = 0x0001, kMaxCmd = 0x3FF;
     constexpr int kTotal = static_cast<int>(kMaxCmd - kMinCmd + 1);
 
     int tested = 0;
@@ -246,7 +252,7 @@ LoopbackResult hipi_loopbackTest(
         bool timedOut = false;
         while (!loop.receiveFrame(rtn)) {
             tud_task();
-            sleep_us(2500);
+            sleep_ms(10);
             if (time_reached(cdcTimeout)) { timedOut = true; break; }
         }
         ++tested;
