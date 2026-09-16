@@ -10,6 +10,7 @@
 #include "drive.h"
 #include "illeds.h"
 #include "ilpixels.h"
+#include "iltemp.h"
 #include "touch.h"
 #include "uidialog.hpp"
 #include "config.hpp"
@@ -25,6 +26,17 @@ CDisplay* videoDisplay = nullptr;  // Same pattern -- needed for pico_main.cpp's
                                      // own periodic fifoSize() diagnostic (see
                                      // display.h's own comment on fifoSize()).
 CPlotter* plotter = nullptr;    // Need to be global for plotterview.cpp
+CBmp280* bmp280Sensor = nullptr;  // Constructed in hipi_init() rather than as
+                                    // a file-scope global (like pixelStrip in
+                                    // pixels.cpp) -- its constructor needs
+                                    // touch_i2c's own VALUE, and static
+                                    // initialization order between two
+                                    // different translation units' globals
+                                    // isn't guaranteed, so this waits until
+                                    // hipi_init() runs (well after all static
+                                    // init has completed, and after
+                                    // touchInit() has already set up the
+                                    // physical bus) instead.
 
 extern hipi::Config config;
 
@@ -91,6 +103,26 @@ void hipi_init()
     // strip specifically, so this just needs to be distinct from every
     // other device's own SAI, which it is.
     devices.push_back(new CHipiPixel("TFPIXEL", 0xED));
+
+    // 0x51 -- HP-IL Interface Specification, Appendix C.4 "Accessory
+    // Identification": class 5x = Electronic Instrumentation, and within
+    // it, if bit D3=0 the lower 3 bits are signal-source/signal-switch/
+    // signal-measurement flags (D2/D1/D0 respectively) -- 0x51 = D0 only,
+    // i.e. a pure measurement device (no source/switch capability),
+    // exactly what this is. begin() shares the SD-card style "did it
+    // actually come up" check (see initSD()'s own SDOK) -- if it fails
+    // (chip not wired up, wrong address, etc.) the device is still
+    // registered and answers HP-IL normally, it'll just always report
+    // "ERR" for a reading (see CHipiTemp::triggerReading()) rather than
+    // silently vanishing from the loop the way a failed SD mount does
+    // for CDrive -- there's no other device depending on this one being
+    // present the way config-file loading depends on the SD card.
+    bmp280Sensor = new CBmp280(touch_i2c);
+    if (!bmp280Sensor->begin(TOUCH_SDA, TOUCH_SCL)) {
+        LOGF("\r\n * WARNING: BMP280 sensor not responding "
+             "(check wiring/address) -- TFTEMP will report ERR");
+    }
+    devices.push_back(new CHipiTemp("TFTEMP", 0x51, *bmp280Sensor));
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
     plotter = new CPlotter("TFPLOT");

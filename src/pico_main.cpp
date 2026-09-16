@@ -39,6 +39,7 @@
 #include "display_config.h"
 #include "Screen.hpp"
 #include "touch.h"
+#include "i2c_device.h"
 #include "leds.h"
 #ifdef TEST_DISPLAY
 #include "display_boot_test.hpp"
@@ -122,7 +123,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.1(beta)";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.3(beta)";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -347,6 +348,13 @@ int main() {
     // own file header) -- was GSL1680-only before, which would have been
     // talking the wrong protocol to this board's actual touch chip.
     touchInit();
+    // touchInit() just did the real i2c_init()/gpio_set_function() work
+    // for this board's one physical I2C bus (see touch.h's own
+    // touch_i2c) -- mark it so any CI2CDevice-derived device (e.g.
+    // CHipiTemp's own CBmp280, set up later in hipi_init()) skips
+    // repeating that when it comes up, rather than each device needing
+    // to know touch got there first.
+    CI2CBus::markInitialized(touch_i2c);
     touch_set_tap_callback(hipi::boardui_handleTap);
     touch_set_release_callback(hipi::boardui_handleRelease);
     touch_set_swipe_callback(hipi::boardui_handleSwipe);

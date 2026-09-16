@@ -31,8 +31,8 @@ extern bool bTrace;
 // state machine only ever calls touch_get_point()/touch_is_down() --
 // it doesn't know or care which chip answers those.
 // -----------------------------------------------------------------------
-#define TOUCH_SDA   16
-#define TOUCH_SCL   17
+// TOUCH_SDA/TOUCH_SCL now defined in touch.h (exported alongside
+// touch_i2c for i2c_device.h's own shared-bus users).
 #define IRQ_PIN     19
 
 struct Finger {

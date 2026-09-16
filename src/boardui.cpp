@@ -717,6 +717,10 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // deviceListVisible below -- consumed here, not treated as a
         // button-strip wake/press or corner-tap.
         dialog_->dismissLoopbackResult();
+    } else if (dialog_ != nullptr && dialog_->isShowingI2CScanResult()) {
+        // Same pattern as isShowingLoopbackResult() just above -- see
+        // uidialog.hpp's own runI2CScan()/dismissI2CScanResult().
+        dialog_->dismissI2CScanResult();
     } else if (infoBoxVisible) {
         // Any touch while it's up dismisses it early -- consumed here, not
         // treated as a button-strip wake/press or another corner-tap.

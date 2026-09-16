@@ -10,6 +10,8 @@
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
+#include "i2c_device.h"       // CI2CBus::scan(), for "Scan I2C"
+#include "touch.h"            // touch_i2c, the bus "Scan I2C" scans
 #include <vector>
 #include <string>
 #include <cstring>
@@ -199,6 +201,26 @@ public:
         // the 7" panel) draw straight to the main window's canvas instead
         // of the PIP layer -- confirmed as corrupting the live content
         // underneath rather than showing the Config menu at all.
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        openConfigMenu();
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+    }
+
+    // Same pattern as isShowingLoopbackResult()/dismissLoopbackResult()
+    // just above (see their own comments for the full reasoning) --
+    // Config > "Scan I2C" runs instantly (no confirmation dialog needed;
+    // scanning is quick and non-destructive, unlike the loopback test's
+    // own physical-jumper requirement) and shows its own result grid,
+    // dismissed by touch.
+    bool isShowingI2CScanResult() const { return state_ == State::I2CScanResult; }
+    void dismissI2CScanResult() {
+        if (state_ != State::I2CScanResult) return;
 #ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
 #endif
@@ -413,6 +435,13 @@ public:
                 // alone.
                 if (b == Button::Ok || b == Button::X) openConfigMenu();
                 break;
+
+            case State::I2CScanResult:
+                // Same "primarily touch, Ok/X also work" pattern as
+                // State::LoopbackResult just above -- see boardui.cpp's
+                // own isShowingI2CScanResult()/dismissI2CScanResult() check.
+                if (b == Button::Ok || b == Button::X) openConfigMenu();
+                break;
         }
 
 #ifdef DISPLAY_7INCH
@@ -471,14 +500,14 @@ private:
         Closed, MainMenu, ConfigMenu, SettingsMenu,
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
         FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
-        LoopbackConfirm, LoopbackResult
+        LoopbackConfirm, LoopbackResult, I2CScanResult
     };
 
     static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
     static constexpr int kMainMenuCount = 4;
 
-    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC", "Loopback test" };
-    static constexpr int kConfigMenuCount = 4;
+    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC", "Loopback test", "Scan I2C" };
+    static constexpr int kConfigMenuCount = 5;
 
     static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns", "Bootsel mode" };
     static constexpr int kSettingsMenuCount = 5;
@@ -601,6 +630,7 @@ private:
         drawRow(1, kConfigMenuLabels[1]);
         drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
         drawRow(3, kConfigMenuLabels[3]);
+        drawRow(4, kConfigMenuLabels[4]);
     }
 
     void enterConfigMenuItem() {
@@ -636,9 +666,90 @@ private:
             }
             sleep_ms(1500);
             openConfigMenu();
-        } else {
+        } else if (selected_ == 3) {
             openLoopbackConfirm();
+        } else {
+            runI2CScan();
         }
+    }
+
+    // "Scan I2C" -- runs immediately (no confirmation needed; scanning
+    // is quick, ~112 short probes, and non-destructive to whatever's on
+    // the bus) and shows the result grid, dismissed by touch (see
+    // isShowingI2CScanResult()/dismissI2CScanResult()) or Ok/X.
+    void runI2CScan() {
+        state_ = State::I2CScanResult;
+        drawBox();
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        d_->txtWrite("Scanning...");
+
+        bool found[128] = { false };
+        CI2CBus::scan(touch_i2c, found);
+
+        drawI2CScanGrid(found);
+    }
+
+    // Renders the classic i2cdetect-style grid: a header row of column
+    // nibbles (0-f), then one row per address decade (00, 10, 20, ...)
+    // with each cell showing the full 2-digit hex address if that
+    // address acknowledged, "--" if it didn't (but was actually probed),
+    // or left blank for the reserved 0x00-0x07/0x78-0x7f range CI2CBus::
+    // scan() deliberately never touches -- immediately recognisable to
+    // anyone who's used the Linux i2cdetect tool, rather than inventing
+    // a new layout. Uses a smaller text scale than the rest of the menu
+    // (this project's own txtSize() scale 0, the smallest available --
+    // see LT7683::txtSize()/RA8875::txtSize()) purely for this one
+    // screen, restored to MenuFrame::TextScale by whatever's drawn next
+    // (every other open*Menu() already sets its own scale explicitly
+    // before drawing, so nothing else needs to know or care this dialog
+    // used a different one).
+    void drawI2CScanGrid(const bool found[128]) {
+        constexpr std::uint8_t kGridScale = 0;
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        const int lineHeight = 18;  // a little taller than the scale-0 glyph's own 16px,
+                                     // for readability -- matches this dialog's own grid
+                                     // rows below, nothing else on screen uses this pitch
+        const int gridX = MenuFrame::X + 20;
+        int y = MenuFrame::Y + 20;
+
+        char line[64];
+        int foundCount = 0;
+        for (int a = 0x08; a <= 0x77; ++a) if (found[a]) ++foundCount;
+        std::snprintf(line, sizeof(line), "Found %d device(s):", foundCount);
+        d_->txtSize(kGridScale);
+        d_->txtSetCursor(gridX, y);
+        d_->txtWrite(line);
+        y += lineHeight + 4;
+
+        d_->txtSetCursor(gridX, y);
+        d_->txtWrite("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
+        y += lineHeight;
+
+        for (int row = 0; row < 8; ++row) {
+            int pos = std::snprintf(line, sizeof(line), "%02x: ", row * 16);
+            for (int col = 0; col < 16; ++col) {
+                const int addr = row * 16 + col;
+                if (addr < 0x08 || addr > 0x77) {
+                    pos += std::snprintf(line + pos, sizeof(line) - static_cast<std::size_t>(pos), "   ");
+                } else if (found[addr]) {
+                    pos += std::snprintf(line + pos, sizeof(line) - static_cast<std::size_t>(pos),
+                                         "%02x ", addr);
+                } else {
+                    pos += std::snprintf(line + pos, sizeof(line) - static_cast<std::size_t>(pos), "-- ");
+                }
+            }
+            d_->txtSetCursor(gridX, y);
+            d_->txtWrite(line);
+            y += lineHeight;
+        }
+
+        y += 4;
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtSetCursor(gridX, y);
+        d_->txtWrite("Touch anywhere to continue.");
     }
 
     // "Loopback test" -- first shows a confirmation dialog explaining
@@ -1285,6 +1396,8 @@ private:
             case State::LoopbackConfirm:
                 break;
             case State::LoopbackResult:
+                break;
+            case State::I2CScanResult:
                 break;
         }
     }

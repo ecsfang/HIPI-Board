@@ -1,8 +1,21 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include "hardware/i2c.h"
 
 extern char gTouchDevice[];
+
+// The physical I2C bus/pins touchInit() below already configures (see
+// touch.cpp's own comment on why both supported touch controllers --
+// GSL1680 on the 5" board, FT5316 on the 7" -- share the same bus/pins
+// regardless of panel). Exposed here so any OTHER I2C device sharing the
+// same physical bus (see i2c_device.h's own CI2CBus::markInitialized())
+// can reuse it without re-initializing hardware touchInit() already set
+// up -- reused directly rather than adding a second, separate i2c_inst_t
+// for what's physically the same two wires.
+extern i2c_inst_t *touch_i2c;
+#define TOUCH_SDA   16
+#define TOUCH_SCL   17
 
 int  touchInit();
 std::uint8_t touch_read();                                // existing, with printf debug

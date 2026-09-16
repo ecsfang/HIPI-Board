@@ -193,9 +193,12 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/display.cpp
         src/illeds.cpp
         src/ilpixels.cpp
+        src/iltemp.cpp
         src/touch.cpp
         src/leds.cpp
         src/pixels.cpp
+        src/i2c_device.cpp
+        src/bmp280.cpp
         src/pilbox.cpp
         src/plotter.cpp
         src/plotterview.cpp
