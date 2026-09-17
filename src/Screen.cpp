@@ -890,6 +890,23 @@ void Screen::draw_letter(std::uint8_t c) {
     // drawing to the shared registers in between, since it still
     // suspends Screen while a menu is open).
     d_->txtSize(size_);
+    // TEMPORARY REVERT: was selectCustomFont() (the uploaded
+    // hp82163_font.hpp glyphs, via UCG/CGRAM) -- confirmed on real
+    // hardware to leave the background completely blank (cursor still
+    // moves/works, splash screen's own bitmap logo still shows, but no
+    // character glyphs render at all -- not garbled, just empty).
+    // Menus (which use selectBuiltinFont() exclusively, going through
+    // this exact same txtWriteChar()/txtWrite() transmission path) work
+    // correctly, which rules out the byte-transmission mechanism itself
+    // as the cause -- points at either the CGRAM upload itself not
+    // actually landing in SDRAM the way uploadCgramChar() intends, or a
+    // register/mode detail specific to LT7683's own "user-defined
+    // Character" path (CCR0 bit[7:6]=10b) beyond what's currently
+    // implemented. Reverted to the chip's own built-in CGROM font here
+    // (same as menus) so the display is usable again while that gets
+    // investigated -- see selectCustomFont()'s/uploadCgramChar()'s own
+    // comments in LT7683.cpp for what's implemented so far.
+    d_->selectBuiltinFont();
     if (c > 127) {
         if (size_ < 4) {
             d_->txtColor(0, color_);

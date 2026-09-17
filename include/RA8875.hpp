@@ -332,6 +332,21 @@ public:
     // bitmap is laid out with bit 7 = leftmost column.
     void uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]);
 
+    // Switches which font source subsequent txtWrite()/txtWriteChar()
+    // calls draw from -- see their own .cpp comments for the exact
+    // FNCR0 (REG[21h]) bits this sets, confirmed against the official
+    // datasheet's own register table rather than guessed. selectCustomFont()
+    // shows the hp82163_font.hpp glyphs uploaded by uploadCgramChar()
+    // (used for Screen's own HP-41-emulated text); selectBuiltinFont()
+    // shows the chip's own internal ISO/IEC 8859-1 CGROM instead (used
+    // for this project's menus -- see uidialog.hpp's own MenuFrame::draw()).
+    // Cheap (one register write), safe to call before every single
+    // character drawn -- see Screen.cpp's own comment on why that's
+    // necessary rather than relying on whichever mode was last left
+    // active.
+    void selectCustomFont();
+    void selectBuiltinFont();
+
     // -----------------------------------------------------------------------
     // Accessors
     // -----------------------------------------------------------------------

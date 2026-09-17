@@ -53,9 +53,12 @@ The best way to mount the Pico is to get female headers, and use a Pico with hea
 The board is prepared to use some LED's, either for status indication, or used by the HPIL controller for fancy effects etc.
 
 There are several options that should be considered before mounting:
-- There is place for 1-5 NeoPixels (WS2812) directly on the board
+- There is a small 3-pin connector that can be used to connect a NeoPixel bar or strip.
+  - We have not thought for any longer bars, since there is no external power to the bar
+- Or there is place for 1-5 NeoPixels (WS2812) directly on the board
   - Note that they must be mounted from lower to higher number (D12->D16), i.e. if only one is used, it must be in D12.
   - Also note that it is nicer to mount the LED's on the backside of the PCB (for easy viewing when used).
+  - If both a bar and NeoPixels LED's are used, the first one on the bar always reflects the ones on the board.
 - Up to 5 normal LED's can be mountet at D7-D10, in any order or number.
   - Note that D7 can't be mounted if NeoPixels are goint to be used
   - Note that D11 and D10 can't be used if RX/TX out of the board is goiung to be used.

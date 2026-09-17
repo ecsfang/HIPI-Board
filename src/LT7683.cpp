@@ -32,9 +32,6 @@ void LT7683::begin() {
 
 void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
                    std::size_t fontChars) {
-    (void)font;
-    (void)fontChars;  // CGRAM upload deferred -- see uploadCgramChar()'s note
-
     reset();
 
     // Confirm the chip left reset in normal operating state (STSR bit1=0)
@@ -65,6 +62,26 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     for (int i = 0; i < 50; ++i) {
         if ((readStatus() & STSR_RAM_READY) != 0) break;
         t_.delayMs(1);
+    }
+
+    // ---- CGRAM font upload -- mirrors RA8875::begin()'s own upload
+    // loop exactly (same font[]/fontChars source, same per-character
+    // call), now that uploadCgramChar() is actually implemented (see
+    // its own comment) -- must run after SDRAM is confirmed ready
+    // above (CGRAM lives in Display RAM, per the datasheet's own
+    // section 8.2), and before anything else in this function touches
+    // AW_COLOR/CVSSA for its own purposes, so uploadCgramChar()'s own
+    // save/restore of those registers has nothing else to clash with.
+    if (font != nullptr && fontChars > 0) {
+        for (std::size_t i = 0; i < fontChars; ++i) {
+            uploadCgramChar(static_cast<std::uint8_t>(FONT_FIRST_ASCII + i), font[i]);
+        }
+        // Swedish å/ä/ö (upper+lower) at their own Latin-1 code points --
+        // not contiguous with the ASCII 32..126 table above, so uploaded
+        // as a separate small set. See hp82163_font.hpp's extra_font[].
+        for (std::size_t i = 0; i < EXTRA_FONT_COUNT; ++i) {
+            uploadCgramChar(extra_font[i].code, extra_font[i].bitmap);
+        }
     }
 
     // ---- Chip/LCD configuration -- confirmed against EastRising's own
@@ -1350,16 +1367,68 @@ void LT7683::set2LayerConfig() {
     // what capability the project actually relies on this call for.
 }
 
+void LT7683::selectCustomFont() {
+    // CCR0 (REG[CCh]) = 0x80: bit[7:6]=10b (select user-defined
+    // character -- confirmed against the datasheet's own register
+    // table, section 14.10), bit[5:4]=00b (16 dots, i.e. 8x16 -- matches
+    // uploadCgramChar()'s own upload size exactly), bit[1:0] irrelevant
+    // in this mode (only meaningful for internal CGROM).
+    writeReg(CCR0_TEXT, 0x80);
+}
+
+void LT7683::selectBuiltinFont() {
+    // CCR0 = 0x00: bit[7:6]=00b (internal CGROM), bit[1:0]=00b
+    // (ISO/IEC 8859-1 / Latin-1 -- the same code points this project's
+    // own Swedish å/ä/ö glyphs already use, so menus display those
+    // correctly too even though they never touch the uploaded CGRAM
+    // data).
+    writeReg(CCR0_TEXT, 0x00);
+}
+
 void LT7683::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
-    // TODO(LT7683): LT7683's User-defined Character Graphic (UCG, section
-    // 13.2) uses a differently-organised CGRAM (REG[CCh]-[DEh], per-size
-    // data formats for 8x16/12x24/16x32) than RA8875's simpler CGRAM
-    // upload. Given LT7683 already has larger built-in CGROM fonts than
-    // RA8875, check whether the HP-41 custom glyph set (hp82163_font.hpp)
-    // is even still needed here, or whether a built-in font size covers
-    // it, before implementing this from scratch.
-    (void)ascii;
-    (void)bitmap;
+    // Follows the datasheet's own "Initialize CGRAM from MCU" flowchart
+    // (section 8.2.7 / Figure 8-2) exactly, confirmed against the actual
+    // register bit tables (section 14.10, CCR0/CCR1) rather than
+    // guessed: point the Canvas at this project's own kCgramAddr scratch
+    // region (see its own comment) in LINEAR addressing mode, then
+    // stream the raw 16-byte glyph there via MRWDP (REG[04h], the same
+    // "Memory Data Port" register every other Display RAM write in this
+    // file already uses), FIFO-full checked first, STSR bit3 (Core
+    // Busy) confirmed clear after.
+    //
+    // Target address per the datasheet's own formula (section 8.2.1,
+    // "8*16 UCG Data Format"): UCG_ADD = CGRAM_Start_ADD + (UCG_Code *
+    // 16). This project maps UCG_Code directly to the ASCII value being
+    // uploaded -- the same convention RA8875::uploadCgramChar() already
+    // uses (CGRAM slot == ASCII code) -- so once CCR0 bit[7:6] selects
+    // user-defined-character mode (see selectCustomFont()/
+    // selectBuiltinFont() below), Screen's own ASCII-driven txtWrite()
+    // calls need no separate lookup or translation anywhere else in
+    // this codebase; the byte values it already writes just resolve to
+    // the right glyph automatically.
+    const std::uint32_t addr = kCgramAddr + static_cast<std::uint32_t>(ascii) * 16;
+
+    gfxMode();                  // ICR (REG[03h]) = 0x00 -- see its own comment
+    writeReg(AW_COLOR, 0x04);   // REG[5Eh]: Canvas addressing = Linear mode (datasheet's
+                                 // own flowchart step 2) -- NOT this project's normal
+                                 // X-Y/16bpp-block mode (0x01, set in begin() and restored
+                                 // below), so every other drawing call in this file must
+                                 // never run while this is active.
+    writeReg16(CVSSA0, static_cast<std::uint16_t>(addr & 0xFFFF));
+    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2),
+              static_cast<std::uint16_t>((addr >> 16) & 0xFFFF));
+
+    for (int i = 0; i < 100; ++i) {
+        if ((readStatus() & STSR_WR_FIFO_FULL) == 0) break;
+        t_.delayMs(1);
+    }
+    writeReg(MRWDP, bitmap, 16);
+    waitStatus(STSR_CORE_BUSY);  // datasheet's own "Check STSR bit3" step, before End
+
+    // Restore Canvas addressing back to this project's own normal mode
+    // -- see begin()'s own identical writeReg(AW_COLOR, 0x01) for why
+    // every other drawing call here expects this, not linear mode.
+    writeReg(AW_COLOR, 0x01);
 }
 
 }  // namespace hipi

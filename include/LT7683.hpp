@@ -444,6 +444,14 @@ public:
     // animation, or a scroll shift) can never collide with the menu's
     // own, independently-rendered content, and vice versa.
     static constexpr std::uint32_t kMenuLayerAddr = 1024UL * 600UL * 2UL * 3UL;
+    // A fifth layer, holding the hp82163_font.hpp glyph data uploaded by
+    // uploadCgramChar() -- tiny (101 chars * 16 bytes = 1616 bytes total,
+    // see FONT_CHAR_COUNT/EXTRA_FONT_COUNT), but given its own full
+    // layer-sized slot anyway purely to keep this project's own SDRAM
+    // map simple/uniform (one constant per purpose) rather than
+    // shoehorning it into leftover space at the tail of an existing
+    // layer.
+    static constexpr std::uint32_t kCgramAddr = 1024UL * 600UL * 2UL * 4UL;
 
     // -----------------------------------------------------------------------
     // Power / reset / backlight
@@ -575,6 +583,21 @@ public:
     // before implementing LT7683's own (differently-organised) UCG upload.
     // -----------------------------------------------------------------------
     void uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]);
+
+    // Switches which font source subsequent txtWrite()/txtWriteChar()
+    // calls draw from -- see their own .cpp comments for the exact
+    // CCR0 (REG[CCh]) bits this sets, confirmed against the datasheet's
+    // own register table (section 14.10) rather than guessed.
+    // selectCustomFont() shows the hp82163_font.hpp glyphs uploaded by
+    // uploadCgramChar() (used for Screen's own HP-41-emulated text);
+    // selectBuiltinFont() shows the chip's own internal ISO/IEC 8859-1
+    // CGROM instead (used for this project's menus -- see uidialog.hpp's
+    // own MenuFrame::draw()). Cheap (one register write), safe to call
+    // before every single character drawn -- see Screen.cpp's own
+    // comment on why that's necessary rather than relying on whichever
+    // mode was last left active.
+    void selectCustomFont();
+    void selectBuiltinFont();
 
     // -----------------------------------------------------------------------
     // Accessors

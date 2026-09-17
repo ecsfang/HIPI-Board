@@ -183,6 +183,24 @@ void RA8875::setLayerMode(LayerMode mode) {
     writeReg(0x52, static_cast<std::uint8_t>(mode) & 0x07);
 }
 
+void RA8875::selectCustomFont() {
+    // FNCR0 (REG[21h]): bit7=1 (CGRAM font selected -- confirmed against
+    // the official datasheet's own register table), bit5=1 (the
+    // datasheet's own note on bit7: "When CGRAM font is select, REG[21h]
+    // bit 5 must be set as 1" -- a required companion bit, not
+    // independently meaningful here), bit[1:0] irrelevant in this mode.
+    writeReg(FNCR0, 0xA0);
+}
+
+void RA8875::selectBuiltinFont() {
+    // FNCR0 = 0x00: bit7=0 (CGROM font), bit5=0 (Internal, not
+    // External, CGROM), bit[1:0]=00b (ISO/IEC 8859-1 / Latin-1 -- the
+    // same code points this project's own Swedish å/ä/ö glyphs already
+    // use, so menus display those correctly too even though they never
+    // touch the uploaded CGRAM data).
+    writeReg(FNCR0, 0x00);
+}
+
 void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
     // Step 1: Sätt CGRAM char index (0x23 = CCR register)
     writeReg(0x23, ascii);

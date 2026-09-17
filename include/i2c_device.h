@@ -42,8 +42,10 @@ public:
     // outside the scanned range are left untouched (the caller decides
     // how to render "not applicable" vs "no response" -- see
     // uidialog.hpp's own drawI2CScanGrid()). Takes only a few
-    // milliseconds total -- each probe is a single zero-length write,
-    // immediately NACKed or ACKed, no actual data transferred.
+    // milliseconds total -- each probe is a single-byte read (the byte
+    // itself discarded, this is purely a presence check); a write-based,
+    // zero-length probe was tried first but confirmed NOT to reliably
+    // detect real devices on this hardware.
     static void scan(i2c_inst_t* bus, bool found[128]);
 
 private:

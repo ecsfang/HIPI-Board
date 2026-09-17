@@ -317,11 +317,35 @@ const char* colorName(std::uint16_t c) {
 
 void showInfoBox() {
     if (infoBoxVisible) return;
-    screen_->suspend();
 
     constexpr int boxW = 400, boxH = 220;
     constexpr int boxX = (SCREEN_MAX_X - boxW) / 2;
     constexpr int boxY = (SCREEN_MAX_Y - boxH) / 2;
+
+#ifdef DISPLAY_7INCH
+    // Draws to the PIP overlay's own separate SDRAM layer instead of
+    // pausing Screen -- same reasoning, and the exact same mechanism, as
+    // UiDialog's own menu system (see uidialog.hpp's handleButton() and
+    // close(), which do this identically): the live main window (Screen's
+    // own text, or a live plot -- see plotterview.cpp) keeps updating in
+    // real time underneath, since it's never actually paused, just
+    // visually covered wherever this box's own rectangle sits. Before
+    // this fix, screen_->suspend() here meant nothing new showed up on
+    // screen until the box closed (up to kInfoBoxShowMs later) even
+    // though HP-IL itself kept being processed completely normally the
+    // whole time underneath -- not a genuine bus-level stall, but looked
+    // exactly like one from the screen never actually changing.
+    //
+    // Reuses the SAME PIP-1 hardware window the menu itself uses (see
+    // LT7683::showPipOverlay()) rather than a second one -- safe since
+    // the two are never actually shown at the same time (boardui_handleTap()
+    // only ever reaches showInfoBox() when neither the menu nor its own
+    // touch-dismissible result states are currently up).
+    display_->beginOverlayDraw();
+#else
+    screen_->suspend();
+#endif
+
     MenuFrame::draw(display_, boxX, boxY, boxW, boxH);
 
     display_->txtColor(0xFFFF, 0x0000);
@@ -363,13 +387,23 @@ void showInfoBox() {
     else       std::snprintf(buf, sizeof(buf), "Text color: 0x%04X", config.textColor());
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
 
+#ifdef DISPLAY_7INCH
+    display_->endOverlayDraw();
+    screen_->reassertRenderState();
+    display_->showPipOverlay(boxX, boxY, boxW, boxH);
+#endif
+
     infoBoxVisible = true;
     infoBoxHideDeadline = make_timeout_time_ms(kInfoBoxShowMs);
 }
 
 void hideInfoBox() {
     if (!infoBoxVisible) return;
+#ifdef DISPLAY_7INCH
+    display_->hidePipOverlay();
+#else
     screen_->resume();  // catches up on anything the HP-41 stream sent meanwhile
+#endif
     infoBoxVisible = false;
 }
 
@@ -475,10 +509,17 @@ void drawDeviceListRows() {
 
 void showDeviceList() {
     if (deviceListVisible) return;
-    screen_->suspend();
 
     deviceListCache = hipi_enumerateDevices();
     deviceListScrollOffset = 0;
+
+    // Same PIP-vs-suspend split, same reasoning, as showInfoBox() just
+    // above -- see its own comment for the full story.
+#ifdef DISPLAY_7INCH
+    display_->beginOverlayDraw();
+#else
+    screen_->suspend();
+#endif
 
     MenuFrame::draw(display_, MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
 
@@ -490,12 +531,22 @@ void showDeviceList() {
 
     drawDeviceListRows();
 
+#ifdef DISPLAY_7INCH
+    display_->endOverlayDraw();
+    screen_->reassertRenderState();
+    display_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+
     deviceListVisible = true;
 }
 
 void hideDeviceList() {
     if (!deviceListVisible) return;
+#ifdef DISPLAY_7INCH
+    display_->hidePipOverlay();
+#else
     screen_->resume();  // catches up on anything the HP-41 stream sent meanwhile
+#endif
     deviceListVisible = false;
 }
 
@@ -519,7 +570,19 @@ void scrollDeviceList(bool down) {
     }
     if (newOffset != deviceListScrollOffset) {
         deviceListScrollOffset = newOffset;
+        // Called from boardui_handleSwipe() -- a separate call path from
+        // showDeviceList() above, needing its own explicit PIP wrapping
+        // for the same reason dismissLoopbackResult()/dismissI2CScanResult()
+        // do in uidialog.hpp (see their own comments there): nothing else
+        // wraps this call in one.
+#ifdef DISPLAY_7INCH
+        display_->beginOverlayDraw();
+#endif
         drawDeviceListRows();
+#ifdef DISPLAY_7INCH
+        display_->endOverlayDraw();
+        screen_->reassertRenderState();
+#endif
     }
 }
 

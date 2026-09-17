@@ -69,6 +69,35 @@ namespace MenuFrame {
     // BorderThickness on each side -> leaves an even yellow border.
     inline void draw(DisplayDriver* d, int x = X, int y = Y, int w = W, int h = H) {
         d->txtSize(TextScale);   // force menu's own scale, independent of Screen's
+        // Every menu-style dialog in this project (the main menu itself,
+        // showInfoBox(), showDeviceList() in boardui.cpp) calls
+        // MenuFrame::draw() as its own first step, so putting this here
+        // covers all of them with one call: menus always use the chip's
+        // own built-in CGROM font (a standard, legible typeface), never
+        // the custom hp82163_font.hpp glyphs Screen's own HP-41-emulated
+        // text uses (see Screen.cpp's own selectCustomFont() call) --
+        // matches this project's own "reassert explicitly, don't rely on
+        // whichever mode was last active" convention (see txtSize()
+        // just above, and Screen.cpp's own comment on why).
+        d->selectBuiltinFont();
+        // Pre-clear the full (sharp-cornered) bounding rectangle to black
+        // FIRST -- fillRoundRect() below only paints the rounded SHAPE
+        // itself, deliberately leaving the four small square "cutout"
+        // corners (outside the arc, inside this bounding box) completely
+        // untouched. Without this, those four corners show whatever was
+        // last sitting in that part of the menu's own PIP layer SDRAM
+        // (never otherwise cleared to a known state between draws) --
+        // confirmed as visible garbage/noise peeking out right at the
+        // rounded corners on real hardware. This makes them a clean,
+        // uniform black instead (matching the box's own interior, drawn
+        // right after), regardless of whatever stale content -- old menu
+        // text, a differently-sized box from a previous dialog, or plain
+        // uninitialized memory -- was there before. Cheap (one extra
+        // hardware-accelerated fill) and invisible to the user either
+        // way, since every draw here happens to the offscreen PIP layer,
+        // revealed only once by showPipOverlay() after everything's done
+        // (see handleButton()'s own end-of-function sequence).
+        d->fillRect(x, y, w, h, 0x0000);
         d->fillRoundRect(x, y, w, h, CornerRadius, Yellow);
         const int innerRadius = CornerRadius > BorderThickness
                                      ? CornerRadius - BorderThickness : 0;
@@ -688,6 +717,15 @@ private:
         bool found[128] = { false };
         CI2CBus::scan(touch_i2c, found);
 
+        // Clears "Scanning..." (drawn above at MenuFrame::TextScale, a
+        // larger/taller glyph) before the grid below switches to its own
+        // smaller scale -- without this, the smaller grid text doesn't
+        // fully cover the larger text's own footprint, leaving visible
+        // remnants of "Scanning..." peeking out around/under the grid.
+        // Same "redraw the box before showing the final content" pattern
+        // runLoopbackTest() already uses between its own "Testing..." and
+        // result text.
+        drawBox();
         drawI2CScanGrid(found);
     }
 
@@ -708,7 +746,7 @@ private:
     void drawI2CScanGrid(const bool found[128]) {
         constexpr std::uint8_t kGridScale = 0;
         d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
+        d_->txtSize(kGridScale);
         const int lineHeight = 18;  // a little taller than the scale-0 glyph's own 16px,
                                      // for readability -- matches this dialog's own grid
                                      // rows below, nothing else on screen uses this pitch
@@ -719,7 +757,6 @@ private:
         int foundCount = 0;
         for (int a = 0x08; a <= 0x77; ++a) if (found[a]) ++foundCount;
         std::snprintf(line, sizeof(line), "Found %d device(s):", foundCount);
-        d_->txtSize(kGridScale);
         d_->txtSetCursor(gridX, y);
         d_->txtWrite(line);
         y += lineHeight + 4;
@@ -1331,8 +1368,15 @@ private:
     void drawRow(int index, const char* label) {
         // See drawColorRow()'s own comment for why this is needed here
         // too -- called on its own during Up/Down navigation, without
-        // drawBox() running again first.
+        // drawBox() running again first. Same reasoning for
+        // selectBuiltinFont() as txtSize() right beside it -- Screen's
+        // own async HP-IL-driven draws could in principle interleave
+        // between this row and drawBox()'s own earlier call (see
+        // Screen.cpp's identical comment on selectCustomFont()), so this
+        // reasserts it explicitly per row rather than trusting it's
+        // still set from MenuFrame::draw().
         d_->txtSize(MenuFrame::TextScale);
+        d_->selectBuiltinFont();
         const bool isSelected = (index == selected_);
         _clearRowBackground(index, isSelected ? MenuFrame::Yellow : 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
