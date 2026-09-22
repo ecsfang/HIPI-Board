@@ -1,6 +1,9 @@
+#define MODULE "TEMP"
+
 #include "iltemp.h"
 #include "usb_serial.h"
 #include <cstdio>
+
 
 // Formats a value expressed in HUNDREDTHS of the display unit as a plain
 // ASCII number with ONE decimal place, no leading '+' for positive
@@ -40,7 +43,7 @@ void CHipiTemp::triggerReading() {
         char buf[16];
         formatHundredths(hundredths, buf, sizeof(buf));
         s = buf;
-        if (bTrace) LOGF("\r\n[TEMP] %s reading -> %s (osrs=%d)", what, buf,
+        MTRC_LOGF("%s reading -> %s (osrs=%d)", what, buf,
                          static_cast<int>(sensor_.oversampling()));
     } else {
         // Matches this project's own convention elsewhere of sending a
@@ -50,7 +53,7 @@ void CHipiTemp::triggerReading() {
         // number as loudly on the controller side as it does to a human
         // reading it on a printer/display.
         s = "ERR";
-        if (bTrace) LOGF("\r\n[TEMP] %s reading FAILED -- sensor not responding", what);
+        MTRC_LOGF("%s reading FAILED -- sensor not responding", what);
     }
     s += "\r\n";
     outQueue_.assign(s.begin(), s.end());
@@ -58,7 +61,7 @@ void CHipiTemp::triggerReading() {
 }
 
 void CHipiTemp::clear(void) {
-    if (bTrace) LOGF("\r\n[TEMP] clear (DCL/SDC)");
+    MTRC_LOGF("clear (DCL/SDC)");
     outQueue_.clear();
     outEnd_ = true;
     midTransfer_ = false;
@@ -83,9 +86,9 @@ void CHipiTemp::doListener(IL_CMD_t cmd, IL_CMD_t* rtn) {
         if (c >= '1' && c <= '5') {
             const auto osrs = static_cast<CBmp280::Oversampling>(c - '0');
             sensor_.setOversampling(osrs);
-            if (bTrace) LOGF("\r\n[TEMP] precision -> osrs=%d", static_cast<int>(osrs));
-        } else if (bExtTrace) {
-            LOGF("\r\n[TEMP] ignored invalid precision digit 0x%02X ('%c')",
+            MTRC_LOGF("precision -> osrs=%d", static_cast<int>(osrs));
+        } else {
+            MDBG_LOGF("ignored invalid precision digit 0x%02X ('%c')",
                  c, (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.');
         }
         return;
@@ -95,12 +98,12 @@ void CHipiTemp::doListener(IL_CMD_t cmd, IL_CMD_t* rtn) {
         awaitingModeChar_ = false;
         if (c == 'T') {
             mode_ = Mode::Temperature;
-            if (bTrace) LOGF("\r\n[TEMP] mode -> Temperature");
+            MTRC_LOGF("mode -> Temperature");
         } else if (c == 'P') {
             mode_ = Mode::Pressure;
-            if (bTrace) LOGF("\r\n[TEMP] mode -> Pressure");
-        } else if (bExtTrace) {
-            LOGF("\r\n[TEMP] ignored invalid mode letter 0x%02X ('%c')",
+            MTRC_LOGF("mode -> Pressure");
+        } else {
+            MDBG_LOGF("ignored invalid mode letter 0x%02X ('%c')",
                  c, (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.');
         }
         return;
@@ -117,10 +120,8 @@ void CHipiTemp::doListener(IL_CMD_t cmd, IL_CMD_t* rtn) {
 
     // Unrecognised byte with no command pending -- ignore silently,
     // matching CLedParser/CPixelParser's own convention elsewhere.
-    if (bExtTrace) {
-        LOGF("\r\n[TEMP] ignored stray byte 0x%02X ('%c')",
+    MDBG_LOGF("ignored stray byte 0x%02X ('%c')",
              c, (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.');
-    }
 }
 
 // Drains outQueue_ one byte per incoming poll -- identical structure to

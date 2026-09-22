@@ -333,8 +333,22 @@ void Screen::txt_size(std::uint8_t size) {
     if (suspended_) return;
     if (size < 4) {
         d_->txtSize(size);
-        d_->writeReg(0x2E, 0);  // horizontal char spacing
-        d_->writeReg(0x29, 0);  // vertical line spacing
+        // Was writeReg(0x2E, 0)/writeReg(0x29, 0) directly -- WRONG
+        // registers on LT7683 (see setCharSpacing()'s own comment,
+        // LT7683.hpp, for the full story: those happen to be the
+        // correct registers on RA8875, not LT7683, which is presumably
+        // how this mistake happened). Kept here for correctness/future
+        // use (e.g. any text path that relies on hardware auto-advance
+        // instead of explicit positioning), but CONFIRMED on real
+        // hardware to have NO VISIBLE EFFECT on draw_letter()'s own
+        // output, at any value tried (including 10) -- draw_letter()'s
+        // caller sets the cursor position explicitly before every
+        // character (`col * width() + ofx_`), bypassing the hardware's
+        // own auto-advance-plus-spacing mechanism entirely. The actual
+        // character-gap fix is in screen_pars()'s own width_
+        // calculation (this function's own caller) -- see its comment.
+        d_->setCharSpacing(2);   // horizontal char spacing
+        d_->setLineSpacing(0);   // vertical line spacing
     } else {
         d_->txtSize(0);
         fon_mode();
@@ -394,7 +408,22 @@ void Screen::screen_pars(std::uint8_t size) {
     }
     if (size < 4) {
         const std::uint8_t k = static_cast<std::uint8_t>(1 + size);
-        width_  = static_cast<std::uint16_t>(8 * k);
+        // Character cell width used for BOTH column count (textWidth_ /
+        // width_) AND explicit per-character cursor positioning
+        // (draw_letter()'s own caller does `col * width() + ofx_` --
+        // see its own comment for why: the hardware's own auto-advance-
+        // plus-F2FSSR-spacing mechanism is never used here, since the
+        // cursor is explicitly repositioned before every character
+        // regardless of whatever F2FSSR says to add). setCharSpacing()
+        // (called from txt_size() below) therefore has NO visible
+        // effect on ITS OWN -- confirmed on real hardware (tried up to
+        // 10 pixels, no change) -- the actual fix is adding the gap
+        // HERE, to the stride the cursor advances by, not to the
+        // hardware register. +2 px per k: matches the requested 1-2px
+        // gap at k=1 (size=0), scaled so it stays visually proportional
+        // at larger sizes too (glyphs themselves scale by k).
+        const std::uint8_t charGap = static_cast<std::uint8_t>(2 * k);
+        width_  = static_cast<std::uint16_t>(8 * k + charGap);
         const std::uint8_t maxCols = static_cast<std::uint8_t>(textWidth_ / width_);
         COLS_   = (columnsOverride_ > 0 && columnsOverride_ <= maxCols)
                       ? columnsOverride_ : maxCols;
@@ -890,23 +919,24 @@ void Screen::draw_letter(std::uint8_t c) {
     // drawing to the shared registers in between, since it still
     // suspends Screen while a menu is open).
     d_->txtSize(size_);
-    // TEMPORARY REVERT: was selectCustomFont() (the uploaded
-    // hp82163_font.hpp glyphs, via UCG/CGRAM) -- confirmed on real
-    // hardware to leave the background completely blank (cursor still
-    // moves/works, splash screen's own bitmap logo still shows, but no
-    // character glyphs render at all -- not garbled, just empty).
-    // Menus (which use selectBuiltinFont() exclusively, going through
-    // this exact same txtWriteChar()/txtWrite() transmission path) work
-    // correctly, which rules out the byte-transmission mechanism itself
-    // as the cause -- points at either the CGRAM upload itself not
-    // actually landing in SDRAM the way uploadCgramChar() intends, or a
-    // register/mode detail specific to LT7683's own "user-defined
-    // Character" path (CCR0 bit[7:6]=10b) beyond what's currently
-    // implemented. Reverted to the chip's own built-in CGROM font here
-    // (same as menus) so the display is usable again while that gets
-    // investigated -- see selectCustomFont()'s/uploadCgramChar()'s own
-    // comments in LT7683.cpp for what's implemented so far.
-    d_->selectBuiltinFont();
+    // RESTORED: was reverted to selectBuiltinFont() during earlier
+    // debugging (custom/UCG font rendered nothing -- background stayed
+    // blank, cursor still moved, splash bitmap still showed, but no
+    // glyphs). ROOT CAUSE FOUND: LT7683's UCG (user-defined character)
+    // text codes MUST be written as TWO bytes (high byte, then low
+    // byte) -- even for codes that fit in one byte -- confirmed on real
+    // hardware; a single-byte write (what txtWriteChar() always did
+    // before this fix) leaves the text engine waiting forever for a
+    // second byte that never arrives, so the character is never
+    // actually committed. txtWriteChar() now dispatches to the correct
+    // (2-byte) protocol automatically whenever selectCustomFont() is
+    // the currently active font (see usingCustomFont_'s own comment,
+    // LT7683.hpp) -- no other change needed here. Menus, which use
+    // selectBuiltinFont() (1-byte codes, unaffected by this bug),
+    // continuing to work throughout all of this was never actually
+    // evidence against the transmission path itself -- CGROM and UCG
+    // simply need different wire formats on this chip.
+    d_->selectCustomFont();
     if (c > 127) {
         if (size_ < 4) {
             d_->txtColor(0, color_);
@@ -936,29 +966,32 @@ void Screen::draw_letter(std::uint8_t c) {
 void Screen::fon_mode() {
 //    if (d_->mode() != nullptr && std::strcmp(d_->mode(), "fon") == 0) return;
     if (suspended_) return;
-    // KNOWN BUG, not yet fixed (this path -- size_>=4, "custom CGRAM
-    // font" mode -- is currently unused; the project constructs Screen
-    // with size=1 everywhere). Same class of issue already found and
-    // fixed in txt_size() for size_<4: these four register addresses are
-    // RA8875-era assumptions that mean something else entirely on
-    // LT7683. Confirmed against the LT768x datasheet directly:
+    // KNOWN BUG, not yet fully fixed (this path -- size_>=4, "custom
+    // CGRAM font" mode -- is currently unused; the project constructs
+    // Screen with size=1 everywhere). The char/line SPACING registers
+    // below are now fixed (see setCharSpacing()'s own comment,
+    // LT7683.hpp) -- REG[21h]/REG[40h] below are NOT, and still need
+    // the same re-derivation. Confirmed against the LT768x datasheet
+    // directly:
     //   REG[21h] is MISA[15:8] -- part of MAIN IMAGE START ADDRESS, not
     //     "FNCR0/CGRAM" at all. Writing 0x80 here would move Main Image
     //     Start Address away from 0 -- likely the same "screen goes black
     //     and stays black" symptom clearActiveWindow()'s old BTE bug had,
     //     not a harmless no-op.
-    //   REG[2Eh]/REG[29h] are PISA (PIP image address) / MWULY[12:8]
-    //     (Main Window Y high bits) -- see txt_size()'s own comment for
-    //     the full story on these two.
     //   REG[40h] ("MWCR0: text mode" here) is GCHP0 (Graphic Cursor
     //     Horizontal Position) on LT7683, not a mode register.
     // Needs the same careful re-derivation txt_size() got before size=4
-    // is usable on this chip -- don't just copy txt_size()'s fix
-    // verbatim, these are a different set of registers.
+    // is usable on this chip -- REG[0x40]/REG[0x21] below are STILL
+    // wrong on LT7683 (this whole function remains unreachable in
+    // production either way -- see this function's own opening comment).
+    // The two spacing writes ARE now fixed, via the same
+    // setCharSpacing()/setLineSpacing() methods txt_size() uses --
+    // see their own comment (LT7683.hpp) for why raw REG[0x2E]/REG[0x29]
+    // was wrong here too.
     d_->writeReg(0x40, 0x80);  // MWCR0: text mode
     d_->writeReg(0x21, 0x80);  // FNCR0: CGRAM
-    d_->writeReg(0x2E, 2);     // horizontal char spacing
-    d_->writeReg(0x29, 4);     // vertical line spacing
+    d_->setCharSpacing(0);     // horizontal char spacing
+    d_->setLineSpacing(0);     // vertical line spacing
     // We don't expose "fon" via RA8875::mode(); tag it with a no-op write.
     // (See note in Screen.hpp — we track mode implicitly via size_.)
 }

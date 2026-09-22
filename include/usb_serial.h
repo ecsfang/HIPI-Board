@@ -136,8 +136,18 @@ extern bool usb_connected;
 extern bool bTrace;
 extern bool bExtTrace;
 #define LOGF(...) do { if (tud_mounted()) cdc0_printf(__VA_ARGS__); } while (0)
+#define mLOGF(mod, ...) do { LOGF("\r\n[" mod "] " __VA_ARGS__); } while (0)
+#define MLOGF(...) do { LOGF("\r\n[" MODULE "] " __VA_ARGS__); } while (0)
 #define TRC_LOGF(...) do { if (bTrace) LOGF(__VA_ARGS__); } while (0)
+#define MTRC_LOGF(...) \
+    do { if (bTrace) LOGF("\r\n[" MODULE "] " __VA_ARGS__); } while (0)
+#define mTRC_LOGF(mod,...) \
+    do { if (bTrace) LOGF("\r\n[" mod "] " __VA_ARGS__); } while (0)
 #define DBG_LOGF(...) do { if (bExtTrace) LOGF(__VA_ARGS__); } while (0)
+#define MDBG_LOGF(...) \
+    do { if (bExtTrace) LOGF("\r\n[" MODULE "] " __VA_ARGS__); } while (0)
+#define mDBG_LOGF(mod,...) \
+    do { if (bExtTrace) LOGF("\r\n[" mod "] " __VA_ARGS__); } while (0)
 
 // ── CDC1 — data port ──────────────────────────────────────────────────────────
 

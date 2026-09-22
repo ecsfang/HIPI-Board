@@ -1,3 +1,5 @@
+#define MODULE "TOUCH"
+
 #include <stdio.h>
 #include <cstring>
 #include <ctype.h>
@@ -21,6 +23,7 @@
 // menu) -- gates the touch-event logging below.
 extern bool bTrace;
 #include "touch.h"
+
 
 // -----------------------------------------------------------------------
 // Shared between both touch controllers: pin assignments, the raw touch
@@ -539,7 +542,7 @@ void touch_poll() {
                 lastTx = tx;
                 lastTy = ty;
                 confirmDeadline = make_timeout_time_ms(kTouchConfirmMs);
-                if (bTrace) LOGF("\r\n[TOUCH] press (%u,%u)", tx, ty);
+                MTRC_LOGF("press (%u,%u)", tx, ty);
             }
         }
         // If touchActive is already true: ignore -- the finger is still
@@ -558,16 +561,16 @@ void touch_poll() {
             const int dy = static_cast<int>(ty) - static_cast<int>(pendingTy);
             if (dx * dx + dy * dy <= kTouchConfirmToleranceSq) {
                 touchConfirmed = true;
-                if (bTrace) LOGF("\r\n[TOUCH] confirmed tap (%u,%u)", pendingTx, pendingTy);
+                MTRC_LOGF("confirmed tap (%u,%u)", pendingTx, pendingTy);
                 if (tapCallback) tapCallback(pendingTx, pendingTy);
             } else if (bTrace) {
-                LOGF("\r\n[TOUCH] confirm failed: moved (%d,%d) from (%u,%u) -- treating as drag/swipe candidate",
+                MLOGF("confirm failed: moved (%d,%d) from (%u,%u) -- treating as drag/swipe candidate",
                      dx, dy, pendingTx, pendingTy);
             }
             // else: moved too far between samples -- treat as noise or a
             // drag, ignore. Still waits for release below as normal.
         } else if (bTrace) {
-            LOGF("\r\n[TOUCH] confirm failed: finger gone by %ums -- single-sample blip", kTouchConfirmMs);
+            MLOGF("confirm failed: finger gone by %ums -- single-sample blip", kTouchConfirmMs);
         }
         // else: finger already gone by the confirm deadline -- was a
         // single-sample blip, not a real press. Ignore it.
@@ -587,7 +590,7 @@ void touch_poll() {
         if (touch_get_point(tx, ty)) {
             lastTx = tx;
             lastTy = ty;
-            if (bTrace) LOGF("\r\n[TOUCH]   still down @ (%u,%u)", tx, ty);
+            MTRC_LOGF("still down @ (%u,%u)", tx, ty);
         } else {
             touchActive = false;
             touchConfirmed = false;
@@ -606,7 +609,7 @@ void touch_poll() {
             const bool isSwipe = std::abs(dx) >= kSwipeMinDx && std::abs(dy) < std::abs(dx);
             const bool isVerticalSwipe = std::abs(dy) >= kSwipeMinDy && std::abs(dx) < std::abs(dy);
             if (bTrace) {
-                LOGF("\r\n[TOUCH] release: start(%u,%u) end(%u,%u) dx=%d dy=%d minDx=%d -> %s",
+                MLOGF("release: start(%u,%u) end(%u,%u) dx=%d dy=%d minDx=%d -> %s",
                      pendingTx, pendingTy, lastTx, lastTy, dx, dy, kSwipeMinDx,
                      isSwipe ? "SWIPE" : (isVerticalSwipe ? "VERTICAL SWIPE" : "no swipe"));
             }

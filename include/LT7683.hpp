@@ -196,6 +196,23 @@ public:
     // Text engine
     static constexpr std::uint8_t CCR0_TEXT = 0xCC;  // Character Control 0 (font, size)
     static constexpr std::uint8_t CCR1_TEXT = 0xCD;  // Character Control 1
+    // CGRAM Start Address (CGRAM_STR0) -- REG[DBh]-[DEh], a 32-bit
+    // address (little-endian, same 4-consecutive-registers layout as
+    // CVSSA0). Confirmed against the datasheet's own register table
+    // (section 14.10 -- the page itself has a typo, listing REG[DEh]
+    // twice for bits [23:16] AND [31:24], but the standard consecutive
+    // pattern DBh/DCh/DDh/DEh matches every other multi-byte register
+    // in this file, CVSSA0 included). Tells the TEXT ENGINE where
+    // user-defined characters (UCG/CGRAM) actually live -- separate
+    // from CVSSA, which is just the drawing engine's own read/write
+    // pointer used WHILE uploading them. The datasheet's own words:
+    // "Host must use canvas image setting to organize CGRAM data and
+    // set CGRAM address to tell engine where to fetch CGRAM data" --
+    // confirms this must be set explicitly; it doesn't default to
+    // wherever CVSSA last pointed during upload. See begin()'s own
+    // setting of this to kCgramAddr, once, right after the font upload
+    // loop.
+    static constexpr std::uint8_t CGRAM_STR0 = 0xDB;
     static constexpr std::uint8_t FLDR      = 0xD0;  // line gap
     static constexpr std::uint8_t F2FSSR    = 0xD1;  // char-to-char space
 
@@ -220,6 +237,13 @@ public:
     static constexpr std::uint8_t STSR_WR_FIFO_FULL = 0x80; // bit7: Memory Write FIFO full -- writeData()'s
                                                               // bulk overload never checked this; drawBitmap565Cropped()
                                                               // now does, see its own comment.
+    // bit6: Memory Write FIFO empty -- 0=not empty, 1=empty. Confirmed
+    // against a working reference implementation of this exact chip
+    // (ESP32-based, MPU8_8bpp_Memory_Write and friends): the correct
+    // "all writes have actually landed" check after a multi-byte MRWDP
+    // write is THIS bit, not STSR_CORE_BUSY -- see uploadCgramChar()'s
+    // own comment.
+    static constexpr std::uint8_t STSR_WR_FIFO_EMPTY = 0x40;
 
     // -----------------------------------------------------------------------
     // Construction / init
@@ -239,15 +263,49 @@ public:
     void     writeReg (std::uint8_t cmd, std::uint8_t data);
     void     writeReg (std::uint8_t cmd, const std::uint8_t* data, std::size_t len);
     void     writeReg16(std::uint8_t cmd, std::uint16_t data);
+    void     writeReg32(std::uint8_t cmd, std::uint32_t data);
     void     writeCmd (std::uint8_t cmd);
     void     writeData(std::uint8_t data);
     void     writeData(const std::uint8_t* data, std::size_t len);
     std::uint8_t readReg (std::uint8_t cmd);
     std::uint8_t readData();
+    // Multi-byte counterpart to writeData(data*, len) -- reads `len`
+    // bytes into `buf` within a SINGLE CS-low/CS-high SPI transaction
+    // (one DATRD prefix byte, then `len` data bytes read back-to-back),
+    // rather than `len` separate single-byte transactions. This matters
+    // for auto-incrementing memory reads (MRWDP -- see verifyCgramChar()'s
+    // own comment): confirmed on real hardware that reading via repeated
+    // single-byte readData() calls (each its own CS toggle) does NOT
+    // correctly continue reading from where the previous byte left off,
+    // while a single continuous transaction (matching how writeData()'s
+    // own multi-byte overload already works, and how the datasheet's
+    // own "Read Register's Data" procedure describes CS staying low for
+    // the whole exchange) does.
+    // Multi-byte read -- reads `len` bytes starting at register `cmd`,
+    // incrementing `cmd` once per byte (writeCmd(cmd++) then the
+    // single-byte readData() above, each its own full CS-toggle
+    // transaction -- exactly like readReg()'s own proven-working
+    // pattern, just repeated `len` times). Confirmed on real hardware
+    // as the reliable way to read back BOTH a sequential multi-byte
+    // register (e.g. CVSSA0..CVSSA0+3, 4 distinct register addresses)
+    // AND MRWDP's own auto-incrementing Canvas data (`cmd` itself
+    // increments too there, but the chip's own DATRD response keeps
+    // tracking the Canvas pointer regardless of the specific register
+    // address last selected) -- a single continuous multi-byte SPI
+    // transaction (this function's own earlier design) was tried first
+    // and confirmed NOT to work reliably for this chip's own read path,
+    // even though the equivalent single continuous transaction works
+    // fine for writes (see writeData(data*, len)).
+    void readData(std::uint8_t cmd, std::uint8_t* buf, std::size_t len);
     std::uint8_t readStatus();
 
     void waitPoll (std::uint8_t reg, std::uint8_t mask);
     void waitStatus(std::uint8_t mask = STSR_CORE_BUSY);
+    // Opposite polarity from waitStatus(): waits until the given
+    // status bit(s) become SET (waitStatus() waits until CLEAR).
+    // Needed for STSR_WR_FIFO_EMPTY, which is "1 = empty" (unlike
+    // STSR_CORE_BUSY/STSR_WR_FIFO_FULL, both "1 = busy/full").
+    void waitStatusSet(std::uint8_t mask);
 
     void spiDelayMs(std::uint32_t ms) { t_.delayMs(ms); }
 
@@ -444,14 +502,22 @@ public:
     // animation, or a scroll shift) can never collide with the menu's
     // own, independently-rendered content, and vice versa.
     static constexpr std::uint32_t kMenuLayerAddr = 1024UL * 600UL * 2UL * 3UL;
-    // A fifth layer, holding the hp82163_font.hpp glyph data uploaded by
-    // uploadCgramChar() -- tiny (101 chars * 16 bytes = 1616 bytes total,
-    // see FONT_CHAR_COUNT/EXTRA_FONT_COUNT), but given its own full
-    // layer-sized slot anyway purely to keep this project's own SDRAM
-    // map simple/uniform (one constant per purpose) rather than
-    // shoehorning it into leftover space at the tail of an existing
-    // layer.
-    static constexpr std::uint32_t kCgramAddr = 1024UL * 600UL * 2UL * 4UL;
+    // CGRAM (hp82163_font.hpp glyph data uploaded by uploadCgramChar())
+    // -- tiny (101 chars * 16 bytes = 1616 bytes total, see
+    // FONT_CHAR_COUNT/EXTRA_FONT_COUNT). Its own dedicated layer
+    // (layer6 in this board's own confirmed-working layer map, i.e. the
+    // 6th 1024*600*2-byte slot, ~7MB in) -- separate from every other
+    // layer above so it can never collide with BTE staging or menu
+    // rendering, now that the user has confirmed on real hardware that
+    // this board's physical SDRAM comfortably extends this far (an
+    // EARLIER revision of this constant crammed CGRAM into unused space
+    // inside kMenuLayerAddr's own layer specifically because the
+    // SDRAM's actual size was still unconfirmed at the time; that
+    // workaround is no longer needed).
+    static constexpr std::uint32_t kCgramAddr = 1024UL * 600UL * 2UL * 5UL;
+
+    // TEMPORARY DIAGNOSTIC -- see lastCvssaReadback()'s own comment above.
+    std::uint32_t lastCvssaReadback_ = 0;
 
     // -----------------------------------------------------------------------
     // Power / reset / backlight
@@ -527,6 +593,71 @@ public:
     void txtSize (std::uint8_t scale);
     void txtWrite(const char* s);
     void txtWriteChar(std::uint8_t c);
+    // EXPERIMENTAL/DIAGNOSTIC: writes a character as a 16-bit code
+    // (low byte, then high byte) instead of txtWriteChar()'s single
+    // byte. Exists to test a specific open question about UCG (see
+    // runFontTest() in display_boot_test.hpp for the full context):
+    // the datasheet's own CCR0 bit[5:4] note says user-defined
+    // character WIDTH depends on whether the character code is above
+    // or below 0x8000, which only makes sense if UCG codes are a
+    // genuine 15/16-bit value -- but nothing confirms whether the MCU
+    // is expected to WRITE that full width per character, or whether a
+    // single byte (as CGROM already uses, and as uploadCgramChar()'s
+    // own address formula assumes) is auto-extended internally. Not
+    // used anywhere in normal operation -- purely for runFontTest() to
+    // compare against txtWriteChar()'s own output on real hardware.
+    void txtWriteChar16(std::uint16_t code);
+
+    // DIAGNOSTIC: raw single-byte SDRAM access at an ARBITRARY address
+    // -- not tied to a CGRAM character code the way uploadCgramChar()/
+    // verifyCgramChar() are, just the same underlying CVSSA/linear-mode/
+    // MRWDP mechanism generalized. Exists specifically for
+    // detectSdramSizeBytes() (display_boot_test.hpp) to empirically
+    // measure how much physical SDRAM is actually populated on this
+    // board -- see kCgramAddr's own comment (this file) for why that
+    // matters: register writes/reads (CVSSA, CGRAM_STR0, CCR0) always
+    // succeed regardless of address, since they're just controller-
+    // internal storage, but actually reaching SDRAM at an address
+    // beyond the physically populated chip silently does nothing.
+    void writeSdramByte(std::uint32_t addr, std::uint8_t value);
+    std::uint8_t readSdramByte(std::uint32_t addr);
+
+    // Correct multi-byte read from MRWDP (REG[04h]), per the
+    // datasheet's own written description of that register's Read
+    // Function (confirmed by the user directly against the datasheet
+    // text, not just a flowchart image): "if you set this port address
+    // from different port address, must issue a dummy read, the first
+    // data read cycle is dummy read and data should be ignored."
+    // Selects MRWDP ONCE (not per byte -- re-selecting per byte, as an
+    // earlier version of this codebase's generic readData(cmd,buf,len)
+    // did when pointed at MRWDP, means EVERY byte counts as "setting
+    // this port address from a different port address" and gets a
+    // dummy response, never real data), issues exactly one dummy read
+    // and discards it, then reads `len` real bytes with no further
+    // port-address changes in between.
+    void readMrwdpBytes(std::uint8_t* buf, std::size_t len);
+
+    // Per the datasheet's own note under REG[5Fh-60h] (CURH, Graphic
+    // Read/Write X-Coordinate): "Host should program proper active
+    // window related parameters before configure this register." None
+    // of uploadCgramChar()/verifyCgramChar()/writeSdramByte()/
+    // readSdramByte() ever did this before -- they set CURH0 without
+    // ever touching the Active Window registers (REG[56h-5Dh]) at all.
+    // widenActiveWindowForLinearAccess() saves whatever the Active
+    // Window is CURRENTLY cached as (e.g. clipping set by the menu
+    // system, mid-render) and widens it to the full screen so the
+    // CURH-based linear address write/read that follows is valid
+    // regardless of what any other in-progress drawing operation had
+    // it set to; restoreActiveWindow() puts the saved state back
+    // afterward so nothing else in the codebase is affected. A
+    // saved width/height of 0 means Active Window was never explicitly
+    // set before (still at its power-on/never-touched state) --
+    // restoreActiveWindow() leaves the full-screen window in place
+    // rather than attempting to restore a meaningless 0x0 region.
+    void widenActiveWindowForLinearAccess(std::uint16_t* savedX0, std::uint16_t* savedY0,
+                                           std::uint16_t* savedW, std::uint16_t* savedH);
+    void restoreActiveWindow(std::uint16_t savedX0, std::uint16_t savedY0,
+                              std::uint16_t savedW, std::uint16_t savedH);
 
     // -----------------------------------------------------------------------
     // Graphics primitives (hardware-accelerated via the geometric drawing
@@ -577,12 +708,63 @@ public:
     void set2LayerConfig();
 
     // -----------------------------------------------------------------------
-    // CGRAM custom characters -- LT7683 has larger built-in CGROM fonts
-    // (8x16/12x24/16x32) than RA8875. Deferred: see if the project can just
-    // use a built-in size instead of uploading the HP-41 custom glyph set,
-    // before implementing LT7683's own (differently-organised) UCG upload.
+    // CGRAM custom characters -- see the datasheet's own "Initialize
+    // CGRAM from MCU" flowchart (section 8.2.7) and register table
+    // (section 14.10, CCR0/CCR1) for the protocol this follows. Confirmed
+    // via verifyCgramChar()'s own read-back that the upload itself
+    // reaches SDRAM correctly (see pico_main.cpp's own boot-time check);
+    // whether CCR0 bit[7:6]=10b (selectCustomFont()) then actually shows
+    // it on real hardware is still under investigation -- see Screen.cpp's
+    // own comment on its currently-reverted selectCustomFont() call.
     // -----------------------------------------------------------------------
     void uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]);
+
+    // Diagnostic only -- reads back the 16 bytes uploadCgramChar() wrote
+    // for `ascii`, using the exact same Canvas/CVSSA/MRWDP mechanism
+    // symmetrically (read instead of write), and compares against
+    // `expected`. Lets pico_main.cpp confirm on real hardware whether
+    // the upload itself actually lands in SDRAM the way intended,
+    // entirely independent of whether the TEXT-DISPLAY side (CCR0
+    // bit[7:6]=10b) then finds/shows it correctly -- narrows down where
+    // a "custom font shows nothing" problem actually sits. Deliberately
+    // has no LOGF/logging of its own -- this class is part of
+    // hipi_core_7/hipi_core_5 (see CMakeLists.txt), shared with the
+    // Linux demo build, which never links tinyusb_device and so can't
+    // see usb_serial.h's own tusb.h include at all; the actual LOGF
+    // calls reporting this function's result live in pico_main.cpp's
+    // own initDisplay() instead, which IS part of the USB-linked
+    // executable target.
+    bool verifyCgramChar(std::uint8_t ascii, const std::uint8_t expected[16], uint8_t *got);
+
+    // TEMPORARY DIAGNOSTIC: the CVSSA0-3 value verifyCgramChar() read
+    // straight back (via readData(CVSSA0, ..., 4), the plain
+    // one-register-at-a-time path already proven working) right after
+    // setting it, from its own most recent call -- lets a caller (e.g.
+    // display_boot_test.hpp) confirm whether the ADDRESS itself landed
+    // correctly, independent of whether the MRWDP read-back mechanism
+    // works. See verifyCgramChar()'s own comment.
+    std::uint32_t lastCvssaReadback() const { return lastCvssaReadback_; }
+
+    // TEMPORARY DIAGNOSTIC: reads CGRAM_STR0 (REG[DBh-DEh]) straight
+    // back via readData(cmd, buf, len) -- the same one-register-at-a-
+    // time path already proven working for CVSSA (see
+    // lastCvssaReadback()'s own comment). Confirms whether the ONE
+    // writeReg32(CGRAM_STR0, kCgramAddr) call in begin() actually
+    // landed, independent of whether CVSSA/the upload itself did --
+    // these are two entirely separate registers, so one working
+    // doesn't guarantee the other does.
+    std::uint32_t readCgramStr0() {
+        std::uint32_t v = 0;
+        readData(CGRAM_STR0, reinterpret_cast<std::uint8_t*>(&v), 4);
+        return v;
+    }
+
+    // TEMPORARY DIAGNOSTIC: confirms selectCustomFont()/selectBuiltinFont()'s
+    // own writeReg(CCR0_TEXT, ...) actually landed, via the plain,
+    // already-proven-working single-byte readReg() (no need for the
+    // multi-byte readData() path -- CCR0 is a single register, unlike
+    // CVSSA/CGRAM_STR0's 4-byte spread).
+    void readCcr0(std::uint8_t* out) { *out = readReg(CCR0_TEXT); }
 
     // Switches which font source subsequent txtWrite()/txtWriteChar()
     // calls draw from -- see their own .cpp comments for the exact
@@ -597,6 +779,20 @@ public:
     // comment on why that's necessary rather than relying on whichever
     // mode was last left active.
     void selectCustomFont();
+
+    // Extra spacing ADDED between characters/lines, in pixels, on top of
+    // the font's own natural cell width/height (REG[D1h] F2FSSR /
+    // REG[D0h] FLDR). Confirmed necessary since the uploaded UCG font
+    // uses its full 8-pixel cell width with no built-in gap, so adjacent
+    // characters touch with zero spacing otherwise. NOTE: Screen.cpp
+    // used to write raw REG[2Eh]/REG[29h] for this directly -- WRONG
+    // registers on LT7683 (PIP Image Start Address high byte / Main
+    // Window Y position high bits respectively, not spacing at all;
+    // those two happen to be the correct registers on RA8875, which is
+    // presumably how the mistake happened -- shared Screen.cpp code
+    // written for one chip, not updated for the other).
+    void setCharSpacing(std::uint8_t pixels);
+    void setLineSpacing(std::uint8_t pixels);
     void selectBuiltinFont();
 
     // -----------------------------------------------------------------------
@@ -631,6 +827,15 @@ private:
     // ICR back on every single call.
     enum class GfxTxtMode : std::uint8_t { Unknown, Graphic, Text };
     GfxTxtMode currentGfxTxtMode_ = GfxTxtMode::Unknown;
+    // Tracks whether selectCustomFont() (true) or selectBuiltinFont()
+    // (false, the power-on default) was called last. Confirmed on real
+    // hardware (see txtWriteChar()'s own comment): UCG (custom) text
+    // codes MUST be written as two bytes (high byte, then low byte),
+    // even for codes that fit in one byte -- CGROM codes are one byte.
+    // This lets txtWriteChar() automatically do the right thing for
+    // whichever font is currently selected, without every call site
+    // throughout the codebase needing to know or care.
+    bool usingCustomFont_ = false;
     // Software-tracked cache of CCR1_TEXT bit6 (text background opacity)
     // -- see txtColor()/txtTrans()'s own comments. -1 = unknown (forces
     // the first call to actually read-modify-write and establish a known

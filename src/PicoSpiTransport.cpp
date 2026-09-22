@@ -63,12 +63,37 @@ void PicoSpiTransport::spiTransfer(const std::uint8_t* tx,
     } else if (tx != nullptr) {
         spi_write_blocking(spi_, tx, len);
     } else if (rx != nullptr) {
-        // RA8875 status / data reads: the controller wants the command
-        // byte shifted out (DATRD/CMDRD), then the response byte clocked
-        // back.  The MicroPython code does this with separate write+read
-        // calls; emulate that with a dummy 0xFF byte.
-        const std::uint8_t pad = 0xFF;
-        spi_write_read_blocking(spi_, &pad, rx, 1);
+        spi_read_blocking(spi_, 0, rx, len);
+/*        // RA8875/LT7683 status / data reads: the controller wants a
+        // dummy byte clocked out (the SPI bus is full-duplex, so
+        // reading ANY byte back means clocking something out on MOSI
+        // at the same time -- 0xFF is the pad value the MicroPython
+        // reference code this was ported from used) for EVERY byte
+        // being read, not just the first -- confirmed on real hardware
+        // that multi-byte CGRAM read-back (see LT7683::readData(buf,
+        // len)) only ever got its first byte correctly, with everything
+        // after silently left untouched, because this used to always
+        // call spi_write_read_blocking(...) with a hardcoded length of
+        // 1 no matter how large `len` actually was. Chunked through a
+        // small stack buffer (padChunk_) rather than a single `len`-
+        // sized heap allocation -- len is always small in this project
+        // (16 bytes for a CGRAM glyph, 1 for a status/data byte), so
+        // this avoids ever needing to allocate for it, at the cost of
+        // an extra loop iteration on the rare case len exceeds one
+        // chunk's size.
+        constexpr std::size_t kPadChunkSize = 32;
+        static const std::uint8_t padChunk_[kPadChunkSize] = {
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        };
+        std::size_t done = 0;
+        while (done < len) {
+            const std::size_t chunk = (len - done < kPadChunkSize) ? (len - done) : kPadChunkSize;
+            spi_write_read_blocking(spi_, padChunk_, rx + done, chunk);
+            done += chunk;
+        }**/
     }
 }
 

@@ -1,3 +1,5 @@
+#define MODULE "PILBOX"
+
 #include <stdio.h>
 #include <ctype.h>
 
@@ -23,6 +25,7 @@ extern hipi::DisplayDriver* display;
  */
 #define P_DEBUG bExtTrace
 #define PD_LOGF(...) do { if (P_DEBUG) LOGF(__VA_ARGS__); } while (0)
+#define PD_MLOGF(...) do { if (P_DEBUG) MLOGF(__VA_ARGS__); } while (0)
 #define PD_IDY_LOGF(frm,...) do {           \
         if( P_DEBUG && !IS_IDLE(frm) ) {    \
             LOGF(__VA_ARGS__);              \
@@ -35,7 +38,7 @@ extern hipi::DisplayDriver* display;
 #define PL_SEND(x) do {                     \
         tud_cdc_n_write_char(ITF_HPIL, x);  \
         tud_cdc_n_write_flush(ITF_HPIL);    \
-        PD_LOGF("\r\n[PILBOX] --> %02X", x);   \
+        PD_MLOGF("--> %02X", x);   \
     } while(0)
 
 // Send a complete frame to the PILBox serial link, using the 2-byte format and flush
@@ -43,7 +46,7 @@ extern hipi::DisplayDriver* display;
         tud_cdc_n_write(ITF_HPIL, &PIL_tx_hi,1);                \
         tud_cdc_n_write(ITF_HPIL, &PIL_tx_lo,1);                \
         tud_cdc_n_write_flush(ITF_HPIL);                        \
-        PD_LOGF("\r\n[PILBOX] --> %02X:%02X", PIL_tx_hi, PIL_tx_lo); \
+        PD_MLOGF("--> %02X:%02X", PIL_tx_hi, PIL_tx_lo); \
     } while(0)
 
 
@@ -149,7 +152,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         // - and there is data available in the serial buffer
         // if a frame arrives we must check for a PILBox command first
         pil_recv = tud_cdc_n_read_char(ITF_HPIL);
-        LOGF("\r\n[PILBOX] <-- %02X", pil_recv);
+        MLOGF("<-- %02X", pil_recv);
         // PILBox emulation received a byte from the PILBox designated serial port
         // pil_recv contains the returned byte
         if ((pil_recv & 0xE0) == 0x20)

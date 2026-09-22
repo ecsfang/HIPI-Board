@@ -23,6 +23,12 @@
 // just wires everything together.
 
 //#define TEST_DISPLAY
+// Separate from TEST_DISPLAY -- runs ONLY runFontTest() (see its own
+// comment in display_boot_test.hpp), skipping touch calibration,
+// primitives, splash screen etc. entirely, for fast iteration while
+// this one specific question is still open. Safe to enable alongside
+// TEST_DISPLAY too (runs first, see the call site below).
+//#define TEST_FONT
 
 #include <stdlib.h>
 #include <cstring>
@@ -41,7 +47,7 @@
 #include "touch.h"
 #include "i2c_device.h"
 #include "leds.h"
-#ifdef TEST_DISPLAY
+#if defined(TEST_DISPLAY) || defined(TEST_FONT)
 #include "display_boot_test.hpp"
 #endif
 
@@ -123,7 +129,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.3beta";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.4beta";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -178,8 +184,6 @@ void initDisplay()
                                               /*baudrate=*/30'000'000,
                                               /*cs_gpio=*/1,
                                               /*rst_gpio=*/hipi::PicoSpiTransport::NO_RESET_PIN);
-    LOGF("\r\n * SPI baudrate: requested 30000000, actual %lu",
-         static_cast<unsigned long>(transport->actualBaudrate()));
     display = new hipi::DisplayDriver(*transport, SCREEN_MAX_X, SCREEN_MAX_Y);
 
     display->begin();
@@ -270,6 +274,12 @@ int main() {
 
     tud_task();
 
+#ifdef TEST_FONT
+    // Same LOGF-timing reasoning as TEST_DISPLAY below -- must run after
+    // the USB CDC wait loops above, or its output is silently dropped.
+    hipi::runFontTest(display);
+#endif
+
 #ifdef TEST_DISPLAY
     // Must run *after* the USB CDC wait loops above -- LOGF() output
     // written before tud_cdc_n_connected(0) goes true is silently
@@ -288,6 +298,51 @@ int main() {
 
     LOGF("\r\n * Init display ...");
     LOGF("\r\n\t* %s", DISPLAY_DEVICE);
+    LOGF("\r\n\t* SPI baudrate: requested 30000000, actual %lu",
+         static_cast<unsigned long>(transport->actualBaudrate()));
+#ifdef DISPLAY_7INCH
+    // TEMPORARY diagnostic -- see LT7683::verifyCgramChar()'s own
+    // comment (LT7683.hpp) for why the actual LOGF calls live HERE
+    // rather than in a method on LT7683 itself: that class is part of
+    // hipi_core_7 (see CMakeLists.txt), shared with the Linux demo
+    // build, which never links tinyusb_device -- usb_serial.h's own
+    // tusb.h include isn't reachable there at all. pico_main.cpp IS
+    // part of the USB-linked executable target, so LOGF is safe to call
+    // directly here instead. tusb_init() has already run by this point
+    // (main() calls it before initSD(), which is what calls this
+    // function), so LOGF() itself is safe to use; bTrace isn't set yet
+    // (that happens later in THIS SAME function, from config.load()),
+    // which is why this isn't just a TRC_LOGF call instead. Remove this
+    // whole block once the underlying "custom font shows nothing" issue
+    // (see Screen.cpp's own comment on the currently-reverted
+    // selectCustomFont() call) is found and fixed.
+    {
+        struct Check { std::uint8_t code; const std::uint8_t* bitmap; const char* label; };
+        uint8_t res[16];
+        const Check checks[] = {
+            { static_cast<std::uint8_t>('A'), hipi::font['A' - hipi::FONT_FIRST_ASCII], "'A'" },
+            { static_cast<std::uint8_t>('0'), hipi::font['0' - hipi::FONT_FIRST_ASCII], "'0'" },
+            { hipi::extra_font[0].code, hipi::extra_font[0].bitmap, "extra_font[0] ('\xC3\x84', Ä)" },
+        };
+        mLOGF("LT7683", "CGRAM upload verification (a few representative chars):");
+        int i=0;
+        for (const auto& c : checks) {
+            const bool ok = display->verifyCgramChar(c.code, c.bitmap, res);
+            LOGF("\r\n  code=0x%02X (%s): read-back %s {%02X}", c.code, c.label,
+                 ok ? "MATCHES what was uploaded" : "DOES NOT MATCH -- upload/readback broken", res[i++]);
+        }
+    }
+#else
+    {
+        uint32_t addr = 0x1234ABCD;
+        uint8_t *pData = (uint8_t*)&addr;
+        uint16_t data1 = addr & 0xFFFF;
+        uint16_t data2 = (addr >> 16) & 0xFFFF;
+        mLOGF("TEST", "%04X --> %02X %02X", data1, data1 & 0xFF, (data1 >> 8) & 0xFF);
+        mLOGF("TEST", "%04X --> %02X %02X", data2, data2 & 0xFF, (data2 >> 8) & 0xFF);
+        mLOGF("TEST", "%02X %02X %02X %02X", pData[0], pData[1], pData[2], pData[3]);
+    }
+#endif
     // Show buttons -- draws and caches the strip, and tells us how wide it
     // is so Screen's initial text width can be sized around it.
     const std::uint16_t buttonStripWidth = hipi::boardui_loadButtonStrip(display);

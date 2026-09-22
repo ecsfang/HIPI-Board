@@ -1,9 +1,12 @@
+#define MODULE "TERMINAL"
+
 #include "terminal.h"
 #include "usb_serial.h"
 #include "tusb.h"
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+
 
 extern bool bTrace;
 
@@ -61,7 +64,7 @@ char escOLetterToHp71(char c) {
 void CTerminal::pushKey(std::uint8_t b) {
     if (keyIn_.size() >= kMaxQueuedKeys) return;
     keyIn_.push(b);
-    if (bTrace) LOGF("\r\n[TERMINAL] key queued: 0x%02X (queue=%zu)", b, keyIn_.size());
+    MTRC_LOGF("key queued: 0x%02X (queue=%zu)", b, keyIn_.size());
 }
 
 void CTerminal::feedRawByte(std::uint8_t b) {
@@ -135,7 +138,7 @@ void CTerminal::feedRawByte(std::uint8_t b) {
                 pushKey(0x1b);
                 pushKey(static_cast<std::uint8_t>(mapped));
             } else if (bTrace) {
-                LOGF("\r\n[TERMINAL] no HP-71 mapping for ESC[%d~ -- dropped", code);
+                MLOGF("no HP-71 mapping for ESC[%d~ -- dropped", code);
             }
             escState_ = EscState::Idle;
             escDigitLen_ = 0;
@@ -198,13 +201,13 @@ IL_CMD_t CTerminal::hpil(IL_CMD_t cmd) {
     if (!justDeliveredData_ && !isOwnIdentificationResponse &&
         !keyIn_.empty() && (IS_DATA(rtn) || IS_IDLE(rtn))) {
         rtn = static_cast<IL_CMD_t>(rtn | SRQ_BIT);
-        if (bTrace) LOGF("\r\n[TERMINAL] hpil: added SRQ_BIT -> 0x%03X", rtn);
+        MTRC_LOGF("hpil: added SRQ_BIT -> 0x%03X", rtn);
     }
     return rtn;
 }
 
 void CTerminal::clear(void) {
-    if (bTrace) LOGF("\r\n[TERMINAL] clear (DCL/SDC) -- dropping %zu queued key(s)", keyIn_.size());
+    MTRC_LOGF("clear (DCL/SDC) -- dropping %zu queued key(s)", keyIn_.size());
     while (!keyIn_.empty()) keyIn_.pop();
     justDeliveredData_ = false;
     escState_ = EscState::Idle;
@@ -313,7 +316,7 @@ void CTerminal::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
                                   // for the one case that actually delivers
                                   // one of our own queued bytes
     if (bTrace && !IS_ROUTINE(cmd)) {
-        LOGF("\r\n[TERMINAL] doTalker called: cmd=0x%03X (SDA=%d SST=%d NRD=%d) keyQ=%zu",
+        MLOGF("doTalker called: cmd=0x%03X (SDA=%d SST=%d NRD=%d) keyQ=%zu",
              cmd, cmd == SDA, cmd == SST, cmd == NRD, keyIn_.size());
     }
 
@@ -327,7 +330,7 @@ void CTerminal::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
         // reflects whatever the queue's real state is by then.
         const std::uint8_t status = keyIn_.empty() ? 0 : 0x41;
         *rtn = status;
-        if (bTrace) LOGF("\r\n[TERMINAL] SST -> status=0x%02X (keyQ=%zu)", status, keyIn_.size());
+        MTRC_LOGF("SST -> status=0x%02X (keyQ=%zu)", status, keyIn_.size());
         return;
     }
 
@@ -353,7 +356,7 @@ void CTerminal::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
             keyIn_.pop();
             justDeliveredData_ = true;
             if (bTrace) {
-                LOGF("\r\n[TERMINAL] doTalker: key 0x%02X -> HP-71B (queue left=%zu)",
+                MLOGF("doTalker: key 0x%02X -> HP-71B (queue left=%zu)",
                      static_cast<unsigned>(*rtn), keyIn_.size());
             }
         }
@@ -370,7 +373,7 @@ void CTerminal::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
 
 void CTerminal::preProc(IL_CMD_t cmd) {
     if (bTrace && !IS_ROUTINE(cmd)) {
-        LOGF("\r\n[TERMINAL] preProc: cmd=0x%03X isListener=%d isTalker=%d addr=%d keyQ=%zu",
+        MLOGF("preProc: cmd=0x%03X isListener=%d isTalker=%d addr=%d keyQ=%zu",
              cmd, isListener(), isTalker(), addr(), keyIn_.size());
     }
 }
@@ -387,7 +390,7 @@ void CTerminal::idle(void) {
     // forwarding to the 71B (see terminal.h), so this just drops
     // whatever was buffered and resets.
     if (escState_ != EscState::Idle && time_reached(escDeadline_)) {
-        if (bTrace) LOGF("\r\n[TERMINAL] esc sequence timed out -- dropped");
+        MTRC_LOGF("esc sequence timed out -- dropped");
         escState_ = EscState::Idle;
         escDigitLen_ = 0;
     }

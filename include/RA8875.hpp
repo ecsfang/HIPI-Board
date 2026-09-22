@@ -170,6 +170,13 @@ public:
     void     writeData(const std::uint8_t* data, std::size_t len);
     std::uint8_t readReg (std::uint8_t cmd);
     std::uint8_t readData();
+    // Multi-byte counterpart -- reads `len` bytes into `buf` within a
+    // SINGLE CS-low/CS-high SPI transaction, rather than `len` separate
+    // single-byte transactions. Matters for CGRAM read-back (see
+    // verifyCgramChar()) the same way it was confirmed to matter on
+    // LT7683 (see its own identical comment) -- one continuous
+    // transaction, not `len` separate CS toggles.
+    void readData(std::uint8_t* buf, std::size_t len);
     std::uint8_t readStatus();
 
     void waitPoll (std::uint8_t reg, std::uint8_t mask);
@@ -332,6 +339,13 @@ public:
     // bitmap is laid out with bit 7 = leftmost column.
     void uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]);
 
+    // Diagnostic only -- reads back the 16 bytes uploadCgramChar() wrote
+    // for `ascii` into `got`, and compares against `expected`. Same
+    // output-parameter signature as LT7683's own (see its own comment
+    // for why): lets a caller (e.g. display_test.hpp) inspect the raw
+    // bytes actually read back, not just whether they matched.
+    bool verifyCgramChar(std::uint8_t ascii, const std::uint8_t expected[16], std::uint8_t* got);
+
     // Switches which font source subsequent txtWrite()/txtWriteChar()
     // calls draw from -- see their own .cpp comments for the exact
     // FNCR0 (REG[21h]) bits this sets, confirmed against the official
@@ -345,6 +359,12 @@ public:
     // necessary rather than relying on whichever mode was last left
     // active.
     void selectCustomFont();
+
+    // See LT7683::setCharSpacing()'s own comment (LT7683.hpp) for the
+    // full story -- RA8875's own correct registers for this (unlike
+    // LT7683's REG[D1h]/REG[D0h]).
+    void setCharSpacing(std::uint8_t pixels);
+    void setLineSpacing(std::uint8_t pixels);
     void selectBuiltinFont();
 
     // -----------------------------------------------------------------------

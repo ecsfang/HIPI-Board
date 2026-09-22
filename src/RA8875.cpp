@@ -183,6 +183,21 @@ void RA8875::setLayerMode(LayerMode mode) {
     writeReg(0x52, static_cast<std::uint8_t>(mode) & 0x07);
 }
 
+void RA8875::setCharSpacing(std::uint8_t pixels) {
+    // REG[2Eh] (F2FSSR): extra pixels added between characters, on top
+    // of the font's own cell width. This IS the correct register on
+    // RA8875 -- unlike on LT7683, where REG[2Eh] is something else
+    // entirely (see LT7683::setCharSpacing()'s own comment for the
+    // full story on why this method exists on both chips with the same
+    // name/signature, each using its own correct register).
+    writeReg(0x2E, pixels);
+}
+
+void RA8875::setLineSpacing(std::uint8_t pixels) {
+    // REG[29h] (FLDR): extra pixels added between text lines.
+    writeReg(0x29, pixels);
+}
+
 void RA8875::selectCustomFont() {
     // FNCR0 (REG[21h]): bit7=1 (CGRAM font selected -- confirmed against
     // the official datasheet's own register table), bit5=1 (the
@@ -285,6 +300,37 @@ std::uint8_t RA8875::readData() {
     t_.spiTransfer(nullptr, rx, 1);
     t_.csHigh();
     return rx[0];
+}
+
+void RA8875::readData(std::uint8_t* buf, std::size_t len) {
+    if (len == 0) return;
+    // See this method's own header comment (RA8875.hpp) for why a
+    // single continuous transaction -- not `len` calls to the
+    // single-byte readData() above -- is what's needed for a reliable
+    // multi-byte read.
+    t_.csLow();
+    t_.spiTransfer(&DATRD, nullptr, 1);
+    t_.spiTransfer(nullptr, buf, len);
+    t_.csHigh();
+}
+
+bool RA8875::verifyCgramChar(std::uint8_t ascii, const std::uint8_t expected[16], std::uint8_t* got) {
+    // Exact mirror of uploadCgramChar() above, but reading instead of
+    // writing -- see its own comment for the register sequence.
+    writeReg(0x23, ascii);       // CGRAM char index
+    writeReg(0x21, 0x00);        // FNCR0 -- text mode source select
+    const std::uint8_t mwcr0 = readReg(0x41);
+    writeData(static_cast<std::uint8_t>((mwcr0 & ~(1 << 3)) | (1 << 2)));  // CGRAM font select
+
+    writeCmd(MRWC);
+    readData(got, 16);
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        if (got[i] != expected[i]) match = false;
+    }
+
+    writeReg(0x41, 0x00);  // restore graphics mode -- same as uploadCgramChar()'s own step 5
+    return match;
 }
 
 std::uint8_t RA8875::readStatus() {

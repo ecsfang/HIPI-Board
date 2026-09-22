@@ -6,6 +6,8 @@
 // uidialog.hpp (pulled in via boardui.h), bmp_loader.hpp, and config.hpp
 // all use in inline/header function bodies. Including it later left LOGF
 // undefined at the point those headers were parsed.
+#define MODULE "BOARDUI"
+
 #include "usb_serial.h"
 #include "plotterview.h"
 
@@ -565,7 +567,7 @@ void scrollDeviceList(bool down) {
     if (newOffset < 0) newOffset = 0;
     if (newOffset > maxOffset) newOffset = maxOffset;
     if (bTrace) {
-        LOGF("\r\n[TOUCH] scrollDeviceList down=%d: devices=%zu visibleRows=%d maxOffset=%d %d->%d",
+        mLOGF("TOUCH", "scrollDeviceList down=%d: devices=%zu visibleRows=%d maxOffset=%d %d->%d",
              down, deviceListCache.size(), visibleRows, maxOffset, deviceListScrollOffset, newOffset);
     }
     if (newOffset != deviceListScrollOffset) {
@@ -811,7 +813,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // there yet.
         const bool inStripZone = (x >= buttonStripScreenX0);
         if (bTrace) {
-            LOGF("\r\n[TOUCH] tap (%u,%u) inStripZone=%d stripVisible=%d",
+            mLOGF("TOUCH", "tap (%u,%u) inStripZone=%d stripVisible=%d",
                  x, y, inStripZone, buttonStripVisible);
         }
         if (!inStripZone) return;
@@ -917,10 +919,10 @@ void boardui_handleSwipe(bool forward) {
     // Ignore while the menu -- or the Devices list dialog -- is open; a
     // swipe crossing either box shouldn't also switch views underneath it.
     if (dialog_->isOpen() || deviceListVisible) {
-        if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d ignored (menu/dialog open)", forward);
+        MTRC_LOGF("swipe forward=%d ignored (menu/dialog open)", forward);
         return;
     }
-    if (bTrace) LOGF("\r\n[TOUCH] swipe forward=%d -> cycling display output", forward);
+    MTRC_LOGF("swipe forward=%d -> cycling display output", forward);
     plotterview_cycleOutput(forward);
 }
 
@@ -942,7 +944,7 @@ bool boardui_isMenuOpen() {
 
 void boardui_handleVerticalSwipe(bool down) {
     if (bTrace) {
-        LOGF("\r\n[TOUCH] vertical swipe down=%d deviceListVisible=%d", down, deviceListVisible);
+        mLOGF("TOUCH", "vertical swipe down=%d deviceListVisible=%d", down, deviceListVisible);
     }
     if (deviceListVisible) {
         scrollDeviceList(down);

@@ -82,6 +82,17 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
         for (std::size_t i = 0; i < EXTRA_FONT_COUNT; ++i) {
             uploadCgramChar(extra_font[i].code, extra_font[i].bitmap);
         }
+
+        // Tells the TEXT ENGINE where the just-uploaded user-defined
+        // characters actually live -- see CGRAM_STR0's own comment
+        // (this file's header) for why this is a SEPARATE register from
+        // CVSSA (which uploadCgramChar() above only used transiently,
+        // as its own read/write pointer while writing each glyph, and
+        // which gets reset back to 0 -- the main window -- via
+        // endOverlayDraw() after each individual upload). Set once here,
+        // covering every character uploaded above, since they all share
+        // the same kCgramAddr base.
+        writeReg32(CGRAM_STR0, kCgramAddr);
     }
 
     // ---- Chip/LCD configuration -- confirmed against EastRising's own
@@ -208,13 +219,17 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     // sets both to the same place (see its main loop() calling
     // Main_Image_Start_Address()+Canvas_Image_Start_address() together
     // every frame). Both are kept in lockstep here for the same reason.
-    writeReg16(MISA0, 0);
-    writeReg16(static_cast<std::uint8_t>(MISA0 + 2), 0);
+
+    writeReg32(MISA0, 0);
+//    writeReg16(MISA0, 0);
+//    writeReg16(static_cast<std::uint8_t>(MISA0 + 2), 0);
     writeReg16(MIW0, width_);
-    writeReg16(MWSXY0, 0);                                  // Main Window Start X = 0
-    writeReg16(static_cast<std::uint8_t>(MWSXY0 + 2), 0);   // Main Window Start Y = 0
-    writeReg16(CVSSA0, 0);
-    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
+    writeReg32(MWSXY0, 0);                                  // Main Window Start X = 0
+//    writeReg16(MWSXY0, 0);                                  // Main Window Start X = 0
+//    writeReg16(static_cast<std::uint8_t>(MWSXY0 + 2), 0);   // Main Window Start Y = 0
+    writeReg32(CVSSA0, 0);
+//    writeReg16(CVSSA0, 0);
+//    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
     writeReg16(CVS_IMWTH0, width_);
     writeReg(0x10, 0x04);    // REG[10h] bit[3:2]=01b: Main Window 16bpp
     writeReg(AW_COLOR, 0x01);  // REG[5Eh] bit[1:0]: Active Window/canvas
@@ -246,11 +261,23 @@ void LT7683::writeReg(std::uint8_t cmd, const std::uint8_t* data, std::size_t le
     writeData(data, len);
 }
 
+/*void LT7683::writeReg16(std::uint8_t cmd, std::uint16_t data) {
+    writeReg(cmd, (uint8_t*)&data, sizeof(data));
+}
+void LT7683::writeReg32(std::uint8_t cmd, std::uint32_t data) {
+    writeReg(cmd, (uint8_t*)&data, sizeof(data));
+}*/
+
 void LT7683::writeReg16(std::uint8_t cmd, std::uint16_t data) {
     writeCmd(cmd);
     writeData(static_cast<std::uint8_t>(data & 0xFF));
     writeCmd(static_cast<std::uint8_t>(cmd + 1));
     writeData(static_cast<std::uint8_t>((data >> 8) & 0xFF));
+}
+
+void LT7683::writeReg32(std::uint8_t cmd, std::uint32_t data) {
+    writeReg16(cmd, static_cast<std::uint16_t>(data & 0xFFFF));
+    writeReg16(cmd+2, static_cast<std::uint16_t>((data >> 16) & 0xFFFF));
 }
 
 void LT7683::writeCmd(std::uint8_t cmd) {
@@ -289,6 +316,57 @@ std::uint8_t LT7683::readData() {
     return rx[0];
 }
 
+void LT7683::readMrwdpBytes(std::uint8_t* buf, std::size_t len) {
+    // See this method's own header comment (LT7683.hpp) for the exact
+    // datasheet wording this implements: select MRWDP ONCE, one dummy
+    // read (discarded), then `len` real reads with no further port-
+    // address changes in between -- re-selecting the port at any point
+    // would make the NEXT read a dummy again.
+    if (len == 0) return;
+    writeCmd(MRWDP);
+    readData();  // dummy -- per datasheet, discard
+    for (std::size_t i = 0; i < len; ++i) {
+        buf[i] = readData();
+    }
+}
+
+void LT7683::widenActiveWindowForLinearAccess(std::uint16_t* savedX0, std::uint16_t* savedY0,
+                                               std::uint16_t* savedW, std::uint16_t* savedH) {
+    // See this method's own header comment (LT7683.hpp) for the
+    // datasheet note this implements.
+    *savedX0 = activeWindowX0Cached_;
+    *savedY0 = activeWindowY0Cached_;
+    *savedW = activeWindowWCached_;
+    *savedH = activeWindowHCached_;
+    setActiveWindow(0, 0, static_cast<std::uint16_t>(width_ - 1),
+                     static_cast<std::uint16_t>(height_ - 1));
+}
+
+void LT7683::restoreActiveWindow(std::uint16_t savedX0, std::uint16_t savedY0,
+                                  std::uint16_t savedW, std::uint16_t savedH) {
+    if (savedW != 0 && savedH != 0) {
+        setActiveWindow(savedX0, savedY0,
+                         static_cast<std::uint16_t>(savedX0 + savedW - 1),
+                         static_cast<std::uint16_t>(savedY0 + savedH - 1));
+    }
+}
+
+void LT7683::readData(std::uint8_t cmd, std::uint8_t* buf, std::size_t len) {
+    // See this method's own header comment (LT7683.hpp) for why this --
+    // writeCmd(cmd++) then the single-byte readData() above, repeated
+    // `len` times, each its own full CS-toggle transaction -- is what
+    // actually works on real hardware, replacing an earlier attempt
+    // that tried one continuous multi-byte transaction (matching
+    // writeData(data*, len)'s own structure) but was confirmed NOT to
+    // read correctly that way, even with the correct `len` reaching the
+    // SPI peripheral.
+    if (len == 0) return;
+    while (len--) {
+        writeCmd(cmd++);
+        *buf++ = readData();
+    }
+}
+
 std::uint8_t LT7683::readStatus() {
     std::uint8_t rx[1] = { 0 };
     t_.csLow();
@@ -313,6 +391,13 @@ void LT7683::waitPoll(std::uint8_t reg, std::uint8_t mask) {
 void LT7683::waitStatus(std::uint8_t mask) {
     for (int i = 0; i < 2500; ++i) {
         if ((readStatus() & mask) == 0) return;
+        t_.delayUs(20);
+    }
+}
+
+void LT7683::waitStatusSet(std::uint8_t mask) {
+    for (int i = 0; i < 2500; ++i) {
+        if ((readStatus() & mask) != 0) return;
         t_.delayUs(20);
     }
 }
@@ -645,9 +730,10 @@ void LT7683::beginOverlayDraw() {
     // coordinate space as the panel itself (MenuFrame's own X/Y are
     // already real screen coordinates), so no separate, narrower stride
     // is needed for the menu layer.
-    writeReg16(CVSSA0, static_cast<std::uint16_t>(kMenuLayerAddr & 0xFFFF));
-    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2),
-              static_cast<std::uint16_t>((kMenuLayerAddr >> 16) & 0xFFFF));
+    writeReg32(CVSSA0, static_cast<std::uint32_t>(kMenuLayerAddr));
+//    writeReg16(CVSSA0, static_cast<std::uint16_t>(kMenuLayerAddr & 0xFFFF));
+//    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2),
+//              static_cast<std::uint16_t>((kMenuLayerAddr >> 16) & 0xFFFF));
     writeReg16(CVS_IMWTH0, width_);
 }
 
@@ -657,8 +743,9 @@ void LT7683::endOverlayDraw() {
     // runs again (Screen's own text drawing very much included), since
     // none of them expect the canvas to still be pointed at the menu
     // layer.
-    writeReg16(CVSSA0, 0);
-    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
+    writeReg32(CVSSA0, 0);
+//    writeReg16(CVSSA0, 0);
+//    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
     writeReg16(CVS_IMWTH0, width_);
 }
 
@@ -839,6 +926,10 @@ void LT7683::gfxMode() {
     // mode -- cheap, and safe now that the actual root cause (pllInit()
     // misconfiguring the clock -- see begin()'s own comment) is gone.
     if (currentGfxTxtMode_ == GfxTxtMode::Graphic) return;
+    // ICR (and other text-related registers) must only be changed while
+    // Core Task Busy (STSR bit3) is 0 -- confirmed on real hardware:
+    // poll BEFORE this write, not after.
+    waitStatus(STSR_CORE_BUSY);
     writeCmd(ICR);
     writeData(0x00);  // ICR = 0x00: bit2=0 (graphic mode), bits[1:0]=00b (Display RAM)
     currentGfxTxtMode_ = GfxTxtMode::Graphic;
@@ -847,6 +938,7 @@ void LT7683::gfxMode() {
 void LT7683::txtMode() {
     // See gfxMode()'s own comment.
     if (currentGfxTxtMode_ == GfxTxtMode::Text) return;
+    waitStatus(STSR_CORE_BUSY);
     writeCmd(ICR);
     writeData(0x04);  // ICR = 0x04: bit2=1 (text mode), bits[1:0]=00b (Display RAM)
     currentGfxTxtMode_ = GfxTxtMode::Text;
@@ -1002,18 +1094,114 @@ void LT7683::txtWrite(const char* s) {
 }
 
 void LT7683::txtWriteChar(std::uint8_t c) {
+    // CRITICAL, confirmed on real hardware: UCG (user-defined/custom
+    // font) character codes MUST be written as TWO bytes -- high byte
+    // then low byte -- even for codes that fit in one byte. A single-
+    // byte write in UCG mode leaves the text engine waiting forever for
+    // the second byte that never arrives, so the character is never
+    // actually committed -- this, not any addressing or timing issue,
+    // is why custom-font text never appeared throughout this project's
+    // whole earlier debugging history. CGROM (builtin font) codes are
+    // genuinely one byte. Rather than require every call site in this
+    // codebase to know which protocol the CURRENTLY SELECTED font
+    // needs, dispatch on usingCustomFont_ (set by selectCustomFont()/
+    // selectBuiltinFont()) here, once.
+    if (usingCustomFont_) {
+        txtWriteChar16(c);
+        return;
+    }
     txtMode();
+    waitStatus(STSR_WR_FIFO_FULL);
     writeCmd(MRWDP);
     writeData(c);
-    // Matches the reference driver's own Check_Busy_Draw() -- an
-    // unconditional wait for STSR_CORE_BUSY to clear after every single
-    // character write. Not just PLL-timing compensation: removing this
-    // entirely (as an earlier cleanup pass mistakenly did, along with
-    // genuinely unnecessary settling margins/FIFO polling) caused
-    // corrupted glyph rendering at every font size, including the
-    // splash dialog's own unscaled text -- the chip needs this to
-    // finish rendering one character before the next write arrives.
+    // Confirmed correct ordering: FIFO-empty (1=empty, opposite
+    // polarity from FIFO-full/task-busy -- see waitStatusSet()'s own
+    // comment), THEN task-not-busy. Matches the reference driver's own
+    // Check_Busy_Draw() -- the chip needs to finish rendering one
+    // character before the next write arrives, or glyphs render
+    // corrupted at every font size, including the splash dialog's own
+    // unscaled text.
+    waitStatusSet(STSR_WR_FIFO_EMPTY);
     waitStatus(STSR_CORE_BUSY);
+}
+
+void LT7683::txtWriteChar16(std::uint16_t code) {
+    // See this method's own header comment (LT7683.hpp), and
+    // txtWriteChar()'s own comment above, for why this exists and is
+    // now the ONLY correct way to write a UCG/custom-font character.
+    // High byte first, then low byte, per the datasheet's own MRWDP
+    // Write Function note D: "For two bytes character code, input high
+    // byte first."
+    //
+    // CRITICAL, confirmed on real hardware: do NOT check FIFO-empty (or
+    // anything else) BETWEEN the two bytes. The text engine is still
+    // waiting for the low byte at that point -- the FIFO will not drain
+    // until BOTH bytes have arrived, so polling FIFO-empty in between
+    // never succeeds and hangs forever (status stuck reporting busy).
+    // Only check FIFO-not-full before EACH byte (so we never overrun
+    // the write FIFO itself), and only check FIFO-empty/task-not-busy
+    // ONCE, after BOTH bytes of this one character are written.
+    txtMode();
+    waitStatus(STSR_WR_FIFO_FULL);
+    writeCmd(MRWDP);
+    writeData(static_cast<std::uint8_t>((code >> 8) & 0xFF));
+    waitStatus(STSR_WR_FIFO_FULL);
+    writeData(static_cast<std::uint8_t>(code & 0xFF));
+    waitStatusSet(STSR_WR_FIFO_EMPTY);
+    waitStatus(STSR_CORE_BUSY);
+}
+
+void LT7683::writeSdramByte(std::uint32_t addr, std::uint8_t value) {
+    // Exact mirror of uploadCgramChar()'s own sequence. Sets CVSSA
+    // (0x50-53, matches the datasheet's own Figure 8-2 CGRAM-init
+    // flowchart), CURH/CURV (0x5F-62, confirmed by the user directly
+    // against the datasheet's own text: "in linear mode [CURH
+    // contains] the actual... memory read/write address" -- CVSSA
+    // alone was tested and confirmed insufficient), AND widens the
+    // Active Window first (see widenActiveWindowForLinearAccess()'s
+    // own comment for the datasheet note this satisfies -- CURH's own
+    // documentation requires it, and this was never done before).
+    std::uint16_t savedX0, savedY0, savedW, savedH;
+    widenActiveWindowForLinearAccess(&savedX0, &savedY0, &savedW, &savedH);
+
+    gfxMode();
+    writeReg32(CVSSA0, addr);
+    writeReg(AW_COLOR, 0x04);
+    writeReg32(CURH0, addr);
+
+    for (int retry = 0; retry < 1000; ++retry) {
+        if ((readStatus() & STSR_WR_FIFO_FULL) == 0) break;
+    }
+    writeCmd(MRWDP);
+    writeData(value);
+    waitStatusSet(STSR_WR_FIFO_EMPTY);
+    waitStatus(STSR_CORE_BUSY);
+
+    writeReg(AW_COLOR, 0x01);
+    endOverlayDraw();
+    restoreActiveWindow(savedX0, savedY0, savedW, savedH);
+}
+
+std::uint8_t LT7683::readSdramByte(std::uint32_t addr) {
+    // Exact mirror of writeSdramByte()'s own addressing (see its
+    // comment for the Active Window widening this also needs), but
+    // reading via readMrwdpBytes() -- see ITS OWN comment for the
+    // dummy-read-on-port-switch fix this needed.
+    std::uint16_t savedX0, savedY0, savedW, savedH;
+    widenActiveWindowForLinearAccess(&savedX0, &savedY0, &savedW, &savedH);
+
+    gfxMode();
+    writeReg32(CVSSA0, addr);
+    writeReg(AW_COLOR, 0x04);
+    writeReg32(CURH0, addr);
+
+    std::uint8_t v = 0;
+    readMrwdpBytes(&v, 1);
+
+    writeReg(AW_COLOR, 0x01);
+    endOverlayDraw();
+    restoreActiveWindow(savedX0, savedY0, savedW, savedH);
+    return v;
 }
 
 // -----------------------------------------------------------------------
@@ -1367,6 +1555,20 @@ void LT7683::set2LayerConfig() {
     // what capability the project actually relies on this call for.
 }
 
+void LT7683::setCharSpacing(std::uint8_t pixels) {
+    // REG[D1h] F2FSSR bit[5:0]: extra pixels added between characters,
+    // on top of the font's own cell width. See this method's own header
+    // comment (LT7683.hpp) for why Screen.cpp must call this instead of
+    // writing REG[2Eh] directly.
+    writeReg(F2FSSR, static_cast<std::uint8_t>(pixels & 0x3F));
+}
+
+void LT7683::setLineSpacing(std::uint8_t pixels) {
+    // REG[D0h] FLDR bit[4:0]: extra pixels added between text lines.
+    // See setCharSpacing()'s own comment.
+    writeReg(FLDR, static_cast<std::uint8_t>(pixels & 0x1F));
+}
+
 void LT7683::selectCustomFont() {
     // CCR0 (REG[CCh]) = 0x80: bit[7:6]=10b (select user-defined
     // character -- confirmed against the datasheet's own register
@@ -1374,6 +1576,10 @@ void LT7683::selectCustomFont() {
     // uploadCgramChar()'s own upload size exactly), bit[1:0] irrelevant
     // in this mode (only meaningful for internal CGROM).
     writeReg(CCR0_TEXT, 0x80);
+    // See usingCustomFont_'s own comment (LT7683.hpp) -- lets
+    // txtWriteChar() automatically use the correct (2-byte) write
+    // protocol this font source needs.
+    usingCustomFont_ = true;
 }
 
 void LT7683::selectBuiltinFont() {
@@ -1383,18 +1589,21 @@ void LT7683::selectBuiltinFont() {
     // correctly too even though they never touch the uploaded CGRAM
     // data).
     writeReg(CCR0_TEXT, 0x00);
+    usingCustomFont_ = false;
 }
 
 void LT7683::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
     // Follows the datasheet's own "Initialize CGRAM from MCU" flowchart
-    // (section 8.2.7 / Figure 8-2) exactly, confirmed against the actual
-    // register bit tables (section 14.10, CCR0/CCR1) rather than
-    // guessed: point the Canvas at this project's own kCgramAddr scratch
-    // region (see its own comment) in LINEAR addressing mode, then
-    // stream the raw 16-byte glyph there via MRWDP (REG[04h], the same
-    // "Memory Data Port" register every other Display RAM write in this
-    // file already uses), FIFO-full checked first, STSR bit3 (Core
-    // Busy) confirmed clear after.
+    // (section 8.2.7 / Figure 8-2) and register table (section 14.10,
+    // CCR0/CCR1), WITH ONE CORRECTION found via real-hardware testing:
+    // the datasheet elsewhere notes CVSSA writes are IGNORED once linear
+    // addressing mode is already active, so CVSSA must be set FIRST
+    // (while still in this project's own normal X-Y/block mode), THEN
+    // switch to linear mode -- the flowchart's own step order (mode,
+    // then address) doesn't actually work. Confirmed against
+    // beginOverlayDraw()'s own use of the exact same CVSSA0/CVS_IMWTH0
+    // registers (redirecting the canvas to the menu layer, entirely in
+    // block mode) that CVSSA writes DO take effect there.
     //
     // Target address per the datasheet's own formula (section 8.2.1,
     // "8*16 UCG Data Format"): UCG_ADD = CGRAM_Start_ADD + (UCG_Code *
@@ -1408,27 +1617,86 @@ void LT7683::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) 
     // the right glyph automatically.
     const std::uint32_t addr = kCgramAddr + static_cast<std::uint32_t>(ascii) * 16;
 
-    gfxMode();                  // ICR (REG[03h]) = 0x00 -- see its own comment
-    writeReg(AW_COLOR, 0x04);   // REG[5Eh]: Canvas addressing = Linear mode (datasheet's
-                                 // own flowchart step 2) -- NOT this project's normal
-                                 // X-Y/16bpp-block mode (0x01, set in begin() and restored
-                                 // below), so every other drawing call in this file must
-                                 // never run while this is active.
-    writeReg16(CVSSA0, static_cast<std::uint16_t>(addr & 0xFFFF));
-    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2),
-              static_cast<std::uint16_t>((addr >> 16) & 0xFFFF));
+    // Per the datasheet's own note under CURH's own register
+    // description: "Host should program proper active window related
+    // parameters before configure this register." Never done before
+    // this fix -- see widenActiveWindowForLinearAccess()'s own comment.
+    std::uint16_t savedX0, savedY0, savedW, savedH;
+    widenActiveWindowForLinearAccess(&savedX0, &savedY0, &savedW, &savedH);
 
-    for (int i = 0; i < 100; ++i) {
-        if ((readStatus() & STSR_WR_FIFO_FULL) == 0) break;
-        t_.delayMs(1);
+    gfxMode();                  // ICR (REG[03h]) = 0x00 -- see its own comment
+    writeReg32(CVSSA0, addr);   // Figure 8-2's own flowchart step -- kept
+                                 // (must happen before switching addressing
+                                 // mode below, per its own earlier note).
+    writeReg(AW_COLOR, 0x04);   // REG[5Eh]: Canvas addressing = Linear mode
+    // CURH/CURV (0x5F-62): the actual linear read/write address per the
+    // datasheet's own text for that register pair -- confirmed by the
+    // user directly against the datasheet, not just the Figure 8-2
+    // flowchart image (which omits this step entirely). Setting CVSSA
+    // ALONE, or CURH0 INSTEAD of CVSSA, were both tried on real
+    // hardware and neither alone was sufficient -- both set to the
+    // same address here.
+    writeReg32(CURH0, addr);
+
+    // Byte-by-byte, not one continuous 16-byte transaction -- confirmed
+    // against a working reference implementation of this exact chip
+    // (ESP32-based, e.g. MPU8_8bpp_Memory_Write): MRWDP is selected
+    // ONCE (writeCmd below), then EACH byte gets its own FIFO-not-full
+    // poll before writeData() -- unlike reads, writes do NOT need MRWDP
+    // re-selected per byte, just the FIFO check. After the loop, the
+    // reference implementation's own final check is FIFO EMPTY
+    // (STSR_WR_FIFO_EMPTY, bit6), not STSR_CORE_BUSY (bit3) as this
+    // function used before -- CORE_BUSY reflects the 2D/BTE/text engine,
+    // not specifically whether queued FIFO bytes have actually drained
+    // to SDRAM yet.
+    writeCmd(MRWDP);
+    for (int i = 0; i < 16; ++i) {
+        waitStatus(STSR_WR_FIFO_FULL);
+        writeData(bitmap[i]);
     }
-    writeReg(MRWDP, bitmap, 16);
-    waitStatus(STSR_CORE_BUSY);  // datasheet's own "Check STSR bit3" step, before End
+    waitStatusSet(STSR_WR_FIFO_EMPTY);
+    waitStatus(STSR_CORE_BUSY);
 
     // Restore Canvas addressing back to this project's own normal mode
     // -- see begin()'s own identical writeReg(AW_COLOR, 0x01) for why
     // every other drawing call here expects this, not linear mode.
     writeReg(AW_COLOR, 0x01);
+    endOverlayDraw();
+    restoreActiveWindow(savedX0, savedY0, savedW, savedH);
+}
+
+bool LT7683::verifyCgramChar(std::uint8_t ascii, const std::uint8_t expected[16], uint8_t* got) {
+    // Exact mirror of uploadCgramChar() above (see its own comment for
+    // why CVSSA, CURH0, and the Active Window widening are all needed
+    // here, to the same address), but reading instead of writing -- via
+    // readMrwdpBytes() (see its own comment for the dummy-read-on-
+    // port-switch fix this needed; the earlier readData(MRWDP, got, 16)
+    // re-selected the port per byte, meaning every single byte read was
+    // a discarded dummy response, never real data).
+    const std::uint32_t addr = kCgramAddr + static_cast<std::uint32_t>(ascii) * 16;
+
+    std::uint16_t savedX0, savedY0, savedW, savedH;
+    widenActiveWindowForLinearAccess(&savedX0, &savedY0, &savedW, &savedH);
+
+    gfxMode();
+    writeReg32(CVSSA0, addr);
+    writeReg(AW_COLOR, 0x04);
+    writeReg32(CURH0, addr);
+
+    // TEMPORARY DIAGNOSTIC -- see lastCvssaReadback()'s own comment
+    // (LT7683.hpp) for what this checks and why.
+    readData(CVSSA0, reinterpret_cast<std::uint8_t*>(&lastCvssaReadback_), 4);
+
+    readMrwdpBytes(got, 16);
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        if (got[i] != expected[i]) match = false;
+    }
+
+    writeReg(AW_COLOR, 0x01);
+    endOverlayDraw();
+    restoreActiveWindow(savedX0, savedY0, savedW, savedH);
+    return match;
 }
 
 }  // namespace hipi

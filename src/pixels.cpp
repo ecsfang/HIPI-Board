@@ -1,7 +1,10 @@
+#define MODULE "PIXEL"
+
 #include "pixels.h"
 #include "usb_serial.h"
 #include <algorithm>
 #include <string>
+
 
 // ─── RGB332 <-> RGB888 ─────────────────────────────────────────────────────
 // bits [7:5]=R (3 bits, 0-7), [4:2]=G (3 bits, 0-7), [1:0]=B (2 bits, 0-3).
@@ -47,10 +50,8 @@ void CPixelStrip::_setCurrent(uint32_t index, std::uint8_t r, std::uint8_t g, st
 }
 
 void CPixelStrip::_traceOutOfRange(uint32_t index, const char* what) const {
-    if (bExtTrace) {
-        LOGF("\r\n[PIXEL] %s: index %lu out of range (strip has %lu pixel(s)) -- ignored",
+    MDBG_LOGF("%s: index %lu out of range (strip has %lu pixel(s)) -- ignored",
              what, static_cast<unsigned long>(index), static_cast<unsigned long>(count_));
-    }
 }
 
 void CPixelStrip::setPixelRGB332(uint32_t index, std::uint8_t colorByte) {
@@ -168,9 +169,9 @@ void CPixelParser::feed(std::uint8_t c) {
     // command letters/digits/selectors are common in this protocol.
     if (bExtTrace) {
         if (c >= 0x20 && c < 0x7F)
-            LOGF("\r\n[PIXEL] feed: 0x%02X ('%c') in state %s", c, c, _stateName(_state));
+            MLOGF("feed: 0x%02X ('%c') in state %s", c, c, _stateName(_state));
         else
-            LOGF("\r\n[PIXEL] feed: 0x%02X in state %s", c, _stateName(_state));
+            MLOGF("feed: 0x%02X in state %s", c, _stateName(_state));
     }
 
     switch (_state) {
@@ -187,12 +188,12 @@ void CPixelParser::feed(std::uint8_t c) {
             _runStart = c;
             _runIndex = 0;
             if (_runCount == 0) {
-                if (bTrace) LOGF("\r\n[PIXEL] run(%s): count=0, start=%u -- nothing to do",
+                MTRC_LOGF("run(%s): count=0, start=%u -- nothing to do",
                                  _run332 ? "RGB332" : "RGB24", _runStart);
                 _reset();
                 return;
             }  // count=0: nothing to apply
-            if (bTrace) LOGF("\r\n[PIXEL] run(%s): count=%u start=%u",
+            MTRC_LOGF("run(%s): count=%u start=%u",
                              _run332 ? "RGB332" : "RGB24", _runCount, _runStart);
             _state = _run332 ? State::AwaitRun332 : State::AwaitRunR;
             return;
@@ -201,7 +202,7 @@ void CPixelParser::feed(std::uint8_t c) {
             _strip.setPixelRGB332(static_cast<uint32_t>(_runStart) + _runIndex, c);
             if (++_runIndex >= _runCount) {
                 _strip.show();
-                if (bTrace) LOGF("\r\n[PIXEL] run(RGB332) complete: %u pixel(s) from %u",
+                MTRC_LOGF("run(RGB332) complete: %u pixel(s) from %u",
                                  _runCount, _runStart);
                 _reset();
             }
@@ -221,7 +222,7 @@ void CPixelParser::feed(std::uint8_t c) {
             _strip.setPixelRGB(static_cast<uint32_t>(_runStart) + _runIndex, _runR, _runG, c);
             if (++_runIndex >= _runCount) {
                 _strip.show();
-                if (bTrace) LOGF("\r\n[PIXEL] run(RGB24) complete: %u pixel(s) from %u",
+                MTRC_LOGF("run(RGB24) complete: %u pixel(s) from %u",
                                  _runCount, _runStart);
                 _reset();
             } else {
@@ -232,7 +233,7 @@ void CPixelParser::feed(std::uint8_t c) {
         // ── 'X'/'Y' ASCII commands' own raw color byte(s) -- also literal,
         // never interpreted as digits/separators. ──────────────────────
         case State::AwaitX:
-            if (bTrace) LOGF("\r\n[PIXEL] set %s = RGB332 0x%02X", _selectionDesc().c_str(), c);
+            MTRC_LOGF("set %s = RGB332 0x%02X", _selectionDesc().c_str(), c);
             _applyToSelection332(c);
             _strip.show();
             _reset();
@@ -250,7 +251,7 @@ void CPixelParser::feed(std::uint8_t c) {
 
         case State::AwaitY3:
             if (bTrace) {
-                LOGF("\r\n[PIXEL] set %s = RGB(%u,%u,%u)",
+                MLOGF("set %s = RGB(%u,%u,%u)",
                      _selectionDesc().c_str(), _runR, _runG, c);
             }
             _applyToSelection(_runR, _runG, c);
@@ -270,7 +271,7 @@ void CPixelParser::feed(std::uint8_t c) {
             // "finalize, then re-feed" pattern for exactly this situation).
             {
                 const int32_t pct = _hasDigit ? std::min<int32_t>(_paramVal, 100) : 0;
-                if (bTrace) LOGF("\r\n[PIXEL] brightness -> %ld%%", static_cast<long>(pct));
+                MTRC_LOGF("brightness -> %ld%%", static_cast<long>(pct));
                 _strip.setBrightness(static_cast<std::uint8_t>(pct));
             }
             _strip.show();
@@ -310,10 +311,10 @@ void CPixelParser::feed(std::uint8_t c) {
             }
             switch (c) {
                 case 'C':
-                    if (bTrace) LOGF("\r\n[PIXEL] off: %s", _selectionDesc().c_str());
+                    MTRC_LOGF("off: %s", _selectionDesc().c_str());
                     _onOff(); _strip.show(); _reset(); return;
                 case 'O':
-                    if (bTrace) LOGF("\r\n[PIXEL] on: %s", _selectionDesc().c_str());
+                    MTRC_LOGF("on: %s", _selectionDesc().c_str());
                     _onOn();  _strip.show(); _reset(); return;
                 case 'S': _state = State::AwaitBrightness; return;
                 case 'X': _state = State::AwaitX; return;
@@ -331,9 +332,9 @@ void CPixelParser::feed(std::uint8_t c) {
                     // a normal, reportable event.
                     if (bExtTrace) {
                         if (c >= 0x20 && c < 0x7F)
-                            LOGF("\r\n[PIXEL] ignored stray byte 0x%02X ('%c') in Idle state", c, c);
+                            MLOGF("ignored stray byte 0x%02X ('%c') in Idle state", c, c);
                         else
-                            LOGF("\r\n[PIXEL] ignored stray byte 0x%02X in Idle state", c);
+                            MLOGF("ignored stray byte 0x%02X in Idle state", c);
                     }
                     return;
             }
@@ -347,17 +348,17 @@ void CPixelParser::flush() {
     if (_state == State::Idle) { _reset(); return; }
     if (_state == State::AwaitBrightness) {
         const int32_t pct = _hasDigit ? std::min<int32_t>(_paramVal, 100) : 0;
-        if (bTrace) LOGF("\r\n[PIXEL] brightness -> %ld%% (at flush)", static_cast<long>(pct));
+        MTRC_LOGF("brightness -> %ld%% (at flush)", static_cast<long>(pct));
         _strip.setBrightness(static_cast<std::uint8_t>(pct));
         _strip.show();
-    } else if (bExtTrace) {
+    } else {
         // Any other pending state at flush() means the transmission ended
         // mid-command -- e.g. '#'/'@' cut off before its run finished, or
         // 'X'/'Y' cut off before its color byte(s) arrived. Nothing is
         // applied for it (see this method's own header comment), but
         // it's worth knowing about when troubleshooting a program that
         // isn't sending what's expected.
-        LOGF("\r\n[PIXEL] flush: dropping incomplete command, state=%s", _stateName(_state));
+        MDBG_LOGF("flush: dropping incomplete command, state=%s", _stateName(_state));
     }
     _reset();
 }

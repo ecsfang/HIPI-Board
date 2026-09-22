@@ -1,3 +1,5 @@
+#define MODULE "PLOTTER"
+
 #include "plotter.h"
 #include "hpgl_font.h"
 #include <cctype>
@@ -5,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
+
 
 // Real 7475A factory-default hard-clip scaling points (see OP's response
 // in execute() below) -- also used by XT/YT/SR to convert percentages
@@ -59,7 +62,7 @@ void CPlotter::reset_state() {
 }
 
 void CPlotter::clear(void) {
-    if (bTrace) LOGF("\r\n[PLOTTER] clear (DCL/SDC)");
+    MTRC_LOGF("clear (DCL/SDC)");
     reset_state();
     if (onClear_) onClear_();
 }
@@ -89,7 +92,7 @@ void CPlotter::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
         // it gets turned into ETO. Clearing midTransfer_ here would leave
         // that final echoed byte completely unhandled instead.
         outEnd_ = true;
-        if (bTrace) LOGF("\r\n[PLOTTER] doTalker: NRD -> end=true");
+        MTRC_LOGF("doTalker: NRD -> end=true");
         return;
     }
 
@@ -109,13 +112,13 @@ void CPlotter::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
     if (outQueue_.empty()) {
         *rtn = ETO;
         midTransfer_ = false;
-        if (bTrace) LOGF("\r\n[PLOTTER] doTalker: cmd=0x%03X -> ETO (nothing queued)", cmd);
+        MTRC_LOGF("doTalker: cmd=0x%03X -> ETO (nothing queued)", cmd);
     } else {
         *rtn = static_cast<IL_CMD_t>(outQueue_.front());
         outQueue_.erase(outQueue_.begin());
         midTransfer_ = true;
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] doTalker: cmd=0x%03X -> 0x%02X '%c' (queue left=%zu)",
+            MLOGF("doTalker: cmd=0x%03X -> 0x%02X '%c' (queue left=%zu)",
                  cmd, *rtn, (*rtn >= 32 && *rtn < 127) ? static_cast<char>(*rtn) : '.',
                  outQueue_.size());
         }
@@ -126,7 +129,7 @@ void CPlotter::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
 void CPlotter::queueOutput(const std::string& s) {
     outQueue_.assign(s.begin(), s.end());
     outEnd_ = false;
-    if (bTrace) LOGF("\r\n[PLOTTER] queued response: \"%s\"", s.c_str());
+    MTRC_LOGF("queued response: \"%s\"", s.c_str());
 }
 
 // Tokenizer, ported from pyILPER's cls_HP7470Processor.process_char().
@@ -240,7 +243,7 @@ void CPlotter::feed_char(char c) {
             // than let that happen.
             if (cmdBuf_.size() > kMaxLabelLength) {
                 if (bTrace) {
-                    LOGF("\r\n[PLOTTER] LB exceeded %zu chars without a terminator "
+                    MLOGF("LB exceeded %zu chars without a terminator "
                          "(0x%02X) -- aborting, treating as malformed",
                          kMaxLabelLength, static_cast<unsigned char>(labelTerminator_));
                 }
@@ -341,17 +344,17 @@ void CPlotter::emitSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, st
 
     segments_.push_back({ix0, iy0, ix1, iy1, currentPen_});
     if (bTrace) {
-        LOGF("\r\n[PLOTTER]   draw (%d,%d) -> (%d,%d) pen=%u", ix0, iy0, ix1, iy1, currentPen_);
+        MLOGF("  draw (%d,%d) -> (%d,%d) pen=%u", ix0, iy0, ix1, iy1, currentPen_);
     }
     if (onDraw_) onDraw_(ix0, iy0, ix1, iy1, currentPen_);
 }
 
 void CPlotter::doMove(std::int16_t x, std::int16_t y) {
     if (penDown_) {
-        if (bTrace) LOGF("\r\n[PLOTTER]   (pen down move)");
+        MTRC_LOGF("  (pen down move)");
         emitSegment(penX_, penY_, x, y);
     } else {
-        if (bTrace) LOGF("\r\n[PLOTTER]   move -> (%d,%d)", x, y);
+        MTRC_LOGF("  move -> (%d,%d)", x, y);
         if (onMove_) onMove_(x, y);
     }
     penX_ = x;
@@ -408,7 +411,7 @@ void CPlotter::moveThroughParams(const std::vector<double>& params) {
 // ── Label (LB) text rendering ───────────────────────────────────────────
 
 void CPlotter::drawLabel(const std::string& text) {
-    if (bTrace) LOGF("\r\n[PLOTTER] LB \"%s\"", text.c_str());
+    MTRC_LOGF("LB \"%s\"", text.c_str());
     for (char ch : text) {
         const unsigned char code = static_cast<unsigned char>(ch);
         if (code == 13) {
@@ -426,7 +429,7 @@ void CPlotter::drawLabel(const std::string& text) {
             const double a = (crPosX_ - charPosX_) * dirCos_ + (crPosY_ - charPosY_) * dirSin_;
             charPosX_ = static_cast<std::int16_t>(charPosX_ + a * dirCos_);
             charPosY_ = static_cast<std::int16_t>(charPosY_ + a * dirSin_);
-            if (bTrace) LOGF("\r\n[PLOTTER]   CR -> textpos(%d,%d)", charPosX_, charPosY_);
+            MTRC_LOGF("  CR -> textpos(%d,%d)", charPosX_, charPosY_);
             continue;
         }
         drawLabelChar(code);
@@ -484,17 +487,17 @@ void CPlotter::execute(const std::string& cmd) {
     const std::vector<double> params = parseParams(cmd, 2);
 
     if (mnemonic == "IN") {
-        if (bTrace) LOGF("\r\n[PLOTTER] IN (initialize/reset)");
+        MTRC_LOGF("IN (initialize/reset)");
         reset_state();
         if (onClear_) onClear_();
     } else if (mnemonic == "SP") {
         currentPen_ = params.empty() ? 0 : static_cast<std::uint8_t>(params[0]);
-        if (bTrace) LOGF("\r\n[PLOTTER] SP -> pen=%u", currentPen_);
+        MTRC_LOGF("SP -> pen=%u", currentPen_);
         if (onPenChanged_) onPenChanged_(currentPen_, penDown_);
     } else if (mnemonic == "PU") {
         penDown_ = false;
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] PU (%zu point%s)", params.size() / 2,
+            MLOGF("PU (%zu point%s)", params.size() / 2,
                  params.size() == 2 ? "" : "s");
         }
         if (onPenChanged_) onPenChanged_(currentPen_, penDown_);
@@ -502,7 +505,7 @@ void CPlotter::execute(const std::string& cmd) {
     } else if (mnemonic == "PD") {
         penDown_ = true;
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] PD (%zu point%s)", params.size() / 2,
+            MLOGF("PD (%zu point%s)", params.size() / 2,
                  params.size() == 2 ? "" : "s");
         }
         if (onPenChanged_) onPenChanged_(currentPen_, penDown_);
@@ -510,14 +513,14 @@ void CPlotter::execute(const std::string& cmd) {
     } else if (mnemonic == "PA") {
         coordMode_ = CoordMode::Absolute;
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] PA absolute (%zu point%s)", params.size() / 2,
+            MLOGF("PA absolute (%zu point%s)", params.size() / 2,
                  params.size() == 2 ? "" : "s");
         }
         moveThroughParams(params);
     } else if (mnemonic == "PR") {
         coordMode_ = CoordMode::Relative;
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] PR relative (%zu point%s)", params.size() / 2,
+            MLOGF("PR relative (%zu point%s)", params.size() / 2,
                  params.size() == 2 ? "" : "s");
         }
         moveThroughParams(params);
@@ -528,13 +531,13 @@ void CPlotter::execute(const std::string& cmd) {
         // this response to complete its startup handshake.
         char buf[48];
         std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d\r\n", kP1X, kP1Y, kP2X, kP2Y);
-        if (bTrace) LOGF("\r\n[PLOTTER] OP (output P1/P2)");
+        MTRC_LOGF("OP (output P1/P2)");
         queueOutput(buf);
     } else if (mnemonic == "OA") {
         // Output Actual position: x,y,pen-status (0=up, 1=down).
         char buf[32];
         std::snprintf(buf, sizeof(buf), "%d,%d,%d\r\n", penX_, penY_, penDown_ ? 1 : 0);
-        if (bTrace) LOGF("\r\n[PLOTTER] OA (output actual position)");
+        MTRC_LOGF("OA (output actual position)");
         queueOutput(buf);
     } else if (mnemonic == "OC") {
         // Output Commanded position -- same x,y,pen format as OA. Real
@@ -544,30 +547,30 @@ void CPlotter::execute(const std::string& cmd) {
         // We don't simulate motor lag, so for us these are the same value.
         char buf[32];
         std::snprintf(buf, sizeof(buf), "%d,%d,%d\r\n", penX_, penY_, penDown_ ? 1 : 0);
-        if (bTrace) LOGF("\r\n[PLOTTER] OC (output commanded position)");
+        MTRC_LOGF("OC (output commanded position)");
         queueOutput(buf);
     } else if (mnemonic == "OE") {
         // Output Error -- we don't track real plotter error conditions
         // yet, so this always reports "no error".
-        if (bTrace) LOGF("\r\n[PLOTTER] OE (output error status)");
+        MTRC_LOGF("OE (output error status)");
         queueOutput("0\r\n");
     } else if (mnemonic == "OI") {
         // Output Identification -- always "7470A" on a real 7470A,
         // regardless of interface (matches the SDI device-id string too).
-        if (bTrace) LOGF("\r\n[PLOTTER] OI (output identification)");
+        MTRC_LOGF("OI (output identification)");
         queueOutput("7470A\r\n");
     } else if (mnemonic == "OF") {
         // Output Factors -- plotter units per millimeter (X,Y). Fixed at
         // the real 7470A/7475A's standard resolution (40 units/mm, i.e.
         // 0.025mm per unit) -- not something we model differently.
-        if (bTrace) LOGF("\r\n[PLOTTER] OF (output scaling factors)");
+        MTRC_LOGF("OF (output scaling factors)");
         queueOutput("40,40\r\n");
     } else if (mnemonic == "OO") {
         // Output Options -- 8 comma-separated flags for optional features.
         // Matches the manual's own real-hardware example exactly: arcs/
         // circles = 0 (an RS-232-C-only option, not applicable to our
         // HP-IL v1 anyway), pen select = 1 (we do support SP).
-        if (bTrace) LOGF("\r\n[PLOTTER] OO (output options)");
+        MTRC_LOGF("OO (output options)");
         queueOutput("0,1,0,0,1,0,0,0\r\n");
     } else if (mnemonic == "OS") {
         // Output Status -- an 8-bit status byte. We only meaningfully
@@ -585,14 +588,14 @@ void CPlotter::execute(const std::string& cmd) {
         }
         char buf[16];
         std::snprintf(buf, sizeof(buf), "%d\r\n", status);
-        if (bTrace) LOGF("\r\n[PLOTTER] OS (output status) -> %d", status);
+        MTRC_LOGF("OS (output status) -> %d", status);
         queueOutput(buf);
     } else if (mnemonic == "OW") {
         // Output Window -- the current IW clip rectangle (lower-left,
         // upper-right), same 4-integer format as OP.
         char buf[48];
         std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d\r\n", iw1x_, iw1y_, iw2x_, iw2y_);
-        if (bTrace) LOGF("\r\n[PLOTTER] OW (output window)");
+        MTRC_LOGF("OW (output window)");
         queueOutput(buf);
     } else if (mnemonic == "TL") {
         // Tick Length: tp[,tn] as percentages of the P1-P2 span. tn
@@ -600,12 +603,12 @@ void CPlotter::execute(const std::string& cmd) {
         // default (0.5%).
         tickLenPos_ = params.empty() ? 0.5 : params[0];
         tickLenNeg_ = params.size() > 1 ? params[1] : tickLenPos_;
-        if (bTrace) LOGF("\r\n[PLOTTER] TL pos=%.3f%% neg=%.3f%%", tickLenPos_, tickLenNeg_);
+        MTRC_LOGF("TL pos=%.3f%% neg=%.3f%%", tickLenPos_, tickLenNeg_);
     } else if (mnemonic == "XT") {
-        if (bTrace) LOGF("\r\n[PLOTTER] XT (x-axis tick)");
+        MTRC_LOGF("XT (x-axis tick)");
         drawTick(/*vertical=*/true);
     } else if (mnemonic == "YT") {
-        if (bTrace) LOGF("\r\n[PLOTTER] YT (y-axis tick)");
+        MTRC_LOGF("YT (y-axis tick)");
         drawTick(/*vertical=*/false);
     } else if (mnemonic == "IW") {
         // Input Window: a clip rectangle for every subsequently drawn
@@ -613,14 +616,14 @@ void CPlotter::execute(const std::string& cmd) {
         // full P1-P2 area (i.e. no extra clipping).
         if (params.size() < 4) {
             iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
-            if (bTrace) LOGF("\r\n[PLOTTER] IW reset to P1-P2");
+            MTRC_LOGF("IW reset to P1-P2");
         } else {
             iw1x_ = static_cast<std::int16_t>(params[0]);
             iw1y_ = static_cast<std::int16_t>(params[1]);
             iw2x_ = static_cast<std::int16_t>(params[2]);
             iw2y_ = static_cast<std::int16_t>(params[3]);
             if (bTrace) {
-                LOGF("\r\n[PLOTTER] IW (%d,%d)-(%d,%d)", iw1x_, iw1y_, iw2x_, iw2y_);
+                MLOGF("IW (%d,%d)-(%d,%d)", iw1x_, iw1y_, iw2x_, iw2y_);
             }
         }
     } else if (mnemonic == "SR") {
@@ -631,7 +634,7 @@ void CPlotter::execute(const std::string& cmd) {
         charWidthUnits_  = wPct / 100.0 * (kP2X - kP1X);
         charHeightUnits_ = hPct / 100.0 * (kP2Y - kP1Y);
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] SR w=%.3f%% h=%.3f%% (%.1f x %.1f units)",
+            MLOGF("SR w=%.3f%% h=%.3f%% (%.1f x %.1f units)",
                  wPct, hPct, charWidthUnits_, charHeightUnits_);
         }
     } else if (mnemonic == "SI") {
@@ -649,14 +652,14 @@ void CPlotter::execute(const std::string& cmd) {
         charWidthUnits_  = wCm * kUnitsPerCm;
         charHeightUnits_ = hCm * kUnitsPerCm;
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] SI w=%.3fcm h=%.3fcm (%.1f x %.1f units)",
+            MLOGF("SI w=%.3fcm h=%.3fcm (%.1f x %.1f units)",
                  wCm, hCm, charWidthUnits_, charHeightUnits_);
         }
     } else if (mnemonic == "SL") {
         // Character slant: a shear factor (dx per unit y), not an angle in
         // degrees -- matches how oo7470A.rx's PxCSA is used directly.
         charSlant_ = params.empty() ? 0.0 : params[0];
-        if (bTrace) LOGF("\r\n[PLOTTER] SL slant=%.3f", charSlant_);
+        MTRC_LOGF("SL slant=%.3f", charSlant_);
     } else if (mnemonic == "DI") {
         // Label direction: a (run,rise) vector: bare "DI" resets to the
         // default (horizontal, i.e. (1,0)).
@@ -671,7 +674,7 @@ void CPlotter::execute(const std::string& cmd) {
         // DI also resets the CR "home" position to the current pen
         // position (oo7470A.rx's newCRP), same as a real PA/PU/PD/PR move.
         crPosX_ = penX_; crPosY_ = penY_;
-        if (bTrace) LOGF("\r\n[PLOTTER] DI cos=%.3f sin=%.3f", dirCos_, dirSin_);
+        MTRC_LOGF("DI cos=%.3f sin=%.3f", dirCos_, dirSin_);
     } else if (mnemonic == "CP") {
         // Character Plot: reposition the label "text cursor" by dCols
         // character-widths and dRows character-heights, along the current
@@ -686,7 +689,7 @@ void CPlotter::execute(const std::string& cmd) {
         charPosX_ = static_cast<std::int16_t>(penX_ + dx * dirCos_ - dy * dirSin_);
         charPosY_ = static_cast<std::int16_t>(penY_ + dx * dirSin_ + dy * dirCos_);
         if (bTrace) {
-            LOGF("\r\n[PLOTTER] CP dCols=%.2f dRows=%.2f -> textpos(%d,%d)",
+            MLOGF("CP dCols=%.2f dRows=%.2f -> textpos(%d,%d)",
                  dCols, dRows, charPosX_, charPosY_);
         }
     } else if (mnemonic == "UC") {
@@ -698,13 +701,13 @@ void CPlotter::execute(const std::string& cmd) {
         // Recognized and silently ignored here rather than falling
         // through to "unrecognized command" -- this is correct,
         // documented behavior for our interface, not a missing feature.
-        if (bTrace) LOGF("\r\n[PLOTTER] UC (NOP on HP-IL interface, per manual)");
+        MTRC_LOGF("UC (NOP on HP-IL interface, per manual)");
     } else if (bTrace) {
         // Remaining v1 gaps (see plotter.h): SC/IP user-scaling,
         // digitizing, OS/OD/OF/OI/OO/OW, DT -- unrecognized mnemonics are
         // otherwise silently ignored, but worth seeing while testing
         // against real programs to know what's not implemented yet.
-        LOGF("\r\n[PLOTTER] unrecognized command '%s'", cmd.c_str());
+        MLOGF("unrecognized command '%s'", cmd.c_str());
     }
 }
 
