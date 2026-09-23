@@ -350,6 +350,53 @@ int main() {
     display->setActiveWindow(0, 0, SCREEN_MAX_X-buttonStripWidth-1, SCREEN_MAX_Y-1);
     screen = new hipi::Screen(display, config.textColor(), 1, config.brightness(), SCREEN_MAX_X-buttonStripWidth );
 
+    // Init touch sensor NOW, before any info text is drawn -- MOVED here
+    // (was right before the wait-for-touch loop much further down, well
+    // after the info text below had already been written) specifically
+    // so the drain loop just below runs and finishes BEFORE the info
+    // text appears, not after. On a true cold boot (as opposed to a
+    // warm reset), the touch controller's own power rail and the I2C
+    // bus can both still be settling right as this runs -- confirmed
+    // that a stale/spurious "touch down" reading during that window
+    // could otherwise still be sitting there by the time the
+    // wait-for-touch loop (further down) starts checking touch_is_down(),
+    // making it exit immediately as if someone had already tapped the
+    // screen, even though the drain loop that already existed further
+    // down (right before that wait loop) looked like it should have
+    // caught this -- it ran too late, after the info text (and several
+    // seconds of HPIL/device init) had already gone by, not before.
+    LOGF("\r\n * Init touch sensor ...");
+    // touch.cpp now has a real FT5316 backend for DISPLAY_7INCH (see its
+    // own file header) -- was GSL1680-only before, which would have been
+    // talking the wrong protocol to this board's actual touch chip.
+    touchInit();
+    // touchInit() just did the real i2c_init()/gpio_set_function() work
+    // for this board's one physical I2C bus (see touch.h's own
+    // touch_i2c) -- mark it so any CI2CDevice-derived device (e.g.
+    // CHipiTemp's own CBmp280, set up later in hipi_init()) skips
+    // repeating that when it comes up, rather than each device needing
+    // to know touch got there first.
+    CI2CBus::markInitialized(touch_i2c);
+
+    // Drain any stale/spurious touch state before the info text below
+    // is even drawn -- the FT5316 controller can report a false "touch
+    // down" for a moment right after its own wake sequence (the
+    // WAKE_PIN toggling in touchInit(), or general power-up electrical
+    // noise on the panel), and touch_is_down() reads the controller
+    // live with no caching, so a stale reading here would make the
+    // wait-for-touch loop further down exit immediately, as if someone
+    // had already tapped the screen. Confirmed as intermittent, not
+    // every boot, and specifically a cold-boot symptom -- exactly what
+    // a power-up transient racing against this code's own timing would
+    // look like. Several reads with a small settle delay between them,
+    // discarding all of them, rather than just one -- a single extra
+    // read could still land during the same transient if it's longer
+    // than one iteration.
+    for (int i = 0; i < 5; ++i) {
+        touch_is_down();
+        sleep_ms(20);
+    }
+
     screen->pr_char(27);
     screen->pr_char('<'); // Cursor off
     screen->pr_str("# HIPI - HP-IL Pico Interface #");
@@ -397,19 +444,10 @@ int main() {
 
     hipi::boardui_init(screen, dialog, HIPI_VERSION);
 
-    // Init touch sensor ...
-    LOGF("\r\n * Init touch sensor ...");
-    // touch.cpp now has a real FT5316 backend for DISPLAY_7INCH (see its
-    // own file header) -- was GSL1680-only before, which would have been
-    // talking the wrong protocol to this board's actual touch chip.
-    touchInit();
-    // touchInit() just did the real i2c_init()/gpio_set_function() work
-    // for this board's one physical I2C bus (see touch.h's own
-    // touch_i2c) -- mark it so any CI2CDevice-derived device (e.g.
-    // CHipiTemp's own CBmp280, set up later in hipi_init()) skips
-    // repeating that when it comes up, rather than each device needing
-    // to know touch got there first.
-    CI2CBus::markInitialized(touch_i2c);
+    // touchInit() and its drain loop already ran, much earlier -- see
+    // the comment right after Screen construction above for why moving
+    // them there was the actual fix. Just the callbacks left to wire up
+    // here, now that boardui_init() above has run.
     touch_set_tap_callback(hipi::boardui_handleTap);
     touch_set_release_callback(hipi::boardui_handleRelease);
     touch_set_swipe_callback(hipi::boardui_handleSwipe);
@@ -449,23 +487,10 @@ int main() {
     LOGF("\r\n=============================");
     LOGF("\r\nUp and running ...\r\n");
 
-    // Drain any stale/spurious touch state before waiting for a real
-    // one below -- the FT5316 controller can report a false "touch
-    // down" for a moment right after its own wake sequence (the WAKE_PIN
-    // toggling in touchInit(), or general power-up electrical noise on
-    // the panel), and touch_is_down() reads the controller live with no
-    // caching, so a stale reading here would make the wait loop below
-    // exit immediately, as if someone had already tapped the screen.
-    // Confirmed as intermittent, not every boot -- exactly what a
-    // power-up transient racing against this code's own timing would
-    // look like. Several reads with a small settle delay between them,
-    // discarding all of them, rather than just one -- a single extra
-    // read could still land during the same transient if it's longer
-    // than one iteration.
-    for (int i = 0; i < 5; ++i) {
-        touch_is_down();
-        sleep_ms(20);
-    }
+    // Touch queue was already drained right after Screen construction
+    // above, before the info text was even written -- see that comment
+    // for why doing it there (rather than just here, right before the
+    // wait loop) is what actually fixes a cold-boot spurious touch.
 
     while (!time_reached(infoTimeout)) {
         tud_task();

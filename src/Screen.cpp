@@ -823,7 +823,23 @@ void Screen::pr_char(std::uint8_t c) {
                 set_cur();  // re-asserts cursor visibility/style too, not just position
             }
         } else {
-            // printable character
+            // printable character. Only ASCII 32-126 actually occupies
+            // a screen cell and advances the cursor -- see
+            // draw_letter()'s own comment for why that range and why
+            // the high bit means inverse video rather than a different
+            // character. Anything else reaching here (an accented
+            // character like Å/Ä that doesn't exist in this 7-bit
+            // charset, for instance) is silently dropped: no buffer
+            // write, no draw, no cursor movement -- so writing
+            // "ABC\xC5\xC4MN" shows "ABCMN" with no gap left behind for
+            // the two dropped characters. The dispatch above (ESC
+            // sequences, backspace/LF/CR) already ran unconditionally
+            // before this branch, so those are handled regardless of
+            // this check -- this only affects content that would
+            // otherwise be treated as a glyph to display.
+            const std::uint8_t base = static_cast<std::uint8_t>(c & 0x7F);
+            if (base < 32 || base > 126) return;
+
             nline_ = false;
             if (escN_)
                 inschar();
@@ -896,6 +912,21 @@ void Screen::set_cur() {
 
 void Screen::draw_letter(std::uint8_t c) {
     if (suspended_) return;
+    // Only ASCII 32-126 (space through '~') has a meaningful glyph in
+    // the uploaded HP82163 font -- control codes (0-31), DEL (127), and
+    // anything else outside this range draw nothing at all (not even a
+    // blank cell -- pr_char(), the caller for live input, is
+    // responsible for not advancing the cursor for these either; see
+    // its own comment). The high bit (c >= 128) selects INVERSE VIDEO
+    // of the SAME glyph rather than a separate inverted font: simplest
+    // implementation that works -- swap foreground/background colour
+    // for the write, then swap back, rather than doubling the uploaded
+    // font with a duplicate inverted copy of every glyph. The base
+    // character (c & 0x7F) must still fall in the printable range for
+    // this to draw anything.
+    const std::uint8_t base = static_cast<std::uint8_t>(c & 0x7F);
+    const bool inverse = c > 127;
+    if (base < 32 || base > 126) return;
     ++charsDrawn_;
     // Explicitly (re-)asserts both the hardware text-size register and
     // (for the normal, <=127 path just below) the foreground colour,
@@ -937,10 +968,10 @@ void Screen::draw_letter(std::uint8_t c) {
     // evidence against the transmission path itself -- CGROM and UCG
     // simply need different wire formats on this chip.
     d_->selectCustomFont();
-    if (c > 127) {
+    if (inverse) {
         if (size_ < 4) {
             d_->txtColor(0, color_);
-            d_->txtWriteChar(static_cast<std::uint8_t>(c & 0x7F));
+            d_->txtWriteChar(base);
         } else {
             d_->fillRect(static_cast<std::int16_t>(col_ * width()),
                         static_cast<std::int16_t>(row_ * height()),
@@ -948,16 +979,16 @@ void Screen::draw_letter(std::uint8_t c) {
                         static_cast<std::int16_t>(height()),
                         color_);
             d_->txtColor(0, color_);
-            const char tmp[2] = { static_cast<char>(c & 0x7F), 0 };
+            const char tmp[2] = { static_cast<char>(base), 0 };
             fon_write(tmp);
         }
         d_->txtColor(color_, 0);
     } else {
         d_->txtColor(color_, 0);
         if (size_ < 4) {
-            d_->txtWriteChar(c);
+            d_->txtWriteChar(base);
         } else {
-            const char tmp[2] = { static_cast<char>(c), 0 };
+            const char tmp[2] = { static_cast<char>(base), 0 };
             fon_write(tmp);
         }
     }
@@ -990,8 +1021,8 @@ void Screen::fon_mode() {
     // was wrong here too.
     d_->writeReg(0x40, 0x80);  // MWCR0: text mode
     d_->writeReg(0x21, 0x80);  // FNCR0: CGRAM
-    d_->setCharSpacing(0);     // horizontal char spacing
-    d_->setLineSpacing(0);     // vertical line spacing
+    d_->setCharSpacing(2);     // horizontal char spacing
+    d_->setLineSpacing(4);     // vertical line spacing
     // We don't expose "fon" via RA8875::mode(); tag it with a no-op write.
     // (See note in Screen.hpp — we track mode implicitly via size_.)
 }
