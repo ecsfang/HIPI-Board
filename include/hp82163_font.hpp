@@ -127,6 +127,10 @@ inline constexpr std::uint8_t font[FONT_CHAR_COUNT][FONT_BYTES_PER_CHAR] = {
 struct FontExtraEntry { std::uint8_t code; std::uint8_t bitmap[FONT_BYTES_PER_CHAR]; };
 
 inline constexpr FontExtraEntry extra_font[] = {
+    //  0 ASCII  DIAMOND
+    { 0x00, { 0, 0, 24, 60, 126, 255, 255, 126, 60, 24, 0, 0, 0, 0, 0, 0 } },
+    // 127 ASCII  Append
+    { 0x7F, {192, 192, 192, 192, 192, 192, 255, 192, 192, 192, 192, 192, 192, 0, 0, 0 } },
     // Ä = 'A' with two redundant middle rows dropped (keeps the pointed tip
     // and crossbar intact -- cropping from the top instead made it read as
     // an 'H'), diaeresis at top.

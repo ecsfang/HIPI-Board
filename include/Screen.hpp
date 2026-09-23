@@ -289,6 +289,14 @@ private:
     void set_cur();
     void draw_letter(std::uint8_t c);
     void fon_write(const char* s);
+    bool valid_char(std::uint8_t c);
+    // Wraps d_->beginBulkTextDraw() (cursor-hiding, see its own comment)
+    // and ALSO asserts txtSize()/selectCustomFont() once, up front, for
+    // the tight synchronous redraw loop about to follow -- see
+    // draw_letter()'s and inBulkDraw_'s own comments for why this is
+    // only safe for these specific bulk-redraw call sites (full(),
+    // inschar(), ESC O), not for live single-character typing.
+    void beginBulkDraw();
 
     // bte() removed -- every internal call site was converted to redraw
     // affected rows from lines_ instead; see Screen.cpp's own comment
@@ -381,6 +389,16 @@ private:
 
     bool suspended_ = false; // true while a UI dialog owns the display
     bool bteScrollEnabled_ = true;  // see setBteScrollEnabled()'s own comment
+    // Set true only for the duration of a tight, synchronous redraw loop
+    // (full(), inschar(), ESC O's own delete-character redraw) -- see
+    // draw_letter()'s and beginBulkDraw()'s own comments (Screen.cpp)
+    // for why this is safe there specifically but NOT safe to apply to
+    // draw_letter()'s single-character call from pr_char() (live typing),
+    // where real time passes between characters and a PIP menu (7" panel)
+    // can genuinely write to the same shared hardware registers in
+    // between. Cleared by set_cur(), which every one of these bulk loops
+    // already calls exactly once, right at the end.
+    bool inBulkDraw_ = false;
 };
 
 }  // namespace hipi

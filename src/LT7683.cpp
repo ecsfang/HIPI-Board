@@ -38,10 +38,6 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     // before touching anything else -- matches the datasheet's own
     // recommended check (section 1.2.2, "External Reset").
     waitStatus(STSR_INHIBIT);
-    //for (int i = 0; i < 50; ++i) {
-    //    if ((readStatus() & STSR_INHIBIT) == 0) break;
-    //    t_.delayMs(1);
-    //}
 
     // ROOT CAUSE FOUND: pllInit() -- skipped entirely. Confirmed on real
     // hardware: commenting out this single call made the long-hunted
@@ -71,11 +67,14 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     // AW_COLOR/CVSSA for its own purposes, so uploadCgramChar()'s own
     // save/restore of those registers has nothing else to clash with.
     if (font != nullptr && fontChars > 0) {
+#if 1
         // Upload the font in one go ...
         uploadCgramFont(FONT_FIRST_ASCII, FONT_CHAR_COUNT, (uint8_t *)font);
-//        for (std::size_t i = 0; i < fontChars; ++i) {
-//            uploadCgramChar(static_cast<std::uint8_t>(FONT_FIRST_ASCII + i), font[i]);
-//        }
+#else
+        for (std::size_t i = 0; i < fontChars; ++i) {
+            uploadCgramChar(static_cast<std::uint8_t>(FONT_FIRST_ASCII + i), font[i]);
+        }
+#endif
         // Swedish å/ä/ö (upper+lower) at their own Latin-1 code points --
         // not contiguous with the ASCII 32..126 table above, so uploaded
         // as a separate small set. See hp82163_font.hpp's extra_font[].
@@ -826,13 +825,15 @@ void LT7683::turnOn(bool on) {
     // disturb the other bits (colour bar, VDIR, PIP enables) in that
     // register.
     const std::uint8_t cur = readReg(0x12);
-    writeData(on ? cur | 0x40 : cur & ~0x40);
+    writeData(on ? static_cast<std::uint8_t>(cur | 0x40)
+                 : static_cast<std::uint8_t>(cur & ~0x40));
 }
 
 void LT7683::sleep(bool s) {
     // REG[E4h] bit1: SDR_PSAVING -- 0->1 enters power saving, 1->0 exits.
     const std::uint8_t cur = readReg(SDRCR);
-    writeData(s ? cur | 0x02 : cur & ~0x02);
+    writeData(s ? static_cast<std::uint8_t>(cur | 0x02)
+                : static_cast<std::uint8_t>(cur & ~0x02));
 }
 
 void LT7683::brightness(std::uint8_t level) {
@@ -1152,6 +1153,7 @@ void LT7683::writeSdramByte(std::uint32_t addr, std::uint8_t value) {
     writeReg32(CVSSA0, addr);
     writeReg(AW_COLOR, 0x04);
     writeReg32(CURH0, addr);
+
     waitStatus(STSR_WR_FIFO_FULL);
     writeCmd(MRWDP);
     writeData(value);
@@ -1644,6 +1646,28 @@ void LT7683::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) 
 }
 
 void LT7683::uploadCgramFont(std::uint8_t start, std::uint8_t chars, const std::uint8_t *bitmap) {
+    // Follows the datasheet's own "Initialize CGRAM from MCU" flowchart
+    // (section 8.2.7 / Figure 8-2) and register table (section 14.10,
+    // CCR0/CCR1), WITH ONE CORRECTION found via real-hardware testing:
+    // the datasheet elsewhere notes CVSSA writes are IGNORED once linear
+    // addressing mode is already active, so CVSSA must be set FIRST
+    // (while still in this project's own normal X-Y/block mode), THEN
+    // switch to linear mode -- the flowchart's own step order (mode,
+    // then address) doesn't actually work. Confirmed against
+    // beginOverlayDraw()'s own use of the exact same CVSSA0/CVS_IMWTH0
+    // registers (redirecting the canvas to the menu layer, entirely in
+    // block mode) that CVSSA writes DO take effect there.
+    //
+    // Target address per the datasheet's own formula (section 8.2.1,
+    // "8*16 UCG Data Format"): UCG_ADD = CGRAM_Start_ADD + (UCG_Code *
+    // 16). This project maps UCG_Code directly to the ASCII value being
+    // uploaded -- the same convention RA8875::uploadCgramChar() already
+    // uses (CGRAM slot == ASCII code) -- so once CCR0 bit[7:6] selects
+    // user-defined-character mode (see selectCustomFont()/
+    // selectBuiltinFont() below), Screen's own ASCII-driven txtWrite()
+    // calls need no separate lookup or translation anywhere else in
+    // this codebase; the byte values it already writes just resolve to
+    // the right glyph automatically.
     const std::uint32_t addr = kCgramAddr + static_cast<std::uint32_t>(start) * 16;
 
     // Per the datasheet's own note under CURH's own register

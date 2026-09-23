@@ -149,7 +149,7 @@ void Screen::full() {
     // jump to (0,0) before it's hidden (confirmed on real hardware: with
     // the reverse order, that jump was still visible even though the
     // subsequent per-row jumping was already fixed by hiding it at all).
-    d_->beginBulkTextDraw();
+    beginBulkDraw();
     set_cursor(0, 0);
     for (int row = 0; row < ROWS_; ++row) {
         // Explicit per-row positioning: the RA8875's own auto-wrap kicks in
@@ -316,7 +316,7 @@ void Screen::inschar() {
         cascaded = true;
     }
 
-    if (!suspended_) d_->beginBulkTextDraw();
+    if (!suspended_) beginBulkDraw();
     set_cursor(0, row_);
     for (std::uint8_t c = 0; c < COLS_; ++c) draw_letter(line[c]);
     if (cascaded) {
@@ -699,6 +699,10 @@ void Screen::cursor_pos(std::uint8_t row, std::uint8_t col) {
 // pr_char — main HP82163 byte dispatcher
 // -----------------------------------------------------------------------
 
+bool Screen::valid_char(std::uint8_t c) {
+    return !c || (c >= 32 && c <= 127);
+}
+
 void Screen::pr_char(std::uint8_t c) {
     if (flag_) {
         flag_ = false;
@@ -777,7 +781,7 @@ void Screen::pr_char(std::uint8_t c) {
                 next[COLS_ - 1] = 32;
                 cascaded = true;
             }
-            if (!suspended_) d_->beginBulkTextDraw();
+            if (!suspended_) beginBulkDraw();
             set_cursor(0, row_);
             for (std::uint8_t cc = 0; cc < COLS_; ++cc) draw_letter(line[cc]);
             if (cascaded) {
@@ -838,7 +842,7 @@ void Screen::pr_char(std::uint8_t c) {
             // this check -- this only affects content that would
             // otherwise be treated as a glyph to display.
             const std::uint8_t base = static_cast<std::uint8_t>(c & 0x7F);
-            if (base < 32 || base > 126) return;
+            if( !valid_char(base) ) return;
 
             nline_ = false;
             if (escN_)
@@ -887,6 +891,12 @@ void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
 }
 
 void Screen::set_cur() {
+    // Ends any bulk-draw batch beginBulkDraw() started -- every one of
+    // its call sites (full(), inschar(), ESC O) calls this exactly once,
+    // right at the end of their own tight redraw loop(s). Placed before
+    // the suspended_ check below so it's cleared unconditionally, not
+    // left set if suspended_ somehow became true first.
+    inBulkDraw_ = false;
     if (suspended_) return;
     // Only actually show the cursor at the live position -- it sits on top
     // of whatever physical row_/col_ is, which is meaningless while
@@ -910,6 +920,21 @@ void Screen::set_cur() {
 // triggering without freezing/corrupting the display on this hardware).
 // Nothing else in the project called it either.
 
+void Screen::beginBulkDraw() {
+    d_->beginBulkTextDraw();
+    // Asserted ONCE here, up front, instead of once per character inside
+    // draw_letter() -- safe specifically because this is only ever
+    // followed by a tight, synchronous for-loop with no possibility of
+    // anything else (the PIP menu, on the 7" panel) writing to these same
+    // shared registers in between iterations. See draw_letter()'s and
+    // inBulkDraw_'s own comments for the full story, and why the live,
+    // single-character typing path (pr_char() -> draw_letter() directly,
+    // never through here) must keep reasserting every single call instead.
+    d_->txtSize(size_);
+    d_->selectCustomFont();
+    inBulkDraw_ = true;
+}
+
 void Screen::draw_letter(std::uint8_t c) {
     if (suspended_) return;
     // Only ASCII 32-126 (space through '~') has a meaningful glyph in
@@ -926,7 +951,7 @@ void Screen::draw_letter(std::uint8_t c) {
     // this to draw anything.
     const std::uint8_t base = static_cast<std::uint8_t>(c & 0x7F);
     const bool inverse = c > 127;
-    if (base < 32 || base > 126) return;
+    if( !valid_char(base) ) return;
     ++charsDrawn_;
     // Explicitly (re-)asserts both the hardware text-size register and
     // (for the normal, <=127 path just below) the foreground colour,
@@ -943,31 +968,39 @@ void Screen::draw_letter(std::uint8_t c) {
     // menu redraw, at which point the register could be back at the
     // menu's own value from something in between. Making Screen assert
     // its own values immediately before every character drawn removes
-    // the dependency on timing/ordering with the menu entirely -- costs
-    // a couple of extra register writes per character, negligible next
-    // to the actual per-character SPI transfer itself, and only ever
-    // matters on the 7" panel (the 5" path never has anything else
-    // drawing to the shared registers in between, since it still
-    // suspends Screen while a menu is open).
-    d_->txtSize(size_);
-    // RESTORED: was reverted to selectBuiltinFont() during earlier
-    // debugging (custom/UCG font rendered nothing -- background stayed
-    // blank, cursor still moved, splash bitmap still showed, but no
-    // glyphs). ROOT CAUSE FOUND: LT7683's UCG (user-defined character)
-    // text codes MUST be written as TWO bytes (high byte, then low
-    // byte) -- even for codes that fit in one byte -- confirmed on real
-    // hardware; a single-byte write (what txtWriteChar() always did
-    // before this fix) leaves the text engine waiting forever for a
-    // second byte that never arrives, so the character is never
-    // actually committed. txtWriteChar() now dispatches to the correct
-    // (2-byte) protocol automatically whenever selectCustomFont() is
-    // the currently active font (see usingCustomFont_'s own comment,
-    // LT7683.hpp) -- no other change needed here. Menus, which use
-    // selectBuiltinFont() (1-byte codes, unaffected by this bug),
-    // continuing to work throughout all of this was never actually
-    // evidence against the transmission path itself -- CGROM and UCG
-    // simply need different wire formats on this chip.
-    d_->selectCustomFont();
+    // the dependency on timing/ordering with the menu entirely.
+    //
+    // SKIPPED here (not "negligible", after all -- redrawing a full
+    // 8x20 screen made this add up to over 300 extra register writes)
+    // when inBulkDraw_ is set: beginBulkDraw() already asserted both
+    // once, right before the tight, uninterrupted redraw loop this
+    // character is a part of -- see its own and inBulkDraw_'s own
+    // comments for exactly why that's safe there specifically, and why
+    // the live single-character typing path (pr_char(), which never
+    // sets inBulkDraw_) still needs the assert on every call: real time
+    // passes between characters there, giving the menu a chance to
+    // interleave a write to these same registers.
+    if (!inBulkDraw_) {
+        d_->txtSize(size_);
+        // RESTORED: was reverted to selectBuiltinFont() during earlier
+        // debugging (custom/UCG font rendered nothing -- background stayed
+        // blank, cursor still moved, splash bitmap still showed, but no
+        // glyphs). ROOT CAUSE FOUND: LT7683's UCG (user-defined character)
+        // text codes MUST be written as TWO bytes (high byte, then low
+        // byte) -- even for codes that fit in one byte -- confirmed on real
+        // hardware; a single-byte write (what txtWriteChar() always did
+        // before this fix) leaves the text engine waiting forever for a
+        // second byte that never arrives, so the character is never
+        // actually committed. txtWriteChar() now dispatches to the correct
+        // (2-byte) protocol automatically whenever selectCustomFont() is
+        // the currently active font (see usingCustomFont_'s own comment,
+        // LT7683.hpp) -- no other change needed here. Menus, which use
+        // selectBuiltinFont() (1-byte codes, unaffected by this bug),
+        // continuing to work throughout all of this was never actually
+        // evidence against the transmission path itself -- CGROM and UCG
+        // simply need different wire formats on this chip.
+        d_->selectCustomFont();
+    }
     if (inverse) {
         if (size_ < 4) {
             d_->txtColor(0, color_);

@@ -1,10 +1,18 @@
 #!/bin/bash
+#
+# HIPI-Board build + flash
+#
+# Detta är din fungerande version med EN ändring: väntetestet på BOOTSEL.
+# Ingenting körs mot enheten före det testet.
 
 set -u
 
 PROJECT_DIR="$HOME/Projects/HIPI-Board"
 DOWNLOAD_DIR="$HOME/Downloads"
 PICO_MOUNT="/media/thomas/RP2350"
+
+# Hur länge vi väntar på BOOTSEL innan vi ger upp (sekunder)
+BOOTSEL_TIMEOUT=300
 
 # Defaults
 PANEL="7"
@@ -13,14 +21,48 @@ ZIP_FILE=""
 
 
 # ------------------------------------------------------------
+# Väntetest
+#
+# [-d] räcker inte: udisks lämnar ofta kvar en tom katalog efter en
+# urkopplad enhet, och då är loopen igenom direkt medan monteringen
+# ännu inte är redo (eller är read-only). Det gav "Permission denied"
+# och den tidiga kopieringen.
+#
+# Fem villkor, och det sista är det enda som är ett bevis:
+#   1. sökvägen är en riktig monteringspunkt, inte bara en katalog
+#   2. den underliggande blockenheten finns (fångar stale montering)
+#   3. den är monterad read-write
+#   4. INFO_UF2.TXT finns -- bootloaderns eget fingeravtryck
+#   5. ett riktigt skrivtest: skapa och ta bort en probe-fil
+# ------------------------------------------------------------
+
+bootsel_ready() {
+    local mp="$1"
+    local dev probe
+
+    [ -d "$mp" ] || return 1
+
+    findmnt -rno TARGET "$mp" >/dev/null 2>&1 || return 1
+
+    dev=$(findmnt -rno SOURCE --target "$mp" 2>/dev/null)
+    [ -n "$dev" ] || return 1
+    [ -b "$dev" ] || return 1
+
+    findmnt -rno OPTIONS --target "$mp" 2>/dev/null | grep -q '\brw\b' || return 1
+
+    [ -f "$mp/INFO_UF2.TXT" ] || return 1
+
+    probe="$mp/.probe.$$"
+    ( : > "$probe" ) 2>/dev/null || return 1
+    [ -e "$probe" ] || return 1
+    rm -f "$probe" 2>/dev/null
+
+    return 0
+}
+
+
+# ------------------------------------------------------------
 # Tolka parametrar
-#
-# Tillåt:
-#   zip-fil
-#   5 eller 7
-#   ALL
-#
-# Argumenten kan anges i valfri ordning.
 # ------------------------------------------------------------
 
 for ARG in "$@"; do
@@ -79,7 +121,10 @@ BUILD_LOG="/tmp/hipi_build.log"
 # Gå till projektet
 # ------------------------------------------------------------
 
-pushd "$PROJECT_DIR" > /dev/null
+pushd "$PROJECT_DIR" > /dev/null || {
+    echo "FEL: Kunde inte gå till $PROJECT_DIR"
+    exit 1
+}
 
 
 # ------------------------------------------------------------
@@ -273,13 +318,39 @@ echo
 echo "Sätt Pico 2 i BOOTSEL om den inte redan är det."
 
 
-while [ ! -d "$PICO_MOUNT" ]; do
+ELAPSED=0
+
+while ! bootsel_ready "$PICO_MOUNT"; do
+
     sleep 1
+    ELAPSED=$((ELAPSED + 1))
+
+    if [ "$BOOTSEL_TIMEOUT" -gt 0 ] && [ "$ELAPSED" -ge "$BOOTSEL_TIMEOUT" ]; then
+
+        echo
+        echo "Timeout efter ${BOOTSEL_TIMEOUT}s: ingen Pico i BOOTSEL på"
+        echo "  $PICO_MOUNT"
+        echo
+
+        if [ -d "$PICO_MOUNT" ] \
+           && ! findmnt -rno TARGET "$PICO_MOUNT" >/dev/null 2>&1; then
+            echo "Katalogen finns men är inte monterad (kvarlevande katalog)."
+            echo "Testa:  udisksctl mount -b /dev/disk/by-label/RP2350"
+        else
+            echo "Kontrollera att Picon är i BOOTSEL och att kabeln klarar data."
+        fi
+
+        echo
+        popd > /dev/null
+        exit 1
+
+    fi
+
 done
 
 
 echo
-echo "Pico hittad: $PICO_MOUNT"
+echo "Pico hittad och skrivbar: $PICO_MOUNT"
 
 
 # ------------------------------------------------------------
@@ -289,7 +360,16 @@ echo "Pico hittad: $PICO_MOUNT"
 echo
 echo "=== Flashar firmware ==="
 
-cp "$UF2_FILE" "$PICO_MOUNT/"
+if ! cp "$UF2_FILE" "$PICO_MOUNT/"; then
+    echo
+    echo "FEL: kopieringen misslyckades. Är enheten kvar i BOOTSEL?"
+    popd > /dev/null
+    exit 1
+fi
+
+# Se till att datat når enheten. Efter detta startar Picon om och volymen
+# försvinner -- ingenting kontrolleras efter denna rad.
+sync
 
 
 # ------------------------------------------------------------
