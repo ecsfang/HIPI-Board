@@ -718,6 +718,7 @@ public:
     // own comment on its currently-reverted selectCustomFont() call.
     // -----------------------------------------------------------------------
     void uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]);
+    void uploadCgramFont(std::uint8_t start, std::uint8_t chars, const std::uint8_t *bitmap);
 
     // Diagnostic only -- reads back the 16 bytes uploadCgramChar() wrote
     // for `ascii`, using the exact same Canvas/CVSSA/MRWDP mechanism

@@ -405,10 +405,15 @@ public:
                 break;
 
             case State::BrightnessMenu:
-                if (b == Button::Up)   moveSelection(-1, kBrightnessCount);
-                if (b == Button::Down) moveSelection(+1, kBrightnessCount);
+                // Live preview: the actual screen brightness follows the
+                // cursor as it moves, so the user sees what they're
+                // about to pick rather than just a highlighted label.
+                // Only applyBrightness() (on Ok) persists it / fires
+                // onBrightnessChanged_ -- Up/Down/X below never do.
+                if (b == Button::Up)   { moveSelection(-1, kBrightnessCount); screen_.setBrightness(kBrightnessLevels[selected_]); }
+                if (b == Button::Down) { moveSelection(+1, kBrightnessCount); screen_.setBrightness(kBrightnessLevels[selected_]); }
                 if (b == Button::Ok)   { applyBrightness(selected_); openSettingsMenu(); }
-                if (b == Button::X)    openSettingsMenu();
+                if (b == Button::X)    { screen_.setBrightness(brightnessBeforeMenu_); openSettingsMenu(); }
                 break;
 
             case State::ColumnsMenu:
@@ -938,6 +943,8 @@ private:
 
     void openBrightnessMenu() {
         state_ = State::BrightnessMenu;
+        // Save value so it can be restored on abort, see handleButton()
+        brightnessBeforeMenu_ = screen_.brightness();
         selected_ = closestBrightnessIndex(screen_.brightness());
         drawBox();
         for (int i = 0; i < kBrightnessCount; ++i) drawRow(i, kBrightnessLabels[i]);
@@ -1226,6 +1233,13 @@ private:
     }
 
     void close() {
+        // Brightness live-preview (see handleButton()'s own
+        // BrightnessMenu case) needs restoring here too, not just on
+        // the menu's own X/cancel -- close() is also reached via the
+        // global Shift+Ok "exit entirely" shortcut, which can fire
+        // while BrightnessMenu is open and mid-preview, bypassing that
+        // X handling entirely.
+        if (state_ == State::BrightnessMenu) screen_.setBrightness(brightnessBeforeMenu_);
         state_ = State::Closed;
         boardui_onMenuClosed();  // shortens the button strip's auto-hide
                                   // countdown -- see its definition in
@@ -1469,6 +1483,11 @@ private:
     std::function<void(std::uint8_t)> onColumnsChanged_;
     std::function<void(const std::string&, bool)> onDeviceToggled_;
     LoopbackTestFn onLoopbackTest_;
+    // Brightness live-previews as the cursor moves in BrightnessMenu
+    // (see handleButton()'s own BrightnessMenu case) -- this holds the
+    // level to restore if the user backs out with X instead of
+    // confirming with Ok. Set once, when the menu is opened.
+    std::uint8_t brightnessBeforeMenu_ = 0;
 };
 
 }  // namespace hipi
