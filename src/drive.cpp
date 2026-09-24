@@ -389,7 +389,7 @@ static void list_dir(const char* path, int depth) {
 
     while (true) {
         fr = f_readdir(&dir, &fno);
-        if (fr != FR_OK || fno.fname[0] == 0) break;   // 0 = slut på katalogen
+        if (fr != FR_OK || fno.fname[0] == 0) break;   // 0 = end of directory
 
         const char* kind = (fno.fattrib & AM_DIR) ? "DIR " : "FILE";
         LOGF("$$$ \t%*s%-4s %8lu  %s\r\n",
@@ -398,7 +398,7 @@ static void list_dir(const char* path, int depth) {
                (unsigned long)fno.fsize,
                fno.fname);
 
-        // Rekursera ned i underkataloger (men inte "." och "..")
+        // Recurse into subdirectories (but not "." and "..")
         if (fno.fattrib & AM_DIR) {
             char subpath[256];
             snprintf(subpath, sizeof(subpath), "%s/%s", path, fno.fname);

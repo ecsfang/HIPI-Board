@@ -111,21 +111,21 @@ endif()
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# 1. Inkludera helper-filen
+# 1. Include the helper file
 include(${PICO_SDK_PATH}/tools/Findpioasm.cmake)
 
-# 2. Den letar upp pioasm — sätt variabeln PIOASM
-# (Findpioasm.cmake gör detta automatiskt om pioasm finns i PATH)
-# Annars sökväg explicit:
-set(PIOASM ${PICO_SDK_PATH}/tools/pioasm/pioasm)    # justera sökvägenISCO
+# 2. It locates pioasm and sets the PIOASM variable
+# (Findpioasm.cmake does this automatically if pioasm is in PATH)
+# Otherwise, set the path explicitly:
+set(PIOASM ${PICO_SDK_PATH}/tools/pioasm/pioasm)    # adjust the path if needed
 
 # ----------------------------------------------------------------------
 # Project-wide compile flags.
 # ----------------------------------------------------------------------
 add_compile_options(-Wall -Wextra -Wpedantic)
 
-## # Deklarera CFG_TUD_CDC globalt för hela bygget
-## # Tvinga CFG_TUD_CDC=2 för hela bygget, inkl. SDK:ns tinyusb_device.a
+## # Declare CFG_TUD_CDC globally for the whole build
+## # Force CFG_TUD_CDC=2 for the whole build, incl. the SDK's tinyusb_device.a
 ## add_compile_definitions(CFG_TUD_CDC=2)
 ## add_compile_definitions(CFG_TUD_CDC_RX_BUFSIZE=256)
 ## add_compile_definitions(CFG_TUD_CDC_TX_BUFSIZE=256)
@@ -230,7 +230,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR=0
     )
 
-    # Generera header från .pio-filen
+    # Generate header from the .pio file
     pico_generate_pio_header(${EXE_TARGET}
         ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
     )

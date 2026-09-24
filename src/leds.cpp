@@ -11,11 +11,11 @@ void led_off(int n) {
 
 void blink_led(int led, int t, int n) {
     for( int i=0; i<n; ++i) {
-        // LED PÅ
+        // LED ON
         led_on(led);
         sleep_ms(t);
 
-        // LED AV
+        // LED OFF
         led_off(led);
         sleep_ms(t);
     }
@@ -25,8 +25,8 @@ static const uint16_t pattern[] = {
     60,  80,   // blink
     60, 300,   // blink
     120, 70,   // blink
-    40,  900,  // lång paus
-    50,  50,   // dubbelblink
+    40,  900,  // long pause
+    50,  50,   // double blink
     50,  500
 };
 
@@ -236,8 +236,8 @@ namespace breathing_led {
 
 static constexpr uint     PWM_WRAP     = 1000;
 static constexpr uint     PWM_MAX      = PWM_WRAP;
-static constexpr uint32_t BREATH_MS    = 1500;       // 1.5 s cykel — tydligare
-static constexpr uint32_t HOLD_US      = 1'000'000;  // 1 s efter senaste 0x6C0
+static constexpr uint32_t BREATH_MS    = 1500;       // 1.5 s cycle — more visible
+static constexpr uint32_t HOLD_US      = 1'000'000;  // 1 s after the latest 0x6C0
 
 static uint16_t _breath_lut[256];
 
@@ -248,7 +248,7 @@ static uint32_t _breath_start  = 0;
 static bool     _is_breathing  = false;
 
 void init(uint gpio) {
-    // Förberäkna smoothstep (256 entries, 0..PWM_MAX)
+    // Precompute smoothstep (256 entries, 0..PWM_MAX)
     for (int i = 0; i < 256; i++) {
         float t = (float)i / 255.0f;
         float s = t * t * (3.0f - 2.0f * t);
@@ -261,7 +261,7 @@ void init(uint gpio) {
 
     // RP2350 default clk_sys = 150 MHz.
     // f_pwm = 150e6 / (clkdiv × (wrap+1))
-    // Vi vill ha ~100 kHz PWM: 150e6 / 100e3 / 1001 ≈ 1.499
+    // We want ~100 kHz PWM: 150e6 / 100e3 / 1001 ≈ 1.499
     pwm_set_wrap(_slice_num, PWM_WRAP);
     pwm_set_clkdiv(_slice_num, 1.5f);
     pwm_set_chan_level(_slice_num, _channel, 0);
@@ -277,7 +277,7 @@ static void update_breath(uint32_t now) {
     int idx = (int)((uint32_t)phase_ms * 256u / BREATH_MS);
     uint16_t level = _breath_lut[idx];
 
-    // DEBUG — skriv ut 5 ggr/sekund
+    // DEBUG — print 5 times/second
     static uint32_t last_dbg = 0;
     if ((uint32_t)(now - last_dbg) > 200'000) {
         LOGF("    breath: phase=%u idx=%d level=%u\n",

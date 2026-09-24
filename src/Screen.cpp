@@ -233,8 +233,8 @@ void Screen::up(bool roll, bool cmd) {
                 d_->bteScrollShift(0, 0, pixelWidth, pixelHeight, height_);
                 d_->fillRect(0, static_cast<std::int16_t>(pixelHeight - height_),
                             pixelWidth, height_, 0x0000);
-                // fillRect() ändrar foreground color.
-                // Återställ Screen's textfärg innan pr_char() fortsätter skriva.
+                // fillRect() changes the foreground color.
+                // Restore Screen's text color before pr_char() continues writing.
                 d_->txtColor(color_, 0);
                 return;
             }
@@ -446,7 +446,7 @@ void Screen::screen_pars(std::uint8_t size) {
         ofy_ = 0;
     } else {
         width_  = 10;
-        COLS_   = static_cast<std::uint8_t>(textWidth_ / width_);   // <-- var: 80
+        COLS_   = static_cast<std::uint8_t>(textWidth_ / width_);   // <-- was: 80
         height_ = 20;
         ROWS_   = 24;
         ofx_ = 0;

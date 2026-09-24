@@ -53,11 +53,11 @@ struct Touch_event ts_event;
 
 i2c_inst_t *touch_i2c = i2c0;
 
-// volatile/atomic flagga som satts i ISR, lases i main-loopen
+// volatile/atomic flag set in the ISR, read in the main loop
 std::atomic<bool> g_dataReadyFlag{false};
 
-// Callback-signaturen kraver en fri funktion (eller static member),
-// inte en vanlig medlemsmetod — SDK:t kanner inte till C++-objekt.
+// The callback signature requires a free function (or static member),
+// not a regular member method — the SDK knows nothing about C++ objects.
 static void gpio_irq_handler(uint gpio, uint32_t events) {
     if (gpio == IRQ_PIN && (events & GPIO_IRQ_EDGE_RISE)) {
         g_dataReadyFlag.store(true, std::memory_order_relaxed);
@@ -67,7 +67,7 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
 void setupDataReadyInterrupt() {
     gpio_init(IRQ_PIN);
     gpio_set_dir(IRQ_PIN, GPIO_IN);
-    gpio_pull_down(IRQ_PIN);   // eller pull_up, beroende pa vilo-lage
+    gpio_pull_down(IRQ_PIN);   // or pull_up, depending on idle state
 
     gpio_set_irq_enabled_with_callback(
         IRQ_PIN,
@@ -155,7 +155,7 @@ static uint8_t touch_read_silent() {
     return ft5316_read_touches(false);
 }
 
-// Hamtar forsta fingrets position. Returnerar false om inget finger ar nere.
+// Gets the first finger's position. Returns false if no finger is down.
 //
 // NOTE: FT5316-family controllers are typically factory-calibrated to
 // report coordinates already in the panel's own pixel space (0..1023,
@@ -426,8 +426,8 @@ int touchInit() {
     return 0;
 }
 
-// Tyst variant av avlasningen - ingen printf, anvands for intern
-// tillstandssparning (kallas ofta, vill inte spamma konsolen).
+// Silent variant of the readout - no printf, used for internal
+// state tracking (called often, must not spam the console).
 static uint8_t touch_read_silent() {
     uint8_t TOUCHRECDATA[24] = {0};
     i2c_read(GSL_DATA_REG, TOUCHRECDATA, 24);
@@ -443,13 +443,13 @@ static uint8_t touch_read_silent() {
     return ts_event.NBfingers;
 }
 
-// Rakoordinaternas fullskala fran GSL1680 (12-bit ADC).
-// OBS: kalibrera dessa mot din faktiska panel - se kommentar nedan.
+// Full-scale raw coordinates from the GSL1680 (12-bit ADC).
+// NOTE: calibrate these against your actual panel - see comment below.
 constexpr uint32_t TOUCH_RAW_MAX_X = 800;
 constexpr uint32_t TOUCH_RAW_MAX_Y = 480;
 
-// Hamtar forsta fingrets position, skalad till skarmens pixelupplosning
-// (800x480). Returnerar false om inget finger ar nere.
+// Gets the first finger's position, scaled to the screen's pixel resolution
+// (800x480). Returns false if no finger is down.
 bool touch_get_point(uint16_t& x, uint16_t& y) {
     if (touch_read_silent() == 0) return false;
     x = static_cast<uint16_t>((ts_event.fingers[0].x * 800) / TOUCH_RAW_MAX_X);
@@ -457,7 +457,7 @@ bool touch_get_point(uint16_t& x, uint16_t& y) {
     return true;
 }
 
-// Latt koll (ingen skalning/parsing utover NBfingers) - for release-polling.
+// Lightweight check (no scaling/parsing beyond NBfingers) - for release polling.
 bool touch_is_down() {
     return touch_read_silent() > 0;
 }

@@ -124,10 +124,10 @@ public:
     enum class Layer : std::uint8_t { Layer1 = 0, Layer2 = 1 };
 
     enum class LayerMode : std::uint8_t {
-        ShowLayer1     = 0b00,  // visa bara lager 1
-        ShowLayer2     = 0b01,  // visa bara lager 2
-        LightenOverlay = 0b10,  // visa OR av bada lagren (bra nar bakgrund = 0x00)
-        Transparent    = 0b11,  // alfablandning enligt FLDR-registret
+        ShowLayer1     = 0b00,  // show layer 1 only
+        ShowLayer2     = 0b01,  // show layer 2 only
+        LightenOverlay = 0b10,  // show OR of both layers (good when background = 0x00)
+        Transparent    = 0b11,  // alpha blending per the FLDR register
     };
 
     // -----------------------------------------------------------------------

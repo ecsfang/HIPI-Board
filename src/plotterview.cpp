@@ -172,6 +172,9 @@ void showSwitchSplash(DisplayOutput mode) {
     const char* name = outputName(mode);
     display_->txtColor(0x0000, 0xEDC0);  // black text on the yellow box
     display_->txtSize(2);
+    // Always use the chip's built-in CGROM font here, never the custom
+    // hp82163_font.hpp glyphs -- same rule as every menu dialog ...
+    display_->selectBuiltinFont();
     // RA8875 hardware font: 8px base glyph width, scaling to 8*(size+1)
     // per the project's own established convention (see MenuFrame's
     // "16px/char at scale 1" comment, i.e. 8*(1+1)).

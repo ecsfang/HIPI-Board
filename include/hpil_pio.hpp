@@ -28,7 +28,7 @@ public:
 /*            if (plus_out_pin_ != minus_out_pin_ + 1) {
                 LOGF("ERROR: TX pins not adjacent: minus=%u plus=%u (expected plus=minus+1)\n",
                     minus_out_pin_, plus_out_pin_);
-                while (true) tight_loop_contents();  // stoppa tydligt
+                while (true) tight_loop_contents();  // halt visibly
             }
             if (plus_in_pin_ != minus_in_pin_ + 1) {
                 LOGF("ERROR: RX pins not adjacent: minus=%u plus=%u\n",
@@ -57,11 +57,11 @@ public:
     }
 
     // ==========================================================
-    // PUBLIC API: läs från RX, skriv till TX
+    // PUBLIC API: read from RX, write to TX
     // ==========================================================
 
-    // Läs ett 32-bitars ord från RX-FIFO (icke-blockerande).
-    // Returnerar true om data hittades, false om FIFO är tom.
+    // Read a 32-bit word from the RX FIFO (non-blocking).
+    // Returns true if data was found, false if the FIFO is empty.
     bool try_read(uint32_t& out_word) {
         if (pio_sm_is_rx_fifo_empty(pio0, sm_rx_)) {
             return false;
@@ -71,27 +71,27 @@ public:
         return true;
     }
 
-    // Läs ett 32-bitars ord från RX-FIFO (blockerande i max timeout_ms).
-    // Returnerar true om data hittades.
+    // Read a 32-bit word from the RX FIFO (blocking for at most timeout_ms).
+    // Returns true if data was found.
     bool read(uint32_t& out_word, uint32_t timeout_ms = 1000) {
         absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
         
-        // Vänta tills FIFO inte är tom
+        // Wait until the FIFO is not empty
         while (pio_sm_is_rx_fifo_empty(pio0, sm_rx_)) {
             if (absolute_time_diff_us(get_absolute_time(), deadline) <= 0) {
-                return false;  // timeout — ingen data
+                return false;  // timeout — no data
             }
             tight_loop_contents();
         }
         
-        // FIFO har data — läs
+        // FIFO has data — read it
         out_word = pio_sm_get(pio0, sm_rx_);
         out_word >>= WORD_SHIFT;
         return true;
     }
 
-    // Skriv ett 32-bitars ord till TX-FIFO (icke-blockerande).
-    // Returnerar true om data skickades, false om FIFO är full.
+    // Write a 32-bit word to the TX FIFO (non-blocking).
+    // Returns true if data was sent, false if the FIFO is full.
     bool try_write(uint32_t word) {
         if (pio_sm_is_tx_fifo_full(pio0, sm_tx_)) {
             return false;
@@ -101,7 +101,7 @@ public:
         return true;
     }
 
-    // Skriv ett 32-bitars ord till TX-FIFO (blockerande i max timeout_ms).
+    // Write a 32-bit word to the TX FIFO (blocking for at most timeout_ms).
     bool write(uint32_t word, uint32_t timeout_ms = 1000) {
         absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
         while (pio_sm_is_tx_fifo_full(pio0, sm_tx_)) {
@@ -116,18 +116,18 @@ public:
     }
 
     // ==========================================================
-    // Convenience för testning
+    // Convenience for testing
     // ==========================================================
 
-    // Skicka ett ord och läs svaret (echo-loopback).
-    // Användbart för test utan en riktig HP-IL-kontroller.
+    // Send a word and read the reply (echo loopback).
+    // Useful for testing without a real HP-IL controller.
     uint32_t roundtrip(uint32_t word, uint32_t timeout_ms = 1000) {
         write(word, timeout_ms);
         uint32_t rx;
         read(rx, timeout_ms);
         return rx;
     }
-    // Alias för enklare namn
+    // Aliases with simpler names
     bool sendFrame(uint32_t word) {
         return try_write(word);
     }
@@ -136,7 +136,7 @@ public:
         return try_read(out_word);
     }
 
-    // Access för debugging
+    // Access for debugging
     uint sm_rx() const { return sm_rx_; }
     uint sm_tx() const { return sm_tx_; }
 
@@ -163,7 +163,7 @@ private:
         uint rx_offset = pio_add_program(pio0, &frame_rx_program);
         uint tx_offset = pio_add_program(pio0, &frame_tx_program);
 
-        // Plattformsoberoende PIO-frekvens (125 MHz på RP2040, 150 MHz på RP2350)
+        // Platform-independent PIO frequency (125 MHz on RP2040, 150 MHz on RP2350)
         const float pio_freq = 4000000.0f;
         const float clkdiv = (float)clock_get_hz(clk_sys) / pio_freq;
 
@@ -183,7 +183,7 @@ private:
 
         pio_gpio_init(pio0, minus_in_pin_);
         pio_gpio_init(pio0, plus_in_pin_);
-        // 2 pinnar, input: minus_in_pin och plus_in_pin (minus=base, plus=base+1)
+        // 2 pins, input: minus_in_pin and plus_in_pin (minus=base, plus=base+1)
         pio_sm_set_consecutive_pindirs(pio0, sm_rx_, minus_in_pin_,  2, false);
         gpio_set_pulls(minus_in_pin_, false, false);
         gpio_set_pulls(plus_in_pin_,  false, false);
@@ -206,15 +206,15 @@ private:
         SetPinDriveStrength(plus_out_pin_, 12);
         SetPinDriveStrength(minus_out_pin_,  12);
 
-        // Starta båda SM:er — RX börjar lyssna, TX pull:ar direkt och blockerar
-        // tills första write() skickar data.
+        // Start both SMs — RX starts listening, TX pulls immediately and blocks
+        // until the first write() sends data.
         pio_sm_set_enabled(pio0, sm_rx_, true);
         pio_sm_set_enabled(pio0, sm_tx_, true);
     }
 
     void SetPinDriveStrength(uint pin, uint mA) {
-        // gpio_set_drive_strength() är pico-SDK:s API för detta
-        // Värdetypen heter 'gpio_drive_strength' (inte _t)
+        // gpio_set_drive_strength() is the pico-sdk API for this
+        // The value type is named 'gpio_drive_strength' (not _t)
         
         if (mA <= 2) {
             gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_2MA);

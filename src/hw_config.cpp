@@ -56,7 +56,7 @@ void init_spi(void) {
     spi.sck_gpio = 10;
     spi.baud_rate = 125 * 1000 * 1000 / 4;
     spi.spi_mode = 0;
-    // resten är redan 0-fyllt från static storage
+    // the rest is already zero-filled from static storage
 
     spi_if.spi = &spi;  // Pointer to the SPI driving this card
     spi_if.ss_gpio = 9;  // The SPI slave select GPIO for this SD card

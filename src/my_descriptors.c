@@ -1,7 +1,7 @@
 #include "tusb.h"
 #include "device/usbd.h"
 
-// Bosch/serial-style strings. Byt ut 0x2E8A om du har en egen VID/PID.
+// Bosch/serial-style strings. Replace 0x2E8A if you have your own VID/PID.
 #define USB_VID   0x2E8A
 #define USB_PID   0x000B
 #define USB_BCD   0x0200
@@ -49,19 +49,19 @@ static const uint8_t desc_configuration[] = {
     TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC0_NOTIF, 8,           // CDC0: itf 0+1
                        EPNUM_CDC0_OUT, EPNUM_CDC0_IN, 64),
 
-    TUD_CDC_DESCRIPTOR(2, 5, EPNUM_CDC1_NOTIF, 8,           // CDC1: itf 2+3  ← FIXEN
+    TUD_CDC_DESCRIPTOR(2, 5, EPNUM_CDC1_NOTIF, 8,           // CDC1: itf 2+3  ← the fix
                        EPNUM_CDC1_OUT, EPNUM_CDC1_IN, 64),
 
-    TUD_CDC_DESCRIPTOR(4, 6, EPNUM_CDC2_NOTIF, 8,           // CDC2: itf 4+5  ← TERMINALEN
+    TUD_CDC_DESCRIPTOR(4, 6, EPNUM_CDC2_NOTIF, 8,           // CDC2: itf 4+5  ← the terminal
                        EPNUM_CDC2_OUT, EPNUM_CDC2_IN, 64),
 
-    TUD_MSC_DESCRIPTOR(6, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN,   // MSC: itf 6 ← SD-KORTET
+    TUD_MSC_DESCRIPTOR(6, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN,   // MSC: itf 6 ← the SD card
                        64),
 };
 
 // ─── String descriptors ──────────────────────────────────────────────────
 static const char *string_desc_arr[] = {
-    (const char[]){0x09, 0x04},      // 0: språk (engelska)
+    (const char[]){0x09, 0x04},      // 0: language (English)
     "HP82163",                       // 1: manufacturer
     "HP-IL Bridge",                  // 2: product
     "PICO2-0001",                    // 3: serial

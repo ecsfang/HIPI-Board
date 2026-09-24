@@ -47,7 +47,7 @@ namespace MenuFrame {
     constexpr int BorderThickness = 3;
     constexpr int CornerRadius    = 14;
 
-    // Samma gula/oranga som anvands i buttons.bmp (#E8B800 -> RGB565).
+    // Same yellow/orange as used in buttons.bmp (#E8B800 -> RGB565).
     // Now that the display runs in genuine 16bpp mode, this renders as the
     // real, correct color -- no more of the 8bpp "green mod 8" quirk we
     // had to work around before (see git history / prior conversation).
@@ -261,7 +261,7 @@ public:
 #endif
     }
 
-    // Anropas fran huvudloopen nar en knapp-touch upptäcks.
+    // Called from the main loop when a button touch is detected.
     // Shift+Ok closes the menu from any depth (see the check right
     // below). A Shift tap is consumed just like any other button press
     // by the "touch that woke the strip is consumed" skip in
@@ -1399,8 +1399,8 @@ private:
     }
 
     void highlightRow(int index, bool /*selected*/) {
-        // drawRow tittar redan pa selected_ for att valja fargschema,
-        // sa vi behover bara peka den pa ratt label-kalla for aktivt state.
+        // drawRow already looks at selected_ to pick the color scheme,
+        // so we only need to point it at the right label source for the active state.
         switch (state_) {
             case State::MainMenu:
                 if (index >= 0 && index < kMainMenuCount)

@@ -169,8 +169,8 @@ void RA8875::set2LayerConfig() {
 }
 
 void RA8875::selectLayer(Layer layer) {
-    // MWCR1 (0x41), bit 0: valjer vilket lager foljande skriv-
-    // operationer (grafik OCH text) gar till.
+    // MWCR1 (0x41), bit 0: selects which layer subsequent write
+    // operations (graphics AND text) go to.
     const std::uint8_t mwcr1 = readReg(0x41);
     const std::uint8_t val = static_cast<std::uint8_t>(
         (mwcr1 & ~0x01) | (static_cast<std::uint8_t>(layer) & 0x01));
@@ -178,8 +178,8 @@ void RA8875::selectLayer(Layer layer) {
 }
 
 void RA8875::setLayerMode(LayerMode mode) {
-    // LTPR0 (0x52): bitarna 2:0 väljer lagervisning/blandning.
-    // 000=Lager1, 001=Lager2, 010=Lighten-overlay (OR), 011=transparent (LTPR1-ratio)
+    // LTPR0 (0x52): bits 2:0 select layer display/blending.
+    // 000=Layer1, 001=Layer2, 010=Lighten-overlay (OR), 011=transparent (LTPR1-ratio)
     writeReg(0x52, static_cast<std::uint8_t>(mode) & 0x07);
 }
 
@@ -217,24 +217,24 @@ void RA8875::selectBuiltinFont() {
 }
 
 void RA8875::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) {
-    // Step 1: Sätt CGRAM char index (0x23 = CCR register)
+    // Step 1: Set CGRAM char index (0x23 = CCR register)
     writeReg(0x23, ascii);
     
-    // Step 2: Sätt FNCR0 till text mode (0x21 = 0x00 för text-mode enable)
+    // Step 2: Set FNCR0 to text mode (0x21 = 0x00 for text-mode enable)
     writeReg(0x21, 0x00);
     
-    // Step 3: Aktivera CGRAM mode via MWCR0 (0x41)
+    // Step 3: Enable CGRAM mode via MWCR0 (0x41)
     // Bit 3 = 0 (CGRAM mode off → on)
     // Bit 2 = 1 (font select: CGRAM)
     const std::uint8_t mwcr0 = readReg(0x41);
     writeData(static_cast<std::uint8_t>((mwcr0 & ~(1 << 3)) | (1 << 2)));
     
-    // Step 4: Skriv bitmap till CGRAM
+    // Step 4: Write bitmap to CGRAM
     writeCmd(MRWC);
     writeData(bitmap, 16);
     
-    // Step 5: Viktigt! Återställ MWCR0 till 0 (grafik-mode) 
-    // så efterföljande writes går till DDRAM, inte CGRAM
+    // Step 5: Important! Restore MWCR0 to 0 (graphics mode)
+    // so subsequent writes go to DDRAM, not CGRAM
     writeReg(0x41, 0x00);
 }
 void RA8875::setActiveWindow(std::uint16_t x0, std::uint16_t y0,
@@ -565,9 +565,9 @@ void RA8875::drawBitmap565Cropped(std::int16_t x, std::int16_t y,
                                   const std::uint16_t* data) {
     gfxMode();
 
-    // Radbuffert: 2 byte per pixel (high byte, low byte — samma format som pixel())
-    static std::uint8_t rowBuf[800 * 2];  // storsta stodda skarmbredd
-    if (drawWidth > 800) return;          // enkel sakerhetsspärr
+    // Row buffer: 2 bytes per pixel (high byte, low byte — same format as pixel())
+    static std::uint8_t rowBuf[800 * 2];  // largest supported screen width
+    if (drawWidth > 800) return;          // simple safety guard
 
     for (std::uint16_t row = 0; row < h; ++row) {
         setxy(static_cast<std::uint16_t>(x),
@@ -583,7 +583,7 @@ void RA8875::drawBitmap565Cropped(std::int16_t x, std::int16_t y,
     }
 }
 
-// I RA8875.cpp:
+// In RA8875.cpp:
 void RA8875::drawBitmap332(std::int16_t x, std::int16_t y,
                            std::uint16_t w, std::uint16_t h,
                            const std::uint8_t* data) {
@@ -592,7 +592,7 @@ void RA8875::drawBitmap332(std::int16_t x, std::int16_t y,
         setxy(static_cast<std::uint16_t>(x),
               static_cast<std::uint16_t>(y + row));
         writeCmd(MRWC);
-        writeData(data + static_cast<std::size_t>(row) * w, w);  // 1 byte/pixel, ingen konvertering
+        writeData(data + static_cast<std::size_t>(row) * w, w);  // 1 byte/pixel, no conversion
     }
 }
 

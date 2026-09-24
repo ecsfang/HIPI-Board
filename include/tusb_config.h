@@ -1,12 +1,12 @@
 #pragma once
-#include "tusb_option.h"   // för OPT_MODE_DEVICE osv.
+#include "tusb_option.h"   // for OPT_MODE_DEVICE etc.
 
-// Standard läge: device
+// Default mode: device
 #ifndef CFG_TUSB_RHPORT0_MODE
 #define CFG_TUSB_RHPORT0_MODE   OPT_MODE_DEVICE
 #endif
 
-// Två CDC:er för hipi (itf 0 = debug, itf 1 = data)
+// Three CDC interfaces for hipi (0 = debug, 1 = data, 2 = terminal)
 #ifndef CFG_TUD_CDC
 #define CFG_TUD_CDC             3
 #endif
@@ -30,7 +30,7 @@
 #define CFG_TUD_MSC_EP_BUFSIZE  512  // matches the SD card's own sector size
 #endif
 
-// Stäng av allt vi inte använder (om inte redan definerat)
+// Disable everything we don't use (unless already defined)
 #ifndef CFG_TUD_HID
 #define CFG_TUD_HID             0
 #endif
