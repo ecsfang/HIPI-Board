@@ -1,88 +1,202 @@
-# HIPI-board - HP-IL Pico Interface — Raspberry Pico 2
+# HIPI Board — Hardware
 
-*Port of J. Chilla's MicroPython project `JCILD` (HP82163 / HP-41 video
-display and HP82161 drive emulator) to C++17, including a port of the
-RA8875 driver, plus a touch-screen on-device menu, persistent
-configuration, and several HP-IL devices (display, drive, LEDs, PILBox).*
+This document describes the HIPI circuit board: which parts to order, how to
+assemble it, and how to test it. For firmware, building and flashing, see the
+main [README](../README.md) and the
+[User & Developer Guide](../documents/GUIDE.md).
 
-## Bill Of Materials
-The HIPI-BOM.pdf shows the BOM for the board.
+![The assembled HIPI board, component side](images/hipi-board-front.jpg)
+> [!NOTE]
+> On the board in this picture, the NeoPixel **D12 is mounted on the wrong
+> side** — it should be on the back of the PCB (see
+> [NeoPixels and LEDs](#4-neopixels-and-leds)). No ordinary LEDs (D7–D11)
+> are fitted on this device.
 
-The main (needed) components are in the beginning of the list.
+<!-- TODO image: replace the placeholder below with:
+![The assembled HIPI board, back side with LEDs/NeoPixels](images/hipi-board-back.jpg) -->
+> 📷 **Image placeholder:** The assembled HIPI board, back side with LEDs/NeoPixels (`images/hipi-board-back.jpg`)
 
-Note that almost any pin compatible Raspberry Pico 2 card could be used.
-It could probably work with a basic Raspberry Pico as well, but all developemtn was done on a Pico 2.
+**Contents**
 
-A Pico 2 W could also be used (to enable WiFi and/or Bluetooth), but we have not tried yet.
-Also note that the official Pico board uses UCB-Micro, while some other cards uses USB-C if that is preferred.
+1. [Bill of materials](#1-bill-of-materials)
+2. [Selecting a display](#2-selecting-a-display)
+3. [Assembly](#3-assembly)
+4. [NeoPixels and LEDs](#4-neopixels-and-leds)
+5. [Connectors](#5-connectors)
+6. [Testing the board](#6-testing-the-board)
 
-### 1. Selecting a display
-Also a matching display panel is needed.
-We have been using the following display panel:
+---
+
+## 1. Bill of materials
+
+The complete parts list is in **[HIPI-BOM.xlsx](HIPI-BOM.xlsx)**. Note that some part are optional (like the LED's).
+
+### Choosing a Pico
+
+- Almost any pin-compatible **Raspberry Pi Pico 2** board can be used. All
+  development has been done on a Pico 2.
+- An original Pico (RP2040) will probably work as well, but has not been
+  tested.
+- A **Pico 2 W** could be used to add Wi-Fi and/or Bluetooth, but this has not
+  been tested yet.
+- The official Pico board has a Micro-USB connector. Some third-party boards
+  use USB-C instead, if you prefer that.
+
+---
+
+## 2. Selecting a display
+
+The board is designed to mount directly on this 7" display panel (SPI
+interface, capacitive touch over I2C):
 
 <https://www.buydisplay.com/spi-7-inch-tft-lcd-dislay-module-1024x600-ra8876-optl-touch-screen-panel>
 
-It is a 7" display with SPI interface and capacitive touch (I2C).
+With this panel the HIPI board is plug-and-play. In theory any SPI display
+could be used, but the firmware would have to be adapted and the board
+mounted in some other way.
 
-In theorie any SPI display could be used (and software adopted to it), and the mounting has to be done in other ways.
-Using this display panel, the HIPI-Board is just play-and-play!
+### Ordering options
 
-When ordering the above display, make sure that:
-- Interface:
-  - Pin Header Connection-4-Wire SPI
-- Power Supply (Typ.)
-  - VDD=5.0V
-- Touch Panel(Attached by default)
-  - 7"Capacitive Touch with Controller
-- MicroSD Card Interface
-  - Pin Header Connection
-- Font Chip
-  - n/a - could be selected - nothing we have tried
+Select the following options when ordering:
 
-#### Backlight control - attention needed
-There is one change we had to do in the display regarding the backlight.
-It could either be controlled by the Pico (you need to manually add a wire from the board)
-Or, it could be handled by the panel itself, but then solder jumper J27 and J28 must be reversed.
-For best result - remove the solder from J27 and add a solder join on J28 and the panel handles the backlight.
+| Option                 | Select                                   |
+|------------------------|------------------------------------------|
+| Interface              | Pin Header Connection – 4-Wire SPI       |
+| Power Supply (Typ.)    | VDD = 5.0 V                              |
+| Touch Panel            | 7" Capacitive Touch with Controller      |
+| MicroSD Card Interface | Pin Header Connection                    |
+| Font Chip              | None (not used by the firmware)          |
 
-### 2. Mounting the components
-The board is made to be easy to mount for anyone with basic soldering skills.
-The best way to mount the Pico is to get female headers, and use a Pico with headers, so the processor might be removed or replaced if needed.
+### Backlight modification
 
-### 3. The LED's
-The board is prepared to use some LED's, either for status indication, or used by the HPIL controller for fancy effects etc.
+> [!IMPORTANT]
+> The display panel needs one modification before use. **The firmware is
+> written for option 1.**
 
-There are several options that should be considered before mounting:
-- There is a small 3-pin connector that can be used to connect a NeoPixel bar or strip.
-  - We have not thought for any longer bars, since there is no external power to the bar
-- Or there is place for 1-5 NeoPixels (WS2812) directly on the board
-  - Note that they must be mounted from lower to higher number (D12->D16), i.e. if only one is used, it must be in D12.
-  - Also note that it is nicer to mount the LED's on the backside of the PCB (for easy viewing when used).
-  - If both a bar and NeoPixels LED's are used, the first one on the bar always reflects the ones on the board.
-- Up to 5 normal LED's can be mountet at D7-D10, in any order or number.
-  - Note that D7 can't be mounted if NeoPixels are goint to be used
-  - Note that D11 and D10 can't be used if RX/TX out of the board is goiung to be used.
+**Option 1 — backlight controlled by the panel (recommended)**
 
-If no LED's are being used, R11-R15 are not needed, they only are needed for each LED mounted.
+On the display panel, remove the solder from jumper **J27** and add a solder
+bridge on **J28**. The backlight is then driven by the display controller, and
+the firmware sets the brightness through it (**Settings → Brightness**). No
+extra wiring is needed.
 
-### 4. Connectors
-The board is made to be easily mounted on a specific display.
+<!-- TODO image: replace the placeholder below with:
+![Jumpers J27 and J28 on the display panel, after the modification](images/display-j27-j28.jpg) -->
+> 📷 **Image placeholder:** Jumpers J27 and J28 on the display panel, after the modification (`images/display-j27-j28.jpg`)
 
-JP1 (display and touch interface) and JP2 (SD-card interface) must be mounted.
+**Option 2 — backlight wired to the HIPI board**
 
-The suggested jumper JP5 is a screw connector to attach the HP-IL wires, but it is up the you how you want to attach the wires.
+Leave the jumpers on the panel as delivered and add a wire from the panel's
+backlight pin to the HIPI board, either to:
 
-Also not that the whole JP1 (all 40 pins) are not needed, I have only mounted two 8 pins (2*4) connectors at each end of JP1, the rest of the pins are unused (in our setup - could be used if a parallell interface is used instead).
+- **5 V** — the backlight is always on at full brightness, and
+  **Settings → Brightness** has no effect; or
+- **a free GPIO on the Pico** — the backlight can be controlled by the Pico,
+  but the firmware must first be changed to drive that GPIO instead of the
+  display controller's backlight output.
 
-Also the connectors J1, J3 and J6 are optional, they could be handy if you want to measure on the board, use RX/TX possibillities, or extend some GPIO's to other external devices.
+---
 
-J4 is also optional, it is a QWIIC connector to allow the card to attach external I2C devices to the board.
+## 3. Assembly
 
-### Testing the board
-When the board is mounted and the needed connectors (JP1 and JP2) are in place, connect the display and apply power.
+The board is designed to be easy to assemble for anyone with basic soldering
+skills.
 
-If the Pico have the correct firmware, it should start with a Welcome screen.
+- Mount the Pico in **female headers** and use a Pico with pre-soldered pin
+  headers. This way the Pico can be removed or replaced later.
 
-Verify that touch works - touch the right side of the display to open the configuration and settings menu.
+<!-- TODO image: replace the placeholder below with:
+![The Pico mounted in female headers](images/pico-female-headers.jpg) -->
+> 📷 **Image placeholder:** The Pico mounted in female headers (`images/pico-female-headers.jpg`)
+- Decide on the LED options (next section) **before** soldering, since some
+  choices exclude others.
 
-To verify HP-IL, attach HP-IL cables to J5 and shortcut the cable (connect the HP-IL connectors to itself), then run the "Loopback test" under the Config menu, it verifies if the HP-IL interface and cables works as expected.
+---
+
+## 4. NeoPixels and LEDs
+
+The board can be fitted with NeoPixels (WS2812) or ordinary LEDs, either as
+status indicators or for effects controlled by the HP-IL controller.
+
+> [!WARNING]
+> **Mount the NeoPixels and LEDs on the back of the PCB** (the side facing
+> the display panel). Otherwise they will point away from the user.
+
+
+<!-- TODO image: replace the placeholder below with:
+![LED and NeoPixel positions D7–D16 on the back of the PCB](images/led-positions.jpg) -->
+> 📷 **Image placeholder:** LED and NeoPixel positions D7–D16 on the back of the PCB (`images/led-positions.jpg`)
+
+### Options
+
+**NeoPixels on the board (D12–D16)**
+
+- Up to 5 NeoPixels can be mounted directly on the board.
+- They must be fitted in order from D12 upwards: if only one is used, it
+  must be in D12; two go in D12 and D13, and so on.
+
+**NeoPixel bar or strip**
+
+- A small 3-pin connector is provided for an external NeoPixel bar or strip.
+- Only short bars are supported, since there is no separate power supply for
+  the bar.
+- If both a bar and on-board NeoPixels are used, the first pixel on the bar
+  always mirrors the ones on the board.
+
+**Ordinary LEDs (D7–D11)**
+
+- Up to 5 ordinary LEDs can be mounted, in any order and any number.
+- Each LED needs its series resistor (R11–R15). If no LEDs are fitted, the
+  resistors can be left out.
+
+### Conflicts
+
+| If you use…                  | …you cannot fit |
+|------------------------------|-----------------|
+| NeoPixels (board or bar)     | D7              |
+| RX/TX out of the board (J1/J3/J6) | D10 and D11 |
+
+---
+
+## 5. Connectors
+
+| Connector | Required | Purpose |
+|-----------|----------|---------|
+| JP1       | **Yes**  | Display and touch interface |
+| JP2       | **Yes**  | SD-card interface on the display panel |
+| JP5       | No       | HP-IL wires. A screw terminal is suggested, but any connection method works. |
+| J1, J3, J6| No       | Measurement points, RX/TX, and extra GPIOs for external devices |
+| J4        | No       | Qwiic connector for external I2C devices |
+
+<!-- TODO image: replace the placeholder below with:
+![Connector locations on the PCB](images/connectors.jpg) -->
+> 📷 **Image placeholder:** Connector locations on the PCB (`images/connectors.jpg`)
+
+**JP1 does not need all 40 pins.** Only two 2×4-pin headers, one at each end,
+are used with the SPI display. The remaining pins are only needed for a
+parallel display interface.
+
+<!-- TODO image: replace the placeholder below with:
+![The two 2×4-pin headers fitted at each end of JP1](images/jp1-headers.jpg) -->
+> 📷 **Image placeholder:** The two 2×4-pin headers fitted at each end of JP1 (`images/jp1-headers.jpg`)
+
+---
+
+## 6. Testing the board
+
+1. Fit at least JP1 and JP2, mount the board on the display, and apply power.
+2. With the correct firmware on the Pico, the splash screen appears followed
+   by a short boot summary.
+3. **Touch:** touch the right-hand edge of the screen to show the button
+   strip, then press **OK** to open the menu.
+4. **HP-IL:** connect the HP-IL cables to JP5 and connect the OUT cable
+   directly to the IN cable, so the loop is closed through the board only.
+   Then run **Config → Loopback test**. It checks that the HP-IL interface
+   and the cables work.
+
+   <!-- TODO image: replace the placeholder below with:
+   ![HP-IL cables connected OUT to IN for the loopback test](images/loopback-test.jpg) -->
+   > 📷 **Image placeholder:** HP-IL cables connected OUT to IN for the loopback test (`images/loopback-test.jpg`)
+
+5. **I2C (optional):** if you have connected something to J4, run
+   **Config → Scan I2C** to check that its address shows up.
