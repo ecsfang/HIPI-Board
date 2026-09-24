@@ -5,6 +5,14 @@ display and HP82161 drive emulator) to C++17, including a port of the
 RA8875 driver, plus a touch-screen on-device menu, persistent
 configuration, and several HP-IL devices (display, drive, LEDs, PILBox).
 
+> **New here?** See the **[User & Developer Guide](documents/GUIDE.md)** for
+> cloning and building the project, flashing the Pico, using the on-screen
+> menus, and adding your own HP-IL devices.
+>
+> **Hardware:** [pcb/README.md](pcb/README.md) describes the circuit board
+> and choice of display, and [pcb/HIPI-BOM.pdf](pcb/HIPI-BOM.pdf) contains the
+> bill of materials.
+
 ## Quick start in VS Code (Raspberry Pi Pico extension)
 
 ### 1. Install the extension
@@ -228,7 +236,7 @@ time and can't look ahead, so pass the Latin-1 byte value directly there.
 
 ---
 
-## LED control — `CLedParser` syntax
+## LED control — `CLedParser` syntax (To be updated - works for 5" panel)
 
 LEDs are controlled by sending compact command strings over CDC/UART,
 one character at a time. Commands are grouped as `<leds><command>[<params>]`
@@ -309,3 +317,5 @@ This example starts to blink led 1 forever, on 100ms and off 900ms
 - 7" panel (LT7683, `DISPLAY_7INCH`): <https://www.buydisplay.com/spi-7-inch-tft-lcd-dislay-module-1024x600-ra8876-optl-touch-screen-panel>
 - pico-sdk: <https://github.com/raspberrypi/pico-sdk>
 - Pico VS Code extension: <https://github.com/raspberrypi/pico-vscode>
+- HP-IL interface Specification: <https://literature.hpcalc.org/community/hp82166-is-en.pdf>
+- Control the world with HPIL: <https://literature.hpcalc.org/community/control-with-hp-il.pdf>

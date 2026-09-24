@@ -129,7 +129,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.4beta";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.4";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
