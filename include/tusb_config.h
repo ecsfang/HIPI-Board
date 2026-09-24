@@ -27,7 +27,11 @@
 #define CFG_TUD_MSC             1
 #endif
 #ifndef CFG_TUD_MSC_EP_BUFSIZE
-#define CFG_TUD_MSC_EP_BUFSIZE  512  // matches the SD card's own sector size
+// Must be a multiple of the 512-byte sector size. 4096 lets TinyUSB move
+// 8 sectors per READ10/WRITE10 callback, i.e. one multi-block SPI transfer
+// instead of 8 single-block ones -- much faster when the host mounts or
+// scans the card. Costs 4 kB of RAM.
+#define CFG_TUD_MSC_EP_BUFSIZE  4096
 #endif
 
 // Disable everything we don't use (unless already defined)

@@ -175,7 +175,14 @@ mode, font, columns) and the device list.
 
 ## 4. Preparing the SD card
 
-Format a micro-SD card as **FAT32** and copy these files to the root:
+Format a micro-SD card as FAT32 or exFAT and copy these files to the root. Both work; cards larger than 32 GB are normally delivered as exFAT. To reformat on Ubuntu (this erases the card):
+
+```bash
+sudo apt install exfatprogs
+lsblk                              # find the card, e.g. /dev/sdb1
+sudo mkfs.exfat -n HIPI /dev/sdb1  # or: sudo mkfs.vfat -F 32 -n HIPI /dev/sdb1
+```
+Files to copy:
 
 | File            | Required | Purpose |
 |-----------------|----------|---------|
@@ -714,7 +721,7 @@ redrawn completely when the user switches back to it.
 
 | Symptom | Check |
 |---------|-------|
-| No buttons on the screen | `buttons.bmp` missing from the SD root, or the SD card is not FAT32 |
+| No buttons on the screen | `buttons.bmp` missing from the SD root, or the SD card is not FAT32/exFAT |
 | "PANIC: f_mount error" in the log | SD card not inserted / not formatted / bad contact |
 | HP-IL doesn't respond | Run **Config → Loopback test** with a cable from OUT to IN. Check that the device isn't `[OFF]` in **Devices** |
 | A device has no address | It is disabled, or the controller has not run auto-addressing yet (e.g. power-cycle the HP-41 loop) |

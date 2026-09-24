@@ -90,7 +90,8 @@ void exitUsbMscMode() {
 
 // ─── TinyUSB MSC callbacks ──────────────────────────────────────────────
 // This LUN's own block size -- fixed at the SD card's own native sector
-// size (matches CFG_TUD_MSC_EP_BUFSIZE in tusb_config.h).
+// size. CFG_TUD_MSC_EP_BUFSIZE in tusb_config.h must be a multiple of it;
+// read10/write10 below transfer bufsize / kBlockSize sectors per call.
 static constexpr uint16_t kBlockSize = 512;
 
 extern "C" {
