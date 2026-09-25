@@ -8,7 +8,8 @@
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
-#include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
+#include "usb_msc.h"
+#include "drive.h"        // CDrive -- deferred switch-off in the Devices menu      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
 #include "i2c_device.h"       // CI2CBus::scan(), for "Scan I2C"
 #include "touch.h"            // touch_i2c, the bus "Scan I2C" scans
@@ -126,6 +127,13 @@ public:
         onFileSelected_ = std::move(cb);
     }
 
+    // Called with true when the file picker opens (cassette taken out:
+    // the drive must report no tape) and false when it closes again (the
+    // old or newly chosen file is back in). See CDrive::setEjected().
+    void setMediaEjectedCallback(std::function<void(bool)> cb) {
+        onMediaEjected_ = std::move(cb);
+    }
+
     // Called with the newly chosen color whenever the user picks one in
     // the "Textcolor" menu (after screen_.setColor() has already applied
     // it). Useful for persisting the choice, e.g. to a Config object.
@@ -210,6 +218,45 @@ public:
     }
 
     bool isOpen() const { return state_ != State::Closed; }
+
+    // Redraws the Config menu's "Connect to PC"/"Disconnect from PC" row
+    // if that menu is showing -- called when the USB MSC mode changed
+    // without going through the menu (the PC ejected the drive, see
+    // usbMscPollHostEject()).
+    void refreshUsbMscRow() {
+        if (state_ != State::ConfigMenu) return;
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        highlightRow(2, selected_ == 2);
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+    }
+
+    // Opens the .dat file picker directly, without going through the main
+    // and Config menus -- used by the Tape view's cassette window / OPEN
+    // hotspots (see boardui_handleTap()). X or a confirmed selection closes
+    // the menu again, back to the Tape view. No-op if a menu is already open.
+    void openFilePickerFromTape() {
+        if (state_ != State::Closed) return;
+        pickerFromTape_ = true;
+#ifndef DISPLAY_7INCH
+        screen_.suspend();   // same as openMainMenu()
+#endif
+        d_->setTextCursorVisible(false, false);
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        openFilePicker();
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+    }
 
     // Used by boardui.cpp's boardui_handleTap() to detect/dismiss the
     // loopback test's own result dialog on any touch -- same pattern as
@@ -426,12 +473,20 @@ public:
             case State::FilePicker:
                 if (b == Button::Up)   moveFileSelection(-1);
                 if (b == Button::Down) moveFileSelection(+1);
-                if (b == Button::Ok)   openConfirmFile(files_[selected_]);
-                if (b == Button::X)    openConfigMenu();
+                if (b == Button::Ok && !files_.empty()) openConfirmFile(files_[selected_]);
+                if (b == Button::X) {
+                    // Opened from the Tape view: back means straight back to it
+                    if (pickerFromTape_) close();
+                    else                 openConfigMenu();
+                }
                 break;
 
             case State::ConfirmFile:
-                if (b == Button::Ok) { applyFile(pendingFile_); openConfigMenu(); }
+                if (b == Button::Ok) {
+                    applyFile(pendingFile_);
+                    if (pickerFromTape_) close();
+                    else                 openConfigMenu();
+                }
                 if (b == Button::X)  openFilePicker();
                 break;
 
@@ -580,8 +635,21 @@ private:
     // "Display"/"Plotter" pick which full-screen output is showing (see
     // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
     // not a pickable state, so it doesn't need a selected_-tracked value.
+#ifdef DISPLAY_7INCH
+    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Tape", "Clear plotter", "Clear screen" };
+    static constexpr int kDisplayMenuCount = 5;
+    static constexpr int kDisplayRowTape = 2;
+#else
+    // No Tape view on the 5" panel (no spare display layer -- see plotterview.cpp)
     static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Clear plotter", "Clear screen" };
     static constexpr int kDisplayMenuCount = 4;
+    static constexpr int kDisplayRowTape = -1;
+#endif
+    // Row indices shared by openDisplayMenu()/enterDisplayMenuItem()
+    static constexpr int kDisplayRowDisplay      = 0;
+    static constexpr int kDisplayRowPlotter      = 1;
+    static constexpr int kDisplayRowClearPlotter = kDisplayMenuCount - 2;
+    static constexpr int kDisplayRowClearScreen  = kDisplayMenuCount - 1;
 
     void openMainMenu() {
 #ifndef DISPLAY_7INCH
@@ -616,20 +684,32 @@ private:
 
     void openDisplayMenu() {
         state_ = State::DisplayMenu;
-        selected_ = (plotterview_output() == DisplayOutput::Plotter) ? 1 : 0;
+        switch (plotterview_output()) {
+            case DisplayOutput::Plotter: selected_ = kDisplayRowPlotter; break;
+            case DisplayOutput::Tape:    selected_ = kDisplayRowTape;    break;
+            default:                     selected_ = kDisplayRowDisplay; break;
+        }
         drawBox();
         for (int i = 0; i < kDisplayMenuCount; ++i) drawRow(i, kDisplayMenuLabels[i]);
     }
 
     void enterDisplayMenuItem() {
-        if (selected_ == 0) {
-            plotterview_setOutput(DisplayOutput::Display);
+        // View switches and "Clear plotter" draw on the live panel (switch
+        // splash, cleared plot), so they must run on the main canvas --
+        // see withMainCanvas(). Without it, on the 7" panel they ended up
+        // on the invisible menu layer.
+        if (selected_ == kDisplayRowDisplay) {
+            withMainCanvas([&]{ plotterview_setOutput(DisplayOutput::Display); });
             close();
-        } else if (selected_ == 1) {
-            plotterview_setOutput(DisplayOutput::Plotter);
+        } else if (selected_ == kDisplayRowPlotter) {
+            withMainCanvas([&]{ plotterview_setOutput(DisplayOutput::Plotter); });
             close();
-        } else if (selected_ == 2) {
-            plotterview_clearPlotter();
+        } else if (selected_ == kDisplayRowTape) {
+            // Ignored by plotterview if hp82161a.bmp didn't load at boot
+            withMainCanvas([&]{ plotterview_setOutput(DisplayOutput::Tape); });
+            close();
+        } else if (selected_ == kDisplayRowClearPlotter) {
+            withMainCanvas([&]{ plotterview_clearPlotter(); });
             close();
         } else {
             // Clear screen -- immediate action, like "Clear plotter"
@@ -648,6 +728,7 @@ private:
     }
 
     void openConfigMenu() {
+        setMediaEjected(false);             // back from the file picker, if there
         state_ = State::ConfigMenu;
         selected_ = 0;
         drawBox();
@@ -1005,7 +1086,9 @@ private:
         (MenuFrame::H - 40) / MenuFrame::RowPitch;
 
     void openFilePicker() {
+        setMediaEjected(true);              // cassette out while choosing
         files_.clear();
+        files_.push_back("");               // first row: "No media" (no file selected)
         DIR dir;
         if (f_opendir(&dir, "") == FR_OK) {
             FILINFO info;
@@ -1105,7 +1188,7 @@ private:
             // fileIndex for the highlight comparison.
             d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
             d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
-            d_->txtWrite(files_[fileIndex].c_str());
+            d_->txtWrite(fileLabel(fileIndex));
         }
         drawScrollIndicators(fileScrollOffset_, static_cast<int>(files_.size()));
     }
@@ -1144,8 +1227,14 @@ private:
         drawDeviceList();
     }
 
+    // Drives show their WANTED state: a drive waiting to switch off
+    // (CDrive::requestEnabled()) already shows [OFF]
+    static bool deviceWantedOn(CDevice* dev) {
+        if (dev->type() == DRIVE) return static_cast<CDrive*>(dev)->wantedEnabled();
+        return dev->enabled();
+    }
     static std::string deviceLabel(CDevice* dev) {
-        return std::string(dev->name()) + (dev->enabled() ? " [ON]" : " [OFF]");
+        return std::string(dev->name()) + (deviceWantedOn(dev) ? " [ON]" : " [OFF]");
     }
 
     // Redraws the currently-scrolled-to window of deviceLabels_ into the
@@ -1192,7 +1281,14 @@ private:
     void toggleDevice(int index) {
         if (index < 0 || index >= static_cast<int>(devices.size())) return;
         CDevice* dev = devices[index];
-        dev->toggleEnabled();
+        if (dev->type() == DRIVE) {
+            // Switching a drive off is deferred until it's idle -- pulling
+            // it out of the loop mid-transfer hangs HP-IL
+            CDrive* drive = static_cast<CDrive*>(dev);
+            drive->requestEnabled(!drive->wantedEnabled());
+        } else {
+            dev->toggleEnabled();
+        }
         deviceLabels_[static_cast<std::size_t>(index)] = deviceLabel(dev);
         // Only actually redraw if this device's own row is within the
         // currently-visible scrolled window -- toggleDevice() is only
@@ -1212,7 +1308,7 @@ private:
             d_->txtColor(0x0000, MenuFrame::Yellow);  // selected row's own highlight colors
             d_->txtWrite(deviceLabels_[static_cast<std::size_t>(index)].c_str());
         }
-        if (onDeviceToggled_) onDeviceToggled_(dev->name(), dev->enabled());
+        if (onDeviceToggled_) onDeviceToggled_(dev->name(), deviceWantedOn(dev));
     }
 
     void openConfirmFile(const std::string& filename) {
@@ -1225,9 +1321,9 @@ private:
     void drawConfirmText() {
         d_->txtColor(0xFFFF, 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-        d_->txtWrite("Open file?");
+        d_->txtWrite(pendingFile_.empty() ? "Remove cassette?" : "Open file?");
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
-        d_->txtWrite(pendingFile_.c_str());
+        d_->txtWrite(pendingFile_.empty() ? kNoMediaLabel : pendingFile_.c_str());
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
         d_->txtWrite("OK = yes    X = cancel");
     }
@@ -1241,6 +1337,8 @@ private:
         // X handling entirely.
         if (state_ == State::BrightnessMenu) screen_.setBrightness(brightnessBeforeMenu_);
         state_ = State::Closed;
+        pickerFromTape_ = false;
+        setMediaEjected(false);             // cassette back in (new or old file)
         boardui_onMenuClosed();  // shortens the button strip's auto-hide
                                   // countdown -- see its definition in
                                   // boardui.cpp for why
@@ -1252,7 +1350,10 @@ private:
         // immediately, correct regardless of what it turns out to be --
         // none of the splash/plotter special-casing the 5" path below
         // still needs is necessary here.
-        d_->hidePipOverlay();
+        // Exception: if this menu action just switched view, the switch
+        // splash has taken over the PIP overlay -- leave it
+        // up; plotterview_poll() removes it when its timer expires.
+        if (!plotterview_isSplashVisible()) d_->hidePipOverlay();
 #else
         if (plotterview_isSplashVisible()) {
             // A view switch just happened (this menu action selected a
@@ -1315,7 +1416,7 @@ private:
     }
 
     void applyFile(const std::string& filename) {
-        LOGF("\r\n * Selected file: %s", filename.c_str());
+        LOGF("\r\n * Selected file: %s", filename.empty() ? kNoMediaLabel : filename.c_str());
         lastAppliedFile_ = filename;  // see openFilePicker()'s own comment
         if (onFileSelected_) onFileSelected_(filename);
     }
@@ -1433,7 +1534,7 @@ private:
                 break;
             case State::FilePicker:
                 if (index >= 0 && index < static_cast<int>(files_.size()))
-                    drawRow(index, files_[index].c_str());
+                    drawRow(index, fileLabel(static_cast<std::size_t>(index)));
                 break;
             case State::TraceMenu:
                 if (index >= 0 && index < kTraceCount)
@@ -1472,9 +1573,30 @@ private:
     int fileScrollOffset_ = 0;
     int deviceScrollOffset_ = 0;
     std::string lastAppliedFile_;
+
+    // The file picker's first row is an empty name, shown as "No media":
+    // choosing it deselects the drive's file (drive reports no tape).
+    static constexpr const char* kNoMediaLabel = "No media";
+    const char* fileLabel(std::size_t i) const {
+        return files_[i].empty() ? kNoMediaLabel : files_[i].c_str();
+    }
+    // True while the file picker was opened directly from the Tape view
+    // (openFilePickerFromTape()) rather than via Config -- X/OK then close
+    // the menu instead of returning to the Config menu. Reset by close().
+    bool pickerFromTape_ = false;
     std::string pendingFile_;
     std::vector<std::string> deviceLabels_;
     std::function<void(const std::string&)> onFileSelected_;
+    std::function<void(bool)> onMediaEjected_;
+    bool mediaEjected_ = false;
+
+    // Cassette out/in: the Tape view (open lid) and the drive itself
+    void setMediaEjected(bool ejected) {
+        if (ejected == mediaEjected_) return;
+        mediaEjected_ = ejected;
+        plotterview_setTapeEjected(ejected);
+        if (onMediaEjected_) onMediaEjected_(ejected);
+    }
     std::function<void(std::uint16_t)> onColorChanged_;
     std::function<void()> onExitRequested_;
     std::function<void(bool, bool)> onTraceChanged_;

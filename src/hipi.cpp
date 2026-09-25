@@ -89,14 +89,23 @@ void hipi_init()
     cassette = new CTapeSD(config.filename().c_str()); // Uses SD-card for file storage
 
     dialog->setFileSelectedCallback([&cassette](const std::string& filename) {
-        LOGF("\r\nSelect file: " HILIGHT "%s" RESET " ", filename.c_str());
+        // "" = "No media": the drive then reports no tape (CDrive::check())
+        LOGF("\r\nSelect file: " HILIGHT "%s" RESET " ",
+             filename.empty() ? "No media" : filename.c_str());
         cassette->select(filename);
         config.setFilename(filename);
+        hipi::plotterview_setTapeFile(filename);   // name on the Tape view's cassette
     });
 
     videoDisplay = new CDisplay("TFDISPLAY", 0x3E);
     devices.push_back(videoDisplay);
-    devices.push_back(new CDrive("TFDRIVE", cassette));
+    {
+        CDrive* drive = new CDrive("TFDRIVE", cassette);
+        devices.push_back(drive);
+        hipi::plotterview_setDrive(drive);   // POWER/BUSY LEDs in the Tape view
+        // No tape while the file picker is open (lid open)
+        dialog->setMediaEjectedCallback([drive](bool ejected) { drive->setEjected(ejected); });
+    }
     devices.push_back(new CHipiLed("TFLEDS", 0xEE));
     // 0xED -- adjacent to TFLEDS's own 0xEE, both being "indicator"-class
     // accessories; no formal Accessory ID table entry exists for a NeoPixel

@@ -442,6 +442,43 @@ public:
     // Restores CVSSA/CVS_IMWTH0 back to the main window (address 0,
     // width_) -- see beginOverlayDraw()'s own comment.
     void endOverlayDraw();
+    // Generic form of beginOverlayDraw(): redirects the drawing engine's
+    // canvas to any full-size (width_ x SCREEN_MAX_Y) SDRAM layer, e.g.
+    // kTapeLayerAddr. beginOverlayDraw() is simply
+    // beginLayerDraw(kMenuLayerAddr). Pair with endOverlayDraw() exactly
+    // like beginOverlayDraw() -- every other drawing call assumes the
+    // canvas is address 0.
+    // stride: the layer's own width in pixels (0 = width_, i.e. a
+    // full-size layer); narrower layers such as the button strip's use
+    // their own width instead.
+    void beginLayerDraw(std::uint32_t layerAddr, std::uint16_t stride = 0);
+    // Copies a w x h region from a full-size off-screen layer (drawn via
+    // beginLayerDraw()) to the SAME position on the live panel, entirely
+    // inside the chip (BTE memory copy, no SPI pixel data). x/y are
+    // screen coordinates; vertOffset_ is applied to both source and
+    // destination, since beginLayerDraw() content was drawn with it too.
+    // Waits for the BTE to finish before returning, so any drawing call
+    // can follow directly.
+    void copyLayerToPanel(std::uint32_t layerAddr,
+                          std::int16_t x, std::int16_t y,
+                          std::uint16_t w, std::uint16_t h);
+    // General form: copies a w x h region between any two layers (the
+    // live panel is address 0, stride width_), each with its own stride.
+    // Same rules as copyLayerToPanel(): source and destination must be
+    // different layers, vertOffset_ is added to both Y values, and it
+    // waits for the BTE to finish before returning.
+    void copyLayerRegion(std::uint32_t srcAddr, std::uint16_t srcStride,
+                         std::int16_t srcX, std::int16_t srcY,
+                         std::uint32_t dstAddr, std::uint16_t dstStride,
+                         std::int16_t dstX, std::int16_t dstY,
+                         std::uint16_t w, std::uint16_t h);
+    // The canvas the drawing engine currently writes to -- as set by
+    // beginLayerDraw()/beginOverlayDraw() (or 0 / width_ after
+    // endOverlayDraw()). Lets code that must draw into a layer from
+    // inside someone else's layer drawing (e.g. while the menu is being
+    // drawn) restore the previous canvas afterwards.
+    std::uint32_t canvasAddr() const { return canvasAddr_; }
+    std::uint16_t canvasStride() const { return canvasStride_; }
     // Configures and enables PIP-1 to show the menu layer's own
     // (x,y,w,h) region as an on-screen overlay at that same (x,y,w,h)
     // position -- i.e. the menu is drawn (via beginOverlayDraw()) at
@@ -460,6 +497,20 @@ public:
     // actually hidden, just covered) becomes visible again immediately,
     // with no redraw needed.
     void hidePipOverlay();
+    // General PIP window control (pip = 1 or 2). Shows the w x h region
+    // at (srcX, srcY) of the layer at layerAddr (with its own stride) on
+    // the panel at (dstX, dstY). srcX, dstX, w and stride must be
+    // multiples of 4 (PIP requirement -- masked here to be safe). Y values
+    // get vertOffset_ added, like every other panel/layer coordinate.
+    // PIP-1 is drawn on top of PIP-2. Can be called repeatedly while the
+    // window is enabled, e.g. to animate its size/position.
+    // showPipOverlay()/hidePipOverlay() above are the menu's own PIP-1
+    // shortcut; the button strip uses PIP-2 (see boardui.cpp).
+    void showPipWindow(int pip, std::uint32_t layerAddr, std::uint16_t stride,
+                       std::int16_t srcX, std::int16_t srcY,
+                       std::int16_t dstX, std::int16_t dstY,
+                       std::uint16_t w, std::uint16_t h);
+    void hidePipWindow(int pip);
 
     // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
     // 0 ("BTE function is idle") -- per the datasheet's own note that
@@ -502,6 +553,13 @@ public:
     // animation, or a scroll shift) can never collide with the menu's
     // own, independently-rendered content, and vice versa.
     static constexpr std::uint32_t kMenuLayerAddr = 1024UL * 600UL * 2UL * 3UL;
+    // Fifth full-size layer: the pre-rendered HP82161A image shown by the
+    // Tape view (see plotterview.cpp). Loaded once at boot from hp82161a.bmp
+    // and only ever copied to the panel via copyLayerToPanel() -- never
+    // drawn to at runtime, so it can't collide with BTE staging or the
+    // menu layer. Lies below kCgramAddr, which is confirmed working on
+    // real hardware, so the SDRAM is known to extend past it.
+    static constexpr std::uint32_t kTapeLayerAddr = 1024UL * 600UL * 2UL * 4UL;
     // CGRAM (hp82163_font.hpp glyph data uploaded by uploadCgramChar())
     // -- tiny (101 chars * 16 bytes = 1616 bytes total, see
     // FONT_CHAR_COUNT/EXTRA_FONT_COUNT). Its own dedicated layer
@@ -515,6 +573,27 @@ public:
     // SDRAM's actual size was still unconfirmed at the time; that
     // workaround is no longer needed).
     static constexpr std::uint32_t kCgramAddr = 1024UL * 600UL * 2UL * 5UL;
+    // Button strip layer for PIP-2 (see boardui.cpp) -- narrow (stride =
+    // strip width, ~120 px x 600 rows = ~144 kB), so it shares CGRAM's
+    // layer slot, 64 kB after CGRAM's 1616 bytes: no overlap, and inside
+    // the SDRAM region confirmed working on real hardware.
+    static constexpr std::uint32_t kStripLayerAddr = kCgramAddr + 0x10000UL;
+    // Tape view cassette (see plotterview.cpp): two full-stride (width_)
+    // areas of up to 128 rows each (~256 kB), also in CGRAM's slot after
+    // the strip. kCassetteAddr holds the cassette picture as loaded from
+    // tape-in.bmp; kCassetteLabelAddr is a copy of it with the current
+    // file name written on the label -- that's the one shown.
+    static constexpr std::uint32_t kCassetteAddr      = kCgramAddr + 0x40000UL;
+    static constexpr std::uint32_t kCassetteLabelAddr = kCgramAddr + 0x80000UL;
+    static constexpr std::uint16_t kCassetteMaxRows   = 128;
+    // Tape view with the lid OPEN (open.bmp, ~344 x 304): narrow
+    // stride (its own width), after the cassette areas in the same slot.
+    static constexpr std::uint32_t kTapeOpenAddr      = kCgramAddr + 0xC0000UL;
+    static constexpr std::uint32_t kTapeOpenMaxBytes  = 0x60000UL;   // 384 kB
+    // Tape view status sprites (leds.bmp, 160 x 40: POWER and BUSY lit,
+    // power switch ON), narrow stride, right after the open-lid area
+    // (~13 kB).
+    static constexpr std::uint32_t kLedsAddr          = kCgramAddr + 0x120000UL;
 
     // TEMPORARY DIAGNOSTIC -- see lastCvssaReadback()'s own comment above.
     std::uint32_t lastCvssaReadback_ = 0;
@@ -821,6 +900,9 @@ private:
     std::uint16_t width_;
     std::uint16_t height_;
     std::uint16_t vertOffset_ = 0;
+    // Current canvas -- see canvasAddr()/canvasStride()
+    std::uint32_t canvasAddr_ = 0;
+    std::uint16_t canvasStride_ = 1024;
     std::uint8_t  txtScale_ = 0;
     bool          pwmInitialized_ = false;
     // Software-tracked cache of ICR bit2 (graphic/text mode) -- see

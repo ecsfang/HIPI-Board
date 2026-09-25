@@ -288,6 +288,9 @@ private:
     void set_cursor(std::uint8_t c, std::uint8_t r);
     void set_cur();
     void draw_letter(std::uint8_t c);
+    // One full row from the text buffer, each character explicitly
+    // positioned -- see its comment in Screen.cpp
+    void draw_row(std::uint8_t row, const std::uint8_t* line);
     void fon_write(const char* s);
     bool valid_char(std::uint8_t c);
     // Wraps d_->beginBulkTextDraw() (cursor-hiding, see its own comment)

@@ -157,13 +157,9 @@ void Screen::full() {
         // for the current font size), not our possibly-smaller COLS_ (set
         // via the Columns menu). Without this, a full repaint would wrap
         // at the hardware's width instead of ours.
-        set_cursor(0, static_cast<std::uint8_t>(row));
         const std::size_t idx = static_cast<std::size_t>(ROWS_ - 1 - row + offset_);
         if (idx >= numLines_) continue;  // shouldn't happen; guards against it regardless
-        const std::uint8_t* line = rowPtr(idx);
-        for (std::uint8_t col = 0; col < COLS_; ++col) {
-            draw_letter(line[col]);
-        }
+        draw_row(static_cast<std::uint8_t>(row), rowPtr(idx));
     }
     set_cur();  // re-asserts cursor visibility/style too, not just position
 }
@@ -317,12 +313,9 @@ void Screen::inschar() {
     }
 
     if (!suspended_) beginBulkDraw();
-    set_cursor(0, row_);
-    for (std::uint8_t c = 0; c < COLS_; ++c) draw_letter(line[c]);
+    draw_row(row_, line);
     if (cascaded) {
-        set_cursor(0, static_cast<std::uint8_t>(row_ + 1));
-        const std::uint8_t* next = rowPtr(ROWS_ - 2 - row_);
-        for (std::uint8_t c = 0; c < COLS_; ++c) draw_letter(next[c]);
+        draw_row(static_cast<std::uint8_t>(row_ + 1), rowPtr(ROWS_ - 2 - row_));
     }
     set_cur();  // re-asserts cursor visibility/style too, not just position
 
@@ -782,12 +775,9 @@ void Screen::pr_char(std::uint8_t c) {
                 cascaded = true;
             }
             if (!suspended_) beginBulkDraw();
-            set_cursor(0, row_);
-            for (std::uint8_t cc = 0; cc < COLS_; ++cc) draw_letter(line[cc]);
+            draw_row(row_, line);
             if (cascaded) {
-                set_cursor(0, static_cast<std::uint8_t>(row_ + 1));
-                const std::uint8_t* next = rowPtr(ROWS_ - 2 - row_);
-                for (std::uint8_t cc = 0; cc < COLS_; ++cc) draw_letter(next[cc]);
+                draw_row(static_cast<std::uint8_t>(row_ + 1), rowPtr(ROWS_ - 2 - row_));
             }
             set_cur();  // re-asserts cursor visibility/style too, not just position
             if (cp_ != cnt_)
@@ -877,6 +867,21 @@ void Screen::pr_str(const char *p) {
 // -----------------------------------------------------------------------
 // Internals
 // -----------------------------------------------------------------------
+
+// Draws one full row from the text buffer. Every character is positioned
+// explicitly (col * width()), exactly like live typing does via set_cur()
+// before each pr_char() -- NOT by the display chip's own auto-advance
+// after a single set_cursor() at column 0. The auto-advance steps by the
+// glyph width plus the chip's own character-spacing register, which does
+// not match width_ (glyph width + the 2*k gap, see screen_pars()); a
+// redrawn screen then had different character spacing than newly typed
+// text on the same screen.
+void Screen::draw_row(std::uint8_t row, const std::uint8_t* line) {
+    for (std::uint8_t col = 0; col < COLS_; ++col) {
+        set_cursor(col, row);
+        draw_letter(line[col]);
+    }
+}
 
 void Screen::set_cursor(std::uint8_t c, std::uint8_t r) {
     if (suspended_) return;

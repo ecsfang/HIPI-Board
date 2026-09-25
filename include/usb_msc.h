@@ -39,6 +39,11 @@ bool enterUsbMscMode();
 // Switches back to normal mode: re-mounts FatFs so CDrive/CTapeSD can
 // resume. Safe to call even if not currently in MSC mode (no-op then).
 void exitUsbMscMode();
+// Call from the main loop: if the PC has ejected the drive (or the USB
+// connection went away) while in "Connect to PC" mode, leaves that mode
+// and returns true -- the caller should then refresh any UI showing the
+// Connect/Disconnect state. Returns false otherwise.
+bool usbMscPollHostEject();
 
 #ifdef __cplusplus
 }

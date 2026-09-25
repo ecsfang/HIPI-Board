@@ -129,7 +129,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.4";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.5";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -407,7 +407,8 @@ int main() {
         screen->pr_str("Stand alone - no USB");
     {
         char buf[64];
-        sprintf(buf, " * Drive: %.32s", config.filename().c_str() );
+        sprintf(buf, " * Drive: %.32s",
+                config.filename().empty() ? "No media" : config.filename().c_str() );
         screen->pr_str(buf);
         int z = sprintf(buf, " * Trace: " );
         switch( (config.trace() ? 0b10 : 0b00) | (config.extTrace() ? 0b01 : 0b00) ) {
@@ -476,6 +477,7 @@ int main() {
     // Wire up the plotter's live-draw callbacks now that display/screen/
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
+    hipi::plotterview_setTapeFile(config.filename());  // cassette in the Tape view
 
     LOGF("\r\n\t* HP-IL initialized");
     {

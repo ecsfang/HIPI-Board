@@ -24,6 +24,7 @@ LT7683::LT7683(RA8875Transport& t,
       vertOffset_(0),
       txtScale_(0) {
     (void)start_on;  // forwarded to begin()
+    canvasStride_ = width_;
 }
 
 void LT7683::begin() {
@@ -706,18 +707,44 @@ void LT7683::bteHorizontalShift(std::int16_t x, std::int16_t y,
 }
 
 void LT7683::beginOverlayDraw() {
-    // Redirects the drawing engine's own canvas to the menu's dedicated
-    // layer -- see this function's own header comment. Canvas Image
-    // Width (stride) is set to width_ (the panel's own width, same as
-    // the main window uses) -- the menu is drawn using the SAME
-    // coordinate space as the panel itself (MenuFrame's own X/Y are
-    // already real screen coordinates), so no separate, narrower stride
-    // is needed for the menu layer.
-    writeReg32(CVSSA0, static_cast<std::uint32_t>(kMenuLayerAddr));
+    beginLayerDraw(kMenuLayerAddr);
+}
+
+void LT7683::beginLayerDraw(std::uint32_t layerAddr, std::uint16_t stride) {
+    // Redirects the drawing engine's own canvas to the given full-size
+    // layer (the menu's, the Tape view's, ...) -- see this function's own
+    // header comment. Canvas Image Width (stride) is set to width_ (the
+    // panel's own width, same as the main window uses) -- every layer is
+    // drawn using the SAME coordinate space as the panel itself (e.g.
+    // MenuFrame's own X/Y are already real screen coordinates), so no
+    // separate, narrower stride is needed.
+    writeReg32(CVSSA0, layerAddr);
 //    writeReg16(CVSSA0, static_cast<std::uint16_t>(kMenuLayerAddr & 0xFFFF));
 //    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2),
 //              static_cast<std::uint16_t>((kMenuLayerAddr >> 16) & 0xFFFF));
-    writeReg16(CVS_IMWTH0, width_);
+    writeReg16(CVS_IMWTH0, stride != 0 ? stride : width_);
+    canvasAddr_ = layerAddr;
+    canvasStride_ = stride != 0 ? stride : width_;
+}
+
+void LT7683::copyLayerToPanel(std::uint32_t layerAddr,
+                              std::int16_t x, std::int16_t y,
+                              std::uint16_t w, std::uint16_t h) {
+    // Same position in both layers -- source and destination are
+    // different SDRAM layers, so they never overlap and a single Memory
+    // Copy is safe (unlike bteScrollShift()'s in-place case).
+    copyLayerRegion(layerAddr, width_, x, y, /*dstAddr=*/0, width_, x, y, w, h);
+}
+
+void LT7683::copyLayerRegion(std::uint32_t srcAddr, std::uint16_t srcStride,
+                             std::int16_t srcX, std::int16_t srcY,
+                             std::uint32_t dstAddr, std::uint16_t dstStride,
+                             std::int16_t dstX, std::int16_t dstY,
+                             std::uint16_t w, std::uint16_t h) {
+    bteMemoryCopy(srcAddr, srcStride, srcX, static_cast<std::int16_t>(srcY + vertOffset_),
+                  dstAddr, dstStride, dstX, static_cast<std::int16_t>(dstY + vertOffset_),
+                  w, h);
+    waitBteIdle();
 }
 
 void LT7683::endOverlayDraw() {
@@ -730,6 +757,8 @@ void LT7683::endOverlayDraw() {
 //    writeReg16(CVSSA0, 0);
 //    writeReg16(static_cast<std::uint8_t>(CVSSA0 + 2), 0);
     writeReg16(CVS_IMWTH0, width_);
+    canvasAddr_ = 0;
+    canvasStride_ = width_;
 }
 
 void LT7683::showPipOverlay(std::int16_t x, std::int16_t y,
@@ -795,6 +824,43 @@ void LT7683::showPipOverlay(std::int16_t x, std::int16_t y,
     // enable bit (6) and the unrelated bits below it untouched.
     const std::uint8_t mpwctrEnable = readReg(MPWCTR);
     writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | 0x80));
+}
+
+void LT7683::showPipWindow(int pip, std::uint32_t layerAddr, std::uint16_t stride,
+                           std::int16_t srcX, std::int16_t srcY,
+                           std::int16_t dstX, std::int16_t dstY,
+                           std::uint16_t w, std::uint16_t h) {
+    const bool pip2 = (pip == 2);
+    // REG[10h] bit4 selects which PIP the shared window registers below
+    // configure (0 = PIP-1, 1 = PIP-2) -- same scheme as showPipOverlay().
+    const std::uint8_t mpwctr = readReg(MPWCTR);
+    writeReg(MPWCTR, static_cast<std::uint8_t>(pip2 ? (mpwctr | 0x10) : (mpwctr & ~0x10)));
+
+    writeReg16(PWDULX0, static_cast<std::uint16_t>(dstX & ~0x3));
+    writeReg16(PWDULY0, static_cast<std::uint16_t>(dstY + vertOffset_));
+    writeReg16(PISA0, static_cast<std::uint16_t>(layerAddr & 0xFFFC));
+    writeReg16(static_cast<std::uint8_t>(PISA0 + 2),
+              static_cast<std::uint16_t>((layerAddr >> 16) & 0xFFFF));
+    writeReg16(PIW0, static_cast<std::uint16_t>(stride & ~0x3));
+    writeReg16(PWIULX0, static_cast<std::uint16_t>(srcX & ~0x3));
+    writeReg16(PWIULY0, static_cast<std::uint16_t>(srcY + vertOffset_));
+    writeReg16(PWW0, static_cast<std::uint16_t>(w & ~0x3));
+    writeReg16(PWH0, h);
+
+    // REG[11h]: 16bpp for the selected PIP -- bits[3:2] = PIP-1,
+    // bits[1:0] = PIP-2 (01b = 16bpp); the other PIP's bits are kept.
+    const std::uint8_t pipcdep = readReg(PIPCDEP);
+    writeReg(PIPCDEP, pip2 ? static_cast<std::uint8_t>((pipcdep & ~0x03) | 0x01)
+                           : static_cast<std::uint8_t>((pipcdep & ~0x0C) | 0x04));
+
+    // Enable: bit7 = PIP-1, bit6 = PIP-2
+    const std::uint8_t mpwctrEnable = readReg(MPWCTR);
+    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | (pip2 ? 0x40 : 0x80)));
+}
+
+void LT7683::hidePipWindow(int pip) {
+    const std::uint8_t mpwctr = readReg(MPWCTR);
+    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctr & ~(pip == 2 ? 0x40 : 0x80)));
 }
 
 void LT7683::hidePipOverlay() {

@@ -1,9 +1,9 @@
 // bmp_loader.hpp
 //
 // Loads 24-bit uncompressed BMP files from the SD card and draws them via
-// RA8875::drawBitmap565(). Shared by the button-strip loader and the
-// splash-screen logo (both in boardui.cpp) so the BMP-parsing logic only
-// exists once.
+// DisplayDriver::drawBitmap565(). Shared by the button-strip loader, the
+// splash-screen logo (both in boardui.cpp) and the Tape view image
+// (plotterview.cpp) so the BMP-parsing logic only exists once.
 #pragma once
 
 #include "display_config.h"
@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <algorithm>
+#include "pico/time.h"
 
 namespace hipi {
 
@@ -50,6 +52,8 @@ inline bool peekBmpDimensions(const char* path, std::uint16_t& outWidth, std::ui
 // Optionally also caches the decoded RGB565 pixels (row-major, stride =
 // width) -- e.g. so a button's sub-rectangle can be redrawn later without
 // re-reading the file (see ui_buttons.hpp's redrawButtonRegion()).
+// The file is read sequentially in ~24 kB chunks (see the loop below), and
+// the time spent is logged, split into SD reading and convert + draw.
 inline bool drawBmpAt(DisplayDriver* display, const char* path,
                        std::int16_t x0, std::int16_t y0,
                        std::vector<std::uint16_t>* outPixels = nullptr,
@@ -107,40 +111,77 @@ inline bool drawBmpAt(DisplayDriver* display, const char* path,
     if (outWidth)  *outWidth  = static_cast<std::uint16_t>(width);
     if (outHeight) *outHeight = static_cast<std::uint16_t>(height);
 
-    std::vector<std::uint8_t>  rawRow(rowSize);
-    std::vector<std::uint16_t> rowBuf(static_cast<std::size_t>(width));
+    // Read the pixel data SEQUENTIALLY, several rows per f_read(). A normal
+    // (bottom-up) BMP stores the bottom screen row first, so instead of
+    // seeking backwards for every row (600 f_lseek() calls for a full
+    // 7" image) the file is read front to back and each chunk is drawn
+    // from the bottom of the image upwards. Rows are reordered inside the
+    // chunk buffer so every chunk is one top-to-bottom drawBitmap565()
+    // call. kChunkTargetBytes keeps the two buffers at ~40 kB total.
+    constexpr std::uint32_t kChunkTargetBytes = 24 * 1024;
+    const std::uint32_t rowsPerChunk =
+        std::max<std::uint32_t>(1, std::min<std::uint32_t>(height, kChunkTargetBytes / rowSize));
 
-    for (std::uint32_t r = 0; r < height; ++r) {
-        // BMPs are normally stored bottom-up when height is positive.
-        const std::uint32_t fileRow = topDown ? r : (height - 1 - r);
+    std::vector<std::uint8_t>  rawChunk(static_cast<std::size_t>(rowsPerChunk) * rowSize);
+    std::vector<std::uint16_t> pixChunk(static_cast<std::size_t>(rowsPerChunk) * width);
 
-        f_lseek(&file, dataOffset + static_cast<FSIZE_t>(fileRow) * rowSize);
-        if (f_read(&file, rawRow.data(), rowSize, &br) != FR_OK || br != rowSize) {
-            LOGF("\r\n\t * Error ... ?");
+    if (f_lseek(&file, dataOffset) != FR_OK) {
+        LOGF("\r\n\t * Seek error!");
+        f_close(&file);
+        return false;
+    }
+
+    const absolute_time_t tStart = get_absolute_time();
+    std::int64_t readUs = 0;
+
+    for (std::uint32_t fileRow = 0; fileRow < height; fileRow += rowsPerChunk) {
+        const std::uint32_t n = std::min<std::uint32_t>(rowsPerChunk, height - fileRow);
+        const UINT bytes = static_cast<UINT>(n * rowSize);
+
+        const absolute_time_t tRead = get_absolute_time();
+        if (f_read(&file, rawChunk.data(), bytes, &br) != FR_OK || br != bytes) {
+            LOGF("\r\n\t * Read error at row %lu", static_cast<unsigned long>(fileRow));
             f_close(&file);
             return false;
         }
+        readUs += absolute_time_diff_us(tRead, get_absolute_time());
 
-        for (std::int32_t col = 0; col < width; ++col) {
-            const std::uint8_t b  = rawRow[static_cast<std::size_t>(col) * 3 + 0];
-            const std::uint8_t g  = rawRow[static_cast<std::size_t>(col) * 3 + 1];
-            const std::uint8_t rr = rawRow[static_cast<std::size_t>(col) * 3 + 2];
-            // RA8875 16bpp format: RGB565
-            rowBuf[static_cast<std::size_t>(col)] = static_cast<std::uint16_t>(
-                ((rr & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+        // Screen row of the TOP row in this chunk
+        const std::uint32_t topScreenRow = topDown ? fileRow : (height - fileRow - n);
+
+        for (std::uint32_t i = 0; i < n; ++i) {
+            // i-th row in file order -> its position (top-to-bottom) in the chunk
+            const std::uint32_t dstRow = topDown ? i : (n - 1 - i);
+            const std::uint8_t* src = rawChunk.data() + static_cast<std::size_t>(i) * rowSize;
+            std::uint16_t* dst = pixChunk.data() + static_cast<std::size_t>(dstRow) * width;
+            for (std::int32_t col = 0; col < width; ++col) {
+                const std::uint8_t b  = src[col * 3 + 0];
+                const std::uint8_t g  = src[col * 3 + 1];
+                const std::uint8_t rr = src[col * 3 + 2];
+                dst[col] = static_cast<std::uint16_t>(
+                    ((rr & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+            }
         }
 
         if (alsoDraw) {
-            display->drawBitmap565(x0, static_cast<std::int16_t>(y0 + r),
-                                  static_cast<std::uint16_t>(width), 1,
-                                  rowBuf.data());
+            display->drawBitmap565(x0, static_cast<std::int16_t>(y0 + topScreenRow),
+                                   static_cast<std::uint16_t>(width),
+                                   static_cast<std::uint16_t>(n),
+                                   pixChunk.data());
         }
 
         if (outPixels) {
-            std::memcpy(outPixels->data() + static_cast<std::size_t>(r) * width,
-                        rowBuf.data(), static_cast<std::size_t>(width) * sizeof(std::uint16_t));
+            std::memcpy(outPixels->data() + static_cast<std::size_t>(topScreenRow) * width,
+                        pixChunk.data(),
+                        static_cast<std::size_t>(n) * width * sizeof(std::uint16_t));
         }
     }
+
+    const std::int64_t totalUs = absolute_time_diff_us(tStart, get_absolute_time());
+    LOGF("\r\n\t\t* %lu ms (SD read %lu ms, convert + draw %lu ms)",
+         static_cast<unsigned long>(totalUs / 1000),
+         static_cast<unsigned long>(readUs / 1000),
+         static_cast<unsigned long>((totalUs - readUs) / 1000));
 
     LOGF("\r\n\t\t* Done!");
     f_close(&file);

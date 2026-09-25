@@ -1,7 +1,8 @@
 #pragma once
 // plotterview.h -- switches the panel's full-screen output between the
-// normal HP-41 text display (Screen) and a live rendering of the
-// plotter's output (CPlotter). See boardui.h for the button
+// normal HP-41 text display (Screen), a live rendering of the plotter's
+// output (CPlotter), and (7" panel only) the Tape view: a picture of an
+// HP82161A cassette drive with touch-sensitive areas. See boardui.h for the button
 // strip/info-box/status-LED "chrome" this coordinates with.
 //
 // Usage (see pico_main.cpp):
@@ -17,17 +18,48 @@
 #include "Screen.hpp"
 #include "plotter.h"
 #include <cstdint>
+#include <string>
+
+class CDrive;
 
 namespace hipi {
 
-enum class DisplayOutput { Display, Plotter };
+enum class DisplayOutput { Display, Plotter, Tape };
 // Bump this alongside the enum whenever a new view is added (e.g. a future
 // Printer view) -- plotterview_cycleOutput() cycles through 0..count-1
-// generically, so that's the only change needed to make swiping reach it.
-constexpr int kDisplayOutputCount = 2;
+// generically, skipping any view that isn't available (see
+// plotterview_isAvailable()).
+constexpr int kDisplayOutputCount = 3;
+
+// Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
+enum class TapeHotspot { None, Open, Power };
 
 // Call once, after display/screen/plotter all exist (see hipi_init()).
+// On the 7" panel this also loads hp82161a.bmp from the SD card into its own
+// off-screen SDRAM layer (LT7683::kTapeLayerAddr) for the Tape view.
 void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter);
+
+// Tape view cassette (7" only; needs tape-in.bmp on the SD card): the
+// cassette shows the selected .dat file's name on its label. Call
+// plotterview_setTapeFile() at boot and whenever another file is
+// selected ("" = no file, empty drive). plotterview_setTapeEjected(true)
+// shows the drive empty with its lid open (open.bmp, if present)
+// while the file picker is open. Both may be called
+// from inside menu drawing -- they restore the active canvas themselves.
+void plotterview_setTapeFile(const std::string& filename);
+void plotterview_setTapeEjected(bool ejected);
+
+// Tape view status LEDs (7" only; needs leds.bmp): POWER is lit while the
+// drive device is enabled, BUSY while it's accessing its file (see
+// CDrive::isBusy()). Updated from plotterview_poll().
+void plotterview_setDrive(CDrive* drive);
+// The drive given to plotterview_setDrive() (nullptr if none) -- e.g. for
+// the power switch hotspot, which toggles it (see boardui_handleTap()).
+CDrive* plotterview_drive();
+
+// True if the view can be shown on this build/board. Tape is only
+// available on the 7" panel, and only if hp82161a.bmp loaded at boot.
+bool plotterview_isAvailable(DisplayOutput mode);
 
 // Switches the panel's full-screen output. Handles suspending/resuming
 // Screen and hiding/showing the button strip (Plotter mode uses the full
@@ -47,11 +79,11 @@ void plotterview_cycleOutput(bool forward);
 // auto-dismiss timer (see plotterview_setOutput()).
 void plotterview_poll();
 
-// True while the brief "DISPLAY"/"PLOTTER" switch-announcement splash is
-// showing (see plotterview_setOutput()) -- checked by UiDialog::close()
-// so it doesn't redraw over/under the splash while the menu closes right
-// after a mode switch (the splash already covers the whole screen,
-// menu box included; its own timeout reveals the real content shortly).
+// True while the brief "DISPLAY"/"PLOTTER"/"TAPE" switch-announcement
+// splash is showing (see plotterview_setOutput()). Checked by
+// UiDialog::close() (7": don't hide the PIP overlay the splash now owns;
+// 5": don't redraw over the full-screen splash) and by
+// boardui_handleTap() (7": taps are ignored while it's up).
 bool plotterview_isSplashVisible();
 
 // Clears the plotter's drawing (both the retained segments() history and,
@@ -60,14 +92,16 @@ bool plotterview_isSplashVisible();
 // mode is currently showing.
 void plotterview_clearPlotter();
 
-// Redraws the current plotter output from scratch (segments() replayed in
-// full). Called internally when switching to Plotter output or when the
-// menu closes back into it (to erase the menu box drawn on top), but
-// exposed in case something else needs to force a refresh.
+// Redraws the current full-screen view from scratch: the plotter output
+// (segments() replayed in full) or the Tape image. Called internally when
+// switching views or when the menu closes back into one (to erase the
+// menu box drawn on top), but exposed in case something else needs to
+// force a refresh. Does nothing while Display (text) output is showing.
 void plotterview_redraw();
 
 // Redraws only a rectangular sub-region (screen pixel coordinates) of the
-// current plotter output -- narrows the active window to that region
+// current full-screen view. For Tape this is a single BTE copy from the
+// off-screen layer. For Plotter it narrows the active window to that region
 // first, so replaying every segment only actually draws the ones (or
 // parts of ones) that fall inside it, then restores the full-screen
 // active window Plotter mode normally runs with. Used by boardui.cpp's
@@ -76,10 +110,14 @@ void plotterview_redraw();
 void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
                               std::int16_t w, std::int16_t h);
 
-// True while Plotter output is the active full-screen view -- boardui's
-// touch handling checks this to skip the normal button-strip wake/show
-// logic (there's no strip to show) and instead treat any tap as opening
-// the menu directly.
+// True while a non-text full-screen view (Plotter or Tape) is showing,
+// i.e. Screen is suspended and anything drawn over the view (such as the
+// button strip) must be restored via plotterview_redrawRegion().
 bool plotterview_isActive();
+
+// Returns which Tape hotspot (if any) contains the given screen point.
+// Always TapeHotspot::None unless the Tape view is showing and its
+// switch splash has timed out.
+TapeHotspot plotterview_tapeHitTest(std::uint16_t x, std::uint16_t y);
 
 }  // namespace hipi

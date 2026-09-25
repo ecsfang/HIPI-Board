@@ -21,6 +21,7 @@
 #include "config.hpp"
 #include "hipi.h"      // DeviceInfo, hipi_enumerateDevices() -- "Devices" dialog
 #include "hpil.h"      // hpilDevices
+#include "drive.h"     // CDrive -- Tape view power switch
 #include "pilbox.h"    // pilbox, CPilBox::isConnected()
 #include "ui_buttons.hpp"
 #include "pico/time.h"
@@ -127,7 +128,7 @@ constexpr std::uint32_t kHideStepDelayMs = 40;
 // Splits buttonStripWidth into kSlideSteps horizontal slices (the last
 // one absorbs whatever doesn't divide evenly) -- used by
 // showButtonStrip()/hideButtonStrip()'s animation below.
-void computeSegmentWidths(std::uint16_t* out) {
+[[maybe_unused]] void computeSegmentWidths(std::uint16_t* out) {  // 5" only
     const auto base = static_cast<std::uint16_t>(buttonStripWidth / kSlideSteps);
     std::uint16_t assigned = 0;
     for (int i = 0; i < kSlideSteps - 1; ++i) {
@@ -135,6 +136,68 @@ void computeSegmentWidths(std::uint16_t* out) {
         assigned = static_cast<std::uint16_t>(assigned + base);
     }
     out[kSlideSteps - 1] = static_cast<std::uint16_t>(buttonStripWidth - assigned);
+}
+
+#ifdef DISPLAY_7INCH
+// ── 7": button strip as a PIP-2 overlay ────────────────────────────────────
+// The strip lives in its own small SDRAM layer (LT7683::kStripLayerAddr,
+// stride = strip width rounded up to 4 pixels) and is shown with the
+// chip's second PIP window. Sliding in/out only changes that window's
+// width and position, so whatever is on the panel underneath -- text,
+// plot or Tape image -- is never overwritten and needs no restoring.
+// (The menu, info box, device list and view-switch splash use PIP-1,
+// which is drawn on top of PIP-2 and never overlaps the strip.)
+std::uint16_t stripStride = 0;   // strip layer's own stride (multiple of 4)
+std::uint16_t stripPad = 0;      // columns left of the strip in its layer
+
+// PIP window width for slide step i (1..kSlideSteps) -- PIP width and
+// x position must be multiples of 4 pixels.
+std::uint16_t stripVisibleWidth(int i) {
+    if (i >= kSlideSteps) return stripStride;
+    const auto w = static_cast<std::uint16_t>(((stripStride * i) / kSlideSteps + 3) & ~3);
+    return std::max<std::uint16_t>(4, std::min(w, stripStride));
+}
+
+// Shows the leftmost visibleW columns of the strip layer at the panel's
+// right edge (visibleW == 0 hides it).
+void showStripPip(std::uint16_t visibleW) {
+    if (visibleW == 0) {
+        display_->hidePipWindow(2);
+        return;
+    }
+    display_->showPipWindow(2, LT7683::kStripLayerAddr, stripStride,
+                            /*srcX=*/0, /*srcY=*/0,
+                            static_cast<std::int16_t>(SCREEN_MAX_X - visibleW), /*dstY=*/0,
+                            visibleW, buttonStripHeight);
+}
+#endif
+
+// Runs fn(stripX0) to draw part of the button strip (a pressed/released
+// button, a status LED). stripX0 is where the strip's own column 0 is in
+// the drawing target:
+//   7": the strip's PIP layer (x = stripPad) -- the PIP overlay shows the
+//       change immediately, whether the strip is visible or not.
+//   5": the panel itself (x = buttonStripScreenX0), with the active window
+//       temporarily widened to include the strip area. It must be narrowed
+//       again afterwards: left at "full panel", a later Screen::full()
+//       (e.g. on menu close) would clear the whole display instead of just
+//       its own text area (confirmed on real hardware).
+template <typename F>
+void drawOnStrip(F&& fn) {
+#ifdef DISPLAY_7INCH
+    display_->beginLayerDraw(LT7683::kStripLayerAddr, stripStride);
+    display_->setActiveWindow(0, 0, stripStride - 1, SCREEN_MAX_Y - 1);
+    fn(stripPad);
+    display_->endOverlayDraw();              // canvas back to the live panel
+    if (screen_ != nullptr) screen_->reassertRenderState();
+    display_->setActiveWindow(0, 0,
+        buttonStripVisible ? SCREEN_MAX_X - buttonStripWidth - 1 : SCREEN_MAX_X - 1,
+        SCREEN_MAX_Y - 1);
+#else
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    fn(buttonStripScreenX0);
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
+#endif
 }
 
 void showButtonStrip() {
@@ -150,8 +213,10 @@ void showButtonStrip() {
     // affected.
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
-    // Builds the strip up in kSlideSteps horizontal slices, entirely
-    // on-screen. Verified geometry (worth spelling out precisely, since
+    // 5" path (the #else branch below): builds the strip up in kSlideSteps
+    // horizontal slices, entirely on-screen. The 7" PIP-2 path shows the
+    // same thing -- source columns [0, w) at the right edge -- by just
+    // growing the PIP window. Verified geometry (worth spelling out precisely, since
     // getting this backwards once already produced a mirrored result):
     // because this always crops from SOURCE column 0 growing (see
     // below for why), EVERY already-drawn pixel's own screen X position
@@ -167,6 +232,14 @@ void showButtonStrip() {
     // avoids), (2) draw ONLY the newly-revealed slice, at the panel's
     // own right edge, via the proven MCU-write BTE path -- not the whole
     // accumulated width from scratch.
+#ifdef DISPLAY_7INCH
+    // Slide in by growing the PIP-2 window -- the status LEDs are already
+    // up to date in the strip layer (see updateStatusLed()).
+    for (int i = 1; i <= kSlideSteps; ++i) {
+        showStripPip(stripVisibleWidth(i));
+        sleep_ms(kSlideStepDelayMs);
+    }
+#else
     std::uint16_t segW[kSlideSteps];
     computeSegmentWidths(segW);
 
@@ -194,6 +267,7 @@ void showButtonStrip() {
 
     setStatusLed(display_, StatusLed::Usb, usbLedOn, buttonStripScreenX0, buttonStripHeight);
     setStatusLed(display_, StatusLed::Pil, pilLedOn, buttonStripScreenX0, buttonStripHeight);
+#endif
 
     // Now narrow the active window/text area back and let Screen reflow
     // into it.
@@ -206,7 +280,8 @@ void showButtonStrip() {
 void hideButtonStrip() {
     if (!buttonStripVisible) return;
 
-    // Verified geometry (see showButtonStrip()'s own comment for the
+    // 5" path (the #else branch below). Verified geometry (see
+    // showButtonStrip()'s own comment for the
     // full "ABCDEF" walkthrough this mirrors): the KEPT portion (source
     // columns [0, keepWidth), i.e. everything except the trailing slice
     // about to disappear) shifts RIGHT by this step's own shrink amount,
@@ -220,6 +295,14 @@ void hideButtonStrip() {
     // pixels to their correct new position.
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 
+#ifdef DISPLAY_7INCH
+    // Slide out by shrinking the PIP-2 window -- the panel underneath was
+    // never touched, so nothing needs redrawing afterwards.
+    for (int i = kSlideSteps - 1; i >= 0; --i) {
+        showStripPip(i == 0 ? 0 : stripVisibleWidth(i));
+        sleep_ms(kHideStepDelayMs);
+    }
+#else
     std::uint16_t segW[kSlideSteps];
     computeSegmentWidths(segW);
 
@@ -239,6 +322,7 @@ void hideButtonStrip() {
         accumWidth = keepWidth;
         sleep_ms(kHideStepDelayMs);
     }
+#endif
 
     // Widen the active window to the full panel, then let Screen reflow
     // into it -- full()'s own hardware clear wipes the button pixels, and
@@ -253,11 +337,15 @@ void hideButtonStrip() {
     // just occupied would be left showing stale button pixels instead of
     // the drawing. Only that strip actually needs it -- the rest of the
     // screen was never touched by the button bitmap in the first place.
+    // 5" only -- on 7" the strip is a PIP-2 overlay that never touched
+    // the panel.
+#ifndef DISPLAY_7INCH
     if (plotterview_isActive()) {
         plotterview_redrawRegion(static_cast<std::int16_t>(buttonStripScreenX0), 0,
                                  static_cast<std::int16_t>(buttonStripWidth),
                                  static_cast<std::int16_t>(buttonStripHeight));
     }
+#endif
 
     buttonStripVisible = false;
 }
@@ -270,6 +358,13 @@ void hideButtonStrip() {
 void updateStatusLed(StatusLed which, bool& cached, bool newState) {
     if (newState == cached) return;
     cached = newState;
+#ifdef DISPLAY_7INCH
+    // Always keep the strip layer current -- it's what PIP-2 shows the
+    // next time the strip slides in.
+    drawOnStrip([&](std::uint16_t x0) {
+        setStatusLed(display_, which, cached, x0, buttonStripHeight);
+    });
+#else
     if (buttonStripVisible) {
         // Same active-window reset as boardui_handleTap()/handleRelease()
         // above, for the same reason -- this runs independently of
@@ -286,6 +381,7 @@ void updateStatusLed(StatusLed which, bool& cached, bool newState) {
         // boardui_handleTap()'s own matching restore.
         display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
     }
+#endif
 }
 
 // ── Top-left-corner info box ────────────────────────────────────────────────
@@ -370,7 +466,7 @@ void showInfoBox() {
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
 
     std::snprintf(buf, sizeof(buf), "File: %s",
-                  config.filename().empty() ? "(none)" : config.filename().c_str());
+                  config.filename().empty() ? "No media" : config.filename().c_str());
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
 
     std::snprintf(buf, sizeof(buf), "Trace: %s",
@@ -704,6 +800,28 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPat
         buttonStripHeight = SCREEN_MAX_Y;
     }
 
+#ifdef DISPLAY_7INCH
+    // Copy the strip into its own PIP-2 layer once. The layer's stride
+    // must be a multiple of 4 pixels (PIP requirement), so any extra
+    // columns go on the LEFT and repeat the strip's first column -- the
+    // strip's right edge stays flush with the panel's right edge.
+    stripStride = static_cast<std::uint16_t>((buttonStripWidth + 3) & ~3);
+    stripPad = static_cast<std::uint16_t>(stripStride - buttonStripWidth);
+    std::vector<std::uint16_t> padded(static_cast<std::size_t>(stripStride) * buttonStripHeight);
+    for (std::uint16_t y = 0; y < buttonStripHeight; ++y) {
+        const std::uint16_t* src = buttonStripPixels.data() + static_cast<std::size_t>(y) * buttonStripWidth;
+        std::uint16_t* dst = padded.data() + static_cast<std::size_t>(y) * stripStride;
+        std::fill(dst, dst + stripPad, src[0]);
+        std::memcpy(dst + stripPad, src, static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
+    }
+    drawOnStrip([&](std::uint16_t x0) {
+        display_->drawBitmap565(0, 0, stripStride, buttonStripHeight, padded.data());
+        setStatusLed(display_, StatusLed::Usb, usbLedOn, x0, buttonStripHeight);
+        setStatusLed(display_, StatusLed::Pil, pilLedOn, x0, buttonStripHeight);
+    });
+    LOGF("(PIP layer, stride %u) ", stripStride);
+#endif
+
     return buttonStripWidth;
 }
 
@@ -741,6 +859,19 @@ void boardui_poll() {
     // accurate, ongoing signal instead of a boot-time snapshot.
     usb_connected = tud_mounted();
 
+    // Deferred drive switch-off (power switch / Devices menu) -- done here,
+    // in the main loop between HP-IL frames, once the drive is idle
+    if (CDrive* drive = plotterview_drive()) {
+        drive->servicePendingDisable();
+    }
+
+    // PC ejected the SD card while in "Connect to PC" mode -- back to
+    // normal mode (done inside usbMscPollHostEject()), and update the
+    // menu row if it's showing
+    if (usbMscPollHostEject()) {
+        dialog_->refreshUsbMscRow();
+    }
+
     // Live USB/PILBOX connection status, checked every kStatusCheckMs
     // regardless of whether the button strip is currently visible --
     // updateStatusLed() caches the new state either way and only touches
@@ -771,6 +902,13 @@ void boardui_poll() {
 }
 
 void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
+#ifdef DISPLAY_7INCH
+    // The view-switch splash owns the PIP overlay for its 1.5 s -- ignore
+    // taps meanwhile, so the menu, info box or device list
+    // (which all use the same overlay) can't take it over and then be
+    // hidden by the splash's own timeout. See plotterview.cpp.
+    if (plotterview_isSplashVisible()) return;
+#endif
     if (dialog_ != nullptr && dialog_->isShowingLoopbackResult()) {
         // Any touch anywhere dismisses the loopback test's own result
         // dialog -- same "any touch while it's up" pattern as
@@ -801,6 +939,29 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         showInfoBox();
     } else if (isDeviceListCornerTouch(x, y)) {
         showDeviceList();
+    } else if (!dialog_->isOpen() &&
+               plotterview_tapeHitTest(x, y) == TapeHotspot::Open) {
+        // Tape view: cassette window or OPEN button -> file picker.
+        // The button strip is needed to navigate the list, so show it too
+        // (it stays up while the menu is open).
+        MTRC_LOGF("tape hotspot OPEN (%u,%u) -> file picker", x, y);
+        dialog_->openFilePickerFromTape();
+        showButtonStrip();
+        buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+    } else if (!dialog_->isOpen() &&
+               plotterview_tapeHitTest(x, y) == TapeHotspot::Power) {
+        // Tape view: power switch -> enable/disable TFDRIVE, saved like the
+        // Devices menu does. The switch and POWER LED follow on the next
+        // plotterview_poll().
+        // Switching off waits until the drive is idle (see
+        // CDrive::servicePendingDisable(), serviced in boardui_poll()), so
+        // the switch/LED only change once it's actually off.
+        if (CDrive* drive = plotterview_drive()) {
+            const bool wanted = drive->requestEnabled(!drive->wantedEnabled());
+            config.setDeviceEnabled(drive->name(), wanted);
+            LOGF("\r\n * %s %s (power switch)", drive->name(),
+                 wanted ? "enabled" : "switching off");
+        }
     } else {
         // Only a touch actually within the button strip's own screen
         // region wakes/keeps it up -- a tap elsewhere (e.g. the left side,
@@ -830,14 +991,14 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // couldn't see what they were touching.
         if (!wasHidden && b != Button::None) {
             pressedButton = b;
-            // Reset the active window to the full panel before drawing --
-            // confirmed necessary on real hardware: showButtonStrip()
+            // 5": the active window must be reset to the full panel before
+            // drawing (drawOnStrip() does it) -- confirmed necessary on real
+            // hardware: showButtonStrip()
             // narrows the active window (to exclude the strip's own area)
             // once it finishes, so a later redraw INTO that excluded area
             // (exactly what the press-feedback shift below does) landed
             // at the wrong screen position entirely -- reported as
             // appearing on the left side of the panel -- without this.
-            display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
             // Visual feedback: redraw just this button's bitmap region
             // shifted, so it looks pressed in. The baseline/restore
             // redraws use a margin larger than the shift, sourced from the
@@ -845,16 +1006,20 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
             // rect (e.g. a shift toward the top-right sticks out past the
             // rect's top and right edges) gets cleaned up too -- not just
             // the tight rect itself.
-            redrawButtonRegion(
-                display_, buttonStripPixels.data(),
-                buttonStripWidth, buttonStripHeight,
-                buttonStripScreenX0, /*stripScreenY0=*/0, b, 0, 0,
-                kPressMargin);
-            redrawButtonRegion(
-                display_, buttonStripPixels.data(),
-                buttonStripWidth, buttonStripHeight,
-                buttonStripScreenX0, /*stripScreenY0=*/0, b,
-                kPressDx, kPressDy);
+            // drawOnStrip() also handles the active window (5") -- see its
+            // comment and the one below.
+            drawOnStrip([&](std::uint16_t x0) {
+                redrawButtonRegion(
+                    display_, buttonStripPixels.data(),
+                    buttonStripWidth, buttonStripHeight,
+                    x0, /*stripScreenY0=*/0, b, 0, 0,
+                    kPressMargin);
+                redrawButtonRegion(
+                    display_, buttonStripPixels.data(),
+                    buttonStripWidth, buttonStripHeight,
+                    x0, /*stripScreenY0=*/0, b,
+                    kPressDx, kPressDy);
+            });
             // Restore the narrowed active window (excluding the strip's
             // own area) that showButtonStrip() originally set -- the
             // reset above was only meant to be temporary, for these two
@@ -866,8 +1031,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
             // what full()'s own comment says clearActiveWindow() must
             // NOT do (confirmed on real hardware: the whole display went
             // black for several seconds on menu close, until the button
-            // strip reappeared and re-hid itself).
-            display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
+            // strip reappeared and re-hid itself). drawOnStrip() restores it.
             // The redraws above went through RA8875::drawBitmap565(), which
             // switches to graphics mode (gfxMode()) and blindly zeros
             // MWCR0 -- the same register that holds the cursor-visible
@@ -894,23 +1058,20 @@ void boardui_handleRelease() {
         pressedButton = Button::None;
         return;
     }
-    // Same active-window reset as boardui_handleTap() above, and for the
-    // same reason -- restoring the button's normal appearance here draws
-    // into the strip's own area too.
-    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     // Restore the button's bitmap to its normal position (with the same
     // margin, to clean up any overflow from the shift regardless of
     // direction).
-    redrawButtonRegion(
-        display_, buttonStripPixels.data(),
-        buttonStripWidth, buttonStripHeight,
-        buttonStripScreenX0, /*stripScreenY0=*/0, pressedButton, 0, 0,
-        kPressMargin);
+    drawOnStrip([&](std::uint16_t x0) {
+        redrawButtonRegion(
+            display_, buttonStripPixels.data(),
+            buttonStripWidth, buttonStripHeight,
+            x0, /*stripScreenY0=*/0, pressedButton, 0, 0,
+            kPressMargin);
+    });
     // Restore the narrowed active window -- see boardui_handleTap()'s own
     // matching restore for why this matters (a later Screen::full(), on
     // menu close, would otherwise clear the whole panel instead of just
-    // its own text area).
-    display_->setActiveWindow(0, 0, SCREEN_MAX_X - buttonStripWidth - 1, SCREEN_MAX_Y - 1);
+    // its own text area). drawOnStrip() restores it.
     screen_->refreshCursor();  // same MWCR0-clobber fix as on press
     pressedButton = Button::None;
 }
@@ -923,6 +1084,9 @@ void boardui_handleSwipe(bool forward) {
         return;
     }
     MTRC_LOGF("swipe forward=%d -> cycling display output", forward);
+    // The info box shares the PIP overlay with the switch splash -- close it
+    // first, so its auto-hide timer can't later remove the splash early.
+    hideInfoBox();
     plotterview_cycleOutput(forward);
 }
 

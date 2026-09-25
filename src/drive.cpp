@@ -63,10 +63,17 @@ void CDrive::ifc(void)
 // Do any pre-processing if needed
 void CDrive::preProc(IL_CMD_t cmd)
 {
+    // Time of the last real HP-IL message frame -- see servicePendingDisable().
+    // IDY frames (0x600-0x7FF) are left out: the controller keeps sending
+    // them for service-request polling even when nothing is going on, so
+    // counting them meant the loop never looked quiet.
+    if( (cmd & 0x600) != 0x600 )
+        lastFrame_ = get_absolute_time();
     if( ddl == 5 ) {
         //Busy formatting
         if( check() ) {
             LOGF("$$$ Formatting ... (%d)\r\n", tape->tell());
+            markBusy();
             tape->write(buffer[0]);
             if( tape->tell() >= TAPE_SIZE ) {
                 end = true;
@@ -317,6 +324,7 @@ void CDrive::readblock()
     if( check() ) {
         // Read BUF_SIZE bytes from tape
         LOGF("$$$ Read block ...\r\n");
+        markBusy();
         tape->read(buffer[0]);
     }
 }
@@ -325,6 +333,7 @@ void CDrive::writeblock()
     if( check() ) {
         // Write buffer[0] to tape
         LOGF("$$$ Write block ...\r\n");
+        markBusy();
         tape->write(buffer[0]);
         // ... and flush!
         // tape.flush();
@@ -333,6 +342,13 @@ void CDrive::writeblock()
 
 bool CDrive::check()
 {
+    if( ejected_ ) {
+        // Lid open (file picker showing) -- no tape, whatever is selected
+        if( tape->ok() )
+            tape->close();
+        sst = DRV_NO_TAPE_ERROR;
+        return false;
+    }
     if( !tape->ok() ) {
         if( sdCardOK() ) {
             if( tape->media() && *tape->media() ) {
@@ -340,6 +356,7 @@ bool CDrive::check()
                 tud_cdc_n_write_flush(0);
                 tud_task();
                 //tape->select(share_Tape);
+                markBusy();
                 tape->open();
                 size(tape->mediaSize());
                 int i = findMedia(size());

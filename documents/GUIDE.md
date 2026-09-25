@@ -175,19 +175,26 @@ mode, font, columns) and the device list.
 
 ## 4. Preparing the SD card
 
-Format a micro-SD card as FAT32 or exFAT and copy these files to the root. Both work; cards larger than 32 GB are normally delivered as exFAT. To reformat on Ubuntu (this erases the card):
+Format a micro-SD card as **FAT32** or **exFAT** and copy these files to
+the root. Both work; cards larger than 32 GB are normally delivered as exFAT.
+To reformat on Ubuntu (this erases the card):
 
 ```bash
 sudo apt install exfatprogs
 lsblk                              # find the card, e.g. /dev/sdb1
 sudo mkfs.exfat -n HIPI /dev/sdb1  # or: sudo mkfs.vfat -F 32 -n HIPI /dev/sdb1
 ```
+
 Files to copy:
 
 | File            | Required | Purpose |
 |-----------------|----------|---------|
 | `buttons.bmp`   | **Yes**  | Artwork for the touch-button strip (from `resources/`). Without it there are no buttons and no menu. |
 | `logo.bmp`      | No       | Splash-screen logo (from `resources/`). Text-only splash if missing. |
+| `hp82161a.bmp`  | No       | 7" panel only: picture for the **Tape** view (from `resources/`). The view is left out if missing. |
+| `tape-in.bmp`   | No       | 7" panel only: the cassette shown in the Tape view's lid window when a file is selected (from `resources/`). |
+| `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open (from `resources/`). |
+| `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its ON position, for the Tape view (from `resources/`). |
 | `*.dat`         | No       | HP82161 cassette/drive images, selectable from the menu. |
 | `CONFIG.TXT`    | No       | Created automatically with defaults on first boot. |
 
@@ -263,7 +270,7 @@ commands sent by the HP-41.
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
 | Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), enabled state |
 | Vertical swipe              | Scroll the device list (when it is open) |
-| Horizontal swipe            | Switch view between **Display** (text) and **Plotter** |
+| Horizontal swipe            | Cycle the view: **Display** (text) → **Plotter** → **Tape** (7" only), and back in the other direction |
 
 The device list performs a live AAD/SAI/SDI enumeration of the internal
 devices. Avoid opening it while a controller is in the middle of a transfer.
@@ -303,14 +310,18 @@ Main menu
 └── Display
     ├── Display            Show the text display
     ├── Plotter            Show the plotter canvas
+    ├── Tape               Show the HP82161A tape drive (7" panel only)
     ├── Clear plotter      Erase the plotter drawing
     └── Clear screen       Erase the text display
 ```
 
 ### 6.1 Config
 
-- **Select file** — lists all `.dat` files in the SD root. The current file
-  is pre-selected. After confirmation the drive (`TFDRIVE`) switches to the
+- **Select file** — lists all `.dat` files in the SD root, with **No media**
+  as the first row. The current file is pre-selected. Choosing **No media**
+  deselects the file: the drive reports that no tape is inserted, the Tape
+  view shows the drive without a cassette, and the info box and boot
+  summary show "No media". After confirmation the drive (`TFDRIVE`) switches to the
   new image and the name is saved to `CONFIG.TXT`.
 - **Trace** — controls logging on the USB debug port:
   - *Off* — no frame log.
@@ -348,9 +359,24 @@ unplugged. The setting is saved per device name.
 
 ### 6.4 Display
 
-Chooses which output fills the screen: the HP82163-style text display, or
-the HP7470A-style plotter canvas (`TFPLOT`). Both keep receiving data in the
-background regardless of which is shown.
+Chooses which output fills the screen: the HP82163-style text display, the
+HP7470A-style plotter canvas (`TFPLOT`), or (7" panel only) the Tape view.
+Display and Plotter keep receiving data in the background regardless of
+which is shown.
+
+**Tape view.** Shows a picture of an HP82161A cassette drive. It is loaded
+from `hp82161a.bmp` once at boot into a spare display layer, so switching to it
+is instant. Tap the **cassette window** or the **OPEN** button to go
+straight to the `.dat` file picker. Choosing a file, or pressing **X**,
+returns to the Tape view. When a `.dat` file is selected, a cassette with
+the file name on its label is seen through the lid window; while the file
+picker is open (from the Tape view or from **Config**) the lid is shown
+open with the drive empty. The **POWER** LED is lit while `TFDRIVE` is
+enabled (**Devices** menu), and **BUSY** lights up while the drive reads,
+writes or formats its file -- not for ordinary HP-IL traffic. The power
+switch shows ON while `TFDRIVE` is enabled; tapping it enables/disables
+the drive, exactly like the **Devices** menu (and saved the same way). The view is not available on the 5" panel, which has no spare
+display memory.
 
 ---
 
@@ -695,7 +721,8 @@ To add your own graphical device:
 2. Write a view module (e.g. `src/myview.cpp`) that registers the
    callbacks and draws through `DisplayDriver`.
 3. Add a value to `DisplayOutput` in `include/plotterview.h` (and update
-   `kDisplayOutputCount`), and handle it in `plotterview_setOutput()` /
+   `kDisplayOutputCount`; extend `plotterview_isAvailable()` if the view
+   isn't available on every board), and handle it in `plotterview_setOutput()` /
    `plotterview_cycleOutput()`, so that swipe and the **Display** menu can
    select it. Add a menu label in
    `kDisplayMenuLabels` in `include/uidialog.hpp`.

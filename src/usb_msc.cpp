@@ -32,6 +32,13 @@ extern std::vector<CDevice*> devices;
 // as (temporarily) not present, something it already handles correctly.
 static bool usbMscActive_ = false;
 
+// Set from TinyUSB callbacks (inside tud_task()) when the PC ejects the
+// drive or the USB connection goes away; handled later from the main loop
+// by usbMscPollHostEject(), which also lets the UI update the menu.
+// Leaving MSC mode means remounting the SD card, which is better not done
+// in the middle of TinyUSB's own SCSI command handling.
+static volatile bool hostEjectPending_ = false;
+
 bool usbMscModeActive() { return usbMscActive_; }
 
 bool enterUsbMscMode() {
@@ -68,6 +75,15 @@ bool enterUsbMscMode() {
     usbMscActive_ = true;
     LOGF("\r\n * USB MSC: entered \"Connect to PC\" mode -- SD card now "
          "available as a USB drive, HP-IL drive access paused");
+    return true;
+}
+
+bool usbMscPollHostEject() {
+    if (!hostEjectPending_) return false;
+    hostEjectPending_ = false;
+    if (!usbMscActive_) return false;
+    LOGF("\r\n * USB MSC: ejected by the PC");
+    exitUsbMscMode();
     return true;
 }
 
@@ -136,15 +152,23 @@ bool tud_msc_is_writable_cb(uint8_t lun) {
 }
 
 bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject) {
-    (void)lun; (void)power_condition; (void)start;
-    // The host explicitly "ejecting" the drive (e.g. the PC's own "Safely
-    // Remove Hardware") is the cleanest possible trigger to leave MSC
-    // mode automatically, without the user needing to separately dig
-    // back into this project's own menu.
-    if (load_eject && !start) {
-        exitUsbMscMode();
+    (void)lun; (void)power_condition; (void)load_eject;
+    // The host "ejecting" the drive is the cleanest possible trigger to
+    // leave MSC mode automatically, without the user needing to separately
+    // dig back into this project's own menu. Any STOP counts, not only
+    // with LoEj set: Linux file managers' "Eject"/"Safely remove" (udisks
+    // power-off) send START STOP UNIT with START=0 but LoEj=0, whereas
+    // eject(1) and Windows set LoEj=1.
+    if (!start && usbMscActive_) {
+        hostEjectPending_ = true;
     }
     return true;
+}
+
+// USB connection gone (bus reset/unplug) while in MSC mode -- the PC
+// can't be using the card any more, so go back to normal mode as well.
+void tud_umount_cb(void) {
+    if (usbMscActive_) hostEjectPending_ = true;
 }
 
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void* buffer,
