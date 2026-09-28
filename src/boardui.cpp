@@ -22,6 +22,7 @@
 #include "hipi.h"      // DeviceInfo, hipi_enumerateDevices() -- "Devices" dialog
 #include "hpil.h"      // hpilDevices
 #include "drive.h"     // CDrive -- Tape view power switch
+#include "screendump.h"
 #include "pilbox.h"    // pilbox, CPilBox::isConnected()
 #include "ui_buttons.hpp"
 #include "pico/time.h"
@@ -863,6 +864,21 @@ void boardui_poll() {
     // in the main loop between HP-IL frames, once the drive is idle
     if (CDrive* drive = plotterview_drive()) {
         drive->servicePendingDisable();
+        drive->servicePowerUp();        // STANDBY wake-up completes here if the loop is quiet
+    }
+
+    // Screen dump requested from the HP-41 ("ESC # D" / "ESC # M") --
+    // taken here, outside HP-IL frame handling. The result message box
+    // uses the same PIP window as the menu, so it's only shown (and only
+    // logged otherwise) when no menu is open.
+    bool withOverlays = false;
+    if (screendump_takePending(withOverlays)) {
+        std::string msg;
+        const bool ok = screendump_save(display_, msg, withOverlays);
+        if (!ok) LOGF("\r\n * Screendump failed: %s", msg.c_str());
+        if (!dialog_->isOpen()) {
+            plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+        }
     }
 
     // PC ejected the SD card while in "Connect to PC" mode -- back to
@@ -949,18 +965,37 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         showButtonStrip();
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
     } else if (!dialog_->isOpen() &&
-               plotterview_tapeHitTest(x, y) == TapeHotspot::Power) {
-        // Tape view: power switch -> enable/disable TFDRIVE, saved like the
-        // Devices menu does. The switch and POWER LED follow on the next
-        // plotterview_poll().
-        // Switching off waits until the drive is idle (see
-        // CDrive::servicePendingDisable(), serviced in boardui_poll()), so
-        // the switch/LED only change once it's actually off.
+               plotterview_tapeHitTest(x, y) == TapeHotspot::Rewind) {
+        // Tape view: REWIND button -- ignored while the drive is busy,
+        // powered down or empty (see CDrive::manualRewind())
         if (CDrive* drive = plotterview_drive()) {
-            const bool wanted = drive->requestEnabled(!drive->wantedEnabled());
-            config.setDeviceEnabled(drive->name(), wanted);
-            LOGF("\r\n * %s %s (power switch)", drive->name(),
-                 wanted ? "enabled" : "switching off");
+            if (!drive->manualRewind()) {
+                MTRC_LOGF("REWIND ignored (BUSY lit, off or no tape)");
+            }
+        }
+    } else if (!dialog_->isOpen() &&
+               plotterview_tapeHitTest(x, y) == TapeHotspot::Power) {
+        // Tape view: power switch -> TFDRIVE's OFF/STANDBY/ON, saved like
+        // the Devices menu does. The switch and POWER LED follow on the
+        // next plotterview_poll().
+        // The switch picture moves at once; switching OFF itself waits
+        // until the drive is idle (CDrive::servicePendingDisable(),
+        // serviced in boardui_poll()), and the POWER LED goes out then.
+        // Each tap moves the switch one step: OFF -> STANDBY -> ON ->
+        // STANDBY -> OFF -> ...
+        if (CDrive* drive = plotterview_drive()) {
+            static bool towardsOn = true;       // direction through STANDBY
+            DrivePower next;
+            switch (drive->powerMode()) {
+                case DrivePower::Off: next = DrivePower::Standby; towardsOn = true;  break;
+                case DrivePower::On:  next = DrivePower::Standby; towardsOn = false; break;
+                default:              next = towardsOn ? DrivePower::On : DrivePower::Off; break;
+            }
+            drive->setPowerMode(next);
+            config.setDeviceEnabled(drive->name(), next != DrivePower::Off);
+            if (next != DrivePower::Off) {
+                config.setDriveStandby(next == DrivePower::Standby);
+            }
         }
     } else {
         // Only a touch actually within the button strip's own screen

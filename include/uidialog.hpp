@@ -8,12 +8,15 @@
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
-#include "usb_msc.h"
-#include "drive.h"        // CDrive -- deferred switch-off in the Devices menu      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
+#include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
+#include "drive.h"        // CDrive -- deferred switch-off in the Devices menu
+#include "screendump.h"   // Display -> Screendump
+#include "lif_info.hpp"   // file picker: contents of a LIF .dat image
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
 #include "i2c_device.h"       // CI2CBus::scan(), for "Scan I2C"
 #include "touch.h"            // touch_i2c, the bus "Scan I2C" scans
 #include <vector>
+#include <algorithm>
 #include <string>
 #include <cstring>
 #include <cstdio>
@@ -487,7 +490,20 @@ public:
                     if (pickerFromTape_) close();
                     else                 openConfigMenu();
                 }
-                if (b == Button::X)  openFilePicker();
+                if (b == Button::Down && !pendingFile_.empty()) openLifInfo();
+                if (b == Button::X)  returnToFilePicker();
+                break;
+
+            case State::LifInfo:
+                // Up/Down: one line, Shift+Up/Down: one page
+                if (b == Button::Up)   scrollLifInfo(shifted ? -kLifInfoRows : -1);
+                if (b == Button::Down) scrollLifInfo(shifted ?  kLifInfoRows :  1);
+                if (b == Button::Ok) {                  // OK: choose this file
+                    applyFile(pendingFile_);
+                    if (pickerFromTape_) close();
+                    else                 openConfigMenu();
+                }
+                if (b == Button::X)  returnToFilePicker();
                 break;
 
             case State::TraceMenu:
@@ -589,7 +605,7 @@ private:
         Closed, MainMenu, ConfigMenu, SettingsMenu,
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
         FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
-        LoopbackConfirm, LoopbackResult, I2CScanResult
+        LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo
     };
 
     static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
@@ -636,20 +652,25 @@ private:
     // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
     // not a pickable state, so it doesn't need a selected_-tracked value.
 #ifdef DISPLAY_7INCH
-    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Tape", "Clear plotter", "Clear screen" };
-    static constexpr int kDisplayMenuCount = 5;
-    static constexpr int kDisplayRowTape = 2;
+    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Tape", "Clear plotter", "Clear screen", "Screendump" };
+    static constexpr int kDisplayMenuCount = 6;
+    static constexpr int kDisplayRowTape         = 2;
+    static constexpr int kDisplayRowClearPlotter = 3;
+    static constexpr int kDisplayRowClearScreen  = 4;
+    static constexpr int kDisplayRowScreendump   = 5;
 #else
-    // No Tape view on the 5" panel (no spare display layer -- see plotterview.cpp)
+    // No Tape view on the 5" panel (no spare display layer -- see
+    // plotterview.cpp), and no screendump (no read-back in the RA8875 driver)
     static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Clear plotter", "Clear screen" };
     static constexpr int kDisplayMenuCount = 4;
-    static constexpr int kDisplayRowTape = -1;
+    static constexpr int kDisplayRowTape         = -1;
+    static constexpr int kDisplayRowClearPlotter = 2;
+    static constexpr int kDisplayRowClearScreen  = 3;
+    static constexpr int kDisplayRowScreendump   = -1;
 #endif
     // Row indices shared by openDisplayMenu()/enterDisplayMenuItem()
     static constexpr int kDisplayRowDisplay      = 0;
     static constexpr int kDisplayRowPlotter      = 1;
-    static constexpr int kDisplayRowClearPlotter = kDisplayMenuCount - 2;
-    static constexpr int kDisplayRowClearScreen  = kDisplayMenuCount - 1;
 
     void openMainMenu() {
 #ifndef DISPLAY_7INCH
@@ -710,6 +731,21 @@ private:
             close();
         } else if (selected_ == kDisplayRowClearPlotter) {
             withMainCanvas([&]{ plotterview_clearPlotter(); });
+            close();
+        } else if (selected_ == kDisplayRowScreendump) {
+            // Save what the panel shows. On the 7" panel the menu is a PIP
+            // overlay, not part of the panel's own image, so it doesn't
+            // end up in the dump. The result is shown for a moment in the
+            // switch-splash box, which close() leaves up.
+            // Saving takes a few seconds, so say so at once: the box
+            // replaces the menu straight away (it's a PIP overlay too, so
+            // it isn't part of the dump either), then shows the result.
+            withMainCanvas([&]{
+                plotterview_showMessage("Saving screendump...");
+                std::string msg;
+                const bool ok = screendump_save(d_, msg);
+                plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+            });
             close();
         } else {
             // Clear screen -- immediate action, like "Clear plotter"
@@ -1285,7 +1321,10 @@ private:
             // Switching a drive off is deferred until it's idle -- pulling
             // it out of the loop mid-transfer hangs HP-IL
             CDrive* drive = static_cast<CDrive*>(dev);
-            drive->requestEnabled(!drive->wantedEnabled());
+            // Same as the power switch: OFF, or back to its last position
+            // (STANDBY or ON)
+            drive->setPowerMode(drive->wantedEnabled() ? DrivePower::Off
+                                                       : drive->lastOnMode());
         } else {
             dev->toggleEnabled();
         }
@@ -1326,6 +1365,85 @@ private:
         d_->txtWrite(pendingFile_.empty() ? kNoMediaLabel : pendingFile_.c_str());
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
         d_->txtWrite("OK = yes    X = cancel");
+        if (!pendingFile_.empty()) {
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 3 * MenuFrame::RowPitch);
+            d_->txtWrite("v  = show contents");
+        }
+    }
+
+    // ── LIF contents (volume header + directory) of pendingFile_ ─────────
+    // Smaller font than the other menus (8x16, 20 px rows) so a directory
+    // listing fits: kLifInfoRows lines of up to ~65 characters.
+    static constexpr int kLifInfoRows  = (MenuFrame::H - 40) / 20;
+    static constexpr int kLifInfoPitch = 20;
+
+    void openLifInfo() {
+        lifLines_.clear();
+        if (usbMscModeActive()) {
+            lifLines_.push_back("SD card in use by PC");
+        } else {
+            lifDescribe(pendingFile_.c_str(), lifLines_);
+        }
+        lifScroll_ = 0;
+        state_ = State::LifInfo;
+        drawBox();
+        drawLifInfo();
+    }
+
+    void scrollLifInfo(int delta) {
+        const int maxOffset = std::max(0, static_cast<int>(lifLines_.size()) - kLifInfoRows);
+        const int next = std::clamp(lifScroll_ + delta, 0, maxOffset);
+        if (next == lifScroll_) return;
+        lifScroll_ = next;
+        drawLifInfo();
+    }
+
+    void drawLifInfo() {
+        d_->selectBuiltinFont();
+        d_->txtSize(0);
+        for (int row = 0; row < kLifInfoRows; ++row) {
+            const int y = MenuFrame::Y + 20 + row * kLifInfoPitch;
+            d_->fillRect(MenuFrame::X + 20, y, MenuFrame::W - 60, kLifInfoPitch, 0x0000);
+            const std::size_t i = static_cast<std::size_t>(lifScroll_ + row);
+            if (i >= lifLines_.size()) continue;
+            // fillRect() changes the foreground colour -- (re)set the text
+            // colour after it, or the text is drawn black on black
+            d_->txtColor(0xFFFF, 0x0000);
+            d_->txtSetCursor(MenuFrame::X + 20, y + 2);
+            d_->txtWrite(lifLines_[i].c_str());
+        }
+        // Scroll marks, in the same place as the other lists'
+        const int indicatorX = MenuFrame::X + MenuFrame::W - 34;
+        const int topY = MenuFrame::Y + 6;
+        const int bottomY = MenuFrame::Y + MenuFrame::H - 29;
+        d_->fillRect(indicatorX, topY, 24, 20, 0x0000);
+        d_->fillRect(indicatorX, bottomY, 24, 20, 0x0000);
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtColor(0xFFFF, 0x0000);
+        if (lifScroll_ > 0) {
+            d_->txtSetCursor(indicatorX, topY);
+            d_->txtWrite("^");
+        }
+        if (lifScroll_ + kLifInfoRows < static_cast<int>(lifLines_.size())) {
+            d_->txtSetCursor(indicatorX, bottomY);
+            d_->txtWrite("v");
+        }
+    }
+
+    // Back to the file list with the file just looked at still selected
+    void returnToFilePicker() {
+        const std::string keep = pendingFile_;
+        openFilePicker();
+        for (std::size_t i = 0; i < files_.size(); ++i) {
+            if (files_[i] == keep) {
+                selected_ = static_cast<int>(i);
+                if (selected_ < fileScrollOffset_ || selected_ >= fileScrollOffset_ + kMaxFilesShown) {
+                    fileScrollOffset_ = std::max(0, selected_ - kMaxFilesShown + 1);
+                }
+                drawFileList();
+                break;
+            }
+        }
     }
 
     void close() {
@@ -1552,6 +1670,8 @@ private:
                 break;
             case State::ConfirmFile:
                 break;
+            case State::LifInfo:
+                break;
             case State::LoopbackConfirm:
                 break;
             case State::LoopbackResult:
@@ -1573,6 +1693,8 @@ private:
     int fileScrollOffset_ = 0;
     int deviceScrollOffset_ = 0;
     std::string lastAppliedFile_;
+    std::vector<std::string> lifLines_;   // LifInfo: description lines
+    int lifScroll_ = 0;                   // LifInfo: first line shown
 
     // The file picker's first row is an empty name, shown as "No media":
     // choosing it deselects the drive's file (drive reports no tape).

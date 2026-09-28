@@ -84,6 +84,8 @@ void logBoth(const char* fmt, ...) {
 uint8_t hpilDevices = 0;
 
 // Add devices to the HP-IL loop here
+static CDrive* driveDev = nullptr;   // TFDRIVE, for its power switch
+
 void hipi_init()
 {
     cassette = new CTapeSD(config.filename().c_str()); // Uses SD-card for file storage
@@ -101,6 +103,7 @@ void hipi_init()
     devices.push_back(videoDisplay);
     {
         CDrive* drive = new CDrive("TFDRIVE", cassette);
+        driveDev = drive;
         devices.push_back(drive);
         hipi::plotterview_setDrive(drive);   // POWER/BUSY LEDs in the Tape view
         // No tape while the file picker is open (lid open)
@@ -151,6 +154,12 @@ void hipi_init()
     for (CDevice* dev : devices) {
         dev->setEnabled(config.isDeviceEnabled(dev->name()));
     }
+    // TFDRIVE's OFF-STANDBY-ON switch: Off = disabled above, the config's
+    // drive_standby flag tells Standby from On
+    if (driveDev != nullptr) {
+        const DrivePower onMode = config.driveStandby() ? DrivePower::Standby : DrivePower::On;
+        driveDev->initPowerMode(driveDev->enabled() ? onMode : DrivePower::Off, onMode);
+    }
 }
 
 // See hipi.h for the full rationale (shared by hipi_test()'s boot-time
@@ -160,7 +169,8 @@ std::vector<DeviceInfo> hipi_enumerateDevices() {
  
     auto sendAll = [](uint32_t frame) -> uint32_t {
         for (CDevice* dev : devices) {
-            frame = dev->hpil(static_cast<IL_CMD_t>(frame));
+            const IL_CMD_t r = dev->hpil(static_cast<IL_CMD_t>(frame));
+            if (r != IL_NO_FRAME) frame = r;   // absorbed: pass it on anyway here
         }
         return frame;
     };
@@ -502,18 +512,32 @@ bool hipi_loop(HpIlLoop& loop) {
         led_on(HPIL_ACT_LED);
         // Got a frame, send to all devices in the loop
         preTrace(rx_frame);
+        bool absorbed = false;
         for (CDevice* dev : devices) {
             // Check if device is enabled ...
             if( dev->enabled() ) {
                 // Let the device handle the frame
                 IL_CMD_t rtn = dev->hpil(rx_frame);
+                if( rtn == IL_NO_FRAME ) {
+                    // Absorbed (see IL_NO_FRAME): the loop is interrupted
+                    // here -- later devices don't see it, nothing is sent
+                    absorbed = true;
+                    break;
+                }
                 doTrace(dev, rx_frame, rtn);
                 rx_frame = rtn;
+            } else {
+                // Not on the loop -- only notes re-addressing (see offLoopFrame())
+                dev->offLoopFrame(rx_frame);
             }
         }
-        postTrace(rx_frame);
-        // Send the final frame back to the HP-IL loop using the PIO interface
-        loop.sendFrame(rx_frame);
+        if( absorbed ) {
+            TRC_LOGF("\r\n\t   <<< frame absorbed (device powering up)");
+        } else {
+            postTrace(rx_frame);
+            // Send the final frame back to the HP-IL loop using the PIO interface
+            loop.sendFrame(rx_frame);
+        }
         // Turn off HPIL-active led
         led_off(HPIL_ACT_LED);
         return true;    // Handled a frame

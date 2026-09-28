@@ -170,7 +170,10 @@ const char* outputName(DisplayOutput mode) {
     return "?";
 }
 
-void showSwitchSplash(DisplayOutput mode) {
+// The yellow box used for the view-switch splash and for short messages
+// (plotterview_showMessage()): `text` centred at the given built-in font
+// scale, shown for `ms` -- plotterview_poll() removes it.
+void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms) {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 #ifdef DISPLAY_7INCH
     display_->beginOverlayDraw();        // draw into the PIP layer
@@ -178,32 +181,33 @@ void showSwitchSplash(DisplayOutput mode) {
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
 #endif
 
-    constexpr int splashW = 300, splashH = 90;   // W: multiple of 4 (PIP)
+    // RA8875/LT7683 hardware font: 8px base glyph width, scaling to
+    // 8*(size+1) per the project's own established convention (see
+    // MenuFrame's "16px/char at scale 1" comment, i.e. 8*(1+1)).
+    const int charW = 8 * (scale + 1);
+    const int charH = 16 * (scale + 1);
+    const int textW = static_cast<int>(std::strlen(text)) * charW;
+    // Box: at least 300 wide, wider for long messages; W a multiple of 4
+    const int splashW = std::min((std::max(300, textW + 48) + 3) & ~3, (SCREEN_MAX_X - 32) & ~3);
+    const int splashH = charH + 42;
     // X rounded down to a multiple of 4 -- showPipOverlay() aligns x/w to
     // 4 pixels, so the box must be aligned too, or the PIP window would
     // show a few columns of whatever else is in the menu layer.
-    constexpr int splashX = ((SCREEN_MAX_X - splashW) / 2) & ~3;
-    constexpr int splashY = (SCREEN_MAX_Y - splashH) / 2;
+    const int splashX = ((SCREEN_MAX_X - splashW) / 2) & ~3;
+    const int splashY = (SCREEN_MAX_Y - splashH) / 2;
     // Same yellow used for the menu box (see uidialog.hpp's MenuFrame) --
     // not reused directly to avoid a circular include (uidialog.hpp
     // already includes plotterview.h for DisplayOutput).
     display_->fillRect(splashX, splashY, splashW, splashH, 0xEDC0);
     display_->rect(splashX, splashY, splashW, splashH, 0xFFFF);
 
-    const char* name = outputName(mode);
     display_->txtColor(0x0000, 0xEDC0);  // black text on the yellow box
-    display_->txtSize(2);
+    display_->txtSize(scale);
     // Always use the chip's built-in CGROM font here, never the custom
     // hp82163_font.hpp glyphs -- same rule as every menu dialog ...
     display_->selectBuiltinFont();
-    // RA8875 hardware font: 8px base glyph width, scaling to 8*(size+1)
-    // per the project's own established convention (see MenuFrame's
-    // "16px/char at scale 1" comment, i.e. 8*(1+1)).
-    const int charW = 8 * (2 + 1);
-    const int charH = 16 * (2 + 1);
-    const int textW = static_cast<int>(std::strlen(name)) * charW;
     display_->txtSetCursor(splashX + (splashW - textW) / 2, splashY + (splashH - charH) / 2);
-    display_->txtWrite(name);
+    display_->txtWrite(text);
 
 #ifdef DISPLAY_7INCH
     display_->endOverlayDraw();          // canvas back to the live panel
@@ -211,7 +215,11 @@ void showSwitchSplash(DisplayOutput mode) {
     display_->showPipOverlay(splashX, splashY, splashW, splashH);
 #endif
     splashVisible_ = true;
-    splashHideDeadline_ = make_timeout_time_ms(kSplashMs);
+    splashHideDeadline_ = make_timeout_time_ms(ms);
+}
+
+void showSwitchSplash(DisplayOutput mode) {
+    showSplashBox(outputName(mode), 2, kSplashMs);
 }
 
 // ─── Tape view (7" panel only) ──────────────────────────────────────────
@@ -239,6 +247,7 @@ constexpr TapeHotspotRect kTapeHotspots[] = {
     { TapeHotspot::Open, 535, 145, 757, 278 },   // cassette window
     { TapeHotspot::Open, 668, 448, 745, 525 },   // OPEN button + its label
     { TapeHotspot::Power, 112, 452, 208, 500 },  // OFF-STANDBY-ON switch
+    { TapeHotspot::Rewind, 540, 448, 612, 525 }, // REWIND button + its label
 };
 
 #ifdef DISPLAY_7INCH
@@ -311,12 +320,32 @@ constexpr std::int16_t kLedSize = 40;
 struct LedSprite { std::int16_t x, y, w, h, srcX; };   // screen rect, column in leds.bmp
 constexpr LedSprite kPowerLed {257, 455, 40, 40,  0};
 constexpr LedSprite kBusyLed  {454, 455, 40, 40, 40};
-constexpr LedSprite kSwitchOn {120, 460, 80, 32, 80};
-[[maybe_unused]] bool switchSpriteLoaded_ = false;  // leds.bmp wide enough for the switch (unused on 5")
+constexpr LedSprite kSwitchOn      {120, 460, 80, 32,  80};
+constexpr LedSprite kSwitchStandby {120, 460, 80, 32, 160};
+[[maybe_unused]] bool switchSpriteLoaded_ = false;   // leds.bmp has the ON switch (unused on 5")
+[[maybe_unused]] bool standbySpriteLoaded_ = false;  // ... and the STANDBY switch
+DrivePower switchShown_ = DrivePower::Off;           // switch position currently drawn
 bool ledsLoaded_ = false;
 [[maybe_unused]] std::uint16_t ledsStride_ = 0;  // (unused on 5")
 bool powerLit_ = false, busyLit_ = false;
 CDrive* drive_ = nullptr;
+
+// Spinning reels: reels.bmp holds kReelFrames frames of each reel hub
+// (38x38, cut out of tape-in.bmp and rotated in 15-degree steps -- the hub
+// has six holes, so four frames make a seamless 60-degree cycle), one row
+// per hub. While the drive is busy (reading, writing, seeking) and the
+// cassette is shown, the frames are cycled; frame 0 is the picture itself.
+constexpr const char* kReelsBmpPath = "reels.bmp";
+constexpr std::int16_t kReelBox = 38;
+constexpr int kReelFrames = 4;
+constexpr std::uint32_t kReelFrameMs = 60;
+constexpr std::uint32_t kReelRewindFrameMs = 25;   // rewind runs ~3x faster
+struct ReelPos { std::int16_t x, y; };               // box position in tape-in.bmp
+constexpr ReelPos kReels[2] = { {17, 38}, {143, 38} };
+bool reelsLoaded_ = false;
+[[maybe_unused]] std::uint16_t reelsStride_ = 0;    // (unused on 5")
+int reelFrame_ = 0;
+absolute_time_t reelNext_ = nil_time;
 
 bool cassetteLoaded_ = false;
 std::uint16_t cassetteW_ = 0, cassetteH_ = 0;
@@ -399,13 +428,13 @@ void loadLidOpen() {
 // region x/y/w/h onto the panel.
 void overlayPatch(std::uint32_t srcAddr, std::uint16_t srcStride,
                   int px, int py, int pw, int ph,
-                  int x, int y, int w, int h, int srcX0 = 0) {
+                  int x, int y, int w, int h, int srcX0 = 0, int srcY0 = 0) {
     const int ix0 = std::max(x, px), iy0 = std::max(y, py);
     const int ix1 = std::min(x + w, px + pw), iy1 = std::min(y + h, py + ph);
     if (ix1 <= ix0 || iy1 <= iy0) return;
     display_->copyLayerRegion(srcAddr, srcStride,
                               static_cast<std::int16_t>(srcX0 + ix0 - px),
-                              static_cast<std::int16_t>(iy0 - py),
+                              static_cast<std::int16_t>(srcY0 + iy0 - py),
                               /*dstAddr=*/0, SCREEN_MAX_X,
                               static_cast<std::int16_t>(ix0),
                               static_cast<std::int16_t>(iy0),
@@ -434,6 +463,35 @@ void loadLeds() {
     screen_->reassertRenderState();
     ledsStride_ = stride;
     switchSpriteLoaded_ = ledsLoaded_ && w >= kSwitchOn.srcX + kSwitchOn.w && h >= kSwitchOn.h;
+    standbySpriteLoaded_ = ledsLoaded_ && w >= kSwitchStandby.srcX + kSwitchStandby.w &&
+                           h >= kSwitchStandby.h;
+    LOGF("\r\n\t* %s %ux%u: LEDs %s, switch ON %s, switch STANDBY %s", kLedsBmpPath, w, h,
+         ledsLoaded_ ? "ok" : "FAILED",
+         switchSpriteLoaded_ ? "ok" : "missing",
+         standbySpriteLoaded_ ? "ok" : "missing (leds.bmp older than 240 px wide?)");
+}
+
+void loadReels() {
+    std::uint16_t w = 0, h = 0;
+    if (!peekBmpDimensions(kReelsBmpPath, w, h)) {
+        LOGF("\r\n\t* %s not found -- no reel animation", kReelsBmpPath);
+        return;
+    }
+    const std::uint16_t stride = static_cast<std::uint16_t>((w + 3) & ~3);
+    if (w < kReelFrames * kReelBox || h < 2 * kReelBox ||
+        static_cast<std::uint32_t>(stride) * h * 2 > LT7683::kReelsMaxBytes) {
+        LOGF("\r\n\t* %s is %ux%u, expected %ux%u -- no reel animation",
+             kReelsBmpPath, w, h, kReelFrames * kReelBox, 2 * kReelBox);
+        return;
+    }
+    {
+        LayerDrawScope scope(LT7683::kReelsAddr, stride);
+        display_->setActiveWindow(0, 0, stride - 1, SCREEN_MAX_Y - 1);
+        reelsLoaded_ = drawBmpAt(display_, kReelsBmpPath, 0, 0);
+    }
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    screen_->reassertRenderState();
+    reelsStride_ = stride;
 }
 
 // Rebuilds the shown cassette: fresh copy of the picture + file name
@@ -502,11 +560,24 @@ void drawTapeRegion(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t
         overlayPatch(LT7683::kCassetteLabelAddr, SCREEN_MAX_X,
                      tapeX_ + kCassetteX, tapeY_ + kCassetteY, cassetteW_, cassetteH_,
                      x, y, w, h);
+        // Reels at their current animation angle (frame 0 = the picture)
+        if (reelsLoaded_ && reelFrame_ != 0) {
+            for (int i = 0; i < 2; ++i) {
+                overlayPatch(LT7683::kReelsAddr, reelsStride_,
+                             tapeX_ + kCassetteX + kReels[i].x,
+                             tapeY_ + kCassetteY + kReels[i].y, kReelBox, kReelBox,
+                             x, y, w, h, reelFrame_ * kReelBox, i * kReelBox);
+            }
+        }
     }
     if (ledsLoaded_) {
+        // Switch: OFF is the photo itself; ON and STANDBY are sprites
         for (const auto& [led, lit] : {std::pair{kPowerLed, powerLit_},
                                        std::pair{kBusyLed,  busyLit_},
-                                       std::pair{kSwitchOn, powerLit_ && switchSpriteLoaded_}}) {
+                                       std::pair{kSwitchOn, switchShown_ == DrivePower::On &&
+                                                            switchSpriteLoaded_},
+                                       std::pair{kSwitchStandby, switchShown_ == DrivePower::Standby &&
+                                                                 standbySpriteLoaded_}}) {
             if (!lit) continue;                  // off = the base image already copied
             overlayPatch(LT7683::kLedsAddr, ledsStride_,
                          tapeX_ + led.x, tapeY_ + led.y, led.w, led.h,
@@ -568,6 +639,7 @@ void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter)
         loadCassette();
         loadLidOpen();
         loadLeds();
+        loadReels();
     }
 #endif
 }
@@ -578,6 +650,10 @@ void plotterview_setTapeFile(const std::string& filename) {
     composeCassetteLabel();
 #endif
     refreshCassette();
+}
+
+void plotterview_showMessage(const char* text) {
+    showSplashBox(text, 1, 2500);
 }
 
 void plotterview_setDrive(CDrive* drive) {
@@ -702,14 +778,33 @@ bool plotterview_isSplashVisible() { return splashVisible_; }
 void plotterview_poll() {
     // Status LEDs -- redraw only on change (a single BTE copy each)
     if (ledsLoaded_ && drive_ != nullptr) {
-        const bool power = drive_->enabled();
-        const bool busy  = power && drive_->isBusy();
+        const bool power = drive_->poweredUp();        // POWER light
+        const bool busy  = power && drive_->busyLight();   // BUSY light, per the manual
+        const DrivePower sw = drive_->powerMode();       // switch position
         if (power != powerLit_) {
             powerLit_ = power;
             refreshLed(kPowerLed);
-            refreshLed(kSwitchOn);           // switch follows POWER
+        }
+        if (sw != switchShown_) {
+            switchShown_ = sw;
+            refreshLed(kSwitchOn);           // same area for all positions
         }
         if (busy  != busyLit_)  { busyLit_  = busy;  refreshLed(kBusyLed); }
+    }
+    // Spinning reels while the drive works (BUSY) -- one frame step per
+    // kReelFrameMs, only the two small hub squares are redrawn
+    if (reelsLoaded_ && drive_ != nullptr && drive_->isBusy() &&
+        output_ == DisplayOutput::Tape && cassetteShown() &&
+        time_reached(reelNext_)) {
+        // Rewind (REWIND button): faster, and the reels turn the other way
+        const bool rewinding = drive_->isRewinding();
+        reelNext_ = make_timeout_time_ms(rewinding ? kReelRewindFrameMs : kReelFrameMs);
+        reelFrame_ = (reelFrame_ + (rewinding ? kReelFrames - 1 : 1)) % kReelFrames;
+        for (const ReelPos& r : kReels) {
+            drawTapeRegion(static_cast<std::int16_t>(tapeX_ + kCassetteX + r.x),
+                           static_cast<std::int16_t>(tapeY_ + kCassetteY + r.y),
+                           kReelBox, kReelBox);
+        }
     }
     if (splashVisible_ && time_reached(splashHideDeadline_)) {
         splashVisible_ = false;

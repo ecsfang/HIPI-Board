@@ -317,6 +317,18 @@ void LT7683::readMrwdpBytes(std::uint8_t* buf, std::size_t len) {
     }
 }
 
+void LT7683::readRow565(std::int16_t x, std::int16_t y, std::uint16_t w, std::uint16_t* out) {
+    static std::uint8_t buf[1024 * 2];
+    if (w > 1024) w = 1024;
+    gfxMode();
+    writeReg16(CURH0, static_cast<std::uint16_t>(x));
+    writeReg16(CURV0, static_cast<std::uint16_t>(y + vertOffset_));
+    readMrwdpBytes(buf, static_cast<std::size_t>(w) * 2);
+    for (std::uint16_t i = 0; i < w; ++i) {
+        out[i] = static_cast<std::uint16_t>(buf[2 * i] | (buf[2 * i + 1] << 8));
+    }
+}
+
 void LT7683::widenActiveWindowForLinearAccess(std::uint16_t* savedX0, std::uint16_t* savedY0,
                                                std::uint16_t* savedW, std::uint16_t* savedH) {
     // See this method's own header comment (LT7683.hpp) for the
@@ -824,6 +836,8 @@ void LT7683::showPipOverlay(std::int16_t x, std::int16_t y,
     // enable bit (6) and the unrelated bits below it untouched.
     const std::uint8_t mpwctrEnable = readReg(MPWCTR);
     writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | 0x80));
+
+    pip_[0] = PipState{ true, kMenuLayerAddr, width_, alignedX, y, alignedX, y, alignedW, h };
 }
 
 void LT7683::showPipWindow(int pip, std::uint32_t layerAddr, std::uint16_t stride,
@@ -856,16 +870,24 @@ void LT7683::showPipWindow(int pip, std::uint32_t layerAddr, std::uint16_t strid
     // Enable: bit7 = PIP-1, bit6 = PIP-2
     const std::uint8_t mpwctrEnable = readReg(MPWCTR);
     writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | (pip2 ? 0x40 : 0x80)));
+
+    pip_[pip2 ? 1 : 0] = PipState{ true, layerAddr,
+        static_cast<std::uint16_t>(stride & ~0x3),
+        static_cast<std::int16_t>(srcX & ~0x3), srcY,
+        static_cast<std::int16_t>(dstX & ~0x3), dstY,
+        static_cast<std::uint16_t>(w & ~0x3), h };
 }
 
 void LT7683::hidePipWindow(int pip) {
     const std::uint8_t mpwctr = readReg(MPWCTR);
     writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctr & ~(pip == 2 ? 0x40 : 0x80)));
+    pip_[pip == 2 ? 1 : 0].on = false;
 }
 
 void LT7683::hidePipOverlay() {
     const std::uint8_t mpwctr = readReg(MPWCTR);
     writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctr & ~0x80));
+    pip_[0].on = false;
 }
 
 // -----------------------------------------------------------------------

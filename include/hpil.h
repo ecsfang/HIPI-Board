@@ -29,7 +29,7 @@
 #define RFC     0x500
 #define IDY     0x600
 #define LLO     0x411
-#define LPD     0x49D
+#define LPD     0x49B   // Loop Power Down (was 0x49D -- wrong; hpil.cpp's trace table already had 0x49B)
 
 #define DOE_MASK   0x400    // 0xx xxxx xxxx
 #define IS_DATA(x) (((x) & DOE_MASK) == DOE)
@@ -91,6 +91,11 @@
 #define inAddrRange(a,x) ((a) >= (x) && (a) <= ((x)+MAX_ADDR))
 
 typedef unsigned short int IL_CMD_t;
+// Returned by CDevice::hpil() when the device ABSORBS the frame instead of
+// retransmitting it -- e.g. the cassette drive powering up after Loop
+// Power Down (a powered-down device doesn't pass frames on). hipi_loop()
+// then sends nothing back on the loop. Not a valid 11-bit frame.
+#define IL_NO_FRAME 0xFFFF
 typedef unsigned char      IL_ADDR_t;
 typedef unsigned char      IL_DATA_t;
 
@@ -160,6 +165,15 @@ public:
     bool isListener() { return isStatus(LISTENER); }
     void last(bool _last) { m_last = _last; }
     bool isLast() { return m_last; }
+    // Called by hipi_loop() for frames passing while this device is
+    // disabled / switched off (it isn't on the loop then). If the
+    // controller re-addresses the loop meanwhile (AAU / AAD), the device's
+    // old address has been handed to someone else -- forget it, so the
+    // device doesn't answer to a duplicate address when it comes back.
+    // Otherwise the address is kept, and the device is reachable at once.
+    void offLoopFrame(IL_CMD_t cmd) {
+        if (cmd == AAU || inAddrRange(cmd, AAD)) addr(31);
+    }
     const char *name() { return m_devName; }
     void type(IL_Type_e type) { m_type = type; }
     IL_Type_e type(void) { return m_type; }

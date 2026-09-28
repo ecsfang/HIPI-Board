@@ -4,6 +4,9 @@
 #
 # Detta är din fungerande version med EN ändring: väntetestet på BOOTSEL.
 # Ingenting körs mot enheten före det testet.
+#
+# Nyligen tillagt: lösa filer kan skickas in som parametrar och kopieras
+# in i projektet (se "Lägg till filer" nedan).
 
 set -u
 
@@ -18,6 +21,12 @@ BOOTSEL_TIMEOUT=300
 PANEL="7"
 FULL_BUILD=false
 ZIP_FILE=""
+
+# Lösa filer som skall kopieras in i projektet
+FILES=()
+
+# Filerna som faktiskt kopierades in, som "<namn> -> <mål>"
+COPIED=()
 
 
 # ------------------------------------------------------------
@@ -63,6 +72,12 @@ bootsel_ready() {
 
 # ------------------------------------------------------------
 # Tolka parametrar
+#
+# Kända parametrar:
+#   5 | 7          panelval
+#   ALL            komplett build
+#   *.zip          projektarkiv som packas upp
+#   *.h *.cpp *.bmp  lösa filer som kopieras in i projektet
 # ------------------------------------------------------------
 
 for ARG in "$@"; do
@@ -85,11 +100,23 @@ for ARG in "$@"; do
             ZIP_FILE="$ARG"
             ;;
 
+        *.h|*.H)
+            FILES+=("$ARG")
+            ;;
+
+        *.cpp|*.CPP)
+            FILES+=("$ARG")
+            ;;
+
+        *.bmp|*.BMP)
+            FILES+=("$ARG")
+            ;;
+
         *)
             echo "FEL: Okänd parameter: $ARG"
             echo
             echo "Användning:"
-            echo "  $0 [zip-fil] [5|7] [ALL]"
+            echo "  $0 [zip-fil] [filer...] [5|7] [ALL]"
             echo
             echo "Exempel:"
             echo "  $0"
@@ -100,6 +127,16 @@ for ARG in "$@"; do
             echo "  $0 projekt.zip ALL"
             echo "  $0 projekt.zip 5"
             echo "  $0 projekt.zip 5 ALL"
+            echo "  $0 fil1.h"
+            echo "  $0 fil1.h fil2.h fil3.cpp"
+            echo "  $0 fil1.h fil2.h fil3.cpp ALL"
+            echo
+            echo "Lösa filer hämtas från $DOWNLOAD_DIR och kopieras in i projektet:"
+            echo "  *.h    -> include/"
+            echo "  *.cpp  -> src/"
+            echo "  *.bmp  -> resources/"
+            echo
+            echo "Källfilerna tas bort från $DOWNLOAD_DIR efter lyckad kopiering."
             exit 1
             ;;
 
@@ -166,6 +203,99 @@ fi
 
 
 # ------------------------------------------------------------
+# Lägg till filer
+#
+# Filändelsen bestämmer målkatalogen:
+#   *.h   -> ./include
+#   *.cpp -> ./src
+#   *.bmp -> ./resources
+#
+# Källan letas upp i $DOWNLOAD_DIR. Anges en sökväg används den i
+# stället. Filen tas bort från $DOWNLOAD_DIR efter lyckad kopiering,
+# men bara om den verkligen kom därifrån.
+#
+# Läggs efter uppackningen, så att lösa filer vinner över zip-innehåll.
+# ------------------------------------------------------------
+
+if [ "${#FILES[@]}" -gt 0 ]; then
+
+    echo
+    echo "=== Lägger till filer ==="
+
+    ADDED=0
+
+    for FILE_ARG in "${FILES[@]}"; do
+
+        NAME=$(basename "$FILE_ARG")
+
+        SRC="$DOWNLOAD_DIR/$NAME"
+        FROM_DOWNLOADS=false
+
+        if [ -f "$SRC" ]; then
+            FROM_DOWNLOADS=true
+        elif [ -f "$FILE_ARG" ]; then
+            SRC="$FILE_ARG"
+        else
+            echo
+            echo "FEL: Filen finns inte:"
+            echo "  $DOWNLOAD_DIR/$NAME"
+            echo
+
+            popd > /dev/null
+            exit 1
+        fi
+
+        EXT="${NAME##*.}"
+        EXT="${EXT,,}"
+
+        case "$EXT" in
+            h)   DEST="./include" ;;
+            cpp) DEST="./src" ;;
+            bmp) DEST="./resources" ;;
+            *)
+                echo
+                echo "FEL: Filändelsen stöds inte: $NAME"
+                echo
+                echo "Stödda: .h, .cpp, .bmp"
+
+                popd > /dev/null
+                exit 1
+                ;;
+        esac
+
+        mkdir -p "$DEST"
+
+        if cp -f "$SRC" "$DEST/$NAME"; then
+
+            echo "  $NAME -> $DEST"
+
+            COPIED+=("$NAME -> $DEST")
+
+            if [ "$FROM_DOWNLOADS" = true ]; then
+                rm -f "$SRC"
+            fi
+
+            ADDED=$((ADDED + 1))
+
+        else
+
+            echo
+            echo "FEL: Kunde inte kopiera $NAME till $DEST"
+            echo
+
+            popd > /dev/null
+            exit 1
+
+        fi
+
+    done
+
+    echo "  ($ADDED fil(er) inlagda)"
+
+fi
+
+
+# ------------------------------------------------------------
 # Visa vald konfiguration
 # ------------------------------------------------------------
 
@@ -180,6 +310,13 @@ if [ "$FULL_BUILD" = true ]; then
     echo "Build: FULL"
 else
     echo "Build: incremental"
+fi
+
+if [ "${#COPIED[@]}" -gt 0 ]; then
+    echo "Filer inlagda (${#COPIED[@]}):"
+    for C in "${COPIED[@]}"; do
+        echo "  $C"
+    done
 fi
 
 echo
@@ -384,6 +521,14 @@ echo
 echo "Panel:    ${PANEL}\""
 echo "Firmware: hipi_${PANEL}_pico.uf2"
 echo
+
+if [ "${#COPIED[@]}" -gt 0 ]; then
+    echo "Filer inlagda (${#COPIED[@]}):"
+    for C in "${COPIED[@]}"; do
+        echo "  $C"
+    done
+    echo
+fi
 
 
 popd > /dev/null

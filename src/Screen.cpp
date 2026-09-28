@@ -340,7 +340,11 @@ void Screen::txt_size(std::uint8_t size) {
         // own auto-advance-plus-spacing mechanism entirely. The actual
         // character-gap fix is in screen_pars()'s own width_
         // calculation (this function's own caller) -- see its comment.
-        d_->setCharSpacing(2);   // horizontal char spacing
+        // Screen positions every character explicitly (see draw_row()),
+        // so this register only affects text drawn with the chip's own
+        // auto-advance: menus, dialogs, splash, the cassette label. Those
+        // want the font's default spacing -- 2 made them far too wide.
+        d_->setCharSpacing(0);   // horizontal char spacing
         d_->setLineSpacing(0);   // vertical line spacing
     } else {
         d_->txtSize(0);
@@ -699,7 +703,10 @@ bool Screen::valid_char(std::uint8_t c) {
 void Screen::pr_char(std::uint8_t c) {
     if (flag_) {
         flag_ = false;
-        if (n_ == 0) {
+        if (n_ == kExtCmdState) {       // ESC # <c> -- see setExtCommandCallback()
+            n_ = -1;
+            if (extCommand_) extCommand_(c);
+        } else if (n_ == 0) {
             pos_[0] = c;
             n_ = 1;
             flag_ = true;
@@ -714,6 +721,9 @@ void Screen::pr_char(std::uint8_t c) {
             n_ = -1;
         } else if (c == 37) {            // ESC %
             n_ = 0;
+            flag_ = true;
+        } else if (c == 35 || c == 126) { // ESC # (or ESC ~) -> project extension, see Screen.hpp
+            n_ = kExtCmdState;
             flag_ = true;
         } else if (c == 83) {            // ESC S -> roll up
             up(true, true);
@@ -1059,7 +1069,7 @@ void Screen::fon_mode() {
     // was wrong here too.
     d_->writeReg(0x40, 0x80);  // MWCR0: text mode
     d_->writeReg(0x21, 0x80);  // FNCR0: CGRAM
-    d_->setCharSpacing(2);     // horizontal char spacing
+    d_->setCharSpacing(0);     // horizontal char spacing -- see txt_size()
     d_->setLineSpacing(4);     // vertical line spacing
     // We don't expose "fon" via RA8875::mode(); tag it with a no-op write.
     // (See note in Screen.hpp — we track mode implicitly via size_.)

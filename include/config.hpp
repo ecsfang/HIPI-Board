@@ -88,6 +88,12 @@ public:
                            static_cast<unsigned>(brightness_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "drive_standby=%d\n", driveStandby_ ? 1 : 0);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        n = std::snprintf(line, sizeof(line), "screendump_next=%u\n", screendumpNext_);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         n = std::snprintf(line, sizeof(line), "columns=%u\n",
                            static_cast<unsigned>(columns_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
@@ -116,6 +122,13 @@ public:
     std::uint8_t fontSize() const { return fontSize_; }
     void setFontSize(std::uint8_t s) { fontSize_ = s; save(); }
 
+    // TFDRIVE's OFF-STANDBY-ON switch: Off is stored as a disabled device
+    // (disabled_devices); this flag tells Standby from On
+    bool driveStandby() const { return driveStandby_; }
+    // Next screendump_<n>.bmp number to try (see screendump.cpp)
+    unsigned screendumpNext() const { return screendumpNext_; }
+    void setScreendumpNext(unsigned n) { screendumpNext_ = n; save(); }
+    void setDriveStandby(bool s) { driveStandby_ = s; save(); }
     std::uint8_t brightness() const { return brightness_; }
     void setBrightness(std::uint8_t b) { brightness_ = b; save(); }
 
@@ -206,6 +219,10 @@ private:
                     extTrace_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "fontsize") == 0) {
                     fontSize_ = static_cast<std::uint8_t>(std::atoi(value));
+                } else if (std::strcmp(key, "screendump_next") == 0) {
+                    screendumpNext_ = static_cast<unsigned>(std::strtoul(value, nullptr, 10));
+                } else if (std::strcmp(key, "drive_standby") == 0) {
+                    driveStandby_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "brightness") == 0) {
                     brightness_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "columns") == 0) {
@@ -234,6 +251,8 @@ private:
     // the same as before.
     std::uint8_t  fontSize_   = 0;
     std::uint8_t  brightness_ = 0xFF;
+    bool          driveStandby_ = false;
+    unsigned      screendumpNext_ = 0;
     std::uint8_t  columns_    = 0;   // 0 = auto
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).

@@ -32,7 +32,7 @@ enum class DisplayOutput { Display, Plotter, Tape };
 constexpr int kDisplayOutputCount = 3;
 
 // Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
-enum class TapeHotspot { None, Open, Power };
+enum class TapeHotspot { None, Open, Power, Rewind };
 
 // Call once, after display/screen/plotter all exist (see hipi_init()).
 // On the 7" panel this also loads hp82161a.bmp from the SD card into its own
@@ -52,6 +52,11 @@ void plotterview_setTapeEjected(bool ejected);
 // Tape view status LEDs (7" only; needs leds.bmp): POWER is lit while the
 // drive device is enabled, BUSY while it's accessing its file (see
 // CDrive::isBusy()). Updated from plotterview_poll().
+// Shows a short message (e.g. "Saved screendump_3.bmp") in the same
+// yellow box as the view-switch splash, for 2.5 s. Taps are ignored
+// meanwhile, like during the splash.
+void plotterview_showMessage(const char* text);
+
 void plotterview_setDrive(CDrive* drive);
 // The drive given to plotterview_setDrive() (nullptr if none) -- e.g. for
 // the power switch hotspot, which toggles it (see boardui_handleTap()).

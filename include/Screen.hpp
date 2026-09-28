@@ -23,6 +23,7 @@
 
 #include "display_config.h"
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace hipi {
@@ -127,6 +128,16 @@ public:
     // here unconditionally (e.g. while just navigating between menu
     // items, menu still open) would undo that, since it doesn't know
     // the menu wants it to stay hidden.
+    // Project-specific escape sequence "ESC # <c>" (not an HP82163 code;
+    // '#' is unused by it): the character after '#' is handed to this
+    // callback and not displayed. "ESC ~ <c>" works too, but the HP-41
+    // can't send '~': its character 126 is Sigma, which the HP-IL module
+    // sends as 0x1C -- so '#' (35, identical in both character sets) is
+    // the one to use from the HP-41. Used for screen dumps from the HP-41
+    // (see pico_main.cpp). The callback runs inside HP-IL frame handling,
+    // so it must only record a request, never do slow work itself.
+    void setExtCommandCallback(std::function<void(std::uint8_t)> cb) { extCommand_ = std::move(cb); }
+
     void reassertRenderState() {
         txt_size(size_);
         d_->txtColor(color_, 0);
@@ -334,7 +345,10 @@ private:
     std::uint32_t charsDrawn_ = 0;  // see charsDrawn()'s own comment
     bool Ins_;      // insert-mode toggle (full block vs. underscore cursor)
     bool cv_;       // cursor-visible toggle
-    int  n_;        // ESC % sequence state: -1=just ESC, 0=awaiting row, 1=awaiting col
+    int  n_;        // ESC % sequence state: -1=just ESC, 0=awaiting row, 1=awaiting col,
+                    // kExtCmdState = ESC # seen, awaiting the command character
+    static constexpr int kExtCmdState = 10;
+    std::function<void(std::uint8_t)> extCommand_;
     std::uint8_t pos_[2];  // ESC % row/col coordinates
 
     // Line buffer for scroll-back -- a SINGLE, FIXED-SIZE flat allocation

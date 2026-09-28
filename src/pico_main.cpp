@@ -72,6 +72,7 @@ extern void init_spi(void);
 
 #include "boardui.h"
 #include "plotterview.h"
+#include "screendump.h"
 #include "config.hpp"
 #include "drive.h"
 
@@ -129,7 +130,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.5";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "2.6";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -478,6 +479,13 @@ int main() {
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
     hipi::plotterview_setTapeFile(config.filename());  // cassette in the Tape view
+    // "ESC # D" / "ESC # M" from the HP-41: screen dump without / with the
+    // menus and other overlays (see Screen::setExtCommandCallback()) --
+    // only recorded here, taken from the main loop by boardui_poll()
+    screen->setExtCommandCallback([](std::uint8_t c) {
+        if (c == 'D') hipi::screendump_request(false);
+        else if (c == 'M') hipi::screendump_request(true);
+    });
 
     LOGF("\r\n\t* HP-IL initialized");
     {

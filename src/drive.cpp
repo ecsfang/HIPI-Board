@@ -43,6 +43,62 @@ int findMedia(unsigned int s)
     return -1;
 }
 
+// Power handling per the HP82161A manual (Loop Power Down, p. 10):
+//   ON:      LPD acts as Device Clear + Interface Clear; power stays on.
+//            (The real drive is also inaccessible for 0.7 s -- not emulated.)
+//   (Both take effect on the RFC after LPD, which is still passed on.)
+//   STANDBY: LPD powers the drive down (POWER light off). Any HP-IL signal
+//            wakes it up again, as Device Clear + Interface Clear. Until it
+//            has powered up (kPowerUpMs), frames are absorbed, not passed
+//            on -- including the waking frame itself.
+//   The manual also says the address becomes undefined in both cases, but
+//   the HP-41 keeps using the old address without re-addressing the loop,
+//   so the address is kept -- see powerUpReset().
+IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
+{
+    if( asleep_ ) {
+        // First HP-IL signal after LPD: start powering up. A powered-down
+        // device doesn't retransmit, so this frame -- and any others until
+        // it's up -- is absorbed (the controller sees it not return).
+        asleep_ = false;
+        poweringUp_ = true;
+        powerUpUntil_ = make_timeout_time_ms(kPowerUpMs);
+        LOGF("\r\n * %s: woken up by HP-IL activity -- powering up", name());
+        return IL_NO_FRAME;
+    }
+    if( poweringUp_ ) {
+        servicePowerUp();
+        if( poweringUp_ )
+            return IL_NO_FRAME;
+    }
+    if( cmd == LPD ) {
+        // Like other commands, LPD is only executed on the following Ready
+        // For Command (manual: "RFC -- executes previous command"): the
+        // controller waits for that RFC to come back, so the drive must
+        // still pass it on before powering down (else the HP-41 reports
+        // TIME OUT).
+        lpdPending_ = true;
+        return cmd;
+    }
+    if( lpdPending_ && cmd != RFC ) {
+        lpdPending_ = false;                // another command came first
+    }
+    if( lpdPending_ && cmd == RFC ) {
+        lpdPending_ = false;
+        if( powerMode_ == DrivePower::Standby ) {
+            if( tape->ok() )
+                tape->close();              // flush and release the file
+            setIdle();
+            asleep_ = true;
+            LOGF("\r\n * %s: Loop Power Down -- standby", name());
+        } else {
+            powerUpReset();
+        }
+        return cmd;                         // this RFC is still passed on
+    }
+    return CDevice::hpil(cmd);
+}
+
 void CDrive::clear(void)
 {
     if( check() )
@@ -103,6 +159,12 @@ void CDrive::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn)
             check();
             *rtn = sst;
             end = true;
+            // A status is reported once, then cleared: DRVTST reads 23 (New
+            // Tape) after a power-up and expects the NEXT SST to say 0 --
+            // anything else stops it with "STATUS nn". Conditions that
+            // still hold (no tape, busy rewinding) are set again by check()
+            // before the next SST.
+            sst = DRV_IDLE;
         } else if( inAddrRange(cmd, DDT) ) {
             IL_ADDR_t n = cmd & MAX_ADDR;
             if( n == 4 ) {
@@ -156,6 +218,7 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
                 // The tape can’t be used until after the tape door is opened
                 // and closed, a Device Clear command is received, or a
                 // Seek (Device Dependent Listener 4) command repositions the tape.
+                markBusy();         // tape moves: BUSY LED + spinning reels
                 clear();
                 //if( check() )
                 //    tape->seek(0);
@@ -292,6 +355,7 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
             if( check() ) {
                 unsigned int b = BUF_SIZE*(m_tmp-1)+(cmd % BUF_SIZE);
                 if( b < size() ) {
+                    markBusy();     // seek to record: BUSY LED + spinning reels
                     tape->seek(BUF_SIZE*b);
                     sst = DRV_IDLE;
                 } else {
@@ -347,6 +411,11 @@ bool CDrive::check()
         if( tape->ok() )
             tape->close();
         sst = DRV_NO_TAPE_ERROR;
+        return false;
+    }
+    if( isRewinding() ) {
+        // REWIND button in progress -- "executing a previous command"
+        sst = DRV_BUSY;
         return false;
     }
     if( !tape->ok() ) {

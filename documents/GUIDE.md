@@ -194,7 +194,8 @@ Files to copy:
 | `hp82161a.bmp`  | No       | 7" panel only: picture for the **Tape** view (from `resources/`). The view is left out if missing. |
 | `tape-in.bmp`   | No       | 7" panel only: the cassette shown in the Tape view's lid window when a file is selected (from `resources/`). |
 | `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open (from `resources/`). |
-| `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its ON position, for the Tape view (from `resources/`). |
+| `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions, for the Tape view (from `resources/`). |
+| `reels.bmp`     | No       | 7" panel only: rotated frames of the cassette's reel hubs, for the spinning-reel animation (from `resources/`). |
 | `*.dat`         | No       | HP82161 cassette/drive images, selectable from the menu. |
 | `CONFIG.TXT`    | No       | Created automatically with defaults on first boot. |
 
@@ -312,7 +313,8 @@ Main menu
     ├── Plotter            Show the plotter canvas
     ├── Tape               Show the HP82161A tape drive (7" panel only)
     ├── Clear plotter      Erase the plotter drawing
-    └── Clear screen       Erase the text display
+    ├── Clear screen       Erase the text display
+    └── Screendump         Save the screen as screendump_<n>.bmp (7" panel only)
 ```
 
 ### 6.1 Config
@@ -321,7 +323,15 @@ Main menu
   as the first row. The current file is pre-selected. Choosing **No media**
   deselects the file: the drive reports that no tape is inserted, the Tape
   view shows the drive without a cassette, and the info box and boot
-  summary show "No media". After confirmation the drive (`TFDRIVE`) switches to the
+  summary show "No media".
+  After choosing a file, the confirmation dialog offers three choices:
+  **OK** opens it, **X** goes back to the file list, and **▼** shows the
+  contents of the LIF image: volume label, size, creation date, directory
+  size, number of files and free blocks, followed by the directory (name,
+  type, size -- in registers for HP-41 files, as the HP-41's DIR shows it
+  -- allocated blocks, and S/P for secure/private). Scroll with ▲/▼
+  (Shift for a page at a time); **OK** opens the file, **X** returns to
+  the file list. After confirmation the drive (`TFDRIVE`) switches to the
   new image and the name is saved to `CONFIG.TXT`.
 - **Trace** — controls logging on the USB debug port:
   - *Off* — no frame log.
@@ -364,6 +374,24 @@ HP7470A-style plotter canvas (`TFPLOT`), or (7" panel only) the Tape view.
 Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
+**Screendump** (7" panel only) saves what the panel shows as a 24-bit BMP
+file, `screendump_<n>.bmp`, in the SD card's root. The menu itself, the
+button strip and message boxes are not included. The number continues
+from `screendump_next` in `CONFIG.TXT` (starting at 0), and numbers whose
+file already exists are skipped. Saving takes a few seconds, during which
+HP-IL isn't serviced, and isn't possible while **Connect to PC** is active.
+
+A screen dump can also be requested from the HP-41 with the project's own
+escape sequence `ESC # D` (screen only) or `ESC # M` (with menus, button
+strip and message boxes -- exactly what's on the screen, mostly for
+documentation). Send it to `TFDISPLAY`, e.g.:
+
+```
+27 ACCHR  35 ACCHR  77 ACCHR       ; ESC # M
+```
+
+The dump is taken right after, from the main loop.
+
 **Tape view.** Shows a picture of an HP82161A cassette drive. It is loaded
 from `hp82161a.bmp` once at boot into a spare display layer, so switching to it
 is instant. Tap the **cassette window** or the **OPEN** button to go
@@ -372,10 +400,19 @@ returns to the Tape view. When a `.dat` file is selected, a cassette with
 the file name on its label is seen through the lid window; while the file
 picker is open (from the Tape view or from **Config**) the lid is shown
 open with the drive empty. The **POWER** LED is lit while `TFDRIVE` is
-enabled (**Devices** menu), and **BUSY** lights up while the drive reads,
-writes or formats its file -- not for ordinary HP-IL traffic. The power
-switch shows ON while `TFDRIVE` is enabled; tapping it enables/disables
-the drive, exactly like the **Devices** menu (and saved the same way). The view is not available on the 5" panel, which has no spare
+enabled (**Devices** menu), and **BUSY** follows the owner's manual: it is
+lit while the drive executes an operation (reading, writing, seeking,
+formatting, rewinding) or is addressed as talker or listener. The
+cassette's reels only spin while the tape actually moves. The power
+switch works like the real OFF-STANDBY-ON switch: each tap moves it one
+step (OFF -> STANDBY -> ON -> STANDBY -> OFF). OFF disables `TFDRIVE`
+(once it's idle); ON keeps it powered; in STANDBY the HP-41 can power it
+down with Loop Power Down (POWER light off) and it wakes up again on the
+next HP-IL activity. The position is saved in `CONFIG.TXT`.
+Tapping **REWIND** rewinds the tape to its start, as on the real drive
+(ignored while BUSY is lit, and when the tape is already at its start). The drive then stays busy for about five
+seconds: BUSY is lit, the reels spin backwards, and the HP-41 gets the
+drive's Busy status until it's done. The view is not available on the 5" panel, which has no spare
 display memory.
 
 ---

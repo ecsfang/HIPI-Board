@@ -139,10 +139,34 @@ inline bool drawBmpAt(DisplayDriver* display, const char* path,
         const UINT bytes = static_cast<UINT>(n * rowSize);
 
         const absolute_time_t tRead = get_absolute_time();
-        if (f_read(&file, rawChunk.data(), bytes, &br) != FR_OK || br != bytes) {
-            LOGF("\r\n\t * Read error at row %lu", static_cast<unsigned long>(fileRow));
-            f_close(&file);
-            return false;
+        const FSIZE_t chunkPos = f_tell(&file);
+        FRESULT fr = f_read(&file, rawChunk.data(), bytes, &br);
+        if (fr != FR_OK || br != bytes) {
+            // A large f_read() goes straight to the card as ONE multi-block
+            // read (disk_read() with count > 1). Some cards/filesystems
+            // (seen with an exFAT card) fail that while single blocks work
+            // -- the drive's 256-byte tape blocks always go through FatFS's
+            // own one-sector buffer. So retry this chunk in 512-byte pieces
+            // before giving up, and log what actually failed.
+            LOGF("\r\n\t * Chunk read failed at row %lu (fr=%d, %u of %u bytes) -- retrying in 512-byte reads",
+                 static_cast<unsigned long>(fileRow), static_cast<int>(fr),
+                 static_cast<unsigned>(br), static_cast<unsigned>(bytes));
+            fr = f_lseek(&file, chunkPos);
+            UINT done = 0;
+            while (fr == FR_OK && done < bytes) {
+                const UINT part = std::min<UINT>(512, bytes - done);
+                UINT got = 0;
+                fr = f_read(&file, rawChunk.data() + done, part, &got);
+                if (got != part) break;
+                done += got;
+            }
+            if (fr != FR_OK || done != bytes) {
+                LOGF("\r\n\t * Read error at row %lu (fr=%d, %u of %u bytes)",
+                     static_cast<unsigned long>(fileRow), static_cast<int>(fr),
+                     static_cast<unsigned>(done), static_cast<unsigned>(bytes));
+                f_close(&file);
+                return false;
+            }
         }
         readUs += absolute_time_diff_us(tRead, get_absolute_time());
 

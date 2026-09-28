@@ -511,6 +511,18 @@ public:
                        std::int16_t dstX, std::int16_t dstY,
                        std::uint16_t w, std::uint16_t h);
     void hidePipWindow(int pip);
+    // What a PIP window currently shows -- recorded by showPipOverlay()/
+    // showPipWindow() and cleared by the hide calls, so a screen dump can
+    // composite the overlays in software (the panel's output itself can't
+    // be read back). Y values are screen coordinates (no vertOffset_).
+    struct PipState {
+        bool on = false;
+        std::uint32_t addr = 0;
+        std::uint16_t stride = 0;
+        std::int16_t srcX = 0, srcY = 0, dstX = 0, dstY = 0;
+        std::uint16_t w = 0, h = 0;
+    };
+    const PipState& pipState(int pip) const { return pip_[pip == 2 ? 1 : 0]; }
 
     // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
     // 0 ("BTE function is idle") -- per the datasheet's own note that
@@ -589,10 +601,14 @@ public:
     // Tape view with the lid OPEN (open.bmp, ~344 x 304): narrow
     // stride (its own width), after the cassette areas in the same slot.
     static constexpr std::uint32_t kTapeOpenAddr      = kCgramAddr + 0xC0000UL;
-    static constexpr std::uint32_t kTapeOpenMaxBytes  = 0x60000UL;   // 384 kB
-    // Tape view status sprites (leds.bmp, 160 x 40: POWER and BUSY lit,
-    // power switch ON), narrow stride, right after the open-lid area
-    // (~13 kB).
+    static constexpr std::uint32_t kTapeOpenMaxBytes  = 0x40000UL;   // 256 kB
+    // Tape view reel animation frames (reels.bmp, ~152 x 76), narrow
+    // stride, after the open-lid area.
+    static constexpr std::uint32_t kReelsAddr         = kCgramAddr + 0x100000UL;
+    static constexpr std::uint32_t kReelsMaxBytes     = 0x20000UL;   // 128 kB
+    // Tape view status sprites (leds.bmp, 240 x 40: POWER and BUSY lit,
+    // power switch ON and STANDBY), narrow stride, right after the
+    // open-lid area (~19 kB).
     static constexpr std::uint32_t kLedsAddr          = kCgramAddr + 0x120000UL;
 
     // TEMPORARY DIAGNOSTIC -- see lastCvssaReadback()'s own comment above.
@@ -715,6 +731,13 @@ public:
     // and discards it, then reads `len` real bytes with no further
     // port-address changes in between.
     void readMrwdpBytes(std::uint8_t* buf, std::size_t len);
+
+    // Reads w RGB565 pixels of one row of the CURRENT canvas (the live
+    // panel unless a layer is selected) starting at screen position x,y --
+    // for screen dumps. Uses readMrwdpBytes(); the Active Window must
+    // include the row. 16bpp pixels come back low byte first, the same
+    // order drawBitmap565Cropped() writes them. w is capped at 1024.
+    void readRow565(std::int16_t x, std::int16_t y, std::uint16_t w, std::uint16_t* out);
 
     // Per the datasheet's own note under REG[5Fh-60h] (CURH, Graphic
     // Read/Write X-Coordinate): "Host should program proper active
@@ -902,6 +925,7 @@ private:
     std::uint16_t vertOffset_ = 0;
     // Current canvas -- see canvasAddr()/canvasStride()
     std::uint32_t canvasAddr_ = 0;
+    PipState pip_[2];                          // [0] = PIP-1, [1] = PIP-2
     std::uint16_t canvasStride_ = 1024;
     std::uint8_t  txtScale_ = 0;
     bool          pwmInitialized_ = false;

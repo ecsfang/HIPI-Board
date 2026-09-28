@@ -206,6 +206,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/hw_config.cpp
         src/my_descriptors.c
         src/usb_msc.cpp
+        src/screendump.cpp
     )
 
     target_link_libraries(${EXE_TARGET} PRIVATE
