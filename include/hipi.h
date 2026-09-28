@@ -19,18 +19,24 @@ struct DeviceInfo {
     int addr;           // -1 if not addressed (AAD left it at 31, "unaddressed")
     std::uint8_t sai;   // only meaningful if addr >= 0
     bool enabled;
+    // PILBOX only: devices on the PC side and the first address they got
+    // at the last auto-addressing (-1 = not known / not applicable)
+    int extDevices = -1;
+    int extFirstAddr = -1;
 };
 
-// Enumerates every device in hipi.cpp's own `devices` vector by directly
-// driving dev->hpil() (never touching the physical PIO loop -- see
-// hipi_test()'s own comment on why that's the only thing safe to do
-// without knowing what else might be on the bus). This temporarily
-// re-addresses every device via an internal AAD/TAD/SAI/SDI sequence, the
-// same way a real controller's own start-up handshake would -- calling
-// it while a real controller is actively mid-transaction on the physical
-// loop risks disrupting that specific exchange, so it's only safe to call
-// when nothing else is expected to be talking on the loop at that moment.
+// Lists every device in hipi.cpp's own `devices` vector, in loop order,
+// with its CURRENT address as given by the controller's own AAU/AAD
+// (addr = -1 if it has none: disabled, or not addressed yet), accessory ID
+// and enabled state. Read-only: no frames are sent, so it's safe to call
+// at any time.
 std::vector<DeviceInfo> hipi_enumerateDevices();
+
+// Makes `order` (the same devices, rearranged) the new loop order and
+// saves it to CONFIG.TXT (device_order). Addresses aren't changed -- the
+// HP-41 reassigns them in the new order at its next auto-addressing.
+class CDevice;
+void hipi_applyDeviceOrder(const std::vector<CDevice*>& order);
 
 // Sends values from a fixed test range out over the physical HP-IL loop
 // and confirms each one comes back unchanged -- requires an actual

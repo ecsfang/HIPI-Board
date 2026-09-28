@@ -146,7 +146,7 @@ Choose whichever is convenient:
 
 - **Button:** Hold the **BOOTSEL** button on the Pico, connect USB (or press
   reset), then release.
-- **Menu:** On a running board, open **Settings → Bootsel mode**. The board
+- **Menu:** On a running board, open **Config → Bootsel mode**. The board
   reboots straight into BOOTSEL — no need to reach the button inside a case.
 
 ### 3.2 Copy the firmware
@@ -300,14 +300,16 @@ Main menu
 │   ├── Trace              Off / On / Extended
 │   ├── Connect to PC      Expose the SD card as a USB drive (toggles to "Disconnect from PC")
 │   ├── Loopback test      Physical HP-IL loop test (needs a loop cable)
-│   └── Scan I2C           Scan the I2C bus and show found addresses
+│   ├── Scan I2C           Scan the I2C bus and show found addresses
+│   └── Bootsel mode       Reboot into BOOTSEL for firmware update
 ├── Settings
 │   ├── Textcolor          White / Yellow / Green / Cyan / Red
 │   ├── Font size          0 – 3
 │   ├── Brightness         20 % / 40 % / 60 % / 80 % / 100 %  (live preview)
-│   ├── Columns            Auto / 25 / 32 / 33 / 50 / 100
-│   └── Bootsel mode       Reboot into BOOTSEL for firmware update
-├── Devices                Enable/disable each HP-IL device (OK toggles [ON]/[OFF])
+│   └── Columns            Auto / 25 / 32 / 33 / 50 / 100
+├── Devices
+│   ├── Enable/disable     Each HP-IL device on/off (OK toggles [ON]/[OFF])
+│   └── Change order       Order of the devices on the loop
 └── Display
     ├── Display            Show the text display
     ├── Plotter            Show the plotter canvas
@@ -350,6 +352,7 @@ Main menu
 - **Scan I2C** — scans addresses 0x08–0x77 on the shared I2C bus (the one
   the touch controller and BMP280 sit on) and shows a grid of responding
   addresses. Handy when adding a new I2C device.
+- **Bootsel mode** — see [section 3.1](#31-enter-bootsel-mode).
 
 ### 6.2 Settings
 
@@ -358,7 +361,6 @@ Main menu
 - **Columns** — forces the line-wrap width. *Auto* uses the natural width
   for the current font size; *32* reproduces the original HP82163 wrap
   width.
-- **Bootsel mode** — see [section 3.1](#31-enter-bootsel-mode).
 
 ### 6.3 Devices
 
@@ -414,6 +416,13 @@ Tapping **REWIND** rewinds the tape to its start, as on the real drive
 seconds: BUSY is lit, the reels spin backwards, and the HP-41 gets the
 drive's Busy status until it's done. The view is not available on the 5" panel, which has no spare
 display memory.
+
+**Devices** has two items: **Enable/disable** (the list above) and
+**Change order**, which sets the devices' order on the loop (and so
+the order in which the HP-41 addresses them): pick a device with ▲/▼ + OK,
+move it with ▲/▼, OK keeps the new position, X puts it back. The order is
+saved as `device_order` in `CONFIG.TXT`; without that line the default order
+from `hipi_init()` applies.
 
 ---
 

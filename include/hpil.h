@@ -154,6 +154,7 @@ public:
     virtual void show(void);
     void addr(IL_CMD_t a) { m_addr = a; }
     IL_CMD_t addr() { return m_addr; }
+    IL_ADDR_t accessoryId() const { return m_nSai; }   // the SAI answer
     void status(IL_Status_e s) { m_status = s; }
     IL_Status_e status() { return m_status; }
     bool isStatus(IL_Status_e s) { return status() == s; }

@@ -11,6 +11,7 @@
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
 #include "drive.h"        // CDrive -- deferred switch-off in the Devices menu
 #include "screendump.h"   // Display -> Screendump
+#include "hipi.h"         // hipi_applyDeviceOrder(), Devices -> Change order
 #include "lif_info.hpp"   // file picker: contents of a LIF .dat image
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
 #include "i2c_device.h"       // CI2CBus::scan(), for "Scan I2C"
@@ -517,7 +518,45 @@ public:
                 if (b == Button::Up)   moveDeviceSelection(-1);
                 if (b == Button::Down) moveDeviceSelection(+1);
                 if (b == Button::Ok)   toggleDevice(selected_);
+                if (b == Button::X)    openDevicesMenu(0);
+                break;
+
+            case State::DevicesMenu:
+                if (b == Button::Up)   moveSelection(-1, kDevicesMenuCount);
+                if (b == Button::Down) moveSelection(+1, kDevicesMenuCount);
+                if (b == Button::Ok) {
+                    if (selected_ == 0) openDeviceList();
+                    else                openDeviceOrder();
+                }
                 if (b == Button::X)    openMainMenu();
+                break;
+
+            case State::DeviceOrder:
+                // Pick a device with Up/Down + OK, then move it with Up/Down;
+                // OK keeps the new position, X puts it back
+                if (b == Button::Up)   orderMove(-1);
+                if (b == Button::Down) orderMove(+1);
+                if (b == Button::Ok) {
+                    if (orderMoving_) {
+                        orderMoving_ = false;
+                        hipi_applyDeviceOrder(orderList_);
+                    } else {
+                        orderMoving_ = true;
+                        orderPickedFrom_ = selected_;
+                    }
+                    drawDeviceOrder();
+                }
+                if (b == Button::X) {
+                    if (orderMoving_) {             // cancel this move
+                        orderMoving_ = false;
+                        orderList_ = devices;
+                        selected_ = orderPickedFrom_;
+                        keepOrderSelectionVisible();
+                        drawDeviceOrder();
+                    } else {
+                        openDevicesMenu(1);         // back to Devices
+                    }
+                }
                 break;
 
             case State::DisplayMenu:
@@ -605,17 +644,18 @@ private:
         Closed, MainMenu, ConfigMenu, SettingsMenu,
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
         FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
-        LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo
+        LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo, DeviceOrder,
+        DevicesMenu
     };
 
     static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
     static constexpr int kMainMenuCount = 4;
 
-    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC", "Loopback test", "Scan I2C" };
-    static constexpr int kConfigMenuCount = 5;
+    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC", "Loopback test", "Scan I2C", "Bootsel mode" };
+    static constexpr int kConfigMenuCount = 6;
 
-    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns", "Bootsel mode" };
-    static constexpr int kSettingsMenuCount = 5;
+    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns" };
+    static constexpr int kSettingsMenuCount = 4;
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
     static constexpr const char*   kColorLabels[] = { "White", "Yellow", "Green", "Cyan", "Red" };
@@ -699,7 +739,7 @@ private:
     void enterMainMenuItem() {
         if (selected_ == 0)      openConfigMenu();
         else if (selected_ == 1) openSettingsMenu();
-        else if (selected_ == 2) openDeviceList();
+        else if (selected_ == 2) openDevicesMenu();
         else                     openDisplayMenu();
     }
 
@@ -782,6 +822,7 @@ private:
         drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
         drawRow(3, kConfigMenuLabels[3]);
         drawRow(4, kConfigMenuLabels[4]);
+        drawRow(5, kConfigMenuLabels[5]);
     }
 
     void enterConfigMenuItem() {
@@ -819,8 +860,10 @@ private:
             openConfigMenu();
         } else if (selected_ == 3) {
             openLoopbackConfirm();
-        } else {
+        } else if (selected_ == 4) {
             runI2CScan();
+        } else {
+            enterBootselMode();
         }
     }
 
@@ -1019,36 +1062,39 @@ private:
             openBrightnessMenu();
         } else if (selected_ == 3) {
             openColumnsMenu();
-        } else {
-            // Bootsel mode -- immediate action (like "Clear plotter" in
-            // the Display menu), not a pickable state: reboots straight
-            // into the RP2350's USB mass-storage bootloader, ready for a
-            // new .uf2 to be dragged onto it. reset_usb_boot() never
-            // returns, so there's no "after" state to show -- the
-            // feedback message has to be drawn and actually visible
-            // BEFORE calling it, not something the user navigates away
-            // from afterward.
-            drawBox();
-            d_->txtColor(0xFFFF, 0x0000);
-            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-            d_->txtWrite("Entering Bootsel mode...");
-            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
-            d_->txtWrite("Drag a new .uf2 onto the");
-            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
-            d_->txtWrite("drive that appears.");
-#ifdef DISPLAY_7INCH
-            // handleButton()'s own end-of-function overlay show (see its
-            // own comment) never runs for this path -- reset_usb_boot()
-            // below never returns, so this message needs to be made
-            // visible right here, or it would sit drawn-but-invisible on
-            // the menu layer while the PIP overlay kept showing whatever
-            // was on screen before this button press.
-            d_->endOverlayDraw();
-            d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
-#endif
-            sleep_ms(1500);  // long enough to actually read before reboot
-            reset_usb_boot(0, 0);
         }
+    }
+
+    // Config -> Bootsel mode
+    void enterBootselMode() {
+        // Bootsel mode -- immediate action (like "Clear plotter" in
+        // the Display menu), not a pickable state: reboots straight
+        // into the RP2350's USB mass-storage bootloader, ready for a
+        // new .uf2 to be dragged onto it. reset_usb_boot() never
+        // returns, so there's no "after" state to show -- the
+        // feedback message has to be drawn and actually visible
+        // BEFORE calling it, not something the user navigates away
+        // from afterward.
+        drawBox();
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        d_->txtWrite("Entering Bootsel mode...");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+        d_->txtWrite("Drag a new .uf2 onto the");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
+        d_->txtWrite("drive that appears.");
+#ifdef DISPLAY_7INCH
+        // handleButton()'s own end-of-function overlay show (see its
+        // own comment) never runs for this path -- reset_usb_boot()
+        // below never returns, so this message needs to be made
+        // visible right here, or it would sit drawn-but-invisible on
+        // the menu layer while the PIP overlay kept showing whatever
+        // was on screen before this button press.
+        d_->endOverlayDraw();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+        sleep_ms(1500);  // long enough to actually read before reboot
+        reset_usb_boot(0, 0);
     }
 
     void openFontSizeMenu() {
@@ -1171,23 +1217,25 @@ private:
     // drawDeviceList()) -- clears both corners first each time, since a
     // shorter list scrolled to afterward could otherwise leave a stale
     // arrow from a longer one showing.
-    void drawScrollIndicators(int scrollOffset, int totalCount) {
+    void drawScrollIndicators(int scrollOffset, int totalCount, int visibleRows = kMaxFilesShown) {
+        // The marks are glyphs of the menu font, 8*(scale+1) x 16*(scale+1)
+        // px (16x32 at TextScale 1) -- the bottom one must end ABOVE the
+        // frame's bottom border, or its background cuts a gap in it (it
+        // was placed for a ~20 px glyph before).
+        constexpr int kGlyphW = 8 * (MenuFrame::TextScale + 1);
+        constexpr int kGlyphH = 16 * (MenuFrame::TextScale + 1);
         const int indicatorX = MenuFrame::X + MenuFrame::W - 34;
         const int topY = MenuFrame::Y + 6;
-        const int bottomY = MenuFrame::Y + MenuFrame::H - 29;  // 3px higher than
-                                                                 // before -- was
-                                                                 // overwriting the
-                                                                 // frame's own
-                                                                 // bottom border
-        d_->fillRect(indicatorX, topY, 24, 20, 0x0000);
-        d_->fillRect(indicatorX, bottomY, 24, 20, 0x0000);
+        const int bottomY = MenuFrame::Y + MenuFrame::H - MenuFrame::BorderThickness - kGlyphH - 2;
+        d_->fillRect(indicatorX, topY, kGlyphW, kGlyphH, 0x0000);
+        d_->fillRect(indicatorX, bottomY, kGlyphW, kGlyphH, 0x0000);
         d_->txtSize(MenuFrame::TextScale);
         d_->txtColor(0xFFFF, 0x0000);
         if (scrollOffset > 0) {
             d_->txtSetCursor(indicatorX, topY);
             d_->txtWrite("^");
         }
-        if (scrollOffset + kMaxFilesShown < totalCount) {
+        if (scrollOffset + visibleRows < totalCount) {
             d_->txtSetCursor(indicatorX, bottomY);
             d_->txtWrite("v");
         }
@@ -1314,6 +1362,75 @@ private:
         drawDeviceList();
     }
 
+    // ── Devices submenu: Enable/disable, Change order ────────────────────
+    static constexpr const char* kDevicesMenuLabels[] = { "Enable/disable", "Change order" };
+    static constexpr int kDevicesMenuCount = 2;
+
+    // `sel`: the row to highlight -- the item we're coming back from
+    void openDevicesMenu(int sel = 0) {
+        state_ = State::DevicesMenu;
+        selected_ = sel;
+        drawBox();
+        for (int i = 0; i < kDevicesMenuCount; ++i) drawRow(i, kDevicesMenuLabels[i]);
+    }
+
+    // ── Devices -> Change order ──────────────────────────────────────────
+    // The loop order of the devices. Up/Down + OK picks one ("moving",
+    // shown between > <), Up/Down then moves it, OK keeps the new order
+    // (hipi_applyDeviceOrder(): used at once, saved to CONFIG.TXT), X puts
+    // it back. X when nothing is picked returns to the Devices menu.
+    void openDeviceOrder() {
+        orderList_ = devices;
+        orderMoving_ = false;
+        state_ = State::DeviceOrder;
+        selected_ = 0;
+        deviceScrollOffset_ = 0;
+        drawBox();
+        drawDeviceOrder();
+    }
+
+    void keepOrderSelectionVisible() {
+        if (selected_ < deviceScrollOffset_) {
+            deviceScrollOffset_ = selected_;
+        } else if (selected_ >= deviceScrollOffset_ + kMaxFilesShown) {
+            deviceScrollOffset_ = selected_ - kMaxFilesShown + 1;
+        }
+    }
+
+    void orderMove(int delta) {
+        const int count = static_cast<int>(orderList_.size());
+        if (count == 0) return;
+        if (!orderMoving_) {
+            selected_ = (selected_ + delta + count) % count;
+        } else {
+            const int to = selected_ + delta;
+            if (to < 0 || to >= count) return;          // no wrap while moving
+            std::swap(orderList_[static_cast<std::size_t>(selected_)],
+                      orderList_[static_cast<std::size_t>(to)]);
+            selected_ = to;
+        }
+        keepOrderSelectionVisible();
+        drawDeviceOrder();
+    }
+
+    void drawDeviceOrder() {
+        d_->txtSize(MenuFrame::TextScale);
+        for (int row = 0; row < kMaxFilesShown; ++row) {
+            const std::size_t i = static_cast<std::size_t>(deviceScrollOffset_ + row);
+            const bool hasEntry = i < orderList_.size();
+            const bool isSelected = hasEntry && static_cast<int>(i) == selected_;
+            _clearRowBackground(row, isSelected ? MenuFrame::Yellow : 0x0000);
+            if (!hasEntry) continue;
+            char label[40];
+            std::snprintf(label, sizeof(label), (isSelected && orderMoving_) ? "%u > %s <" : "%u  %s",
+                          static_cast<unsigned>(i + 1), orderList_[i]->name());
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
+            d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
+            d_->txtWrite(label);
+        }
+        drawScrollIndicators(deviceScrollOffset_, static_cast<int>(orderList_.size()));
+    }
+
     void toggleDevice(int index) {
         if (index < 0 || index >= static_cast<int>(devices.size())) return;
         CDevice* dev = devices[index];
@@ -1413,21 +1530,7 @@ private:
             d_->txtWrite(lifLines_[i].c_str());
         }
         // Scroll marks, in the same place as the other lists'
-        const int indicatorX = MenuFrame::X + MenuFrame::W - 34;
-        const int topY = MenuFrame::Y + 6;
-        const int bottomY = MenuFrame::Y + MenuFrame::H - 29;
-        d_->fillRect(indicatorX, topY, 24, 20, 0x0000);
-        d_->fillRect(indicatorX, bottomY, 24, 20, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
-        d_->txtColor(0xFFFF, 0x0000);
-        if (lifScroll_ > 0) {
-            d_->txtSetCursor(indicatorX, topY);
-            d_->txtWrite("^");
-        }
-        if (lifScroll_ + kLifInfoRows < static_cast<int>(lifLines_.size())) {
-            d_->txtSetCursor(indicatorX, bottomY);
-            d_->txtWrite("v");
-        }
+        drawScrollIndicators(lifScroll_, static_cast<int>(lifLines_.size()), kLifInfoRows);
     }
 
     // Back to the file list with the file just looked at still selected
@@ -1662,6 +1765,12 @@ private:
                 if (index >= 0 && index < static_cast<int>(deviceLabels_.size()))
                     drawRow(index, deviceLabels_[static_cast<std::size_t>(index)].c_str());
                 break;
+            case State::DeviceOrder:
+                break;
+            case State::DevicesMenu:
+                if (index >= 0 && index < kDevicesMenuCount)
+                    drawRow(index, kDevicesMenuLabels[index]);
+                break;
             case State::DisplayMenu:
                 if (index >= 0 && index < kDisplayMenuCount)
                     drawRow(index, kDisplayMenuLabels[index]);
@@ -1692,6 +1801,9 @@ private:
     // did before.
     int fileScrollOffset_ = 0;
     int deviceScrollOffset_ = 0;
+    std::vector<CDevice*> orderList_;     // DeviceOrder: the order being edited
+    bool orderMoving_ = false;            // DeviceOrder: a device is picked up
+    int orderPickedFrom_ = 0;             // DeviceOrder: where it was picked up
     std::string lastAppliedFile_;
     std::vector<std::string> lifLines_;   // LifInfo: description lines
     int lifScroll_ = 0;                   // LifInfo: first line shown

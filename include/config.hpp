@@ -102,6 +102,10 @@ public:
                            disabledDevices_.c_str());
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "device_order=%s\n",
+                           deviceOrder_.c_str());
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         f_close(&file);
     }
 
@@ -125,6 +129,8 @@ public:
     // TFDRIVE's OFF-STANDBY-ON switch: Off is stored as a disabled device
     // (disabled_devices); this flag tells Standby from On
     bool driveStandby() const { return driveStandby_; }
+    const std::string& deviceOrder() const { return deviceOrder_; }
+    void setDeviceOrder(const std::string& csv) { deviceOrder_ = csv; save(); }
     // Next screendump_<n>.bmp number to try (see screendump.cpp)
     unsigned screendumpNext() const { return screendumpNext_; }
     void setScreendumpNext(unsigned n) { screendumpNext_ = n; save(); }
@@ -229,6 +235,8 @@ private:
                     columns_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "disabled_devices") == 0) {
                     disabledDevices_ = value;
+                } else if (std::strcmp(key, "device_order") == 0) {
+                    deviceOrder_ = value;
                 }
             }
             line = std::strtok(nullptr, "\r\n");
@@ -257,6 +265,9 @@ private:
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).
     std::string   disabledDevices_ = "";
+    // Loop order of the devices, comma-separated names (Devices -> Change
+    // order). Empty = the default order they're created in (hipi_init()).
+    std::string   deviceOrder_ = "";
 };
 
 }  // namespace hipi

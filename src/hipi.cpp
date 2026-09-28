@@ -86,6 +86,57 @@ uint8_t hpilDevices = 0;
 // Add devices to the HP-IL loop here
 static CDrive* driveDev = nullptr;   // TFDRIVE, for its power switch
 
+// Exactly one device -- the last in the loop -- has last() set
+static void markLastDevice() {
+    for (CDevice* dev : devices) dev->last(false);
+    if (!devices.empty()) devices.back()->last(true);
+}
+
+// Reorders `devices` by the saved device_order names. Names not found are
+// ignored; devices not named keep their default relative order at the end
+// (e.g. a device added in a newer version).
+static void restoreDeviceOrder() {
+    const std::string& csv = config.deviceOrder();
+    if (csv.empty()) return;
+    std::vector<CDevice*> rest = devices;
+    std::vector<CDevice*> ordered;
+    std::size_t start = 0;
+    while (start <= csv.size()) {
+        std::size_t comma = csv.find(',', start);
+        if (comma == std::string::npos) comma = csv.size();
+        const std::string name = csv.substr(start, comma - start);
+        for (auto it = rest.begin(); it != rest.end(); ++it) {
+            if (name == (*it)->name()) {
+                ordered.push_back(*it);
+                rest.erase(it);
+                break;
+            }
+        }
+        start = comma + 1;
+    }
+    ordered.insert(ordered.end(), rest.begin(), rest.end());
+    devices = ordered;
+}
+
+void hipi_applyDeviceOrder(const std::vector<CDevice*>& order) {
+    if (order.size() != devices.size()) return;      // must be the same devices
+    devices = order;
+    markLastDevice();
+    std::string csv;
+    for (CDevice* dev : devices) {
+        if (!csv.empty()) csv += ",";
+        csv += dev->name();
+    }
+    config.setDeviceOrder(csv);
+    LOGF("\r\n * Device order: %s", csv.c_str());
+}
+
+// Seen at the last auto-addressing (AAD) passing the PILBox: how many
+// devices on the PC side took an address, and the first of them.
+// -1 = no AAD seen yet. See hipi_loop().
+static int pilboxDevices = -1;
+static int pilboxFirstAddr = -1;
+
 void hipi_init()
 {
     cassette = new CTapeSD(config.filename().c_str()); // Uses SD-card for file storage
@@ -145,8 +196,9 @@ void hipi_init()
     // "general interface" suggestion we used before.
     devices.push_back(new CTerminal("TFTERM", 0x4E));
 
-    // Mark the last device in the loop
-    devices.back()->last(true);
+    // Saved loop order (Devices -> Change order), then mark the last device
+    restoreDeviceOrder();
+    markLastDevice();
 
     // Apply persisted enabled/disabled state (see Config::isDeviceEnabled()
     // / UiDialog's "Devices" menu) now that the actual instances exist --
@@ -162,114 +214,30 @@ void hipi_init()
     }
 }
 
-// See hipi.h for the full rationale (shared by hipi_test()'s boot-time
-// log and boardui.cpp's on-demand "Devices" dialog).
+// See hipi.h. Reports each device's CURRENT address -- the one the
+// controller (HP-41) gave it with its own AAU/AAD -- without sending any
+// frames. An earlier version ran its own AAU/AAD/TAD/SAI/SDI sequence
+// through every device, disabled ones included: disabled devices then
+// showed an address, and simply opening the list re-addressed all
+// devices behind the controller's back.
 std::vector<DeviceInfo> hipi_enumerateDevices() {
     std::vector<DeviceInfo> result;
- 
-    auto sendAll = [](uint32_t frame) -> uint32_t {
-        for (CDevice* dev : devices) {
-            const IL_CMD_t r = dev->hpil(static_cast<IL_CMD_t>(frame));
-            if (r != IL_NO_FRAME) frame = r;   // absorbed: pass it on anyway here
-        }
-        return frame;
-    };
- 
-    sendAll(UNL);
-    sendAll(RFC);
-    sendAll(AAU);
-    sendAll(RFC);
-    sendAll(UNT);
-    sendAll(RFC);
- 
-    // Discover the device count purely from the AAD response -- NOT from
-    // the size of our own `devices` vector. This is the part an earlier
-    // version of this function got wrong: it looped over `devices` and
-    // read dev->addr()/name()/enabled() directly, which only ever shows
-    // OUR OWN objects. A real controller has no such list to cheat
-    // with -- it only knows what AAD/TAD/SAI/SDI themselves reveal, and
-    // that's the only thing that would also correctly surface a genuine
-    // external device reachable through CPilBox (e.g. something pyILPER
-    // presents on the other side), which has no corresponding CDevice of
-    // ours at all.
-    const uint32_t afterAad = sendAll(AAD + 1);
-    const int deviceCount = static_cast<int>(afterAad) - static_cast<int>(AAD + 1);
- 
-    for (int addr = 1; addr <= deviceCount; ++addr) {
+    for (CDevice* dev : devices) {
         DeviceInfo info{};
-        info.addr = addr;
-        info.devName[0] = '\0';
-        info.enabled = true;   // default for anything that isn't one of our own -- see the cross-reference pass below
- 
-        // RFC ("ready for command") between each step -- gives the
-        // addressed device a moment to act before the next command
-        // arrives, the same pacing a real controller would use, not just
-        // an unbroken burst of frames.
-        sendAll(static_cast<uint32_t>(TAD + addr));
-        sendAll(RFC);
- 
-        const uint32_t sai = sendAll(SAI);
-        sendAll(sai);   // confirmation echo, closes out m_sai cleanly
-        sendAll(RFC);
-        info.sai = static_cast<std::uint8_t>(sai & 0xFF);
- 
-        std::size_t n = 0;
-        uint32_t c = sendAll(SDI);
-        while (c != ETO && n < sizeof(info.sdiName) - 1) {
-            info.sdiName[n++] = static_cast<char>(c & 0xFF);
-            // No RFC here -- unlike TAD/SAI/UNT (distinct commands), this
-            // is a continuous data stream: base()'s m_sdi residual check
-            // advances on ANY incoming frame regardless of its value, so
-            // an RFC here consumes a character exactly like the real
-            // continuation read does. A real test proved it: inserting
-            // one here garbled every name ("TFDISPLAY" -> "TDSLY", every
-            // other character silently skipped).
-            c = sendAll(0);
+        std::snprintf(info.devName, sizeof(info.devName), "%s", dev->name());
+        std::snprintf(info.sdiName, sizeof(info.sdiName), "%s", dev->name());
+        info.enabled = dev->enabled();
+        const int a = static_cast<int>(dev->addr());
+        // Only devices on the loop have an address; 31 = unaddressed
+        info.addr = (info.enabled && a < 31) ? a : -1;
+        info.sai = static_cast<std::uint8_t>(dev->accessoryId());
+        info.extDevices = -1;
+        if (dev->type() == PILBOX && info.enabled && pilboxDevices >= 0) {
+            info.extDevices = pilboxDevices;
+            info.extFirstAddr = pilboxFirstAddr;
         }
-        info.sdiName[n] = '\0';
- 
-        sendAll(UNT);
-        sendAll(RFC);
- 
         result.push_back(info);
     }
- 
-    // Cross-reference our own devices vector purely for display purposes
-    // (a local name + enabled/disabled status) -- this never feeds back
-    // into the address/SAI/SDI values above, which came entirely from
-    // the protocol exchange itself. A genuine external device (no match
-    // here) just keeps the defaults set above (blank name, enabled=true,
-    // i.e. "not applicable").
-    for (DeviceInfo& info : result) {
-        for (CDevice* dev : devices) {
-            if (dev->addr() == info.addr) {
-                std::snprintf(info.devName, sizeof(info.devName), "%s", dev->name());
-                info.enabled = dev->enabled();
-                break;
-            }
-        }
-    }
- 
-    // Also list any of our OWN devices that didn't take an address at
-    // all (addr() left at 31, "unaddressed") -- e.g. CPilBox when
-    // nothing's connected on the other side, correctly staying
-    // transparent during AAD rather than claiming to be a device it
-    // isn't. These aren't part of the protocol-driven loop above (there's
-    // no address to query them at), but they're still worth surfacing so
-    // the list doesn't just silently omit a disconnected/disabled local
-    // device.
-    for (CDevice* dev : devices) {
-        if (dev->addr() >= 31) {
-            DeviceInfo info{};
-            info.addr = -1;
-            std::snprintf(info.devName, sizeof(info.devName), "%s", dev->name());
-            info.enabled = dev->enabled();
-            info.sai = 0;
-            info.sdiName[0] = '\0';
-            result.push_back(info);
-        }
-    }
- 
     return result;
 }
 
@@ -327,28 +295,11 @@ LoopbackResult hipi_loopbackTest(
 }
 
 bool hipi_test() {
-    // ── Device self-check ────────────────────────────────────────────
-    // Deliberately does NOT touch the physical loop at all (no
-    // loop.sendFrame()/receiveFrame()) -- we don't know whether a real
-    // controller or other physical devices are present, so all we can
-    // safely exercise this way is our own built-in devices (and, via
-    // CPilBox's own hpil(), whatever it can reach over USB if something's
-    // actually connected there). Every frame is instead driven directly
-    // through dev->hpil(), chained across the devices vector in order --
-    // the exact same dispatch hipi_loop() uses for real bus frames, just
-    // sourced by us instead of the physical PIO loop. This mirrors what a
-    // real controller's own AAD/TAD/SAI/SDI sequence looks like: offer
-    // AAD, see how many devices take an address, then address each one
-    // in turn to read its identity (SAI) and name (SDI). A real
-    // controller connecting afterward starts its own IFC/AAU/AAD cycle
-    // regardless, so this leaves nothing lasting behind to worry about.
-    //
-    // enabled()/disabled() is purely a *runtime* gate hipi_loop() uses to
-    // skip a device on the real bus (simulating it being unplugged) --
-    // every device is still a normal, fully-functional CDevice underneath
-    // and answers hpil() exactly the same either way, so the self-check
-    // queries all of them identically and just notes which ones are
-    // currently disabled alongside the result, rather than skipping them.
+    // ── Device list at boot ──────────────────────────────────────────
+    // Just logs the devices and their current addresses (see
+    // hipi_enumerateDevices() -- read-only, no frames are sent). Right
+    // after power-up nothing has an address yet; the HP-41 assigns them
+    // with its own AAU/AAD.
 
     // Force the trace to avoid corrupt logging
     bTrace = false;
@@ -360,7 +311,7 @@ bool hipi_test() {
     const int addressedCount = static_cast<int>(std::count_if(
         infos.begin(), infos.end(), [](const DeviceInfo& d) { return d.addr >= 0; }));
 
-    LOGF("\r\n%d device(s) responded to AAD", addressedCount);
+    LOGF("\r\n%d device(s) with an address", addressedCount);
     LOGF("\r\nAddr     Name       ID       Enabled"); 
     LOGF("\r\n------------------------------------");
 
@@ -398,7 +349,7 @@ bool hipi_test() {
     uint32_t frame = AAD + 1;
     frame = sendAll(frame);
     const int addressedCount = static_cast<int>(frame) - static_cast<int>(AAD + 1);
-    LOGF("\r\n%d device(s) responded to AAD", addressedCount);
+    LOGF("\r\n%d device(s) with an address", addressedCount);
     LOGF("\r\nAddr     Name       ID       Enabled"); 
     LOGF("\r\n------------------------------------");
 
@@ -518,6 +469,14 @@ bool hipi_loop(HpIlLoop& loop) {
             if( dev->enabled() ) {
                 // Let the device handle the frame
                 IL_CMD_t rtn = dev->hpil(rx_frame);
+                // Devices behind the PILBox (on the PC): during auto-
+                // addressing each takes one address, so the AAD frame
+                // comes back from the PILBox counted up by their number
+                if( dev->type() == PILBOX && inAddrRange(rx_frame, AAD)
+                    && inAddrRange(rtn, AAD) ) {
+                    pilboxFirstAddr = static_cast<int>(rx_frame - AAD);
+                    pilboxDevices   = static_cast<int>(rtn - rx_frame);
+                }
                 if( rtn == IL_NO_FRAME ) {
                     // Absorbed (see IL_NO_FRAME): the loop is interrupted
                     // here -- later devices don't see it, nothing is sent

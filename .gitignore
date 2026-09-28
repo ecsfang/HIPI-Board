@@ -57,6 +57,7 @@ compile_commands.json
 *.log
 *.bak
 *.swp
+/*.zip
 
 # vcpkg
 vcpkg_installed/
@@ -67,3 +68,10 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+lif/
+logs/
+
+documents/*.pdf
+documents/images/*.bmp
+

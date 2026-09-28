@@ -489,6 +489,7 @@ void showInfoBox() {
 #ifdef DISPLAY_7INCH
     display_->endOverlayDraw();
     screen_->reassertRenderState();
+    screen_->refreshCursor();       // see showDeviceList()
     display_->showPipOverlay(boxX, boxY, boxW, boxH);
 #endif
 
@@ -578,16 +579,25 @@ void drawDeviceListRows() {
     display_->txtSize(0);
     const int visibleRows = deviceListVisibleRows();
     int y = rowsY;
-    char buf[64];
+    char buf[96];
     for (int i = 0; i < visibleRows; ++i) {
         const std::size_t idx = static_cast<std::size_t>(deviceListScrollOffset + i);
         if (idx >= deviceListCache.size()) break;
         const DeviceInfo& info = deviceListCache[idx];
-        if (info.addr < 0) {
-            std::snprintf(buf, sizeof(buf), "%6s  %-10s [%c]",
+        if (info.extDevices > 0) {
+            // PILBox with devices on the PC: how many, and their addresses
+            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] PC: %d (addr %d-%d)",
+                          "--", info.devName, info.enabled ? 'X' : ' ', info.extDevices,
+                          info.extFirstAddr, info.extFirstAddr + info.extDevices - 1);
+        } else if (info.extDevices == 0) {
+            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] PC: none",
+                          "--", info.devName, info.enabled ? 'X' : ' ');
+        } else if (info.addr < 0) {
+            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c]",
                           "--", info.devName, info.enabled ? 'X' : ' ');
         } else {
-            std::snprintf(buf, sizeof(buf), "addr%2d  %-10s0x%02X [%c]",
+            // "addr NN": room for two-digit addresses (up to 30)
+            std::snprintf(buf, sizeof(buf), "addr %2d  %-10s0x%02X [%c]",
                           info.addr, info.devName, info.sai, info.enabled ? 'X' : ' ');
         }
         display_->txtSetCursor(MenuFrame::X + 20, y);
@@ -633,6 +643,9 @@ void showDeviceList() {
 #ifdef DISPLAY_7INCH
     display_->endOverlayDraw();
     screen_->reassertRenderState();
+    // Drawing the list moved the chip's (shared) text cursor into the
+    // box -- put the blinking cursor back where the text stands
+    screen_->refreshCursor();
     display_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
 #endif
 
@@ -681,6 +694,7 @@ void scrollDeviceList(bool down) {
 #ifdef DISPLAY_7INCH
         display_->endOverlayDraw();
         screen_->reassertRenderState();
+        screen_->refreshCursor();
 #endif
     }
 }
