@@ -112,9 +112,9 @@ grey when off.
 After a few seconds (or when you touch the screen) HIPI is ready. Anything
 the HP-41 prints now appears on the screen.
 
-![The start-up screen while HIPI starts](images/screen-startup.png)
+<a href="images/screen-startup.png"><img src="images/screen-startup.png" alt="The start-up screen while HIPI starts" width="512"></a>
 
-![The start-up screen when HIPI is ready](images/screen-startup-ready.png)
+<a href="images/screen-startup-ready.png"><img src="images/screen-startup-ready.png" alt="The start-up screen when HIPI is ready" width="512"></a>
 
 ---
 
@@ -125,7 +125,7 @@ the HP-41 prints now appears on the screen.
 The buttons are hidden to give the text more room. **Touch the right edge of the
 screen** to slide them in. They slide away again after 5 seconds without use.
 
-![The button strip](images/screen-button-strip.png)
+<a href="images/screen-button-strip.png"><img src="images/screen-button-strip.png" alt="The button strip" width="512"></a>
 
 | Button | Does | With **Shift** first |
 |--------|------|----------------------|
@@ -144,14 +144,14 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 | **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. Swipe up/down to scroll |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
-![Info box](images/screen-infobox.png)
+<a href="images/screen-infobox.png"><img src="images/screen-infobox.png" alt="Info box" width="512"></a>
 
-![Device list](images/screen-devicelist.png)
+<a href="images/screen-devicelist.png"><img src="images/screen-devicelist.png" alt="Device list" width="512"></a>
 
 When you switch view, a yellow box shows the name of the new view for a moment.
 Touches are ignored while it's showing.
 
-![View switch](images/screen-swipe-splash.png)
+<a href="images/screen-swipe-splash.png"><img src="images/screen-swipe-splash.png" alt="View switch" width="512"></a>
 
 ---
 
@@ -162,21 +162,21 @@ Touches are ignored while it's showing.
 The HP 82163 video display: everything the HP-41 prints, like `PRA`, `PRX` or
 program listings. Scroll back with ▲ and ▼.
 
-![Display view](images/view-display.png)
+<a href="images/view-display.png"><img src="images/view-display.png" alt="Display view" width="512"></a>
 
 ### 5.2 Plotter
 
 Shows what the HP-41 draws on the plotter (`TFPLOT`). The drawing keeps growing
 while you look at other views. Clear it with **Display → Clear plotter**.
 
-![Plotter view](images/view-plotter.png)
+<a href="images/view-plotter.png"><img src="images/view-plotter.png" alt="Plotter view" width="512"></a>
 
 ### 5.3 Tape
 
 A picture of the HP 82161A cassette drive — and you can use it like the real
 thing.
 
-![Tape view](images/view-tape.png)
+<a href="images/view-tape.png"><img src="images/view-tape.png" alt="Tape view" width="512"></a>
 
 | On the picture | What it does |
 |----------------|--------------|
@@ -188,7 +188,7 @@ thing.
 | **BUSY** light | The drive is working, or the HP-41 is talking to it |
 | **Reels** | Spin while the tape is read, written or wound |
 
-![Lid open](images/view-tape-open.png)
+<a href="images/view-tape-open.png"><img src="images/view-tape-open.png" alt="Lid open" width="512"></a>
 
 ---
 
@@ -197,7 +197,7 @@ thing.
 Press **OK** to open the menu. **▲/▼** to move, **OK** to choose, **X** to go
 back. **Shift + OK** closes the menu from anywhere.
 
-![Main menu](images/menu-main.png)
+<a href="images/menu-main.png"><img src="images/menu-main.png" alt="Main menu" width="512"></a>
 
 ```
 Main menu
@@ -239,9 +239,9 @@ All settings are remembered, also after power off.
 - **Loopback test** — connect HIPI's IN and OUT with one HP-IL cable (no HP-41),
   then run it. "Loopback OK!" means the HP-IL side works.
 
-![Devices menu](images/menu-devices.png)
+<a href="images/menu-devices.png"><img src="images/menu-devices.png" alt="Devices menu" width="512"></a>
 
-![Loopback test](images/menu-loopback.png)
+<a href="images/menu-loopback.png"><img src="images/menu-loopback.png" alt="Loopback test" width="512"></a>
 
 ---
 
@@ -259,7 +259,7 @@ card reader, or straight from HIPI with **Connect to PC** (see
 
 Use **Config → Select file**, or touch the cassette window in the Tape view.
 
-![File list](images/menu-filelist.png)
+<a href="images/menu-filelist.png"><img src="images/menu-filelist.png" alt="File list" width="512"></a>
 
 - **No media** at the top means *no cassette in the drive*.
 - After choosing a file you get three options:
@@ -273,7 +273,7 @@ Press **▼** to see the cassette's contents: its name, size, free space and the
 list of files with type and size (in registers, like the HP-41's `DIR`).
 Scroll with ▲/▼ (Shift for a page), **OK** to use the cassette, **X** to go back.
 
-![Cassette contents](images/menu-lif-contents.png)
+<a href="images/menu-lif-contents.png"><img src="images/menu-lif-contents.png" alt="Cassette contents" width="512"></a>
 
 ---
 
@@ -321,7 +321,7 @@ Two things make plotter commands easy to type on the HP-41:
   at most 15 characters. `⊢` is **APPEND** (in ALPHA mode: shift + K), which
   adds the text to what's already in ALPHA.
 
-![Plotter example](images/example-plotter-box.png)
+<a href="images/example-plotter-box.png"><img src="images/example-plotter-box.png" alt="Plotter example" width="512"></a>
 
 ### 8.2 Temperature and pressure — `TFTEMP`
 
@@ -420,7 +420,7 @@ HIPI shows up on the computer as a few serial ports; the terminal is the
 program, for example PuTTY on Windows or `minicom` on Linux.
 
 <!-- TODO image: replace the placeholder below with:
-![Terminal program](images/example-terminal.png) -->
+<a href="images/example-terminal.png"><img src="images/example-terminal.png" alt="Terminal program" width="512"></a> -->
 > 📷 **Image placeholder:** A terminal program on the PC showing text from the calculator (`images/example-terminal.png`)
 
 ### 8.6 PC link — `PILBOX`
@@ -433,7 +433,7 @@ HIPI creates (on Linux usually `/dev/ttyACM1`) as its PILBox port.
 When no emulator is running, `PILBOX` simply passes everything on.
 
 <!-- TODO image: replace the placeholder below with:
-![pyILPER](images/example-pyilper.png) -->
+<a href="images/example-pyilper.png"><img src="images/example-pyilper.png" alt="pyILPER" width="512"></a> -->
 > 📷 **Image placeholder:** pyILPER connected to HIPI's PILBox port (`images/example-pyilper.png`)
 
 ---
@@ -452,13 +452,9 @@ computer without taking it out:
 
 While connected, the cassette drive is paused and screen dumps are not possible.
 
-<!-- TODO image: replace the placeholder below with:
-![SD card on the PC](images/pc-usb-drive.png) -->
-> 📷 **Image placeholder:** The SD card shown as a drive on the computer (`images/pc-usb-drive.png`)
+<a href="images/pc-usb-drive.png"><img src="images/pc-usb-drive.png" alt="SD card on the PC" width="512"></a>
 
-<!-- TODO image: replace the placeholder below with:
-![Connect to PC menu](images/menu-connect-pc.png) -->
-> 📷 **Image placeholder:** "Disconnect from PC" in the Config menu (`images/menu-connect-pc.png`)
+<a href="images/menu-connect-pc.png"><img src="images/menu-connect-pc.png" alt="Connect to PC menu" width="512"></a>
 
 ---
 
@@ -487,16 +483,12 @@ A new version comes as a `.uf2` file, `hipi_7_pico.uf2`, in the HIPI download.
 3. Copy the `.uf2` file onto that drive.
 4. HIPI restarts with the new version — the version number is shown at start-up.
 
-<!-- TODO image: replace the placeholder below with:
-![RP2350 drive](images/update-rp2350-drive.png) -->
-> 📷 **Image placeholder:** The RP2350 drive on the computer, with the .uf2 file being copied (`images/update-rp2350-drive.png`)
+<a href="images/update-rp2350-drive.png"><img src="images/update-rp2350-drive.png" alt="RP2350 drive" width="512"></a>
 
 **If HIPI doesn't start at all:** hold the small **BOOTSEL** button on the Pico
 board inside while you plug in the USB cable, then do step 3.
 
-<!-- TODO image: replace the placeholder below with:
-![BOOTSEL button](images/update-bootsel-button.jpg) -->
-> 📷 **Image placeholder:** Where the BOOTSEL button is (`images/update-bootsel-button.jpg`)
+<img src="images/update-bootsel-button.jpg" alt="BOOTSEL button" width="512">
 
 Your settings and files on the SD card are kept. If a new version needs new SD
 card files, they are in the SD card zip of that download.
