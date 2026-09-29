@@ -68,6 +68,9 @@ std::vector<std::uint16_t> buttonStripPixels;
 // Built-in button strip image -- see boardui_loadButtonStrip()
 extern const std::uint16_t kButtonsImage[];
 extern const std::uint16_t kButtonsImageWidth, kButtonsImageHeight;
+// Built-in logo -- see showSplashScreen()
+extern const std::uint16_t kLogoImage[];
+extern const std::uint16_t kLogoImageWidth, kLogoImageHeight;
 namespace hipi {
 namespace {
 std::uint16_t buttonStripWidth = 0, buttonStripHeight = 0, buttonStripScreenX0 = 0;
@@ -723,18 +726,14 @@ void showSplashScreen(DisplayDriver* display, const char* version,
     // Logo on the left, vertically centered in the box; if it's missing
     // from the SD card, just skip it and fall back to text-only (same
     // graceful-degradation style as the button strip in boardui_loadButtonStrip()).
+    // Built-in logo (src/logo_image.cpp -- no SD card needed), vertically
+    // centred in the box
     const int logoX = splashX + 20;
-    std::uint16_t logoW = 0, logoH = 0;
-    // Peek dimensions first so we can vertically center whatever size the
-    // logo actually is.
-    const bool haveDims = peekBmpDimensions(HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp"), logoW, logoH);
-    const int logoY = splashY + (splashH - (haveDims ? logoH : 0)) / 2;
-    const bool haveLogo = haveDims &&
-        drawBmpAt(display, HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp"), logoX, logoY, nullptr, &logoW, &logoH);
+    const int logoY = splashY + (splashH - kLogoImageHeight) / 2;
+    display->drawBitmap565(logoX, logoY, kLogoImageWidth, kLogoImageHeight, kLogoImage);
 
-    // Text sits to the right of the logo (or at the usual left margin if
-    // the logo failed to load).
-    const int textX = haveLogo ? (logoX + logoW + 20) : (splashX + 20);
+    // Text sits to the right of the logo
+    const int textX = logoX + kLogoImageWidth + 20;
     const int textTop = splashY + (splashH - 90) / 2;  // ~90px tall text block
 
     display->txtColor(0xFFFF, 0x0000);

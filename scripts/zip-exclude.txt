@@ -1,0 +1,10 @@
+build/*
+.git/*
+*.pico-sdk/*
+lif/*
+lib/*
+documents/*
+.vscode/*
+logs/*
+PicoLed/*
+./*.zip

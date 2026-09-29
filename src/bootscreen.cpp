@@ -8,6 +8,11 @@
 #include <cstdio>
 #include <cstring>
 
+// Built-in logo (src/logo_image.cpp, from resources/logo.bmp via
+// scripts/bmp_to_rgb565.py)
+extern const std::uint16_t kLogoImage[];
+extern const std::uint16_t kLogoImageWidth, kLogoImageHeight;
+
 namespace hipi {
 
 #ifdef DISPLAY_7INCH
@@ -82,11 +87,9 @@ void bootscreen_begin(DisplayDriver* display, const char* version) {
         d_->fillRect(0, 0, kW, kH, kBlack);
         MenuFrame::draw(d_, 8, 8, kW - 16, kH - 16);
         d_->selectBuiltinFont();
-        // Logo (if on the SD card), name, version
-        std::uint16_t lw = 0, lh = 0;
-        const bool logo = peekBmpDimensions(HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp"), lw, lh) &&
-                          drawBmpAt(d_, HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp"), 34, 30, nullptr, &lw, &lh);
-        const int tx = logo ? 34 + lw + 22 : 40;
+        // Logo (built in -- no SD card needed), name, version
+        d_->drawBitmap565(34, 30, kLogoImageWidth, kLogoImageHeight, kLogoImage);
+        const int tx = 34 + kLogoImageWidth + 22;
         text(tx, 30, "HIPI", 3, kYellow);
         text(tx + 2, 104, "HP-IL Pico Interface", 1, kWhite);
         char buf[32];

@@ -81,13 +81,13 @@ The SD card then looks like this:
 
 ```
 CONFIG.TXT        HIPI's settings (created by HIPI itself)
-resources/        pictures: logo.bmp, and the cassette drive's
-                  hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+resources/        the cassette drive's pictures: hp82161a.bmp,
+                  tape-in.bmp, open.bmp, leds.bmp, reels.bmp
 lif/              your cassettes (.dat files)
 screenshots/      screen dumps (created by HIPI when you save the first)
 ```
 
-HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons and menus are built in, so HIPI can be used without an SD card too — just without cassettes, pictures and saved settings.
+HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons, menus and start-up screen are built in, so HIPI can be used without an SD card too — just without cassettes, pictures and saved settings.
 
 ### 3.2 Connect everything
 
@@ -98,9 +98,7 @@ HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons and menus a
 4. Connect USB power. HIPI starts.
 5. Turn the HP-41 on.
 
-<!-- TODO image: replace the placeholder below with:
-![HP-IL loop between HP-41 and HIPI](images/setup-loop.jpg) -->
-> 📷 **Image placeholder:** HP-41 and HIPI connected in a loop (`images/setup-loop.jpg`)
+![HP-IL loop between HP-41 and HIPI](images/setup-loop.jpg)
 
 ### 3.3 First start
 
@@ -458,7 +456,9 @@ While connected, the cassette drive is paused and screen dumps are not possible.
 ![SD card on the PC](images/pc-usb-drive.png) -->
 > 📷 **Image placeholder:** The SD card shown as a drive on the computer (`images/pc-usb-drive.png`)
 
-![Connect to PC menu](images/menu-connect-pc.png)
+<!-- TODO image: replace the placeholder below with:
+![Connect to PC menu](images/menu-connect-pc.png) -->
+> 📷 **Image placeholder:** "Disconnect from PC" in the Config menu (`images/menu-connect-pc.png`)
 
 ---
 

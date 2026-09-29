@@ -189,22 +189,22 @@ SD card layout (folder names in `include/sd_paths.h`):
 
 ```
 CONFIG.TXT        settings -- created with defaults on first boot
-resources/        bitmaps, copied from the repo's resources/ folder
+resources/        Tape view bitmaps, copied from the repo's resources/ folder
 lif/              cassette images (*.dat, LIF), listed by Select file
 screenshots/      screen dumps -- created on the first Screendump
 ```
 
 | File (in `resources/`) | Required | Purpose |
 |------------------------|----------|---------|
-| `logo.bmp`      | No       | Logo on the start-up screen. Left out if missing. |
 | `hp82161a.bmp`  | No       | 7" panel only: picture for the **Tape** view. The view is left out if missing. |
 | `tape-in.bmp`   | No       | 7" panel only: the cassette shown in the Tape view's lid window when a file is selected. |
 | `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open. |
 | `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions. |
 | `reels.bmp`     | No       | 7" panel only: rotated frames of the cassette's reel hubs, for the spinning-reel animation. |
 
-(`buttons.bmp` stays in the repo's `resources/` only -- it's built into the
-firmware.)
+(`buttons.bmp` and `logo.bmp` stay in the repo's `resources/` only -- they're
+built into the firmware as `src/buttons_image.cpp` and `src/logo_image.cpp`,
+regenerated with `scripts/bmp_to_rgb565.py`.)
 
 The button strip is built into the firmware (`src/buttons_image.cpp`), so
 the buttons and menus work without an SD card. To change it, edit

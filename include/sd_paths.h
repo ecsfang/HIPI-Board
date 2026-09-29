@@ -2,8 +2,8 @@
 // in the root; everything else has its own folder.
 #pragma once
 
-// Bitmaps HIPI reads: logo.bmp, and the Tape view's hp82161a.bmp,
-// tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+// Bitmaps HIPI reads: the Tape view's hp82161a.bmp, tape-in.bmp, open.bmp,
+// leds.bmp, reels.bmp (the logo and the buttons are built in)
 #define HIPI_DIR_RESOURCES   "resources"
 // Screen dumps (screendump_<n>.bmp) -- created when the first is saved
 #define HIPI_DIR_SCREENSHOTS "screenshots"
