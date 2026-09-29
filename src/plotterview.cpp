@@ -1,8 +1,12 @@
 #include "plotterview.h"
+#include "sd_paths.h"
 #include "boardui.h"
 #include "usb_serial.h"
 #include "bmp_loader.hpp"
 #include "drive.h"
+#include <cctype>
+#include <vector>
+extern std::vector<CDevice*> devices;   // hipi.cpp -- loop order
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -17,6 +21,9 @@ DisplayDriver* display_ = nullptr;
 Screen* screen_ = nullptr;
 CPlotter* plotter_ = nullptr;
 DisplayOutput output_ = DisplayOutput::Display;
+// The device whose view is showing (nullptr = none yet / the Display view
+// with no display device) -- swiping steps through the devices from here
+CDevice* viewDevice_ = nullptr;
 
 // Fixed mapping from plotter units to screen pixels -- fits the whole
 // P1..P2 hard-clip area (see plotter.cpp's OP response: 250,279 /
@@ -51,17 +58,26 @@ std::int16_t mapY(std::int16_t py) {
     return static_cast<std::int16_t>(std::lround(kOffsetY + kFitH - (static_cast<double>(py) - kP1Y) * kScale));
 }
 
-// A handful of distinguishable pen colors (RGB565), cycling if the pen
-// index exceeds the list. v1 doesn't track real per-pen colors from a
-// palette-definition command (not part of our supported HP-GL set yet),
-// so this is a reasonable stand-in rather than a faithful pen-color match.
+// The plot is drawn like on real plotter paper: dark pens on white.
+constexpr std::uint16_t kPaperColor = 0xFFFF;
+
+// Pen colours (RGB565) for SP 1, 2, 3, ... -- HP-GL only selects a pen
+// NUMBER; which colour sits in that pen stall is up to the user, so this
+// table is the "pen carousel". Pens beyond the table cycle through it.
+// Tones are chosen to show up well on white (a plain yellow wouldn't).
 constexpr std::uint16_t kPenColors[] = {
-    0xFFFF, 0x07E0, 0xF800, 0x001F, 0xFFE0, 0x07FF, 0xF81F,
+    0x0000,   // 1: black
+    0xE000,   // 2: red
+    0x001A,   // 3: blue
+    0x0460,   // 4: green
+    0xCD00,   // 5: yellow (dark gold, readable on white)
 };
 constexpr int kPenColorCount = static_cast<int>(sizeof(kPenColors) / sizeof(kPenColors[0]));
 
 std::uint16_t penColor(std::uint8_t pen) {
-    if (pen == 0) return 0x0000;  // "no pen" -- shouldn't normally draw anyway
+    // Pen 0 = no pen selected (after IN, before any SP): draw in black
+    // anyway, the most useful default for programs that never select one
+    if (pen == 0) return kPenColors[0];
     return kPenColors[(pen - 1) % kPenColorCount];
 }
 
@@ -137,7 +153,7 @@ void onPlotterClear() {
 #ifndef DISPLAY_7INCH
     if (boardui_isMenuOpen()) return;  // see onPlotterDraw()'s own comment
 #endif
-    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
+    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kPaperColor);
     screen_->refreshCursor();
 }
 
@@ -218,8 +234,18 @@ void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms) {
     splashHideDeadline_ = make_timeout_time_ms(ms);
 }
 
-void showSwitchSplash(DisplayOutput mode) {
-    showSplashBox(outputName(mode), 2, kSplashMs);
+DisplayOutput outputFor(ViewKind k) {
+    switch (k) {
+        case ViewKind::Plotter: return DisplayOutput::Plotter;
+        case ViewKind::Tape:    return DisplayOutput::Tape;
+        default:                return DisplayOutput::Display;
+    }
+}
+
+// On the loop, switched on, and its kind of view can be shown here
+bool deviceHasView(CDevice* dev) {
+    return dev != nullptr && dev->enabled() && dev->viewKind() != ViewKind::None &&
+           plotterview_isAvailable(outputFor(dev->viewKind()));
 }
 
 // ─── Tape view (7" panel only) ──────────────────────────────────────────
@@ -229,7 +255,7 @@ void showSwitchSplash(DisplayOutput mode) {
 // then a single in-chip BTE copy -- no SD card or SPI pixel traffic.
 // The RA8875 (5") has no spare layer at 16bpp, so the view isn't offered
 // there at all (tapeLoaded_ stays false).
-constexpr const char* kTapeBmpPath = "hp82161a.bmp";
+constexpr const char* kTapeBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "hp82161a.bmp");
 bool tapeLoaded_ = false;
 std::int16_t tapeX_ = 0, tapeY_ = 0;     // image's top-left on screen
 [[maybe_unused]] std::uint16_t tapeW_ = 0, tapeH_ = 0;    // image size (unused on 5")
@@ -285,7 +311,7 @@ void loadTapeLayer() {
 // to kCassetteLabelAddr and the file name is written on the label; that
 // copy is what's shown. The cassette is shown when a file is selected and
 // the file picker isn't open ("ejected" while choosing a file).
-constexpr const char* kCassetteBmpPath = "tape-in.bmp";
+constexpr const char* kCassetteBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "tape-in.bmp");
 // Window opening in hp82161a.bmp's own pixel coordinates (= tape-in.bmp's
 // top-left). Re-measure if hp82161a.bmp is replaced.
 constexpr std::int16_t kCassetteX = 545, kCassetteY = 158;
@@ -304,7 +330,7 @@ constexpr std::uint16_t kLabelInk = 0x2104;   // near-black "pen"
 // with its pins) while the drive is "ejected", i.e. from pressing OPEN (or
 // opening the file picker any other way) until the picker closes.
 // Coordinates in hp82161a.bmp's own pixels -- re-measure if hp82161a.bmp changes.
-constexpr const char* kTapeOpenBmpPath = "open.bmp";
+constexpr const char* kTapeOpenBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "open.bmp");
 constexpr std::int16_t kTapeOpenX = 496, kTapeOpenY = 0;
 bool lidOpenLoaded_ = false;
 std::uint16_t lidOpenW_ = 0, lidOpenH_ = 0;
@@ -315,7 +341,7 @@ std::uint16_t lidOpenW_ = 0, lidOpenH_ = 0;
 // the power switch in its ON position (80x32). Shown = copy the sprite;
 // not shown = restore that area from hp82161a.bmp's layer (LEDs off,
 // switch OFF, as photographed).
-constexpr const char* kLedsBmpPath = "leds.bmp";
+constexpr const char* kLedsBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "leds.bmp");
 constexpr std::int16_t kLedSize = 40;
 struct LedSprite { std::int16_t x, y, w, h, srcX; };   // screen rect, column in leds.bmp
 constexpr LedSprite kPowerLed {257, 455, 40, 40,  0};
@@ -335,7 +361,7 @@ CDrive* drive_ = nullptr;
 // has six holes, so four frames make a seamless 60-degree cycle), one row
 // per hub. While the drive is busy (reading, writing, seeking) and the
 // cassette is shown, the frames are cycled; frame 0 is the picture itself.
-constexpr const char* kReelsBmpPath = "reels.bmp";
+constexpr const char* kReelsBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "reels.bmp");
 constexpr std::int16_t kReelBox = 38;
 constexpr int kReelFrames = 4;
 constexpr std::uint32_t kReelFrameMs = 60;
@@ -680,7 +706,7 @@ void plotterview_redraw() {
         return;
     }
     if (output_ != DisplayOutput::Plotter) return;
-    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
+    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kPaperColor);
     for (const PlotSegment& seg : plotter_->segments()) {
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
     }
@@ -702,7 +728,7 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
     display_->setActiveWindow(static_cast<std::uint16_t>(x0), static_cast<std::uint16_t>(y0),
                               static_cast<std::uint16_t>(x0 + w - 1),
                               static_cast<std::uint16_t>(y0 + h - 1));
-    display_->fillRect(x0, y0, w, h, 0x0000);
+    display_->fillRect(x0, y0, w, h, kPaperColor);
     // BTE (memory-copy) doesn't apply here: this region's own pixels
     // were never drawn in the first place (the content area is
     // NARROWER than the full panel for as long as the button strip is
@@ -750,8 +776,25 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
     screen_->refreshCursor();
 }
 
-void plotterview_setOutput(DisplayOutput mode) {
-    if (mode == output_ || !plotterview_isAvailable(mode)) return;
+// Switches the panel to `mode`, for device `dev` (its title goes in the
+// splash). Tape -> Tape with another drive also counts as a switch.
+static void switchView(DisplayOutput mode, CDevice* dev) {
+    if (!plotterview_isAvailable(mode)) return;
+    if (mode == output_ && dev == viewDevice_) return;
+    viewDevice_ = dev;
+    if (mode == DisplayOutput::Tape && dev != nullptr && dev != drive_) {
+        // Another drive: its own cassette, lid and lights
+        drive_ = static_cast<CDrive*>(dev);
+        tapeFile_ = drive_->mediaFile();
+        tapeEjected_ = drive_->ejected();
+        powerLit_ = drive_->poweredUp();
+        busyLit_ = powerLit_ && drive_->busyLight();
+        switchShown_ = drive_->powerMode();
+        reelFrame_ = 0;
+#ifdef DISPLAY_7INCH
+        composeCassetteLabel();
+#endif
+    }
     output_ = mode;
     if (mode != DisplayOutput::Display) {
         // Stop Screen from drawing text over the plot, and turn off the
@@ -762,7 +805,9 @@ void plotterview_setOutput(DisplayOutput mode) {
         screen_->suspend();
         screen_->hideCursorHardware();
     }
-    showSwitchSplash(mode);
+    std::string title = dev ? plotterview_viewTitle(dev) : std::string(outputName(mode));
+    for (char& c : title) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    showSplashBox(title.c_str(), 2, kSplashMs);
 #ifdef DISPLAY_7INCH
     // Draw the new view now, hidden behind the full-screen splash overlay
     // -- it's already complete when plotterview_poll() removes the overlay.
@@ -771,6 +816,51 @@ void plotterview_setOutput(DisplayOutput mode) {
     // 5": deliberately do NOT draw the new view (or resume() Screen) here
     // -- the splash is drawn directly on the panel and would be
     // overwritten. plotterview_poll() does it once the splash times out.
+}
+
+void plotterview_setOutput(DisplayOutput mode) {
+    // The first device (loop order) with that kind of view
+    for (CDevice* dev : devices) {
+        if (deviceHasView(dev) && outputFor(dev->viewKind()) == mode) {
+            switchView(mode, dev);
+            return;
+        }
+    }
+    if (mode == DisplayOutput::Display) switchView(mode, nullptr);
+}
+
+void plotterview_showDevice(CDevice* dev) {
+    if (deviceHasView(dev)) switchView(outputFor(dev->viewKind()), dev);
+}
+
+CDevice* plotterview_viewDevice() { return viewDevice_; }
+
+std::vector<CDevice*> plotterview_viewDevices() {
+    std::vector<CDevice*> list;
+    for (CDevice* dev : devices) {
+        if (deviceHasView(dev)) list.push_back(dev);
+    }
+    return list;
+}
+
+std::string plotterview_viewTitle(CDevice* dev) {
+    std::string title;
+    switch (dev->viewKind()) {
+        case ViewKind::Display: title = "Display"; break;
+        case ViewKind::Plotter: title = "Plotter"; break;
+        case ViewKind::Tape:    title = "Tape";    break;
+        default:                title = dev->name(); return title;
+    }
+    // Several devices with the same kind of view: add the device name
+    int same = 0;
+    for (CDevice* d : devices) {
+        if (deviceHasView(d) && d->viewKind() == dev->viewKind()) ++same;
+    }
+    if (same > 1) {
+        title += " ";
+        title += dev->name();
+    }
+    return title;
 }
 
 bool plotterview_isSplashVisible() { return splashVisible_; }
@@ -819,16 +909,34 @@ void plotterview_poll() {
 DisplayOutput plotterview_output() { return output_; }
 
 void plotterview_cycleOutput(bool forward) {
-    // Proper modulo for the backward case too (a plain % can return a
-    // negative result in C++ for a negative left-hand side).
-    // Skip views that aren't available (Tape on the 5" panel, or with no
-    // hp82161a.bmp) -- Display is always available, so this always terminates.
+    // Step through the devices in LOOP ORDER (forward = next on the loop)
+    // to the next one that has a view. Devices without a view, switched
+    // off, or whose view can't be shown here are skipped.
+    const int n = static_cast<int>(devices.size());
+    if (n == 0) return;
+    int start = -1;
+    for (int i = 0; i < n; ++i) {
+        if (devices[static_cast<std::size_t>(i)] == viewDevice_) { start = i; break; }
+    }
+    if (start < 0) {
+        // Not on a device's view yet (e.g. right after start-up): start
+        // from the first device showing the current kind of view
+        for (int i = 0; i < n; ++i) {
+            CDevice* d = devices[static_cast<std::size_t>(i)];
+            if (deviceHasView(d) && outputFor(d->viewKind()) == output_) { start = i; break; }
+        }
+        if (start < 0) start = forward ? n - 1 : 0;
+    }
     const int step = forward ? 1 : -1;
-    int next = static_cast<int>(output_);
-    do {
-        next = ((next + step) % kDisplayOutputCount + kDisplayOutputCount) % kDisplayOutputCount;
-    } while (!plotterview_isAvailable(static_cast<DisplayOutput>(next)));
-    plotterview_setOutput(static_cast<DisplayOutput>(next));
+    for (int k = 1; k <= n; ++k) {
+        CDevice* d = devices[static_cast<std::size_t>(((start + k * step) % n + n) % n)];
+        if (deviceHasView(d)) {
+            switchView(outputFor(d->viewKind()), d);
+            return;
+        }
+    }
+    // No device has a view at all: the text display is always there
+    switchView(DisplayOutput::Display, nullptr);
 }
 
 void plotterview_clearPlotter() {

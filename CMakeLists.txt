@@ -207,6 +207,8 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/my_descriptors.c
         src/usb_msc.cpp
         src/screendump.cpp
+        src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
+        src/bootscreen.cpp
     )
 
     target_link_libraries(${EXE_TARGET} PRIVATE

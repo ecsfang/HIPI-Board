@@ -1,5 +1,6 @@
 #define MODULE "DUMP"
 #include "screendump.h"
+#include "sd_paths.h"
 #include "config.hpp"
 #include "usb_msc.h"
 #include "usb_serial.h"   // LOGF
@@ -68,13 +69,15 @@ bool screendump_save(DisplayDriver* d, std::string& message, bool withOverlays) 
         return false;
     }
 
-    // First free "screendump_<n>.bmp", starting at the saved counter
+    // First free "screenshots/screendump_<n>.bmp", starting at the saved
+    // counter (the folder is created if it isn't there yet)
+    f_mkdir(HIPI_DIR_SCREENSHOTS);          // FR_EXIST if it is -- fine
     unsigned n = config.screendumpNext();
-    char name[32];
+    char name[48];
     FILINFO info;
     unsigned tries = 0;
     for (;; ++n, ++tries) {
-        std::snprintf(name, sizeof(name), "screendump_%u.bmp", n);
+        std::snprintf(name, sizeof(name), HIPI_DIR_SCREENSHOTS "/screendump_%u.bmp", n);
         if (f_stat(name, &info) == FR_NO_FILE) break;
         if (tries >= kMaxTries) {
             message = "No free file name";

@@ -9,6 +9,7 @@ class CDisplay : public CDevice {
     std::queue<unsigned char> fifo;
     std::uint32_t totalPushed_ = 0;  // see totalPushed()'s own comment
 public:
+    ViewKind viewKind() const override { return ViewKind::Display; }
     CDisplay(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau=31) : CDevice(name, _sai, _aau, DISPLAY) {
     }
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);

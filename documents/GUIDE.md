@@ -167,7 +167,7 @@ Choose whichever is convenient:
 
 ### 3.3 Verify
 
-After reboot you should see the splash screen with the version number,
+After reboot you should see the start-up screen with the version number,
 followed by a short boot summary (USB status, current drive file, trace
 mode, font, columns) and the device list.
 
@@ -185,19 +185,34 @@ lsblk                              # find the card, e.g. /dev/sdb1
 sudo mkfs.exfat -n HIPI /dev/sdb1  # or: sudo mkfs.vfat -F 32 -n HIPI /dev/sdb1
 ```
 
-Files to copy:
+SD card layout (folder names in `include/sd_paths.h`):
 
-| File            | Required | Purpose |
-|-----------------|----------|---------|
-| `buttons.bmp`   | **Yes**  | Artwork for the touch-button strip (from `resources/`). Without it there are no buttons and no menu. |
-| `logo.bmp`      | No       | Splash-screen logo (from `resources/`). Text-only splash if missing. |
-| `hp82161a.bmp`  | No       | 7" panel only: picture for the **Tape** view (from `resources/`). The view is left out if missing. |
-| `tape-in.bmp`   | No       | 7" panel only: the cassette shown in the Tape view's lid window when a file is selected (from `resources/`). |
-| `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open (from `resources/`). |
-| `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions, for the Tape view (from `resources/`). |
-| `reels.bmp`     | No       | 7" panel only: rotated frames of the cassette's reel hubs, for the spinning-reel animation (from `resources/`). |
-| `*.dat`         | No       | HP82161 cassette/drive images, selectable from the menu. |
-| `CONFIG.TXT`    | No       | Created automatically with defaults on first boot. |
+```
+CONFIG.TXT        settings -- created with defaults on first boot
+resources/        bitmaps, copied from the repo's resources/ folder
+lif/              cassette images (*.dat, LIF), listed by Select file
+screenshots/      screen dumps -- created on the first Screendump
+```
+
+| File (in `resources/`) | Required | Purpose |
+|------------------------|----------|---------|
+| `logo.bmp`      | No       | Logo on the start-up screen. Left out if missing. |
+| `hp82161a.bmp`  | No       | 7" panel only: picture for the **Tape** view. The view is left out if missing. |
+| `tape-in.bmp`   | No       | 7" panel only: the cassette shown in the Tape view's lid window when a file is selected. |
+| `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open. |
+| `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions. |
+| `reels.bmp`     | No       | 7" panel only: rotated frames of the cassette's reel hubs, for the spinning-reel animation. |
+
+(`buttons.bmp` stays in the repo's `resources/` only -- it's built into the
+firmware.)
+
+The button strip is built into the firmware (`src/buttons_image.cpp`), so
+the buttons and menus work without an SD card. To change it, edit
+`resources/buttons.bmp` and regenerate the source file:
+
+```bash
+scripts/bmp_to_rgb565.py resources/buttons.bmp src/buttons_image.cpp kButtonsImage
+```
 
 Once the board is running you can also copy files to the SD card over USB —
 see **Config → Connect to PC** below.
@@ -224,6 +239,14 @@ Unknown keys are ignored, so older files keep working.
 ---
 
 ## 5. Using the board
+
+**Start-up screen (7").** At power-up a full-screen overlay (PIP-1, drawn by
+`src/bootscreen.cpp`) shows the version, a STATUS card whose rows are filled
+in as start-up reaches each step (SD card, settings, USB, HP-IL, Tape images,
+each drive's file, trace -- green = OK, red = missing, grey = off) and the
+devices in loop order. It stays for 6 s (`kBootScreenMs` in `pico_main.cpp`)
+or until the screen is touched. The 5" panel keeps the classic splash and
+text summary.
 
 ### 5.1 The button strip
 
@@ -271,7 +294,7 @@ commands sent by the HP-41.
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
 | Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), enabled state |
 | Vertical swipe              | Scroll the device list (when it is open) |
-| Horizontal swipe            | Cycle the view: **Display** (text) → **Plotter** → **Tape** (7" only), and back in the other direction |
+| Horizontal swipe            | Switch view: each device with a view (display, plotter, every cassette drive) in loop order -- left = next device, right = previous |
 
 The device list performs a live AAD/SAI/SDI enumeration of the internal
 devices. Avoid opening it while a controller is in the middle of a transfer.
@@ -321,7 +344,7 @@ Main menu
 
 ### 6.1 Config
 
-- **Select file** — lists all `.dat` files in the SD root, with **No media**
+- **Select file** — lists all `.dat` files in the SD card's `lif/` folder, with **No media**
   as the first row. The current file is pre-selected. Choosing **No media**
   deselects the file: the drive reports that no tape is inserted, the Tape
   view shows the drive without a cassette, and the info box and boot
@@ -377,7 +400,7 @@ Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
 **Screendump** (7" panel only) saves what the panel shows as a 24-bit BMP
-file, `screendump_<n>.bmp`, in the SD card's root. The menu itself, the
+file, `screendump_<n>.bmp`, in the SD card's `screenshots/` folder. The menu itself, the
 button strip and message boxes are not included. The number continues
 from `screendump_next` in `CONFIG.TXT` (starting at 0), and numbers whose
 file already exists are skipped. Saving takes a few seconds, during which
@@ -411,11 +434,16 @@ step (OFF -> STANDBY -> ON -> STANDBY -> OFF). OFF disables `TFDRIVE`
 (once it's idle); ON keeps it powered; in STANDBY the HP-41 can power it
 down with Loop Power Down (POWER light off) and it wakes up again on the
 next HP-IL activity. The position is saved in `CONFIG.TXT`.
+
 Tapping **REWIND** rewinds the tape to its start, as on the real drive
-(ignored while BUSY is lit, and when the tape is already at its start). The drive then stays busy for about five
-seconds: BUSY is lit, the reels spin backwards, and the HP-41 gets the
-drive's Busy status until it's done. The view is not available on the 5" panel, which has no spare
-display memory.
+(ignored while BUSY is lit, and when the tape is already at its start). The
+drive then stays busy for 2 to 10 seconds, depending on how far into the
+tape it was (2 s just after the start, 6 s halfway, 10 s at the end): BUSY is
+lit, the reels spin backwards, and the HP-41 gets the drive's Busy status
+until it's done.
+
+The Tape view is not available on the 5" panel, which has no spare display
+memory.
 
 **Devices** has two items: **Enable/disable** (the list above) and
 **Change order**, which sets the devices' order on the loop (and so
@@ -794,7 +822,6 @@ redrawn completely when the user switches back to it.
 
 | Symptom | Check |
 |---------|-------|
-| No buttons on the screen | `buttons.bmp` missing from the SD root, or the SD card is not FAT32/exFAT |
 | "PANIC: f_mount error" in the log | SD card not inserted / not formatted / bad contact |
 | HP-IL doesn't respond | Run **Config → Loopback test** with a cable from OUT to IN. Check that the device isn't `[OFF]` in **Devices** |
 | A device has no address | It is disabled, or the controller has not run auto-addressing yet (e.g. power-cycle the HP-41 loop) |

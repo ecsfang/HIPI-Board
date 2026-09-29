@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <map>
 
 namespace hipi {
 
@@ -67,8 +68,12 @@ public:
         char line[160];
         UINT bw = 0;
 
-        int n = std::snprintf(line, sizeof(line), "filename=%s\n", filename_.c_str());
-        f_write(&file, line, static_cast<UINT>(n), &bw);
+        // One line per cassette drive: media.<device name>=<file>
+        int n = 0;
+        for (const auto& [dev, media] : driveMedia_) {
+            n = std::snprintf(line, sizeof(line), "media.%s=%s\n", dev.c_str(), media.c_str());
+            f_write(&file, line, static_cast<UINT>(n), &bw);
+        }
 
         n = std::snprintf(line, sizeof(line), "textcolor=%u\n",
                            static_cast<unsigned>(textColor_));
@@ -111,8 +116,17 @@ public:
 
     // ----- Accessors (each setter persists immediately) -----
 
-    const std::string& filename() const { return filename_; }
-    void setFilename(const std::string& f) { filename_ = f; save(); }
+    // Selected LIF (.dat) file of each cassette drive, by device name.
+    // An old CONFIG.TXT's single "filename=" is used for TFDRIVE.
+    std::string driveMedia(const std::string& device) const {
+        const auto it = driveMedia_.find(device);
+        if (it != driveMedia_.end()) return it->second;
+        return device == "TFDRIVE" ? legacyFilename_ : std::string();
+    }
+    void setDriveMedia(const std::string& device, const std::string& f) {
+        driveMedia_[device] = f;
+        save();
+    }
 
     std::uint16_t textColor() const { return textColor_; }
     void setTextColor(std::uint16_t c) { textColor_ = c; save(); }
@@ -215,8 +229,10 @@ private:
                 *eq = 0;
                 const char* key = line;
                 const char* value = eq + 1;
-                if (std::strcmp(key, "filename") == 0) {
-                    filename_ = value;
+                if (std::strncmp(key, "media.", 6) == 0) {
+                    driveMedia_[key + 6] = value;
+                } else if (std::strcmp(key, "filename") == 0) {
+                    legacyFilename_ = value;      // pre-multi-drive CONFIG.TXT
                 } else if (std::strcmp(key, "textcolor") == 0) {
                     textColor_ = static_cast<std::uint16_t>(std::atoi(value));
                 } else if (std::strcmp(key, "trace") == 0) {
@@ -243,7 +259,8 @@ private:
         }
     }
 
-    std::string   filename_  = "";
+    std::map<std::string, std::string> driveMedia_;   // device name -> .dat file
+    std::string   legacyFilename_ = "";
     // Matches the FONT_COLOR default that was previously hardcoded in
     // pico_main.cpp, so first boot (before a config file exists) looks
     // the same as before.

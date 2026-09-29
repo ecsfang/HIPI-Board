@@ -19,8 +19,10 @@
 #include "plotter.h"
 #include <cstdint>
 #include <string>
+#include <vector>
 
 class CDrive;
+class CDevice;
 
 namespace hipi {
 
@@ -78,7 +80,20 @@ DisplayOutput plotterview_output();
 // swipe gesture (see boardui.cpp's boardui_handleSwipe()). Generic over
 // kDisplayOutputCount, so it already works correctly for however many
 // views exist whenever that count grows.
+// Swipe: shows the view of the next (forward) or previous device on the
+// loop that has one (CDevice::viewKind()), in loop order.
 void plotterview_cycleOutput(bool forward);
+
+// The devices that currently have a view (switched on, view available
+// here), in loop order -- e.g. for the Display menu
+std::vector<CDevice*> plotterview_viewDevices();
+// A view's name: "Display", "Plotter", "Tape" -- plus the device name if
+// several devices have that kind of view ("Tape TFDRIVE2")
+std::string plotterview_viewTitle(CDevice* dev);
+// Shows that device's view
+void plotterview_showDevice(CDevice* dev);
+// The device whose view is showing (nullptr if none)
+CDevice* plotterview_viewDevice();
 
 // Call once per main-loop iteration -- handles the view-switch splash's
 // auto-dismiss timer (see plotterview_setOutput()).

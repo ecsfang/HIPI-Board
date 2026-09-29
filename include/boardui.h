@@ -42,7 +42,9 @@ void showSplashScreen(DisplayDriver* display, const char* version,
 // pixel width so the caller can size Screen's initial text width
 // (SCREEN_MAX_X - returned width). Returns 0 if the bitmap couldn't be
 // loaded (e.g. missing from the SD card).
-std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPath = "buttons.bmp");
+// The button strip is built into the firmware (no SD card needed) -- see
+// src/buttons_image.cpp / scripts/bmp_to_rgb565.py
+std::uint16_t boardui_loadButtonStrip(DisplayDriver* display);
 
 // Call once, after Screen and UiDialog exist -- wires up the module state
 // needed by the rest of boardui's functions (info box, button strip,

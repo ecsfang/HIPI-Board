@@ -2,9 +2,12 @@
 #define __DRIVE_H__
 
 #include "hpil.h"
+#include "sd_paths.h"
 #include "tape.h"   // CTape, CTapeSD, CTapeMem, CTapeFlash
 #include "pico/time.h"
 #include <cstdint>
+#include <functional>
+#include <string>
 
 extern void disableSD();
 extern void enableSD();
@@ -58,6 +61,8 @@ class CDrive : public CDevice {
     // drive's lid is open). The selected file stays selected, but the
     // drive reports no tape until it's put back (see check()).
     bool ejected_ = false;
+    std::string mediaFile_;                            // see mediaFile()
+    std::function<void(CDrive*)> onMediaChanged_;
     // Disabling (power switch / Devices menu) is deferred until the drive
     // is at a safe point -- see requestEnabled()/servicePendingDisable().
     // Pulling the drive out of the loop mid-transfer hung HP-IL.
@@ -76,7 +81,10 @@ class CDrive : public CDevice {
     bool lpdPending_ = false;                  // LPD seen, executed on the next RFC
     absolute_time_t powerUpUntil_ = nil_time;
     // REWIND button: the tape is "rewinding" (drive busy) until this time
-    static constexpr std::uint32_t kManualRewindMs = 5000;
+    // Rewind time grows with how far into the tape we are: kRewindMinMs
+    // just after the start, kRewindMaxMs at the very end (linear between)
+    static constexpr std::uint32_t kRewindMinMs = 2000;
+    static constexpr std::uint32_t kRewindMaxMs = 10000;
     absolute_time_t rewindUntil_ = nil_time;
     // What the drive does when it (re)gains power (switched on, or woken
     // after Loop Power Down): as Device Clear + Interface Clear (manual:
@@ -94,6 +102,7 @@ class CDrive : public CDevice {
         // service manual's DRVTST expects exactly that after a power-up.
     }
 public:
+    ViewKind viewKind() const override { return ViewKind::Tape; }
     IL_CMD_t hpil(IL_CMD_t cmd) override;
     DrivePower powerMode() const { return powerMode_; }
     DrivePower lastOnMode() const { return lastOnMode_; }
@@ -127,7 +136,8 @@ public:
     // Doesn't operate while the BUSY light is on (busyLight(), which
     // includes being addressed), powered down, without a cassette, or
     // when the tape is already at its start. The
-    // drive is busy for kManualRewindMs -- BUSY light on, reels spinning
+    // drive is busy for kRewindMinMs..kRewindMaxMs, in proportion to the
+    // tape position -- BUSY light on, reels spinning
     // backwards, HP-IL access answered with the Busy status (32) -- as a
     // real rewind takes a few seconds. Returns false if ignored.
     bool manualRewind() {
@@ -142,10 +152,18 @@ public:
             LOGF("\r\n * %s: REWIND ignored -- tape already at the start", name());
             return false;
         }
+        // Position as a fraction of the tape (size() is in 256-byte records)
+        const std::uint64_t pos = tape->tell();
+        const std::uint64_t total = static_cast<std::uint64_t>(size() > 0 ? size() : 512) * BUF_SIZE;
+        const std::uint64_t part = pos < total ? pos : total;
+        const std::uint32_t ms = kRewindMinMs +
+            static_cast<std::uint32_t>((kRewindMaxMs - kRewindMinMs) * part / total);
         tape->seek(0);
-        rewindUntil_ = make_timeout_time_ms(kManualRewindMs);
+        rewindUntil_ = make_timeout_time_ms(ms);
         busyUntil_ = rewindUntil_;
-        LOGF("\r\n * %s: REWIND", name());
+        LOGF("\r\n * %s: REWIND from %lu/%lu (%lu ms)", name(),
+             static_cast<unsigned long>(pos), static_cast<unsigned long>(total),
+             static_cast<unsigned long>(ms));
         return true;
     }
     bool isRewinding() const { return !time_reached(rewindUntil_); }
@@ -168,6 +186,12 @@ public:
     }
     // True while the drive is (or very recently was) accessing the file
     bool isBusy() const { return !time_reached(busyUntil_); }
+    // Each drive has its own cassette: an SD-card LIF (.dat) file, "" = no
+    // media. Several drives can be on the loop, each with its own file.
+    CDrive(const char *name, const std::string& mediaFile, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2)
+        : CDrive(name, new CTapeSD(lifPath(mediaFile).c_str()), _sai, _aau) {
+        mediaFile_ = mediaFile;
+    }
     CDrive(const char *name, CTape *_tape, IL_ADDR_t _sai=16, IL_ADDR_t _aau=2) : CDevice(name, _sai, _aau, DRIVE) {
         tape = _tape;
         mode = WRITE_MODE;
@@ -205,9 +229,26 @@ public:
         if (ejected == ejected_) return;
         ejected_ = ejected;
         if (ejected_ && tape->ok()) tape->close();   // flush and release the file
-        LOGF("\r\n * Drive: cassette %s", ejected_ ? "removed" : "inserted");
+        LOGF("\r\n * %s: cassette %s", name(), ejected_ ? "removed" : "inserted");
     }
     bool ejected() const { return ejected_; }
+
+    // The drive's cassette file (see the constructor). setMediaFile()
+    // "inserts" another one: the old file is closed, the new one is opened
+    // on the next access (reported as a new tape). The callback is told,
+    // e.g. to save it in CONFIG.TXT and update the Tape view.
+    const std::string& mediaFile() const { return mediaFile_; }
+    // The file on the SD card: lif/<name> ("" stays "" = no media)
+    static std::string lifPath(const std::string& file) {
+        return file.empty() ? file : std::string(HIPI_DIR_LIF "/") + file;
+    }
+    void setMediaFile(const std::string& file) {
+        tape->select(lifPath(file).c_str());
+        mediaFile_ = file;
+        LOGF("\r\n * %s: media %s", name(), file.empty() ? "(none)" : file.c_str());
+        if (onMediaChanged_) onMediaChanged_(this);
+    }
+    void setMediaChangedCallback(std::function<void(CDrive*)> cb) { onMediaChanged_ = std::move(cb); }
 
     // Enable at once; disable only once it's safe (servicePendingDisable()).
     // Returns the new "wanted" state -- what to show and save.

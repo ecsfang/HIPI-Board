@@ -1,6 +1,7 @@
 // UiDialog.hpp
 #pragma once
 #include "display_config.h"
+#include "sd_paths.h"
 #include "Screen.hpp"
 #include "ui_buttons.hpp"
 #include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
@@ -164,6 +165,13 @@ public:
     void setCurrentFile(const std::string& filename) {
         lastAppliedFile_ = filename;
     }
+
+    // The cassette drive the file picker works on: its current file is
+    // pre-selected, the chosen file is given to it (CDrive::setMediaFile()),
+    // and it has no cassette while the picker is open. With several
+    // drives on the loop, each has its own file.
+    void setTargetDrive(CDrive* drive) { targetDrive_ = drive; }
+    CDrive* targetDrive() const { return targetDrive_; }
 
     // Called with the newly chosen (trace, debug) pair whenever the user
     // picks Off/On/Extended in the "Trace" menu (after the globals bTrace
@@ -560,8 +568,8 @@ public:
                 break;
 
             case State::DisplayMenu:
-                if (b == Button::Up)   moveSelection(-1, kDisplayMenuCount);
-                if (b == Button::Down) moveSelection(+1, kDisplayMenuCount);
+                if (b == Button::Up)   moveDisplaySelection(-1);
+                if (b == Button::Down) moveDisplaySelection(+1);
                 if (b == Button::Ok)   enterDisplayMenuItem();
                 if (b == Button::X)    openMainMenu();
                 break;
@@ -691,26 +699,25 @@ private:
     // "Display"/"Plotter" pick which full-screen output is showing (see
     // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
     // not a pickable state, so it doesn't need a selected_-tracked value.
+    // Display menu: one row per device view (plotterview_viewDevices(),
+    // loop order -- "Display", "Plotter", "Tape", or "Tape TFDRIVE2" when
+    // there are several), then these actions. Screendump: 7" only (no
+    // read-back in the RA8875 driver).
+    enum class DisplayAction { ClearPlotter, ClearScreen, Screendump };
 #ifdef DISPLAY_7INCH
-    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Tape", "Clear plotter", "Clear screen", "Screendump" };
-    static constexpr int kDisplayMenuCount = 6;
-    static constexpr int kDisplayRowTape         = 2;
-    static constexpr int kDisplayRowClearPlotter = 3;
-    static constexpr int kDisplayRowClearScreen  = 4;
-    static constexpr int kDisplayRowScreendump   = 5;
+    static constexpr DisplayAction kDisplayActions[] = {
+        DisplayAction::ClearPlotter, DisplayAction::ClearScreen, DisplayAction::Screendump };
+    static constexpr const char* kDisplayActionLabels[] = { "Clear plotter", "Clear screen", "Screendump" };
+    static constexpr int kDisplayActionCount = 3;
 #else
-    // No Tape view on the 5" panel (no spare display layer -- see
-    // plotterview.cpp), and no screendump (no read-back in the RA8875 driver)
-    static constexpr const char* kDisplayMenuLabels[] = { "Display", "Plotter", "Clear plotter", "Clear screen" };
-    static constexpr int kDisplayMenuCount = 4;
-    static constexpr int kDisplayRowTape         = -1;
-    static constexpr int kDisplayRowClearPlotter = 2;
-    static constexpr int kDisplayRowClearScreen  = 3;
-    static constexpr int kDisplayRowScreendump   = -1;
+    static constexpr DisplayAction kDisplayActions[] = {
+        DisplayAction::ClearPlotter, DisplayAction::ClearScreen };
+    static constexpr const char* kDisplayActionLabels[] = { "Clear plotter", "Clear screen" };
+    static constexpr int kDisplayActionCount = 2;
 #endif
-    // Row indices shared by openDisplayMenu()/enterDisplayMenuItem()
-    static constexpr int kDisplayRowDisplay      = 0;
-    static constexpr int kDisplayRowPlotter      = 1;
+    std::vector<CDevice*> viewDevs_;          // Display menu: the view rows
+    std::vector<std::string> displayLabels_;  // Display menu: all row labels
+    int displayScroll_ = 0;                   // Display menu: first row shown
 
     void openMainMenu() {
 #ifndef DISPLAY_7INCH
@@ -745,13 +752,46 @@ private:
 
     void openDisplayMenu() {
         state_ = State::DisplayMenu;
-        switch (plotterview_output()) {
-            case DisplayOutput::Plotter: selected_ = kDisplayRowPlotter; break;
-            case DisplayOutput::Tape:    selected_ = kDisplayRowTape;    break;
-            default:                     selected_ = kDisplayRowDisplay; break;
+        viewDevs_ = plotterview_viewDevices();
+        displayLabels_.clear();
+        selected_ = 0;
+        for (std::size_t i = 0; i < viewDevs_.size(); ++i) {
+            displayLabels_.push_back(plotterview_viewTitle(viewDevs_[i]));
+            if (viewDevs_[i] == plotterview_viewDevice()) selected_ = static_cast<int>(i);
         }
+        for (int i = 0; i < kDisplayActionCount; ++i) displayLabels_.push_back(kDisplayActionLabels[i]);
+        displayScroll_ = 0;
+        keepDisplaySelectionVisible();
         drawBox();
-        for (int i = 0; i < kDisplayMenuCount; ++i) drawRow(i, kDisplayMenuLabels[i]);
+        drawDisplayMenuRows();
+    }
+
+    // The list can be longer than the box (several drives...): scrolls
+    // like the file list
+    void keepDisplaySelectionVisible() {
+        if (selected_ < displayScroll_) displayScroll_ = selected_;
+        else if (selected_ >= displayScroll_ + kMaxFilesShown) displayScroll_ = selected_ - kMaxFilesShown + 1;
+    }
+    void moveDisplaySelection(int delta) {
+        const int count = static_cast<int>(displayLabels_.size());
+        if (count == 0) return;
+        selected_ = (selected_ + delta + count) % count;
+        keepDisplaySelectionVisible();
+        drawDisplayMenuRows();
+    }
+    void drawDisplayMenuRows() {
+        d_->txtSize(MenuFrame::TextScale);
+        for (int row = 0; row < kMaxFilesShown; ++row) {
+            const std::size_t i = static_cast<std::size_t>(displayScroll_ + row);
+            const bool has = i < displayLabels_.size();
+            const bool sel = has && static_cast<int>(i) == selected_;
+            _clearRowBackground(row, sel ? MenuFrame::Yellow : 0x0000);
+            if (!has) continue;
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
+            d_->txtColor(sel ? 0x0000 : 0xFFFF, sel ? MenuFrame::Yellow : 0x0000);
+            d_->txtWrite(displayLabels_[i].c_str());
+        }
+        drawScrollIndicators(displayScroll_, static_cast<int>(displayLabels_.size()));
     }
 
     void enterDisplayMenuItem() {
@@ -759,20 +799,19 @@ private:
         // splash, cleared plot), so they must run on the main canvas --
         // see withMainCanvas(). Without it, on the 7" panel they ended up
         // on the invisible menu layer.
-        if (selected_ == kDisplayRowDisplay) {
-            withMainCanvas([&]{ plotterview_setOutput(DisplayOutput::Display); });
+        const int views = static_cast<int>(viewDevs_.size());
+        if (selected_ < views) {
+            // A device's view
+            CDevice* dev = viewDevs_[static_cast<std::size_t>(selected_)];
+            withMainCanvas([&]{ plotterview_showDevice(dev); });
             close();
-        } else if (selected_ == kDisplayRowPlotter) {
-            withMainCanvas([&]{ plotterview_setOutput(DisplayOutput::Plotter); });
-            close();
-        } else if (selected_ == kDisplayRowTape) {
-            // Ignored by plotterview if hp82161a.bmp didn't load at boot
-            withMainCanvas([&]{ plotterview_setOutput(DisplayOutput::Tape); });
-            close();
-        } else if (selected_ == kDisplayRowClearPlotter) {
+            return;
+        }
+        const DisplayAction action = kDisplayActions[selected_ - views];
+        if (action == DisplayAction::ClearPlotter) {
             withMainCanvas([&]{ plotterview_clearPlotter(); });
             close();
-        } else if (selected_ == kDisplayRowScreendump) {
+        } else if (action == DisplayAction::Screendump) {
             // Save what the panel shows. On the 7" panel the menu is a PIP
             // overlay, not part of the panel's own image, so it doesn't
             // end up in the dump. The result is shown for a moment in the
@@ -819,11 +858,53 @@ private:
     void drawConfigMenuRows() {
         drawRow(0, kConfigMenuLabels[0]);
         drawRow(1, kConfigMenuLabels[1]);
-        drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
+        drawRow(2, (usbMscModeActive() || devForceDisconnectLabel_) ? "Disconnect from PC" : "Connect to PC");
         drawRow(3, kConfigMenuLabels[3]);
         drawRow(4, kConfigMenuLabels[4]);
         drawRow(5, kConfigMenuLabels[5]);
     }
+
+    // Body of the "Connected" message (box already drawn, first line's
+    // cursor already set)
+    void drawConnectedText() {
+        d_->txtWrite("Connected -- SD card is now");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+        d_->txtWrite("visible as a USB drive on the PC.");
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
+        d_->txtWrite("HP-IL drive access paused.");
+    }
+
+    bool devForceDisconnectLabel_ = false;   // HIPI_DEV_SCREENDUMPS only
+
+#if HIPI_DEV_SCREENDUMPS
+    // Screen dump with menus of whatever the menu layer shows right now
+    // (see HIPI_DEV_SCREENDUMPS in screendump.h)
+    void devScreendump(const char* what) {
+        std::string msg;
+        const bool ok = screendump_save(d_, msg, /*withOverlays=*/true);
+        LOGF("\r\n * DEV screendump (%s): %s%s", what, ok ? "saved " : "FAILED -- ", msg.c_str());
+    }
+
+    // The two screens seen while connected to the PC, drawn and dumped
+    // before actually connecting: the "Connected" message, and the Config
+    // menu with "Disconnect from PC" selected
+    void devDumpConnectScreens() {
+        drawBox();
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        drawConnectedText();
+        devScreendump("Connected message");
+
+        const int keep = selected_;
+        devForceDisconnectLabel_ = true;
+        selected_ = 2;                      // "Disconnect from PC" highlighted
+        drawBox();
+        drawConfigMenuRows();
+        devScreendump("Config menu, Disconnect from PC");
+        devForceDisconnectLabel_ = false;
+        selected_ = keep;
+    }
+#endif
 
     void enterConfigMenuItem() {
         if (selected_ == 0) {
@@ -839,6 +920,12 @@ private:
             // action -- this one's reversible, and the user needs to
             // see the result to know it's safe to unplug/plug back in.
             const bool wasActive = usbMscModeActive();
+#if HIPI_DEV_SCREENDUMPS
+            // Once connected, the SD card belongs to the PC and can't be
+            // written -- so dump the two "connected" screens just BEFORE
+            // actually connecting
+            if (!wasActive) devDumpConnectScreens();
+#endif
             const bool nowActive = wasActive ? (exitUsbMscMode(), false) : enterUsbMscMode();
             drawBox();
             d_->txtColor(0xFFFF, 0x0000);
@@ -848,11 +935,7 @@ private:
                 d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
                 d_->txtWrite("HP-IL drive access resumed.");
             } else if (nowActive) {
-                d_->txtWrite("Connected -- SD card is now");
-                d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
-                d_->txtWrite("visible as a USB drive on the PC.");
-                d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
-                d_->txtWrite("HP-IL drive access paused.");
+                drawConnectedText();
             } else {
                 d_->txtWrite("Couldn't connect -- no SD card?");
             }
@@ -1093,6 +1176,9 @@ private:
         d_->endOverlayDraw();
         d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
 #endif
+#if HIPI_DEV_SCREENDUMPS
+        devScreendump("Bootsel message");      // last chance -- we reboot next
+#endif
         sleep_ms(1500);  // long enough to actually read before reboot
         reset_usb_boot(0, 0);
     }
@@ -1168,11 +1254,14 @@ private:
         (MenuFrame::H - 40) / MenuFrame::RowPitch;
 
     void openFilePicker() {
+        // The drive whose Tape view was shown last (the first drive until
+        // then) -- with several drives, each view picks its own file
+        if (CDrive* d = plotterview_drive()) targetDrive_ = d;
         setMediaEjected(true);              // cassette out while choosing
         files_.clear();
         files_.push_back("");               // first row: "No media" (no file selected)
         DIR dir;
-        if (f_opendir(&dir, "") == FR_OK) {
+        if (f_opendir(&dir, HIPI_DIR_LIF) == FR_OK) {      // cassettes live in lif/
             FILINFO info;
             while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
                 if (!(info.fattrib & AM_DIR) && hasExtension(info.fname, ".dat")) {
@@ -1189,8 +1278,9 @@ private:
         // applied yet this session, or that file's been deleted/renamed
         // since).
         selected_ = 0;
+        const std::string& current = targetDrive_ ? targetDrive_->mediaFile() : lastAppliedFile_;
         for (std::size_t i = 0; i < files_.size(); ++i) {
-            if (files_[i] == lastAppliedFile_) { selected_ = static_cast<int>(i); break; }
+            if (files_[i] == current) { selected_ = static_cast<int>(i); break; }
         }
         // Unlike every other menu here, this list can hold more entries
         // than fit in the box at once (kMaxFilesShown) -- previously
@@ -1499,7 +1589,7 @@ private:
         if (usbMscModeActive()) {
             lifLines_.push_back("SD card in use by PC");
         } else {
-            lifDescribe(pendingFile_.c_str(), lifLines_);
+            lifDescribe((std::string(HIPI_DIR_LIF "/") + pendingFile_).c_str(), lifLines_);
         }
         lifScroll_ = 0;
         state_ = State::LifInfo;
@@ -1639,6 +1729,8 @@ private:
     void applyFile(const std::string& filename) {
         LOGF("\r\n * Selected file: %s", filename.empty() ? kNoMediaLabel : filename.c_str());
         lastAppliedFile_ = filename;  // see openFilePicker()'s own comment
+        // The file belongs to the drive (see setTargetDrive())
+        if (targetDrive_) targetDrive_->setMediaFile(filename);
         if (onFileSelected_) onFileSelected_(filename);
     }
 
@@ -1772,8 +1864,8 @@ private:
                     drawRow(index, kDevicesMenuLabels[index]);
                 break;
             case State::DisplayMenu:
-                if (index >= 0 && index < kDisplayMenuCount)
-                    drawRow(index, kDisplayMenuLabels[index]);
+                (void)index;
+                drawDisplayMenuRows();
                 break;
             case State::Closed:
                 break;
@@ -1805,6 +1897,7 @@ private:
     bool orderMoving_ = false;            // DeviceOrder: a device is picked up
     int orderPickedFrom_ = 0;             // DeviceOrder: where it was picked up
     std::string lastAppliedFile_;
+    CDrive* targetDrive_ = nullptr;       // see setTargetDrive()
     std::vector<std::string> lifLines_;   // LifInfo: description lines
     int lifScroll_ = 0;                   // LifInfo: first line shown
 
@@ -1829,6 +1922,7 @@ private:
         if (ejected == mediaEjected_) return;
         mediaEjected_ = ejected;
         plotterview_setTapeEjected(ejected);
+        if (targetDrive_) targetDrive_->setEjected(ejected);
         if (onMediaEjected_) onMediaEjected_(ejected);
     }
     std::function<void(std::uint16_t)> onColorChanged_;

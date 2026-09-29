@@ -9,6 +9,7 @@
 #define MODULE "BOARDUI"
 
 #include "usb_serial.h"
+#include "sd_paths.h"
 #include "plotterview.h"
 
 #include "boardui.h"
@@ -23,6 +24,7 @@
 #include "hpil.h"      // hpilDevices
 #include "drive.h"     // CDrive -- Tape view power switch
 #include "screendump.h"
+extern std::vector<CDevice*> devices;
 #include "pilbox.h"    // pilbox, CPilBox::isConnected()
 #include "ui_buttons.hpp"
 #include "pico/time.h"
@@ -42,29 +44,6 @@ Screen* screen_  = nullptr;
 UiDialog* dialog_ = nullptr;
 const char* version_ = "";
 
-// Reads a BMP's pixel data right-aligned at (screen_width - width, y0),
-// caching the pixels/dimensions in the out* parameters so a sub-region can
-// be redrawn later without re-reading the file (see redrawButtonRegion()
-// in ui_buttons.hpp).
-bool drawBmpRightAligned(DisplayDriver* display, const char* path,
-                         std::uint16_t screen_width, std::uint16_t y0,
-                         std::vector<std::uint16_t>* outPixels,
-                         std::uint16_t* outWidth,
-                         std::uint16_t* outHeight,
-                         std::uint16_t* outScreenX0,
-                         bool alsoDraw = true) {
-    std::uint16_t width = 0, height = 0;
-    if (!peekBmpDimensions(path, width, height)) {
-        LOGF("\r\n\t * Could not read BMP dimensions for <%s>!", path);
-        return false;
-    }
-    const std::uint16_t x0 = static_cast<std::uint16_t>(screen_width - width);  // right edge
-    if (outScreenX0) *outScreenX0 = x0;
-    return drawBmpAt(display, path, static_cast<std::int16_t>(x0),
-                     static_cast<std::int16_t>(y0),
-                     outPixels, outWidth, outHeight, alsoDraw);
-}
-
 // ── Auto-hiding button strip ────────────────────────────────────────────────
 //
 // Normally hidden, so the text area gets the full panel width. Any touch
@@ -79,11 +58,18 @@ bool drawBmpRightAligned(DisplayDriver* display, const char* path,
 // -- you need the buttons visible to navigate it.
 
 // Cached copy of the button-strip bitmap, so a single button's
-// sub-rectangle can be redrawn (e.g. shifted for "pressed" feedback)
-// without re-reading the BMP from the SD card. Filled in by
+// sub-rectangle can be redrawn (e.g. shifted for "pressed" feedback).
+// Filled in (from the built-in image) by
 // boardui_loadButtonStrip() at boot. RGB565 (2 bytes/pixel), matching the
 // display's 16bpp mode.
 std::vector<std::uint16_t> buttonStripPixels;
+}  // namespace (reopened below)
+}  // namespace hipi
+// Built-in button strip image -- see boardui_loadButtonStrip()
+extern const std::uint16_t kButtonsImage[];
+extern const std::uint16_t kButtonsImageWidth, kButtonsImageHeight;
+namespace hipi {
+namespace {
 std::uint16_t buttonStripWidth = 0, buttonStripHeight = 0, buttonStripScreenX0 = 0;
 
 bool buttonStripVisible = false;
@@ -466,9 +452,13 @@ void showInfoBox() {
     }
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
 
-    std::snprintf(buf, sizeof(buf), "File: %s",
-                  config.filename().empty() ? "No media" : config.filename().c_str());
-    display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
+    // Each cassette drive's file
+    for (CDevice* dev : devices) {
+        if (dev->type() != DRIVE) continue;
+        const std::string& f = static_cast<CDrive*>(dev)->mediaFile();
+        std::snprintf(buf, sizeof(buf), "%s: %s", dev->name(), f.empty() ? "No media" : f.c_str());
+        display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
+    }
 
     std::snprintf(buf, sizeof(buf), "Trace: %s",
                   config.extTrace() ? "Extended" : (config.trace() ? "On" : "Off"));
@@ -737,10 +727,10 @@ void showSplashScreen(DisplayDriver* display, const char* version,
     std::uint16_t logoW = 0, logoH = 0;
     // Peek dimensions first so we can vertically center whatever size the
     // logo actually is.
-    const bool haveDims = peekBmpDimensions("logo.bmp", logoW, logoH);
+    const bool haveDims = peekBmpDimensions(HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp"), logoW, logoH);
     const int logoY = splashY + (splashH - (haveDims ? logoH : 0)) / 2;
     const bool haveLogo = haveDims &&
-        drawBmpAt(display, "logo.bmp", logoX, logoY, nullptr, &logoW, &logoH);
+        drawBmpAt(display, HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp"), logoX, logoY, nullptr, &logoW, &logoH);
 
     // Text sits to the right of the logo (or at the usual left margin if
     // the logo failed to load).
@@ -767,25 +757,20 @@ void showSplashScreen(DisplayDriver* display, const char* version,
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPath) {
+std::uint16_t boardui_loadButtonStrip(DisplayDriver* display) {
     display_ = display;
 
-    LOGF("\r\n\t* Load buttons ... ");
-    // alsoDraw=false: only decode and cache the pixels (buttonStripPixels)
-    // for later use -- the strip itself stays off-screen until a real tap
-    // first calls showButtonStrip(), which draws from that cache and sets
-    // up LED state correctly on its own. Drawing it here too used to make
-    // it appear briefly at boot, which is exactly what showed up during
-    // the device self-check / startup wait (see hipi_test() and
-    // pico_main.cpp) -- distracting from the text meant to be read there.
-    if (!drawBmpRightAligned(display, bmpPath, SCREEN_MAX_X, 0,
-                             &buttonStripPixels, &buttonStripWidth,
-                             &buttonStripHeight, &buttonStripScreenX0,
-                             /*alsoDraw=*/false)) {
-        LOGF("\r\n ### Failed to draw buttons ... ");
-        return 0;
-    }
-
+    LOGF("\r\n\t* Load buttons (built in) ... ");
+    // The strip is built into the firmware (src/buttons_image.cpp,
+    // generated from resources/buttons.bmp by scripts/bmp_to_rgb565.py),
+    // so the buttons -- and with them the menu -- work without an SD card.
+    // Not drawn here; showButtonStrip() draws it from the cache on the
+    // first tap (drawing it at boot made it flash up during start-up).
+    buttonStripWidth = kButtonsImageWidth;
+    buttonStripHeight = kButtonsImageHeight;
+    buttonStripScreenX0 = static_cast<std::uint16_t>(SCREEN_MAX_X - buttonStripWidth);
+    buttonStripPixels.assign(kButtonsImage,
+                             kButtonsImage + static_cast<std::size_t>(kButtonsImageWidth) * kButtonsImageHeight);
     // Scale vertically to fill this panel's real height -- buttons.bmp
     // was made for the 5" board's 480px-tall panel; this board's is
     // 600px (SCREEN_MAX_Y). Nearest-neighbor, not interpolated -- keeps
@@ -793,7 +778,7 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display, const char* bmpPat
     // gradient, which matters more here than smooth scaling would.
     // Width is untouched -- only height needs adapting, since the strip
     // is already correctly right-aligned regardless of panel width (see
-    // drawBmpRightAligned() above).
+    // buttonStripScreenX0 above).
     //
     // NOTE: this scales the BITMAP itself, not the hit-test rectangles
     // in ui_buttons.hpp -- those are still hardcoded to the 5" board's
@@ -1136,7 +1121,10 @@ void boardui_handleSwipe(bool forward) {
     // The info box shares the PIP overlay with the switch splash -- close it
     // first, so its auto-hide timer can't later remove the splash early.
     hideInfoBox();
-    plotterview_cycleOutput(forward);
+    // `forward` from touch.cpp means a left-to-right swipe. Swiping LEFT
+    // goes to the next device on the loop (like turning a page), right
+    // goes back.
+    plotterview_cycleOutput(!forward);
 }
 
 void boardui_onMenuClosed() {

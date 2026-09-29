@@ -118,6 +118,11 @@ typedef enum {
     TERMINAL
 } IL_Type_e;
 
+// Which view on the panel a device has (if any). Swiping goes through
+// the devices in loop order and shows each one's view; a new kind of view
+// (e.g. another drive model with its own picture) gets a new value here.
+enum class ViewKind { None, Display, Plotter, Tape };
+
 class CDevice {
 protected:
     IL_Status_e     m_status;
@@ -155,6 +160,8 @@ public:
     void addr(IL_CMD_t a) { m_addr = a; }
     IL_CMD_t addr() { return m_addr; }
     IL_ADDR_t accessoryId() const { return m_nSai; }   // the SAI answer
+    // The view this device has on the panel -- see ViewKind
+    virtual ViewKind viewKind() const { return ViewKind::None; }
     void status(IL_Status_e s) { m_status = s; }
     IL_Status_e status() { return m_status; }
     bool isStatus(IL_Status_e s) { return status() == s; }

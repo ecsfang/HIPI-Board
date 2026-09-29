@@ -73,8 +73,10 @@ extern void init_spi(void);
 #include "boardui.h"
 #include "plotterview.h"
 #include "screendump.h"
+#include "bootscreen.h"
 #include "config.hpp"
 #include "drive.h"
+extern std::vector<CDevice*> devices;   // hipi.cpp -- the HP-IL devices, loop order
 
 #include <cstdio>
 
@@ -130,7 +132,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "2.7";  // shown on splash screen
+constexpr const char* HIPI_VERSION = "3.0(beta)";  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -207,6 +209,46 @@ FRESULT initSD()
     return fr;
 }
 
+#ifdef DISPLAY_7INCH
+// Start-up screen rows: SD card and settings (right after mounting)
+static void bootRowsSdAndSettings(FRESULT fr) {
+    char buf[40];
+    if (fr != FR_OK) {
+        hipi::bootscreen_row("SD card", hipi::BootState::Fail, "not found");
+        hipi::bootscreen_row("Settings", hipi::BootState::Info, "defaults");
+        return;
+    }
+    // Card size in tenths of a GB (integer maths -- no float printf needed)
+    const std::uint64_t bytes = static_cast<std::uint64_t>(fs.n_fatent - 2) * fs.csize * 512u;
+    const unsigned tenths = static_cast<unsigned>(bytes / 100000000ull);
+    const char* type = fs.fs_type == FS_EXFAT ? "exFAT" : fs.fs_type == FS_FAT32 ? "FAT32"
+                     : fs.fs_type == FS_FAT16 ? "FAT16" : "FAT12";
+    std::snprintf(buf, sizeof(buf), "%u.%u GB %s", tenths / 10, tenths % 10, type);
+    hipi::bootscreen_row("SD card", hipi::BootState::Ok, buf);
+    FILINFO fi;
+    const bool haveConfig = f_stat("CONFIG.TXT", &fi) == FR_OK;
+    hipi::bootscreen_row("Settings", haveConfig ? hipi::BootState::Ok : hipi::BootState::Info,
+                         haveConfig ? "CONFIG.TXT" : "defaults");
+}
+
+// Rows after the devices exist: Tape view, each drive's cassette, trace,
+// and the DEVICES card
+static void bootRowsDevices() {
+    const bool tape = hipi::plotterview_isAvailable(hipi::DisplayOutput::Tape);
+    hipi::bootscreen_row("Bitmaps", tape ? hipi::BootState::Ok : hipi::BootState::Fail,
+                         tape ? "images loaded" : "images missing");
+    for (CDevice* dev : devices) {
+        if (dev->type() != DRIVE) continue;
+        const std::string& f = static_cast<CDrive*>(dev)->mediaFile();
+        hipi::bootscreen_row(dev->name(), f.empty() ? hipi::BootState::Off : hipi::BootState::Ok,
+                             f.empty() ? "No media" : f.c_str());
+    }
+    hipi::bootscreen_row("Trace", config.trace() ? hipi::BootState::Info : hipi::BootState::Off,
+                         config.extTrace() ? "extended" : (config.trace() ? "on" : "off"));
+    hipi::bootscreen_devices(devices);
+}
+#endif
+
 int main() {
     board_init(); 
     tusb_init();
@@ -235,7 +277,14 @@ int main() {
     // Splash screen -- shown as early as possible, stays up for a couple
     // of seconds while the rest of the boot sequence (buttons, SD-card
     // driven config, HP-IL devices) continues below.
+#ifdef DISPLAY_7INCH
+    // Start-up screen (bootscreen.h): its STATUS rows are filled in below
+    // as start-up gets to each step
+    hipi::bootscreen_begin(display, HIPI_VERSION);
+    bootRowsSdAndSettings(fr);
+#else
     hipi::showSplashScreen(display, HIPI_VERSION, 2000);
+#endif
 
     absolute_time_t timeout = make_timeout_time_ms(2000);
 
@@ -249,6 +298,11 @@ int main() {
         }
         sleep_ms(10);   // a bit gentler than tight_loop_contents
     }
+
+#ifdef DISPLAY_7INCH
+    hipi::bootscreen_row("USB", usb_connected ? hipi::BootState::Ok : hipi::BootState::Off,
+                         usb_connected ? "connected" : "not connected");
+#endif
 
     // Wait for a terminal to actually open the CDC port too (max 2 seconds --
     // previously unbounded, so boot would hang forever with no USB present).
@@ -400,6 +454,8 @@ int main() {
 
     screen->pr_char(27);
     screen->pr_char('<'); // Cursor off
+#ifndef DISPLAY_7INCH
+    // 5": the classic text summary (the 7" panel has the start-up screen)
     screen->pr_str("# HIPI - HP-IL Pico Interface #");
 
     if( usb_connected )
@@ -408,9 +464,12 @@ int main() {
         screen->pr_str("Stand alone - no USB");
     {
         char buf[64];
-        sprintf(buf, " * Drive: %.32s",
-                config.filename().empty() ? "No media" : config.filename().c_str() );
-        screen->pr_str(buf);
+        for (CDevice* dev : devices) {       // each cassette drive's file
+            if (dev->type() != DRIVE) continue;
+            const std::string& f = static_cast<CDrive*>(dev)->mediaFile();
+            snprintf(buf, sizeof(buf), " * %s: %.32s", dev->name(), f.empty() ? "No media" : f.c_str());
+            screen->pr_str(buf);
+        }
         int z = sprintf(buf, " * Trace: " );
         switch( (config.trace() ? 0b10 : 0b00) | (config.extTrace() ? 0b01 : 0b00) ) {
         case 0b00: sprintf(buf+z, "OFF" ); break;
@@ -424,6 +483,7 @@ int main() {
         screen->pr_str(buf);
         screen->pr_str("--------------------------------------");
     }
+#endif
 
     // 10s, not 5 -- gives enough time to actually read the device
     // self-check list (see hipi_test()) that ends up on screen just
@@ -434,7 +494,6 @@ int main() {
     tud_task();
 
     dialog = new hipi::UiDialog(display, *screen);
-    dialog->setCurrentFile(config.filename());  // see its own comment
     dialog->setColorChangedCallback([](std::uint16_t c) { config.setTextColor(c); });
     dialog->setTraceChangedCallback([](bool t, bool d) { config.setTraceMode(t, d); });
     dialog->setFontSizeChangedCallback([](std::uint8_t s) { config.setFontSize(s); });
@@ -472,13 +531,27 @@ int main() {
         return hipi_loopbackTest(hpil, onProgress);
     });
 
+#ifdef DISPLAY_7INCH
+    hipi::bootscreen_row("HP-IL", hipi::BootState::Ok, "loop ready");
+#if HIPI_DEV_SCREENDUMPS
+    // Development aid (see screendump.h): the start-up screen halfway
+    // through its STATUS rows, for the user manual
+    {
+        std::string msg;
+        const bool ok = hipi::screendump_save(display, msg, /*withOverlays=*/true);
+        LOGF("\r\n * DEV screendump (start-up screen): %s%s", ok ? "saved " : "FAILED -- ", msg.c_str());
+    }
+#endif
+#endif
+
     // Setup all devices in the HPIL loop (display, drive, LEDs, PILBox)
     hipi_init();
 
     // Wire up the plotter's live-draw callbacks now that display/screen/
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
-    hipi::plotterview_setTapeFile(config.filename());  // cassette in the Tape view
+    if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
+        hipi::plotterview_setTapeFile(d->mediaFile());
     // "ESC # D" / "ESC # M" from the HP-41: screen dump without / with the
     // menus and other overlays (see Screen::setExtCommandCallback()) --
     // only recorded here, taken from the main loop by boardui_poll()
@@ -487,6 +560,9 @@ int main() {
         else if (c == 'M') hipi::screendump_request(true);
     });
 
+#ifdef DISPLAY_7INCH
+    bootRowsDevices();
+#endif
     LOGF("\r\n\t* HP-IL initialized");
     {
         LOGF("\r\n\t* Device self-check");
@@ -502,9 +578,37 @@ int main() {
     // for why doing it there (rather than just here, right before the
     // wait loop) is what actually fixes a cold-boot spurious touch.
 
+#ifdef DISPLAY_7INCH
+    // The start-up screen stays for kBootScreenMs (a touch skips it), with
+    // a countdown bar
+    constexpr std::uint32_t kBootScreenMs = 20000;
+    absolute_time_t bootWaitStart = get_absolute_time();
+    infoTimeout = make_timeout_time_ms(kBootScreenMs);
+#if HIPI_DEV_SCREENDUMPS
+    bool devReadyDumped = false;
+#endif
+#endif
     while (!time_reached(infoTimeout)) {
         tud_task();
         usb_serial_flush_boot_log();
+#ifdef DISPLAY_7INCH
+        const float bootFraction = static_cast<float>(absolute_time_diff_us(bootWaitStart, get_absolute_time()))
+                                   / (kBootScreenMs * 1000.0f);
+        hipi::bootscreen_progress(bootFraction);
+#if HIPI_DEV_SCREENDUMPS
+        // Development aid (see screendump.h): the finished start-up screen
+        // with the countdown bar halfway, for the user manual. Saving takes
+        // a few seconds -- the countdown then continues from halfway.
+        if (!devReadyDumped && bootFraction >= 0.5f) {
+            devReadyDumped = true;
+            std::string msg;
+            const bool ok = hipi::screendump_save(display, msg, /*withOverlays=*/true);
+            LOGF("\r\n * DEV screendump (start-up screen, ready): %s%s", ok ? "saved " : "FAILED -- ", msg.c_str());
+            bootWaitStart = from_us_since_boot(to_us_since_boot(get_absolute_time()) - kBootScreenMs * 500ull);
+            infoTimeout = make_timeout_time_ms(kBootScreenMs / 2);
+        }
+#endif
+#endif
         // A raw touch check (not the full touch_poll()/tap-callback
         // flow) -- lets someone skip the wait early without also
         // processing this same touch as a real tap, which would show
@@ -513,6 +617,9 @@ int main() {
         sleep_ms(10);
     }
 
+#ifdef DISPLAY_7INCH
+    hipi::bootscreen_end();
+#endif
     screen->clear();
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());

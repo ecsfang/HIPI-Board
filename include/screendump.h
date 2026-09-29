@@ -5,6 +5,17 @@
 #include "display_config.h"
 #include <string>
 
+// Development aid: set to 1 to also save screen dumps (with menus) of the
+// screens that can't be dumped the normal way -- the "Entering Bootsel
+// mode" message (the board reboots right after), and the "Connected to
+// PC" message + the Config menu showing "Disconnect from PC" (the SD card
+// belongs to the PC then), and the start-up screen twice: halfway
+// through its STATUS rows, and finished with the countdown bar halfway. Keep 0 for normal builds. Can also be set from
+// the build: -DHIPI_DEV_SCREENDUMPS=1
+#ifndef HIPI_DEV_SCREENDUMPS
+#define HIPI_DEV_SCREENDUMPS 0
+#endif
+
 namespace hipi {
 
 // Reads back the live panel (the main window only, unless withOverlays --

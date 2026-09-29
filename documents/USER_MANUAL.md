@@ -73,17 +73,21 @@ The HIPI download contains two things: the software (a `.uf2` file, see
 card needs**.
 
 1. Unzip the SD card zip.
-2. Copy all its files to the top level (root) of the SD card.
-3. Add your own cassettes (`.dat` files) — see [chapter 7](#7-cassette-files).
+2. Copy its contents to the SD card, keeping the folders.
+3. Put your own cassettes (`.dat` files) in the `lif` folder — see
+   [chapter 7](#7-cassette-files).
 
-| File           | What it's for |
-|----------------|---------------|
-| `buttons.bmp`  | The on-screen buttons — **required** |
-| `logo.bmp`     | Start-up logo |
-| `hp82161a.bmp`, `tape-in.bmp`, `open.bmp`, `leds.bmp`, `reels.bmp` | The cassette drive picture |
-| `*.dat`        | Your cassettes |
+The SD card then looks like this:
 
-HIPI creates its settings file, `CONFIG.TXT`, by itself.
+```
+CONFIG.TXT        HIPI's settings (created by HIPI itself)
+resources/        pictures: logo.bmp, and the cassette drive's
+                  hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+lif/              your cassettes (.dat files)
+screenshots/      screen dumps (created by HIPI when you save the first)
+```
+
+HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons and menus are built in, so HIPI can be used without an SD card too — just without cassettes, pictures and saved settings.
 
 ### 3.2 Connect everything
 
@@ -100,12 +104,19 @@ HIPI creates its settings file, `CONFIG.TXT`, by itself.
 
 ### 3.3 First start
 
-HIPI shows its logo and version, then a short start-up summary, and then it's
-ready. Anything the HP-41 prints now appears on the screen.
+HIPI shows its start-up screen: the version, and a **STATUS** list that fills
+in line by line as HIPI starts — SD card, settings, USB, the HP-IL loop, the
+tape pictures, each cassette drive's file and the trace setting. A green dot
+means OK, red means something is missing, grey means off. On the right, the
+**DEVICES ON THE LOOP** are shown in loop order: yellow when switched on,
+grey when off.
 
-<!-- TODO image: replace the placeholder below with:
-![Start-up screen](images/screen-startup.png) -->
-> 📷 **Image placeholder:** Start-up screen with logo and summary (`images/screen-startup.png`)
+After a few seconds (or when you touch the screen) HIPI is ready. Anything
+the HP-41 prints now appears on the screen.
+
+![The start-up screen while HIPI starts](images/screen-startup.png)
+
+![The start-up screen when HIPI is ready](images/screen-startup-ready.png)
 
 ---
 
@@ -116,9 +127,7 @@ ready. Anything the HP-41 prints now appears on the screen.
 The buttons are hidden to give the text more room. **Touch the right edge of the
 screen** to slide them in. They slide away again after 5 seconds without use.
 
-<!-- TODO image: replace the placeholder below with:
-![The button strip](images/screen-button-strip.png) -->
-> 📷 **Image placeholder:** The button strip shown on the right (`images/screen-button-strip.png`)
+![The button strip](images/screen-button-strip.png)
 
 | Button | Does | With **Shift** first |
 |--------|------|----------------------|
@@ -135,22 +144,16 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 |-------|--------------|
 | **Top-left corner** | Info box: current file, settings, version |
 | **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. Swipe up/down to scroll |
-| **Swipe left or right** | Switch view: Display → Plotter → Tape |
+| **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
-<!-- TODO image: replace the placeholder below with:
-![Info box](images/screen-infobox.png) -->
-> 📷 **Image placeholder:** The info box (top-left corner) (`images/screen-infobox.png`)
+![Info box](images/screen-infobox.png)
 
-<!-- TODO image: replace the placeholder below with:
-![Device list](images/screen-devicelist.png) -->
-> 📷 **Image placeholder:** The device list (bottom-left corner) (`images/screen-devicelist.png`)
+![Device list](images/screen-devicelist.png)
 
 When you switch view, a yellow box shows the name of the new view for a moment.
 Touches are ignored while it's showing.
 
-<!-- TODO image: replace the placeholder below with:
-![View switch](images/screen-swipe-splash.png) -->
-> 📷 **Image placeholder:** The yellow "PLOTTER" box after a swipe (`images/screen-swipe-splash.png`)
+![View switch](images/screen-swipe-splash.png)
 
 ---
 
@@ -161,27 +164,21 @@ Touches are ignored while it's showing.
 The HP 82163 video display: everything the HP-41 prints, like `PRA`, `PRX` or
 program listings. Scroll back with ▲ and ▼.
 
-<!-- TODO image: replace the placeholder below with:
-![Display view](images/view-display.png) -->
-> 📷 **Image placeholder:** Display view with some HP-41 output (`images/view-display.png`)
+![Display view](images/view-display.png)
 
 ### 5.2 Plotter
 
 Shows what the HP-41 draws on the plotter (`TFPLOT`). The drawing keeps growing
 while you look at other views. Clear it with **Display → Clear plotter**.
 
-<!-- TODO image: replace the placeholder below with:
-![Plotter view](images/view-plotter.png) -->
-> 📷 **Image placeholder:** Plotter view with a drawing (`images/view-plotter.png`)
+![Plotter view](images/view-plotter.png)
 
 ### 5.3 Tape
 
 A picture of the HP 82161A cassette drive — and you can use it like the real
 thing.
 
-<!-- TODO image: replace the placeholder below with:
-![Tape view](images/view-tape.png) -->
-> 📷 **Image placeholder:** Tape view with a cassette inserted (`images/view-tape.png`)
+![Tape view](images/view-tape.png)
 
 | On the picture | What it does |
 |----------------|--------------|
@@ -222,7 +219,7 @@ Main menu
 │   ├── Enable/disable     Turn HIPI's devices on or off
 │   └── Change order       Change the devices' order on the loop
 └── Display
-    ├── Display / Plotter / Tape   Choose the view
+    ├── Display, Plotter, Tape…    Choose a view (one row per device)
     ├── Clear plotter
     ├── Clear screen
     └── Screendump         Save the screen as a picture
@@ -256,7 +253,7 @@ Each `.dat` file on the SD card is one cassette.
 
 ### Adding cassettes
 
-Copy your `.dat` files to the top level (root) of the SD card — either with a
+Copy your `.dat` files to the `lif` folder on the SD card — either with a
 card reader, or straight from HIPI with **Connect to PC** (see
 [chapter 9](#9-connecting-to-a-pc)).
 
@@ -326,9 +323,7 @@ Two things make plotter commands easy to type on the HP-41:
   at most 15 characters. `⊢` is **APPEND** (in ALPHA mode: shift + K), which
   adds the text to what's already in ALPHA.
 
-<!-- TODO image: replace the placeholder below with:
-![Plotter example](images/example-plotter-box.png) -->
-> 📷 **Image placeholder:** The square from the example in the Plotter view (`images/example-plotter-box.png`)
+![Plotter example](images/example-plotter-box.png)
 
 ### 8.2 Temperature and pressure — `TFTEMP`
 
@@ -463,16 +458,14 @@ While connected, the cassette drive is paused and screen dumps are not possible.
 ![SD card on the PC](images/pc-usb-drive.png) -->
 > 📷 **Image placeholder:** The SD card shown as a drive on the computer (`images/pc-usb-drive.png`)
 
-<!-- TODO image: replace the placeholder below with:
-![Connect to PC menu](images/menu-connect-pc.png) -->
-> 📷 **Image placeholder:** "Disconnect from PC" in the Config menu (`images/menu-connect-pc.png`)
+![Connect to PC menu](images/menu-connect-pc.png)
 
 ---
 
 ## 10. Screen dumps
 
-**Display → Screendump** saves the screen as a picture on the SD card:
-`screendump_0.bmp`, `screendump_1.bmp` and so on. It takes a few seconds; a
+**Display → Screendump** saves the screen as a picture in the `screenshots`
+folder on the SD card: `screendump_0.bmp`, `screendump_1.bmp` and so on. It takes a few seconds; a
 yellow box tells you when it's done. The menu itself is not in the picture.
 
 You can also take one from an HP-41 program (with the display device selected):
@@ -514,10 +507,9 @@ card files, they are in the SD card zip of that download.
 
 | Problem | Try this |
 |---------|----------|
-| No buttons on the screen | `buttons.bmp` is missing from the SD card, or the card isn't readable. Use a FAT32 card |
 | HP-41 can't find the drive or the cassette | Is a cassette chosen (not *No media*)? Is `TFDRIVE` ON in **Devices**, and the switch in the Tape view not OFF? |
 | Nothing shows on the screen | Is `TFDISPLAY` ON in **Devices**? Is the Display view chosen (swipe)? |
-| Tape view is missing | The tape pictures are missing from the SD card — copy the files from the SD card zip |
+| Tape view is missing | The tape pictures are missing from the `resources` folder — copy the files from the SD card zip |
 | Files copied from the PC don't show | Eject the drive on the computer first |
 | Screen dump fails | Not possible while **Connect to PC** is on |
 

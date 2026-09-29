@@ -111,6 +111,7 @@ struct PlotSegment {
 
 class CPlotter : public CDevice {
 public:
+    ViewKind viewKind() const override { return ViewKind::Plotter; }
     // sai/aau/device-id match the real HP-7475A/pyILPER conventions:
     // AID 0x60, default address 5, device-id string "HP7470A".
     CPlotter(const char *name, IL_ADDR_t _sai = 0x60, IL_ADDR_t _aau = 5)
