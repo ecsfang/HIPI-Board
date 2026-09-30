@@ -14,6 +14,8 @@ class CPilBox : public CDevice {
     char pbBuf[32];
     IL_CMD_t m_wLastCmd;
     IL_CMD_t loopbackFrame = NO_FRAME;    // loopback frame when no valid serial link is available
+    int pendingRx_ = -1;                 // byte read ahead by drainTdisBacklog(), -1 = none
+    bool tdisBacklogDrained_ = false;    // the TDIS backlog is dropped only once
     bool m_hadCmd = false;               // true right after a CMD frame, until the next RFC consumes it (matches the PIC firmware's FCMD flag)
 public:
     CPilBox(const char *name) : CDevice(name, 0, 0, NONE) {
@@ -31,6 +33,7 @@ public:
 private:
     IL_CMD_t sendFrame(IL_CMD_t cmd);
     IL_CMD_t receiveFrame(void);
+    void drainTdisBacklog(void);
 };
 
 // The single CPilBox instance created in hipi_init() (see hipi.cpp) --

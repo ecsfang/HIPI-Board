@@ -192,6 +192,7 @@ CONFIG.TXT        settings -- created with defaults on first boot
 resources/        Tape view bitmaps, copied from the repo's resources/ folder
 lif/              cassette images (*.dat, LIF), listed by Select file
 screenshots/      screen dumps -- created on the first Screendump
+logs/             analyzer logs -- created on the first Log to file
 ```
 
 | File (in `resources/`) | Required | Purpose |
@@ -239,6 +240,19 @@ Unknown keys are ignored, so older files keep working.
 ---
 
 ## 5. Using the board
+
+**HP-IL analyzer.** `src/analyzer.cpp` is a passive observer, not a
+`CDevice`: `hipi_loop()` calls `analyzer_capture(in, out)` for every frame
+(what arrived, what leaves -- `IL_NO_FRAME` if absorbed) into a 4096-entry
+ring buffer (32 kB), and `analyzer_poll()` in the main loop analyses and
+draws. The overview groups frames into transactions (controller -> listeners
+data, talker -> controller answers after SDA/SST/SAI/SDI, auto-addressing,
+IFC/DCL/LPD, the HP82161A's DDL/DDT commands decoded) and flags missing
+answers, ETE and gaps over 500 ms (`kSlowUs`) inside a transaction; the
+detailed mode is one explained line per frame. Changing mode re-analyses the
+whole ring. Shown via `plotterview_showAnalyzer()` (`DisplayOutput::Analyzer`,
+not in the swipe order); UiDialog routes OK/arrows to it while shown
+(`AnalyzerMenu`). Logs go to `logs/analyzer_<n>.txt`.
 
 **Start-up screen (7").** At power-up a full-screen overlay (PIP-1, drawn by
 `src/bootscreen.cpp`) shows the version, a STATUS card whose rows are filled
@@ -339,6 +353,7 @@ Main menu
     ├── Tape               Show the HP82161A tape drive (7" panel only)
     ├── Clear plotter      Erase the plotter drawing
     ├── Clear screen       Erase the text display
+    ├── Analyzer           HP-IL bus analyzer view (own menu on OK)
     └── Screendump         Save the screen as screendump_<n>.bmp (7" panel only)
 ```
 
@@ -794,12 +809,12 @@ To add your own graphical device:
 1. Write the device in the same style: state + callbacks, no drawing code.
 2. Write a view module (e.g. `src/myview.cpp`) that registers the
    callbacks and draws through `DisplayDriver`.
-3. Add a value to `DisplayOutput` in `include/plotterview.h` (and update
-   `kDisplayOutputCount`; extend `plotterview_isAvailable()` if the view
-   isn't available on every board), and handle it in `plotterview_setOutput()` /
-   `plotterview_cycleOutput()`, so that swipe and the **Display** menu can
-   select it. Add a menu label in
-   `kDisplayMenuLabels` in `include/uidialog.hpp`.
+3. Give the device a view: add a value to `ViewKind` (`include/hpil.h`)
+   and to `DisplayOutput` (`include/plotterview.h`), return it from the
+   device's `viewKind()`, and handle it in `plotterview.cpp` (`outputFor()`,
+   `plotterview_viewTitle()`, `switchView()`, and `plotterview_isAvailable()`
+   if the view isn't available on every board). Swiping and the **Display**
+   menu then pick it up automatically, in loop order.
 4. Call the view's `init()` from `pico_main.cpp`, after `hipi_init()`
    (the device must exist) — the same place `plotterview_init()` is called.
 

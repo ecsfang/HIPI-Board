@@ -1,17 +1,19 @@
 #pragma once
-// plotterview.h -- switches the panel's full-screen output between the
-// normal HP-41 text display (Screen), a live rendering of the plotter's
-// output (CPlotter), and (7" panel only) the Tape view: a picture of an
-// HP82161A cassette drive with touch-sensitive areas. See boardui.h for the button
-// strip/info-box/status-LED "chrome" this coordinates with.
+// plotterview.h -- the device views on the panel: the normal HP-41 text
+// display (Screen), a live rendering of the plotter's output (CPlotter),
+// and (7" panel only) one Tape view per cassette drive: a picture of an
+// HP82161A with touch-sensitive areas. Each device says which view it has
+// (CDevice::viewKind()); swiping steps through them in loop order. See
+// boardui.h for the button strip/info-box/status-LED "chrome" this
+// coordinates with.
 //
 // Usage (see pico_main.cpp):
 //
 //   plotter = new CPlotter("TFPLOT");   // (done inside hipi_init())
 //   hipi::plotterview_init(display, screen, plotter);
 //
-// The UiDialog "Display" menu calls plotterview_setOutput()/
-// plotterview_clearPlotter()/plotterview_output() directly (see
+// The UiDialog "Display" menu calls plotterview_viewDevices()/
+// plotterview_showDevice()/plotterview_clearPlotter() directly (see
 // uidialog.hpp) -- there's no separate callback wiring needed here.
 
 #include "display_config.h"
@@ -26,12 +28,9 @@ class CDevice;
 
 namespace hipi {
 
-enum class DisplayOutput { Display, Plotter, Tape };
-// Bump this alongside the enum whenever a new view is added (e.g. a future
-// Printer view) -- plotterview_cycleOutput() cycles through 0..count-1
-// generically, skipping any view that isn't available (see
-// plotterview_isAvailable()).
-constexpr int kDisplayOutputCount = 3;
+// The kinds of view the panel can show (matches ViewKind in hpil.h, plus
+// the Analyzer, which isn't a device's view)
+enum class DisplayOutput { Display, Plotter, Tape, Analyzer };
 
 // Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
 enum class TapeHotspot { None, Open, Power, Rewind };
@@ -68,19 +67,10 @@ CDrive* plotterview_drive();
 // available on the 7" panel, and only if hp82161a.bmp loaded at boot.
 bool plotterview_isAvailable(DisplayOutput mode);
 
-// Switches the panel's full-screen output. Handles suspending/resuming
-// Screen and hiding/showing the button strip (Plotter mode uses the full
-// 800x480 panel, so the strip is suppressed while it's active), and
-// (re)drawing whichever output is now current.
-void plotterview_setOutput(DisplayOutput mode);
+// The kind of view currently shown
 DisplayOutput plotterview_output();
 
-// Cycles to the next (forward=true) or previous (forward=false) view in
-// the list, wrapping around at either end -- used for the left/right
-// swipe gesture (see boardui.cpp's boardui_handleSwipe()). Generic over
-// kDisplayOutputCount, so it already works correctly for however many
-// views exist whenever that count grows.
-// Swipe: shows the view of the next (forward) or previous device on the
+// Swipe (see boardui.cpp's boardui_handleSwipe()): shows the view of the next (forward) or previous device on the
 // loop that has one (CDevice::viewKind()), in loop order.
 void plotterview_cycleOutput(bool forward);
 
@@ -95,12 +85,17 @@ void plotterview_showDevice(CDevice* dev);
 // The device whose view is showing (nullptr if none)
 CDevice* plotterview_viewDevice();
 
+// The HP-IL analyzer's view (analyzer.h) -- not a device, so not in the
+// swipe order. Leaving it returns to the view shown before.
+void plotterview_showAnalyzer();
+void plotterview_leaveAnalyzer();
+
 // Call once per main-loop iteration -- handles the view-switch splash's
-// auto-dismiss timer (see plotterview_setOutput()).
+// auto-dismiss timer (see plotterview_showDevice()).
 void plotterview_poll();
 
 // True while the brief "DISPLAY"/"PLOTTER"/"TAPE" switch-announcement
-// splash is showing (see plotterview_setOutput()). Checked by
+// splash is showing (see plotterview_showDevice()). Checked by
 // UiDialog::close() (7": don't hide the PIP overlay the splash now owns;
 // 5": don't redraw over the full-screen splash) and by
 // boardui_handleTap() (7": taps are ignored while it's up).

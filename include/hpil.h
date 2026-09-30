@@ -3,8 +3,8 @@
 
 #include "usb_serial.h"
 
-#define RESET           "\e[0m"
-#define HILIGHT         "\e[1;92m"       // Green highlight
+#define RESET           "\x1b[0m"
+#define HILIGHT         "\x1b[1;92m"       // Green highlight
 
 #define DOE     0x000   // Data byte (0-255)
 #define CMD     0x400   // Command
@@ -150,12 +150,12 @@ public:
     }
     bool base(IL_CMD_t cmd, IL_CMD_t *rtn);
     virtual IL_CMD_t hpil(IL_CMD_t cmd);
-    virtual void doListener(IL_CMD_t cmd, IL_CMD_t *rtn) {}
-    virtual void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {}
+    virtual void doListener(IL_CMD_t /*cmd*/, IL_CMD_t * /*rtn*/) {}
+    virtual void doTalker(IL_CMD_t /*cmd*/, IL_CMD_t * /*rtn*/) {}
     virtual void clear() = 0;
     virtual void idle(void) {}
     virtual void ifc(void) {}
-    virtual void preProc(IL_CMD_t c) {}
+    virtual void preProc(IL_CMD_t /*c*/) {}
     virtual void show(void);
     void addr(IL_CMD_t a) { m_addr = a; }
     IL_CMD_t addr() { return m_addr; }

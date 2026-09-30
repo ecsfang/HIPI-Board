@@ -10,6 +10,7 @@
 
 #include "usb_serial.h"
 #include "sd_paths.h"
+#include "analyzer.h"
 #include "plotterview.h"
 
 #include "boardui.h"
@@ -104,6 +105,15 @@ constexpr std::uint32_t kStatusCheckMs = 250;
 constexpr std::int16_t kPressDx = 5, kPressDy = -5;
 constexpr std::int16_t kPressMargin = 8;
 Button pressedButton = Button::None;
+
+// Auto-repeat for ▲/▼ held down: after kRepeatDelayMs, the press repeats
+// every kRepeatIntervalMs until the finger is lifted -- works everywhere
+// the arrows scroll (text history, menus, lists, the analyzer), since it
+// just repeats the button into UiDialog::handleButton().
+constexpr std::uint32_t kRepeatDelayMs = 500;
+constexpr std::uint32_t kRepeatIntervalMs = 200;
+Button repeatButton = Button::None;
+absolute_time_t repeatNext = nil_time;
 
 // Slide animation timing for showButtonStrip()/hideButtonStrip() below --
 // short enough to feel snappy, several steps so the motion actually reads
@@ -842,6 +852,13 @@ void boardui_init(Screen* screen, UiDialog* dialog, const char* version) {
 }
 
 void boardui_poll() {
+    // Held ▲/▼: repeat (see kRepeatDelayMs). Released -> boardui_handleRelease()
+    if (repeatButton != Button::None && pressedButton == repeatButton &&
+        time_reached(repeatNext)) {
+        repeatNext = make_timeout_time_ms(kRepeatIntervalMs);
+        dialog_->handleButton(repeatButton, /*repeat=*/true);
+        buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);  // keep the strip up
+    }
     // Auto-hide the info box after kInfoBoxShowMs, same idea as the button
     // strip's own countdown below.
     if (infoBoxVisible && time_reached(infoBoxHideDeadline)) {
@@ -1010,6 +1027,13 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
             mLOGF("TOUCH", "tap (%u,%u) inStripZone=%d stripVisible=%d",
                  x, y, inStripZone, buttonStripVisible);
         }
+        // Analyzer view: a tap anywhere else (not a corner, not the strip)
+        // pauses / resumes it
+        if (!inStripZone && !dialog_->isOpen() &&
+            plotterview_output() == DisplayOutput::Analyzer) {
+            analyzer_setPaused(!analyzer_paused());
+            return;
+        }
         if (!inStripZone) return;
 
         const bool wasHidden = !buttonStripVisible;
@@ -1073,11 +1097,16 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
             // every single button touch.
             screen_->refreshCursor();
             dialog_->handleButton(b);
+            if (b == Button::Up || b == Button::Down) {
+                repeatButton = b;                       // see boardui_poll()
+                repeatNext = make_timeout_time_ms(kRepeatDelayMs);
+            }
         }
     }
 }
 
 void boardui_handleRelease() {
+    repeatButton = Button::None;          // finger lifted: stop auto-repeat
     if (pressedButton == Button::None) return;
     // The button strip may have been hidden entirely DURING the press
     // (e.g. Shift+Ok -- see UiDialog::setExitRequestedCallback()'s own

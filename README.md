@@ -53,13 +53,20 @@ Hold **BOOTSEL** on the Pico 2, release after reset, drag-and-drop the
 UF2 onto the new drive.
 
 ### 6. SD card
-Format a micro-SD card FAT32 and place these files at its root:
-- `buttons.bmp` — the touch-button strip graphic (drawn right-aligned on boot)
-- `logo.bmp` — splash-screen logo (optional; splash falls back to text-only if missing)
-- `CONFIG.TXT` — not required; created automatically on first boot with
-  default values if missing (see Configuration below)
-- Your HP82161 drive image(s) (`.dat` files) — selectable from the on-device
-  file picker, or auto-loaded from the last-used filename in `CONFIG.TXT`
+Format a micro-SD card (FAT32 recommended; exFAT also works) and lay it out
+like this (folder names in `include/sd_paths.h`):
+```
+CONFIG.TXT        settings -- created with defaults on first boot
+resources/        Tape view bitmaps from this repo's resources/ folder:
+                  hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+lif/              cassette images (*.dat, LIF) -- listed by Select file
+screenshots/      screen dumps -- created on the first Screendump
+logs/             analyzer logs -- created on the first Log to file
+```
+The button strip and the logo are built into the firmware
+(`src/buttons_image.cpp`, `src/logo_image.cpp`), so buttons, menus and the
+start-up screen work without an SD card. See `documents/USER_MANUAL.md` for
+the user's view and `documents/GUIDE.md` for the details.
 
 ---
 
@@ -70,44 +77,44 @@ Format a micro-SD card FAT32 and place these files at its root:
 │                                     built as hipi_5_pico / hipi_7_pico, see
 │                                     hipi_add_pico_targets() inside)
 ├── README.md
-├── .vscode/
-├── resources/
-│   ├── buttons.bmp / buttons.png  ← touch-button strip artwork
-│   └── logo.bmp                   ← splash-screen logo
+├── documents/                     ← USER_MANUAL.md (users), GUIDE.md (users + developers)
+├── pcb/                           ← hardware: README, BOM, pictures
+├── scripts/                       ← build/flash helpers, bmp_to_rgb565.py (embeds BMPs)
+├── resources/                     ← artwork: Tape view BMPs (go on the SD card),
+│                                     buttons.bmp/.png + logo.bmp (built into the firmware)
 ├── include/
-│   ├── RA8875.hpp / RA8875Transport.hpp   ← display controller driver + transport interface
-│   ├── PicoSpiTransport.hpp / LinuxSpiDevTransport.hpp  ← concrete transports
+│   ├── LT7683.hpp / RA8875.hpp / *Transport.hpp  ← display drivers (7" / 5") + SPI transports
 │   ├── Screen.hpp                 ← HP82163 video-stream emulator (text buffer, scroll-back)
 │   ├── hp82163_font.hpp           ← custom 8x16 CGRAM font (ASCII 32-126 + Swedish å/ä/ö)
-│   ├── bmp_loader.hpp             ← shared 24-bit BMP loader/drawer (buttons + splash logo)
-│   ├── uidialog.hpp               ← on-device touch menu (UiDialog) + splash screen
-│   ├── ui_buttons.hpp             ← touch-button hit-testing + press/release bitmap feedback
+│   ├── bmp_loader.hpp             ← 24-bit BMP loader (Tape view bitmaps)
+│   ├── uidialog.hpp               ← on-device touch menus (UiDialog)
+│   ├── boardui.h / ui_buttons.hpp ← button strip, info box, device list, touch dispatch
+│   ├── bootscreen.h               ← start-up screen (7")
+│   ├── plotterview.h              ← device views: Display / Plotter / Tape, swiping
+│   ├── screendump.h               ← screen dumps to screenshots/ (+ HIPI_DEV_SCREENDUMPS)
+│   ├── lif_info.hpp               ← LIF volume/directory reader (cassette contents view)
 │   ├── config.hpp                 ← persistent settings (CONFIG.TXT)
-│   ├── hpil.h                     ← CDevice: shared HP-IL protocol base class
-│   ├── drive.h / tape.h           ← CDrive (HP-IL device) / CTape+CTapeSD+CTapeMem+CTapeFlash (storage backends)
+│   ├── sd_paths.h                 ← SD card folder names
+│   ├── hpil.h                     ← CDevice: shared HP-IL protocol base class (+ ViewKind)
+│   ├── drive.h / tape.h           ← CDrive (HP82161A emulation) / CTape + CTapeSD (LIF file)
 │   ├── display.h                  ← CDisplay: HP-IL device feeding bytes into Screen
-│   ├── leds.h / illeds.h          ← LED driver (CLedParser command syntax, see below) + HP-IL LED device
-│   ├── pilbox.h                   ← CPilBox HP-IL device
-│   ├── touch.h                    ← GSL1680 touch controller interface
-│   ├── gslX680fw.h                ← GSL1680 touch controller firmware blob
-│   ├── hpil_pio.hpp                ← generated PIO header (from src/hpil.pio)
-│   ├── display_test.hpp           ← optional RA8875 diagnostic tests (opt-in, see pico_main.cpp)
-│   ├── usb_serial.h / tusb_config.h  ← USB CDC console (cdc0_printf)
+│   ├── plotter.h                  ← CPlotter: HP7470A (HP-GL) plotter device
+│   ├── illeds.h / ilpixels.h / iltemp.h / terminal.h / pilbox.h  ← the other HP-IL devices
+│   ├── leds.h / pixels.h / bmp280.h / i2c_device.h  ← LED, NeoPixel and sensor drivers
+│   ├── touch.h / gslX680fw.h      ← GSL1680 touch controller + its firmware blob
+│   ├── usb_serial.h / usb_msc.h / tusb_config.h  ← USB: CDC consoles, SD card as USB drive
+│   ├── hpil_pio.hpp               ← generated PIO header (from src/hpil.pio)
+│   ├── display_test.hpp / display_boot_test.hpp  ← optional display diagnostics (opt-in)
 │   └── (no-OS-FatFS SD library lives under lib/, vendored, unmodified)
 └── src/
-    ├── pico_main.cpp               ← entry point: boot sequence, main loop, touch handling
-    ├── RA8875.cpp / Screen.cpp
-    ├── device.cpp                  ← CDevice implementation
-    ├── drive.cpp                   ← CDrive implementation
-    ├── display.cpp                 ← CDisplay implementation
-    ├── hipi.cpp                    ← wires up all HP-IL devices, trace/debug globals
-    ├── hpil.cpp                    ← HP-IL loop frame handling
-    ├── hpil.pio                    ← PIO program for the HP-IL physical layer
-    ├── leds.cpp / illeds.cpp
-    ├── pilbox.cpp
-    ├── touch.cpp                   ← GSL1680 driver + touch_get_point()/touch_is_down()
-    ├── hw_config.cpp                ← FatFS SD-card hardware config
-    ├── my_descriptors.c             ← USB descriptors
+    ├── pico_main.cpp               ← entry point: boot sequence, main loop
+    ├── hipi.cpp                    ← creates the HP-IL devices, loop dispatch, trace
+    ├── hpil.cpp / hpil.pio / device.cpp  ← HP-IL frames, PIO physical layer, CDevice
+    ├── drive.cpp / display.cpp / plotter.cpp / pilbox.cpp / ...  ← the HP-IL devices
+    ├── boardui.cpp / bootscreen.cpp / plotterview.cpp / screendump.cpp  ← UI
+    ├── buttons_image.cpp / logo_image.cpp  ← built-in bitmaps (generated, see scripts/)
+    ├── LT7683.cpp / RA8875.cpp / Screen.cpp / touch.cpp / leds.cpp / pixels.cpp
+    ├── usb_msc.cpp / my_descriptors.c / hw_config.cpp  ← USB drive, descriptors, SD config
     ├── PicoSpiTransport.cpp / LinuxSpiDevTransport.cpp
     └── linux_main.cpp               ← optional Linux demo (HIPI_BUILD_LINUX_EXAMPLE, off by default)
 ```
@@ -148,10 +155,9 @@ display.begin();   // configures genuine 16bpp/RGB565 by default (SYSR_16BPP)
 hipi::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/255, /*textWidth=*/680);
 for (uint8_t b : hp41_stream) screen.pr_char(b);
 ```
-`RA8875::set8Bpp()` still exists but isn't used anywhere in the Pico build
-(the display runs in real 16bpp/RGB565 throughout, which also fixed several
-subtle color-quantization issues 8bpp had). `set2LayerConfig()` is likewise
-unused on Pico; it's only exercised in the optional Linux demo
+The display runs in real 16bpp/RGB565 throughout (which also fixed several
+subtle color-quantization issues 8bpp had). `set2LayerConfig()` is unused on
+Pico; it's only exercised in the optional Linux demo
 (`linux_main.cpp`).
 
 ---
@@ -165,15 +171,28 @@ menu to close it entirely; the "back" button goes up one level at a time.
 
 ```
 Config
-├── Select file     (SD-card .dat picker, with an "Open file?" confirmation)
-└── Trace           (Off / On / Extended -- controls bTrace/bExtTrace in hipi.cpp)
+├── Select file     (the cassette for the Tape view's drive; LIF contents view)
+├── Trace           (Off / On / Extended)
+├── Connect to PC   (SD card as a USB drive)
+├── Loopback test
+├── Scan I2C
+└── Bootsel mode    (reboot for a firmware update)
 Settings
 ├── Textcolor       (White / Yellow / Green / Cyan / Red)
-├── Font size       (0-3, built-in CGRAM scales)
+├── Font size       (0-3)
 ├── Brightness      (20% / 40% / 60% / 80% / 100%)
 └── Columns         (Auto / 21 / 28 / 32 / 42 / 85 -- 32 reproduces the
                       original HP82163's column wrap width regardless of
                       font size; the rest are the natural max per font size)
+Devices
+├── Enable/disable
+└── Change order    (order on the loop)
+Display
+├── <one row per device view, loop order>
+├── Clear plotter / Clear screen
+└── Screendump      (7")
+```
+The full description is in `documents/GUIDE.md`.
 ```
 
 While the menu is open, `Screen` output is suspended (incoming HP-41 stream
@@ -189,27 +208,31 @@ of the HP82163 stream's own `ESC S`/`ESC T` "roll" commands.
 
 Touching a button also gives brief visual feedback: the button's own
 bitmap region is redrawn shifted a few pixels (see `kPressDx`/`kPressDy` in
-`pico_main.cpp`), then restored on release.
+`boardui.cpp`), then restored on release.
 
 ## Configuration
 
 `Config` (`config.hpp`) persists settings as human-readable `key=value`
-lines in `CONFIG.TXT` on the SD card:
+lines in `CONFIG.TXT` on the SD card, for example:
 ```
-filename=CASSETTE1.DAT
+media.TFDRIVE=GAMES.DAT
 textcolor=65535
 trace=0
 debug=0
 fontsize=0
 brightness=255
+drive_standby=0
+screendump_next=3
 columns=0
+disabled_devices=
+device_order=TFDISPLAY,TFDRIVE,TFLEDS,TFPIXEL,TFTEMP,PILBOX,TFPLOT,TFTERM
 ```
-Every setter (`setFilename`, `setTextColor`, `setTraceMode`, `setFontSize`,
-`setBrightness`, `setColumns`) rewrites the whole file immediately, so it's
-always in sync with what's shown in the menu. If `CONFIG.TXT` doesn't exist
-yet (or can't be opened for any reason), it's created automatically with
-default values on first boot. Unknown keys are ignored when parsing, so
-older config files stay loadable as new settings get added.
+Every setter rewrites the whole file immediately, so it's always in sync
+with what's shown in the menu. If `CONFIG.TXT` doesn't exist yet (or can't
+be opened), it's created with default values on first boot. Unknown keys
+are ignored when parsing, so older config files stay loadable as new
+settings get added (an old single `filename=` line is still read, for
+`TFDRIVE`).
 
 ## Character set
 

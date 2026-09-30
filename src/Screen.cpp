@@ -23,7 +23,6 @@ Screen::Screen(DisplayDriver* display,
       color_(color),
       brightness_(brightness),
       size_(size),
-      textWidth_(textWidth),
       ROWS_(0),
       COLS_(0),
       width_(0),
@@ -32,6 +31,7 @@ Screen::Screen(DisplayDriver* display,
       ofy_(0),
       row_(0),
       col_(0),
+      textWidth_(textWidth),
       flag_(false),
       nline_(false),
       escN_(false),
@@ -267,7 +267,6 @@ void Screen::scrollBy(int n) {
     if (newOffset > maxOffset) newOffset = maxOffset;
     if (static_cast<std::size_t>(newOffset) == offset_) return;
 
-    const long actualDelta = newOffset - static_cast<long>(offset_);
     offset_ = static_cast<std::size_t>(newOffset);
 
     // Was two separate BTE block-move fast paths for actualDelta==+-1

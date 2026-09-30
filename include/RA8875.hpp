@@ -200,12 +200,12 @@ public:
              std::uint16_t x1,  std::uint16_t y1,
              std::uint16_t w,   std::uint16_t h,
              std::uint16_t x0 = 0, std::uint16_t y0 = 0);
-    void bteScrollShift(std::int16_t x, std::int16_t y,
-                            std::uint16_t w, std::uint16_t h,
-                            std::uint16_t shiftRows) {}
-    void bteHorizontalShift(std::int16_t x, std::int16_t y,
-                            std::uint16_t w, std::uint16_t h,
-                            std::int16_t dx) {}
+    void bteScrollShift(std::int16_t /*x*/, std::int16_t /*y*/,
+                            std::uint16_t /*w*/, std::uint16_t /*h*/,
+                            std::uint16_t /*shiftRows*/) {}
+    void bteHorizontalShift(std::int16_t /*x*/, std::int16_t /*y*/,
+                            std::uint16_t /*w*/, std::uint16_t /*h*/,
+                            std::int16_t /*dx*/) {}
     // RA8875 has no PIP equivalent -- these are never actually called
     // (uidialog.hpp guards every call site with #ifdef DISPLAY_7INCH,
     // keeping the 5" panel on the older Screen::suspend()/resume()
@@ -213,8 +213,8 @@ public:
     // consistent between panel types.
     void beginOverlayDraw() {}
     void endOverlayDraw() {}
-    void showPipOverlay(std::int16_t x, std::int16_t y,
-                        std::uint16_t w, std::uint16_t h) {}
+    void showPipOverlay(std::int16_t /*x*/, std::int16_t /*y*/,
+                        std::uint16_t /*w*/, std::uint16_t /*h*/) {}
     void hidePipOverlay() {}
 
     // Matches LT7683::bteMcuWriteBitmap()/waitBteIdle() for interface
@@ -324,9 +324,6 @@ public:
     // -----------------------------------------------------------------------
     // HP82163-specific configuration (called by Screen / share.py setup)
     // -----------------------------------------------------------------------
-
-    // Switch the controller to 8-bit colour depth (256 colours).
-    void set8Bpp();
 
     // Enable RA8875 2-layer configuration (DSPCTR bit 7).  Used by
     // Screen::store()/recall() to keep a backup of the visible layer.

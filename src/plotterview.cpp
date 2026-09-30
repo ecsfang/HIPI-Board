@@ -4,6 +4,7 @@
 #include "usb_serial.h"
 #include "bmp_loader.hpp"
 #include "drive.h"
+#include "analyzer.h"
 #include <cctype>
 #include <vector>
 extern std::vector<CDevice*> devices;   // hipi.cpp -- loop order
@@ -111,7 +112,7 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
     if (output_ != DisplayOutput::Plotter) return;
 #ifndef DISPLAY_7INCH
     // FIXED: was checking screen_->isSuspended() here -- but
-    // plotterview_setOutput() itself calls screen_->suspend() the moment
+    // switchView() itself calls screen_->suspend() the moment
     // Plotter output is selected (deliberately, so Screen's own text
     // rendering doesn't draw over the plot -- see its own comment), so
     // that flag is ALWAYS true throughout completely normal Plotter
@@ -182,6 +183,7 @@ const char* outputName(DisplayOutput mode) {
         case DisplayOutput::Display: return "DISPLAY";
         case DisplayOutput::Plotter: return "PLOTTER";
         case DisplayOutput::Tape:    return "TAPE";
+        case DisplayOutput::Analyzer: return "ANALYZER";
     }
     return "?";
 }
@@ -701,6 +703,10 @@ bool plotterview_isAvailable(DisplayOutput mode) {
 }
 
 void plotterview_redraw() {
+    if (output_ == DisplayOutput::Analyzer) {
+        analyzer_redrawAll();
+        return;
+    }
     if (output_ == DisplayOutput::Tape) {
         drawTapeRegion(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
         return;
@@ -818,22 +824,32 @@ static void switchView(DisplayOutput mode, CDevice* dev) {
     // overwritten. plotterview_poll() does it once the splash times out.
 }
 
-void plotterview_setOutput(DisplayOutput mode) {
-    // The first device (loop order) with that kind of view
-    for (CDevice* dev : devices) {
-        if (deviceHasView(dev) && outputFor(dev->viewKind()) == mode) {
-            switchView(mode, dev);
-            return;
-        }
-    }
-    if (mode == DisplayOutput::Display) switchView(mode, nullptr);
-}
-
 void plotterview_showDevice(CDevice* dev) {
     if (deviceHasView(dev)) switchView(outputFor(dev->viewKind()), dev);
 }
 
 CDevice* plotterview_viewDevice() { return viewDevice_; }
+
+// The view to go back to when leaving the Analyzer
+static CDevice* beforeAnalyzer_ = nullptr;
+static DisplayOutput beforeAnalyzerOutput_ = DisplayOutput::Display;
+
+void plotterview_showAnalyzer() {
+    if (output_ == DisplayOutput::Analyzer) return;
+    beforeAnalyzer_ = viewDevice_;
+    beforeAnalyzerOutput_ = output_;
+    switchView(DisplayOutput::Analyzer, nullptr);
+}
+
+void plotterview_leaveAnalyzer() {
+    if (output_ != DisplayOutput::Analyzer) return;
+    if (deviceHasView(beforeAnalyzer_)) {
+        switchView(outputFor(beforeAnalyzer_->viewKind()), beforeAnalyzer_);
+    } else {
+        switchView(beforeAnalyzerOutput_ == DisplayOutput::Tape ? DisplayOutput::Display
+                                                                  : beforeAnalyzerOutput_, nullptr);
+    }
+}
 
 std::vector<CDevice*> plotterview_viewDevices() {
     std::vector<CDevice*> list;

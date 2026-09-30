@@ -9,6 +9,8 @@
 #define HIPI_DIR_SCREENSHOTS "screenshots"
 // Cassette images (LIF .dat files) for the drives
 #define HIPI_DIR_LIF         "lif"
+// Analyzer logs (analyzer_<n>.txt) -- created when the first is started
+#define HIPI_DIR_LOGS        "logs"
 
 // Path of a file in one of these folders, e.g. HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp")
 #define HIPI_PATH(dir, file) dir "/" file

@@ -92,15 +92,13 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
         cmd = m_wLastCmd;                            // use the last CMD frame as answer
         m_hadCmd = false;   // consumed
         sendFrame(cmd);                            // send the RFC frame
-        // Bounded wait: previously unbounded, so any hiccup on the PC side
-        // (dropped byte, app not yet ready to answer) hung the whole
-        // device forever -- hipi_loop() never returned to the main loop,
-        // so even touch stopped responding.
-        absolute_time_t rfcDeadline = make_timeout_time_ms(500);
+        // Waits until the PC answers. NOTE: unbounded -- a 500 ms timeout
+        // was tried here but is disabled; if the PC side never answers
+        // (dropped byte, app not ready), hipi_loop() doesn't return.
         do {
             tud_task();  // TinyUSB background task
             pil_cmd = receiveFrame();
-        } while( pil_cmd == NO_FRAME ); //&& !time_reached(rfcDeadline) );
+        } while( pil_cmd == NO_FRAME );
         PD_LOGF("\t   <== RFC!\r\n");
         if( pil_cmd == NO_FRAME ) LOGF("\t   <== Timeout!!!!!!!!!!!!\r\n");
         return RFC;
@@ -130,6 +128,35 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     return pil_cmd;
 }
 
+// The PC app may have sent TDIS (0x32 0x94) several times while waiting
+// for the PILBox to come up -- on the first TDIS, read away any further
+// 0x32 0x94 pairs already queued, so it's answered with a single 0x94.
+// Anything else stays for normal processing (a byte read ahead is put
+// back in pendingRx_).
+void CPilBox::drainTdisBacklog(void)
+{
+    int drained = 0;
+    while (tud_cdc_n_available(ITF_HPIL) > 0) {
+        uint8_t next = 0;
+        if (!tud_cdc_n_peek(ITF_HPIL, &next) || next != 0x32) break;
+        tud_cdc_n_read_char(ITF_HPIL);                 // the 0x32
+        if (tud_cdc_n_available(ITF_HPIL) == 0) {      // lo byte not here yet
+            PIL_tx_hi = 0x32;                          // keep it as a hi byte
+            break;
+        }
+        const int lo = tud_cdc_n_read_char(ITF_HPIL);
+        if (lo != 0x94) {                              // another frame: keep it
+            PIL_tx_hi = 0x32;
+            pendingRx_ = lo;
+            break;
+        }
+        ++drained;
+    }
+    if (drained > 0) {
+        MLOGF("TDIS backlog: %d repeated TDIS dropped, answered once", drained);
+    }
+}
+
 IL_CMD_t CPilBox::receiveFrame(void)
 {
     IL_CMD_t frame;
@@ -140,7 +167,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         loopbackFrame = NO_FRAME;                 // reset the loopback frame
         return frame;                      // return no data and get out
     }
-    else if (tud_cdc_n_available(ITF_HPIL) == 0)
+    else if (pendingRx_ < 0 && tud_cdc_n_available(ITF_HPIL) == 0)
     {
         // no bytes available
         return NO_FRAME;                      // return no data and get out
@@ -151,7 +178,12 @@ IL_CMD_t CPilBox::receiveFrame(void)
         // - there is a valid serial link
         // - and there is data available in the serial buffer
         // if a frame arrives we must check for a PILBox command first
-        pil_recv = tud_cdc_n_read_char(ITF_HPIL);
+        if (pendingRx_ >= 0) {                // a byte put back by drainTdisBacklog()
+            pil_recv = static_cast<IL_CMD_t>(pendingRx_);
+            pendingRx_ = -1;
+        } else {
+            pil_recv = tud_cdc_n_read_char(ITF_HPIL);
+        }
         MLOGF("<-- %02X", pil_recv);
         // PILBox emulation received a byte from the PILBox designated serial port
         // pil_recv contains the returned byte
@@ -193,6 +225,10 @@ IL_CMD_t CPilBox::receiveFrame(void)
             PL_LOG_MODE("TDIS");
             PILBox_mode = TDIS;             // set mode to disabled
                                             // frame is not forwarded to the HP-IL emulation
+            if (!tdisBacklogDrained_) {
+                tdisBacklogDrained_ = true;
+                drainTdisBacklog();         // answer a queued-up series only once
+            }
             PL_SEND(pil_recv);              // return command for confirmation
             type( NONE );
             //hipi::setStatusLed(display, hipi::StatusLed::Pil, false);

@@ -82,6 +82,7 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index) {
 }
 
 uint16_t const * tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+    (void)langid;
     static uint16_t buf[32];
     const char *str;
     if (index == 0) { buf[0] = 0x0409; return buf; }

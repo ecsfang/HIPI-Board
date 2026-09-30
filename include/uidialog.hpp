@@ -12,6 +12,7 @@
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
 #include "drive.h"        // CDrive -- deferred switch-off in the Devices menu
 #include "screendump.h"   // Display -> Screendump
+#include "analyzer.h"     // Display -> Analyzer
 #include "hipi.h"         // hipi_applyDeviceOrder(), Devices -> Change order
 #include "lif_info.hpp"   // file picker: contents of a LIF .dat image
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
@@ -121,24 +122,6 @@ class UiDialog {
 public:
     UiDialog(DisplayDriver* display, Screen& screen) : d_(display), screen_(screen) {}
 
-    // Called with the chosen filename once the user confirms it in the
-    // "Open file?" dialog. Decouples UiDialog from whatever device class
-    // (e.g. CTape) actually acts on the file -- just wire it up in main:
-    //
-    //   dialog.setFileSelectedCallback([&drive](const std::string& name) {
-    //       drive.select(name);
-    //   });
-    void setFileSelectedCallback(std::function<void(const std::string&)> cb) {
-        onFileSelected_ = std::move(cb);
-    }
-
-    // Called with true when the file picker opens (cassette taken out:
-    // the drive must report no tape) and false when it closes again (the
-    // old or newly chosen file is back in). See CDrive::setEjected().
-    void setMediaEjectedCallback(std::function<void(bool)> cb) {
-        onMediaEjected_ = std::move(cb);
-    }
-
     // Called with the newly chosen color whenever the user picks one in
     // the "Textcolor" menu (after screen_.setColor() has already applied
     // it). Useful for persisting the choice, e.g. to a Config object.
@@ -162,9 +145,6 @@ public:
     // first time the menu is opened, before the user has ever used it
     // to pick anything, it fell back to the list's first entry
     // regardless of what was actually loaded.
-    void setCurrentFile(const std::string& filename) {
-        lastAppliedFile_ = filename;
-    }
 
     // The cassette drive the file picker works on: its current file is
     // pre-selected, the chosen file is given to it (CDrive::setMediaFile()),
@@ -361,13 +341,18 @@ public:
 #endif
     }
 
-    void handleButton(Button b) {
+    // repeat: an auto-repeat of a held ▲/▼ (see boardui_poll()) -- acts
+    // with the same Shift state as the original press (line vs page)
+    void handleButton(Button b, bool repeat = false) {
         if (b == Button::Shift) {
             shiftPending_ = true;   // latch for the *next* button press
             return;
         }
-        const bool shifted = shiftPending_;
-        shiftPending_ = false;      // consumed by this button press, whatever it is
+        const bool shifted = repeat ? lastShifted_ : shiftPending_;
+        if (!repeat) {
+            shiftPending_ = false;  // consumed by this button press, whatever it is
+            lastShifted_ = shifted;
+        }
 
         // Shift+OK ("EXIT" on the button graphic) always means "leave
         // entirely and hide the buttons" -- whether or not a menu
@@ -412,7 +397,17 @@ public:
 
         switch (state_) {
             case State::Closed:
-                if (b == Button::Ok) {
+                if (plotterview_output() == DisplayOutput::Analyzer) {
+                    // The Analyzer view: its own menu, and the arrows scroll
+                    // its log instead of the HP-41 text
+                    if (b == Button::Ok)        openAnalyzerMenu();
+                    else if (b == Button::Up)   analyzer_scroll(shifted ? analyzer_pageRows() : 1);
+                    else if (b == Button::Down) analyzer_scroll(shifted ? -analyzer_pageRows() : -1);
+                    else if (b == Button::X) {
+                        if (shifted) analyzer_clear();
+                        else         analyzer_scrollToLive();
+                    }
+                } else if (b == Button::Ok) {
                     openMainMenu();
                 } else if (b == Button::Up) {
                     // Up = scroll further into history (older content).
@@ -567,6 +562,20 @@ public:
                 }
                 break;
 
+            case State::AnalyzerLogMenu:
+                if (b == Button::Up)   moveListSelection(analyzerLogLabels_, analyzerLogScroll_, -1);
+                if (b == Button::Down) moveListSelection(analyzerLogLabels_, analyzerLogScroll_, +1);
+                if (b == Button::Ok)   enterAnalyzerLogMenuItem();
+                if (b == Button::X)    openAnalyzerMenu(4);
+                break;
+
+            case State::AnalyzerMenu:
+                if (b == Button::Up)   moveListSelection(analyzerLabels_, analyzerScroll_, -1);
+                if (b == Button::Down) moveListSelection(analyzerLabels_, analyzerScroll_, +1);
+                if (b == Button::Ok)   enterAnalyzerMenuItem();
+                if (b == Button::X)    close();
+                break;
+
             case State::DisplayMenu:
                 if (b == Button::Up)   moveDisplaySelection(-1);
                 if (b == Button::Down) moveDisplaySelection(+1);
@@ -653,16 +662,16 @@ private:
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
         FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
         LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo, DeviceOrder,
-        DevicesMenu
+        DevicesMenu, AnalyzerMenu, AnalyzerLogMenu
     };
 
-    static constexpr const char* kMainMenuLabels[] = { "Config", "Settings", "Devices", "Display" };
+    static constexpr const char* kMainMenuLabels[] = { "Config >", "Settings >", "Devices >", "Display >" };
     static constexpr int kMainMenuCount = 4;
 
-    static constexpr const char* kConfigMenuLabels[] = { "Select file", "Trace", "Connect to PC", "Loopback test", "Scan I2C", "Bootsel mode" };
+    static constexpr const char* kConfigMenuLabels[] = { "Select file >", "Trace >", "Connect to PC", "Loopback test >", "Scan I2C", "Bootsel mode" };
     static constexpr int kConfigMenuCount = 6;
 
-    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor", "Font size", "Brightness", "Columns" };
+    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor >", "Font size >", "Brightness >", "Columns >" };
     static constexpr int kSettingsMenuCount = 4;
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
@@ -703,17 +712,17 @@ private:
     // loop order -- "Display", "Plotter", "Tape", or "Tape TFDRIVE2" when
     // there are several), then these actions. Screendump: 7" only (no
     // read-back in the RA8875 driver).
-    enum class DisplayAction { ClearPlotter, ClearScreen, Screendump };
+    enum class DisplayAction { Analyzer, ClearPlotter, ClearScreen, Screendump };
 #ifdef DISPLAY_7INCH
     static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::ClearPlotter, DisplayAction::ClearScreen, DisplayAction::Screendump };
-    static constexpr const char* kDisplayActionLabels[] = { "Clear plotter", "Clear screen", "Screendump" };
-    static constexpr int kDisplayActionCount = 3;
+        DisplayAction::Analyzer, DisplayAction::ClearPlotter, DisplayAction::ClearScreen, DisplayAction::Screendump };
+    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Clear plotter", "Clear screen", "Screendump" };
+    static constexpr int kDisplayActionCount = 4;
 #else
     static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::ClearPlotter, DisplayAction::ClearScreen };
-    static constexpr const char* kDisplayActionLabels[] = { "Clear plotter", "Clear screen" };
-    static constexpr int kDisplayActionCount = 2;
+        DisplayAction::Analyzer, DisplayAction::ClearPlotter, DisplayAction::ClearScreen };
+    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Clear plotter", "Clear screen" };
+    static constexpr int kDisplayActionCount = 3;
 #endif
     std::vector<CDevice*> viewDevs_;          // Display menu: the view rows
     std::vector<std::string> displayLabels_;  // Display menu: all row labels
@@ -748,6 +757,111 @@ private:
         else if (selected_ == 1) openSettingsMenu();
         else if (selected_ == 2) openDevicesMenu();
         else                     openDisplayMenu();
+    }
+
+    // ── Analyzer menu (the menu button while the Analyzer view is shown) ─
+    std::vector<std::string> analyzerLabels_;
+    int analyzerScroll_ = 0;
+
+    void buildAnalyzerLabels() {
+        analyzerLabels_ = {
+            "Clear",
+            analyzer_mode() == AnalyzerMode::Overview ? "Mode: Overview" : "Mode: Detailed",
+            analyzer_relativeTime() ? "Time: Relative" : "Time: Since start-up",
+            analyzer_showIdle() ? "Idle frames: Shown" : "Idle frames: Hidden",
+            analyzer_logging() ? "Logging (on) >" : "Logging >",
+            "Leave view",
+        };
+    }
+
+    // `sel`: the row to highlight (back from the Logging submenu: row 4)
+    void openAnalyzerMenu(int sel = 0) {
+        state_ = State::AnalyzerMenu;
+        selected_ = sel;
+        analyzerScroll_ = 0;
+        buildAnalyzerLabels();
+        drawBox();
+        drawListRows(analyzerLabels_, analyzerScroll_);
+    }
+
+    void enterAnalyzerMenuItem() {
+        switch (selected_) {
+            case 0:                                         // Clear
+                analyzer_clear();
+                close();
+                return;
+            case 1:
+                analyzer_setMode(analyzer_mode() == AnalyzerMode::Overview ? AnalyzerMode::Detailed
+                                                                           : AnalyzerMode::Overview);
+                break;
+            case 2: analyzer_setRelativeTime(!analyzer_relativeTime()); break;
+            case 3: analyzer_setShowIdle(!analyzer_showIdle()); break;
+            case 4:                                         // Logging >
+                openAnalyzerLogMenu();
+                return;
+            default:                                        // Leave view
+                withMainCanvas([&]{ plotterview_leaveAnalyzer(); });
+                close();
+                return;
+        }
+        // A setting changed: show its new value, stay in the menu
+        buildAnalyzerLabels();
+        drawListRows(analyzerLabels_, analyzerScroll_);
+    }
+
+    // Analyzer -> Logging: Start/Stop (a new file each time), Save (the
+    // current buffer to a new file, while not logging). X: back.
+    std::vector<std::string> analyzerLogLabels_;
+    int analyzerLogScroll_ = 0;
+
+    void openAnalyzerLogMenu() {
+        state_ = State::AnalyzerLogMenu;
+        selected_ = 0;
+        analyzerLogScroll_ = 0;
+        analyzerLogLabels_ = { analyzer_logging() ? "Stop" : "Start", "Save" };
+        drawBox();
+        drawListRows(analyzerLogLabels_, analyzerLogScroll_);
+    }
+
+    void enterAnalyzerLogMenuItem() {
+        std::string msg;
+        std::string shown;
+        if (selected_ == 0) {
+            if (analyzer_logging()) {
+                analyzer_stopLog();
+                shown = "Logging stopped";
+            } else {
+                shown = analyzer_startLog(msg) ? "Logging to " + msg : msg;
+            }
+        } else {
+            shown = analyzer_saveLog(msg) ? "Saved " + msg : msg;
+        }
+        withMainCanvas([&]{ plotterview_showMessage(shown.c_str()); });
+        close();
+    }
+
+    // Generic scrolling list rows (labels, first row shown) -- same look
+    // as the other lists
+    void drawListRows(const std::vector<std::string>& labels, int scroll) {
+        d_->txtSize(MenuFrame::TextScale);
+        for (int row = 0; row < kMaxFilesShown; ++row) {
+            const std::size_t i = static_cast<std::size_t>(scroll + row);
+            const bool has = i < labels.size();
+            const bool sel = has && static_cast<int>(i) == selected_;
+            _clearRowBackground(row, sel ? MenuFrame::Yellow : 0x0000);
+            if (!has) continue;
+            d_->txtColor(sel ? 0x0000 : 0xFFFF, sel ? MenuFrame::Yellow : 0x0000);
+            writeRowLabel(MenuFrame::Y + 20 + row * MenuFrame::RowPitch, labels[i].c_str());
+        }
+        drawScrollIndicators(scroll, static_cast<int>(labels.size()));
+    }
+    void moveListSelection(const std::vector<std::string>& labels, int& scroll, int delta) {
+        const int count = static_cast<int>(labels.size());
+        if (count == 0) return;
+        selected_ = (selected_ + delta + count) % count;
+        if (selected_ < scroll) scroll = selected_;
+        else if (selected_ >= scroll + kMaxFilesShown) scroll = selected_ - kMaxFilesShown + 1;
+        drawListRows(labels, scroll);
     }
 
     void openDisplayMenu() {
@@ -808,7 +922,10 @@ private:
             return;
         }
         const DisplayAction action = kDisplayActions[selected_ - views];
-        if (action == DisplayAction::ClearPlotter) {
+        if (action == DisplayAction::Analyzer) {
+            withMainCanvas([&]{ plotterview_showAnalyzer(); });
+            close();
+        } else if (action == DisplayAction::ClearPlotter) {
             withMainCanvas([&]{ plotterview_clearPlotter(); });
             close();
         } else if (action == DisplayAction::Screendump) {
@@ -1271,14 +1388,12 @@ private:
             f_closedir(&dir);
         }
         state_ = State::FilePicker;
-        // Find and highlight the last file actually applied, same idea
-        // as every other multi-choice menu (Textcolor/Font size/
-        // Brightness/Columns) -- falls back to index 0 (the first file
-        // in the list) if it's not found (e.g. nothing's ever been
-        // applied yet this session, or that file's been deleted/renamed
-        // since).
+        // Highlight the drive's current file, same idea as every other
+        // multi-choice menu (Textcolor/Font size/Brightness/Columns) --
+        // falls back to index 0 ("No media") if it's not in the list
+        // (e.g. deleted or renamed since).
         selected_ = 0;
-        const std::string& current = targetDrive_ ? targetDrive_->mediaFile() : lastAppliedFile_;
+        const std::string current = targetDrive_ ? targetDrive_->mediaFile() : std::string();
         for (std::size_t i = 0; i < files_.size(); ++i) {
             if (files_[i] == current) { selected_ = static_cast<int>(i); break; }
         }
@@ -1453,7 +1568,7 @@ private:
     }
 
     // ── Devices submenu: Enable/disable, Change order ────────────────────
-    static constexpr const char* kDevicesMenuLabels[] = { "Enable/disable", "Change order" };
+    static constexpr const char* kDevicesMenuLabels[] = { "Enable/disable >", "Change order >" };
     static constexpr int kDevicesMenuCount = 2;
 
     // `sel`: the row to highlight -- the item we're coming back from
@@ -1675,7 +1790,8 @@ private:
             // wipe the splash out early.
             return;
         }
-        if (plotterview_output() == DisplayOutput::Plotter) {
+        if (plotterview_output() == DisplayOutput::Plotter ||
+            plotterview_output() == DisplayOutput::Analyzer) {
             // Screen stays suspended (it's not what's showing) -- just
             // erase the menu box by redrawing the plot underneath it,
             // instead of screen_.resume()'s HP-41 text redraw below.
@@ -1728,10 +1844,8 @@ private:
 
     void applyFile(const std::string& filename) {
         LOGF("\r\n * Selected file: %s", filename.empty() ? kNoMediaLabel : filename.c_str());
-        lastAppliedFile_ = filename;  // see openFilePicker()'s own comment
         // The file belongs to the drive (see setTargetDrive())
         if (targetDrive_) targetDrive_->setMediaFile(filename);
-        if (onFileSelected_) onFileSelected_(filename);
     }
 
     // Draws every entry in kColorLabels using ITS OWN colour (kColors[i])
@@ -1807,9 +1921,24 @@ private:
         d_->selectBuiltinFont();
         const bool isSelected = (index == selected_);
         _clearRowBackground(index, isSelected ? MenuFrame::Yellow : 0x0000);
-        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + index * MenuFrame::RowPitch);
         d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
-        d_->txtWrite(label);
+        writeRowLabel(MenuFrame::Y + 20 + index * MenuFrame::RowPitch, label);
+    }
+
+    // A row's label. One ending in " >" (opens another menu or dialog) gets
+    // its ">" right-aligned in the row, like a submenu arrow.
+    void writeRowLabel(int y, const char* label) {
+        const std::size_t len = std::strlen(label);
+        const bool sub = len >= 2 && label[len - 1] == '>' && label[len - 2] == ' ';
+        d_->txtSetCursor(MenuFrame::X + 20, static_cast<std::uint16_t>(y));
+        if (!sub) {
+            d_->txtWrite(label);
+            return;
+        }
+        const std::string text(label, len - 2);
+        d_->txtWrite(text.c_str());
+        d_->txtSetCursor(MenuFrame::X + MenuFrame::W - 64, static_cast<std::uint16_t>(y));
+        d_->txtWrite(">");
     }
 
     void highlightRow(int index, bool /*selected*/) {
@@ -1863,6 +1992,12 @@ private:
                 if (index >= 0 && index < kDevicesMenuCount)
                     drawRow(index, kDevicesMenuLabels[index]);
                 break;
+            case State::AnalyzerMenu:
+                drawListRows(analyzerLabels_, analyzerScroll_);
+                break;
+            case State::AnalyzerLogMenu:
+                drawListRows(analyzerLogLabels_, analyzerLogScroll_);
+                break;
             case State::DisplayMenu:
                 (void)index;
                 drawDisplayMenuRows();
@@ -1886,6 +2021,7 @@ private:
     Screen& screen_;
     State state_ = State::Closed;
     int selected_ = 0;
+    bool lastShifted_ = false;      // Shift state of the last press (auto-repeat)
     bool shiftPending_ = false;   // latched by Button::Shift (any state),
                                     // consumed by the next button press
     std::vector<std::string> files_;
@@ -1896,7 +2032,6 @@ private:
     std::vector<CDevice*> orderList_;     // DeviceOrder: the order being edited
     bool orderMoving_ = false;            // DeviceOrder: a device is picked up
     int orderPickedFrom_ = 0;             // DeviceOrder: where it was picked up
-    std::string lastAppliedFile_;
     CDrive* targetDrive_ = nullptr;       // see setTargetDrive()
     std::vector<std::string> lifLines_;   // LifInfo: description lines
     int lifScroll_ = 0;                   // LifInfo: first line shown
@@ -1913,8 +2048,6 @@ private:
     bool pickerFromTape_ = false;
     std::string pendingFile_;
     std::vector<std::string> deviceLabels_;
-    std::function<void(const std::string&)> onFileSelected_;
-    std::function<void(bool)> onMediaEjected_;
     bool mediaEjected_ = false;
 
     // Cassette out/in: the Tape view (open lid) and the drive itself
@@ -1923,7 +2056,6 @@ private:
         mediaEjected_ = ejected;
         plotterview_setTapeEjected(ejected);
         if (targetDrive_) targetDrive_->setEjected(ejected);
-        if (onMediaEjected_) onMediaEjected_(ejected);
     }
     std::function<void(std::uint16_t)> onColorChanged_;
     std::function<void()> onExitRequested_;

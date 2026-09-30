@@ -1,18 +1,13 @@
 #ifndef __TAPE_H__
 #define __TAPE_H__
 
-// CTape and its storage backends (CTapeSD, CTapeMem, CTapeFlash).
-// Split out of drive.h so the HP-IL device logic (CDrive) and the
-// storage backends can be read/changed independently.
-//
-// CTapeSD is what's actually used in production (SD card via FatFs).
-// CTapeMem and CTapeFlash are kept around as fallbacks for testing
-// without an SD card.
+// CTape (the cassette interface) and CTapeSD, its implementation on the
+// SD card via FatFs -- one LIF image file per cassette (lif/<name>.dat).
+// Split out of drive.h so the HP-IL device logic (CDrive) and the storage
+// can be read/changed independently.
 
 #include <string>
 #include <cstring>
-#include "hardware/flash.h"
-#include "hardware/sync.h"
 #include <cstdio>
 #include "hw_config.h"
 #include "f_util.h"
@@ -33,9 +28,6 @@
 #define SURFACES    2
 #define TAPE_SIZE   (TRACKS*REC_SIZE*BUF_SIZE)
 
-//#define MEDIA_NAME "HDRIVCHUU260701.DAT"
-//#define MEDIA_NAME "HDRIVCHUU260708.DAT"
-#define MEDIA_NAME "cass1.dat"
 
 #define SIZE_OFFS   24
 
@@ -46,21 +38,12 @@ typedef struct media_t {
     unsigned short int blocks;
 } Media_t;
 
-// ─── Flash placement ───────────────────────────────────────────────────────────
-// Pico 2 has 4 MB of flash. Place tape data at the very top.
-// 128 KB / 4 KB = 32 sectors — must both be sector-aligned.
-static_assert(TAPE_SIZE   % FLASH_SECTOR_SIZE == 0, "TAPE_SIZE not sector-aligned");
-static_assert(BUF_SIZE    == FLASH_PAGE_SIZE,        "BUF_SIZE must be 256 (FLASH_PAGE_SIZE)");
-
-#define FLASH_TOTAL_BYTES  (4u * 1024u * 1024u)
-#define TAPE_FLASH_OFFSET  (FLASH_TOTAL_BYTES - TAPE_SIZE)   // 0x003E0000
-
 class CTape {
 protected:
     char _name[64];
     bool _open;
 public:
-    CTape(const char *name = MEDIA_NAME) {
+    CTape(const char *name = "") {
         _open = false;
         select(name);
     }
@@ -108,7 +91,7 @@ class CTapeSD : public CTape {
     FIL _tape;
     FRESULT _fr;
 public:
-    CTapeSD(const char *name = MEDIA_NAME) : CTape(name) {
+    CTapeSD(const char *name = "") : CTape(name) {
     }
     unsigned int tell(void) {
         return _open ? f_tell(&_tape) : 0;
@@ -176,7 +159,7 @@ public:
         if (_fr != FR_OK)
             error("f_lseek");
     }
-    void open() { //const char *name = MEDIA_NAME) {
+    void open() {
         LOGF("Opening tape SD-file: [%s]\r\n", _name);
         tud_cdc_n_write_flush(0);
         tud_task();
@@ -204,156 +187,6 @@ public:
             error("f_close");
         _open = false;
         LOGF("Done closing\r\n");
-    }
-};
-
-// Internal RAM version of tape for testing without SD-card
-// Note - clears after each boot - so just for testing!!
-class CTapeMem : public CTape {
-    unsigned char   _tape[TAPE_SIZE];
-    unsigned int    _tPos;
-public:
-    CTapeMem(const char *name = MEDIA_NAME) : CTape(name) {
-        open();
-    }
-    unsigned int tell(void) {
-        return _tPos;
-    }
-    unsigned char *pos(void) {
-        return _tape + tell();
-    }
-    void read(unsigned char *buf) {
-        // Number of bytes to read ...
-        int sz = (tell() + BUF_SIZE) >= TAPE_SIZE ? TAPE_SIZE - tell() : BUF_SIZE;
-        // If less than BUF_SIZE then fill with 255 ...
-        if( sz < BUF_SIZE )
-            memset(buf+sz, 255, BUF_SIZE-sz);
-        memcpy(buf, pos(), sz);
-        wind(sz);
-    }
-    unsigned int readInt() {
-        unsigned int n = *((unsigned int*)pos());
-        wind(sizeof(unsigned int));
-        return n;
-    }
-    void write(unsigned char *buf) {
-        LOGF("Writing %d bytes to tape at %d\r\n", BUF_SIZE, tell());
-        memcpy(pos(), buf, BUF_SIZE);
-        wind(BUF_SIZE);
-    }
-    void seek(unsigned int s) {
-        _tPos = s;
-    }
-    void wind(unsigned int s) {
-        seek(tell() + s);
-    }
-    void open(void) {
-        LOGF("Opening tape in RAM\r\n");
-        seek(0);
-        _open = true;
-    }
-    void close() {
-        LOGF("Closing tape in RAM\r\n");
-        seek(0);
-        _open = false;
-    }
-};
-
-// Internal Flash version of tape for testing without SD-card
-// Persistent storage - limited to 128 KB (32 sectors of 4 KB each)
-// Note - not bit wear efficient - each write rewrites the entire sector!
-class CTapeFlash : public CTape {
-    uint32_t        _tPos;
-    uint8_t         _sectorBuf[FLASH_SECTOR_SIZE];   // 4 KB RAM buffer
-    int32_t         _loadedSector;                   // which sector is in buf (-1 = none)
-    bool            _dirty;                          // buf differs from flash
-
-    // ── helpers ───────────────────────────────────────────────────────────────
-
-    int sectorOf(uint32_t tapePos) const {
-        return (int)(tapePos / FLASH_SECTOR_SIZE);
-    }
-
-    // Read one sector from XIP-mapped flash into _sectorBuf (no erase needed)
-    void loadSector(int sector) {
-        if (_loadedSector == sector) return;
-        flushSector();                               // write previous sector first
-        uint32_t addr = XIP_BASE + TAPE_FLASH_OFFSET + (uint32_t)sector * FLASH_SECTOR_SIZE;
-        memcpy(_sectorBuf, reinterpret_cast<const uint8_t*>(addr), FLASH_SECTOR_SIZE);
-        _loadedSector = sector;
-        _dirty = false;
-    }
-
-    // Erase + reprogram the buffered sector back to flash
-    // NOTE: called with interrupts off; both flash_range_* run from ROM (safe)
-    void flushSector() {
-        if (_loadedSector < 0 || !_dirty) return;
-        uint32_t off = TAPE_FLASH_OFFSET + (uint32_t)_loadedSector * FLASH_SECTOR_SIZE;
-        LOGF("Flush to flash at %u\r\n", off);
-        uint32_t irq = save_and_disable_interrupts();
-        flash_range_erase  (off, FLASH_SECTOR_SIZE);
-        flash_range_program(off, _sectorBuf, FLASH_SECTOR_SIZE);
-        restore_interrupts(irq);
-        _dirty = false;
-    }
-
-public:
-    CTapeFlash(const char *name = MEDIA_NAME) : CTape(name), _tPos(0), _loadedSector(-1), _dirty(false) {
-        open();
-    }
-
-    ~CTapeFlash() { flushSector(); }
-
-    // ── CTape interface ───────────────────────────────────────────────────────
-
-    unsigned int tell(void) override { return _tPos; }
-
-    void seek(unsigned int s) override { _tPos = s; }
-
-    // Reads go straight through the XIP window — no sector buffer needed
-    void read(unsigned char *buf) override {
-        int sz = BUF_SIZE;
-        if ((_tPos + BUF_SIZE) >= TAPE_SIZE)
-            sz = (int)(TAPE_SIZE - _tPos);
-        const uint8_t *src = reinterpret_cast<const uint8_t*>(
-            XIP_BASE + TAPE_FLASH_OFFSET + _tPos);
-        memcpy(buf, src, sz);
-        while (sz < BUF_SIZE) buf[sz++] = 0xFF;
-        _tPos += (uint32_t)sz;
-    }
-
-    unsigned int readInt() override {
-        const uint8_t *src = reinterpret_cast<const uint8_t*>(
-            XIP_BASE + TAPE_FLASH_OFFSET + _tPos);
-        unsigned int n;
-        memcpy(&n, src, sizeof(n));   // safe unaligned read
-        _tPos += sizeof(unsigned int);
-        return n;
-    }
-
-    // Writes go into the sector buffer; flash is only touched on sector change or close()
-    void write(unsigned char *buf) override {
-        LOGF("Writing %d bytes to flash at %u\r\n", BUF_SIZE, _tPos);
-        int sector = sectorOf(_tPos);
-        loadSector(sector);                           // load if not already buffered
-        uint32_t offsetInSector = _tPos % FLASH_SECTOR_SIZE;
-        memcpy(_sectorBuf + offsetInSector, buf, BUF_SIZE);
-        _dirty = true;
-        _tPos += BUF_SIZE;
-        flushSector();   // ← always flush immediately
-    }
-
-    void open(void) override {
-        LOGF("Opening flash tape [%s] @ offset 0x%06X\r\n", _name, TAPE_FLASH_OFFSET);
-        _tPos = 0;
-        _open = true;
-    }
-
-    void close() override {
-        LOGF("Closing flash tape, flushing sector %d\r\n", _loadedSector);
-        flushSector();
-        _tPos = 0;
-        _open = false;
     }
 };
 

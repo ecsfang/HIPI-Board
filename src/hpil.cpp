@@ -59,7 +59,7 @@ const static IL_Codes_t ilCodes[] = {
 char *ilMnemonic(IL_CMD_t frame, char *buf)
 {
 	// go through HP-IL opcode table
-	for (int i = 0; i < sizeof(ilCodes) / sizeof(ilCodes[0]); ++i)
+	for (std::size_t i = 0; i < sizeof(ilCodes) / sizeof(ilCodes[0]); ++i)
 	{
 		// found opcode in table
 		if ((frame & ilCodes[i].mask) == ilCodes[i].opc)

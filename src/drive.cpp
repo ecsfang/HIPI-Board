@@ -14,7 +14,6 @@ Media_t mediaInfo[] = {
 };
 
 static bool SDOK = false;
-const char *share_Tape = MEDIA_NAME;
 
 void disableSD() {
     SDOK = false;
@@ -212,16 +211,12 @@ void CDrive::doListener(IL_CMD_t cmd, IL_CMD_t *rtn)
         } else {
             switch( n ) {
             case 7:
-                //Rewind (incomplete)
-                // The tape is rewound to the leader at the very beginning and
-                // is generally used when the tape is going to be removed.
-                // The tape can’t be used until after the tape door is opened
-                // and closed, a Device Clear command is received, or a
-                // Seek (Device Dependent Listener 4) command repositions the tape.
+                // Rewind: the tape is wound back to its start. (On the real
+                // drive it then can't be used until the door is opened and
+                // closed, a Device Clear arrives or a Seek repositions it --
+                // not emulated: the HP-41 always seeks before using it.)
                 markBusy();         // tape moves: BUSY LED + spinning reels
                 clear();
-                //if( check() )
-                //    tape->seek(0);
                 break;
             case 8:
                 //Close record
@@ -424,7 +419,6 @@ bool CDrive::check()
                 LOGF("$$$ Opening tape file: %s ", tape->media());
                 tud_cdc_n_write_flush(0);
                 tud_task();
-                //tape->select(share_Tape);
                 markBusy();
                 tape->open();
                 size(tape->mediaSize());
@@ -486,7 +480,7 @@ static void list_dir(const char* path, int depth) {
 
         // Recurse into subdirectories (but not "." and "..")
         if (fno.fattrib & AM_DIR) {
-            char subpath[256];
+            char subpath[512];     // path (<= 255) + '/' + name (<= 255)
             snprintf(subpath, sizeof(subpath), "%s/%s", path, fno.fname);
             list_dir(subpath, depth + 1);
         }

@@ -221,12 +221,6 @@ char gTouchDevice[] = "GSL1680";
 #define I2CBUF_SIZE         0x20
 #define I2CBUF_MASK         ~(I2CBUF_SIZE-1)
 
-// I2C reserves some addresses for special purposes. We exclude these from the scan.
-// These are any addresses of the form 000 0xxx or 111 1xxx
-bool reserved_addr(uint8_t addr) {
-    return (addr & 0x78) == 0 || (addr & 0x78) == 0x78;
-}
-
 int i2c_write(uint8_t val, uint8_t *buf=NULL, uint8_t len=0)
 {
     uint8_t wBuf[I2CBUF_SIZE+1];
@@ -344,7 +338,7 @@ void load_fw(void)
 	uint8_t buf[32];
 	size_t source_len = (sizeof(GSLX680_FW)/sizeof(struct fw_data));
 
-    for(int i=0; i<source_len; i++) {
+    for(size_t i=0; i<source_len; i++) {
         if( GSLX680_FW[i].offset == PAGE_REG ) {
             memcpy(&buf[0], &GSLX680_FW[i].val, 4);
 			i2c_write(GSL_PAGE_REG, buf, 4);    // Select the block

@@ -800,13 +800,10 @@ public:
                      std::uint16_t x1, std::uint16_t y1);
 
     // -----------------------------------------------------------------------
-    // Colour depth / layers -- LT7683's model (multi-buffer + PIP) doesn't
-    // map cleanly onto RA8875's simple 2-layer overlay. Stubbed for now
-    // (log a "not implemented" note, don't touch hardware state) until
-    // it's clear whether the project actually needs the equivalent
-    // capability on this chip -- see LT7683.cpp.
+    // RA8875-style 2-layer mode -- a no-op here: the 7" build uses its own
+    // layers + PIP windows instead (beginLayerDraw(), showPipOverlay()).
+    // Kept only so the Linux demo, which calls it, builds for both panels.
     // -----------------------------------------------------------------------
-    void set8Bpp();
     void set2LayerConfig();
 
     // -----------------------------------------------------------------------

@@ -1604,23 +1604,8 @@ void LT7683::fillTriangle(std::int16_t x0, std::int16_t y0, std::int16_t x1, std
     triangleHelper(x0, y0, x1, y1, x2, y2, color, true);
 }
 
-// -----------------------------------------------------------------------
-// Deferred: 2-layer/PIP config, CGRAM custom characters -- see LT7683.hpp's
-// header comment for why these are stubbed rather than guessed at.
-// -----------------------------------------------------------------------
-
-void LT7683::set8Bpp() {
-    // TODO(LT7683): map to whatever this project actually needs 8bpp mode
-    // for on RA8875 before implementing -- CCR (REG[01h]) bit[4:3]
-    // controls LCD interface bpp, but the *purpose* this serves elsewhere
-    // in the codebase needs checking first.
-}
-
 void LT7683::set2LayerConfig() {
-    // TODO(LT7683): see LT7683.hpp's header comment -- LT7683's PIP/
-    // multi-buffer model doesn't map directly onto RA8875's simple
-    // 2-layer overlay register (DPCTR bit7). Deferred until it's clear
-    // what capability the project actually relies on this call for.
+    // No-op -- see the header: layers + PIP windows are used instead
 }
 
 void LT7683::setCharSpacing(std::uint8_t pixels) {

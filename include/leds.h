@@ -79,15 +79,7 @@ class PicoPwm {
     void stop();
 };
 
-extern void alienBegin(void);
-extern void alienStartup(uint32_t durationMs);
 
-namespace breathing_led {
-extern void init(uint gpio);
-extern void update(int value);
-}
-
-extern void pwm_test(int pin);
 
 extern void led_on(int n);
 extern void led_off(int n);

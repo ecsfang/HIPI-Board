@@ -158,11 +158,6 @@ void RA8875::pllInit() {
 // HP82163-specific configuration
 // -----------------------------------------------------------------------
 
-void RA8875::set8Bpp() {
-    // SYSR_8BPP overrides the 16BPP default set in begin().
-    writeReg(SYSR, SYSR_8BPP);
-}
-
 void RA8875::set2LayerConfig() {
     // DSPCTR register (0x20), bit 7 = two-layer mode.
     writeReg(0x20, 0x80);

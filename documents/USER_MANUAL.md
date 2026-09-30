@@ -20,9 +20,10 @@
 8. [HIPI's other devices](#8-hipis-other-devices)
 9. [Connecting to a PC](#9-connecting-to-a-pc)
 10. [Screen dumps](#10-screen-dumps)
-11. [Updating the software](#11-updating-the-software)
-12. [Troubleshooting](#12-troubleshooting)
-13. [Words you may meet](#13-words-you-may-meet)
+11. [The HP-IL analyzer](#11-the-hp-il-analyzer)
+12. [Updating the software](#12-updating-the-software)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Words you may meet](#14-words-you-may-meet)
 
 ---
 
@@ -69,7 +70,7 @@ Cassettes are simply files on a micro-SD card, so you never run out of tape.
 ### 3.1 Prepare the SD card
 
 The HIPI download contains two things: the software (a `.uf2` file, see
-[chapter 11](#11-updating-the-software)) and a **zip file with everything the SD
+[chapter 12](#12-updating-the-software)) and a **zip file with everything the SD
 card needs**.
 
 1. Unzip the SD card zip.
@@ -85,6 +86,7 @@ resources/        the cassette drive's pictures: hp82161a.bmp,
                   tape-in.bmp, open.bmp, leds.bmp, reels.bmp
 lif/              your cassettes (.dat files)
 screenshots/      screen dumps (created by HIPI when you save the first)
+logs/             analyzer logs (created when you start the first)
 ```
 
 HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons, menus and start-up screen are built in, so HIPI can be used without an SD card too — just without cassettes, pictures and saved settings.
@@ -195,7 +197,8 @@ thing.
 ## 6. The menus
 
 Press **OK** to open the menu. **▲/▼** to move, **OK** to choose, **X** to go
-back. **Shift + OK** closes the menu from anywhere.
+back. **Shift + OK** closes the menu from anywhere. A **>** at the right of a
+row means it opens another menu or dialog.
 
 <a href="images/menu-main.png"><img src="images/menu-main.png" alt="Main menu" width="512"></a>
 
@@ -218,6 +221,7 @@ Main menu
 │   └── Change order       Change the devices' order on the loop
 └── Display
     ├── Display, Plotter, Tape…    Choose a view (one row per device)
+    ├── Analyzer           Watch what happens on the HP-IL loop
     ├── Clear plotter
     ├── Clear screen
     └── Screendump         Save the screen as a picture
@@ -473,7 +477,59 @@ You can also take one from an HP-41 program (with the display device selected):
 
 ---
 
-## 11. Updating the software
+## 11. The HP-IL analyzer
+
+The analyzer shows what happens on the HP-IL loop: who talks to whom, what
+is sent, status answers, and anything that goes wrong. It only listens — it
+has no address and never changes anything on the loop. It records all the
+time in the background, so you can open it *after* something went wrong
+and see what led up to it.
+
+Open it with **Display → Analyzer**. **▲/▼** scroll back and forth (Shift for
+a page, hold to keep scrolling), **X** jumps to the newest line, **Shift + X**
+clears it. **Touch the middle of the screen** to pause: the screen freezes
+with a red PAUSED banner while recording goes on; touch again to resume.
+
+<a href="images/analyzer-overview.png"><img src="images/analyzer-overview.png" alt="The analyzer view in overview mode" width="512"></a>
+
+**Overview** (the default) shows one line per event:
+
+```
+00:04:05.016  CTRL -> TFDISPLAY(1)   "HELLO WORLD" (13 bytes, CR LF)   26.0 ms
+00:04:05.090  CTRL <- TFDRIVE(2)   status 23 NEW TAPE   2.0 ms
+00:04:05.102  NO RESPONSE: SST to addr 3
+00:04:05.118  TFDRIVE(2)   SEEK track 0 record 5
+00:04:05.830  CTRL <- TFDRIVE(2)   READ 512 bytes (2 records)   41.0 ms
+```
+
+- **White and cyan:** data sent to and from devices, summarised. Text is shown
+  as text, anything else as a number of bytes.
+- **Yellow:** events such as auto-addressing, clearing the loop, the cassette
+  drive's commands.
+- **Red:** problems: no answer, transmission errors, slow answers (over half
+  a second).
+- Devices outside HIPI are shown by address, and by their type once they
+  have told it (e.g. `addr 4 (printer)`). Devices in a PC program connected
+  through PILBOX (e.g. pyILPER) are marked **PC**, e.g. `PC addr 4 (printer)`.
+- The loop's controller — usually the HP-41 — is shown as **CTRL**, since HP-IL
+  messages don't say who sent them.
+
+**Detailed** shows every single message on the loop, explained.
+
+Press **OK** in the analyzer for its menu:
+
+| Menu item | Does |
+|-----------|------|
+| **Clear** | Empties the analyzer |
+| **Mode** | Overview or Detailed — switching shows the recorded history again in the new mode |
+| **Time** | Time since start-up, or time since the previous line |
+| **Idle frames** | Hide or show the loop's idle polling |
+| **Logging >** | **Start** / **Stop**: write everything from now on to a new file, `logs/analyzer_<n>.txt`. **Save**: when not logging, save what the analyzer holds right now to a new file — handy when something just happened. (Not while connected to a PC.) |
+| **Leave view** | Back to the view you came from |
+
+---
+
+## 12. Updating the software
 
 A new version comes as a `.uf2` file, `hipi_7_pico.uf2`, in the HIPI download.
 
@@ -495,7 +551,7 @@ card files, they are in the SD card zip of that download.
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Problem | Try this |
 |---------|----------|
@@ -510,7 +566,7 @@ log helps whoever looks at the problem.
 
 ---
 
-## 13. Words you may meet
+## 14. Words you may meet
 
 - **HP-IL** — HP's cable system that connects the HP-41 to its peripherals.
 - **Loop** — HP-IL devices are connected in a ring, from OUT to IN, back to the

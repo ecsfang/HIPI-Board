@@ -13,6 +13,7 @@
 #include "iltemp.h"
 #include "touch.h"
 #include "uidialog.hpp"
+#include "analyzer.h"
 #include "config.hpp"
 
 #include "usb_serial.h"
@@ -460,6 +461,7 @@ bool hipi_loop(HpIlLoop& loop) {
         led_on(HPIL_ACT_LED);
         // Got a frame, send to all devices in the loop
         preTrace(rx_frame);
+        const IL_CMD_t arrived = static_cast<IL_CMD_t>(rx_frame);   // for the analyzer
         bool absorbed = false;
         for (CDevice* dev : devices) {
             // Check if device is enabled ...
@@ -487,6 +489,13 @@ bool hipi_loop(HpIlLoop& loop) {
                 dev->offLoopFrame(rx_frame);
             }
         }
+#if HIPI_ANALYZER
+        // The analyzer sees what arrived and what leaves (analyzer.h)
+        hipi::analyzer_capture(arrived, absorbed ? static_cast<IL_CMD_t>(IL_NO_FRAME)
+                                                 : static_cast<IL_CMD_t>(rx_frame));
+#else
+        (void)arrived;
+#endif
         if( absorbed ) {
             TRC_LOGF("\r\n\t   <<< frame absorbed (device powering up)");
         } else {

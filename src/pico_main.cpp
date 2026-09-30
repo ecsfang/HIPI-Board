@@ -74,6 +74,7 @@ extern void init_spi(void);
 #include "plotterview.h"
 #include "screendump.h"
 #include "bootscreen.h"
+#include "analyzer.h"
 #include "config.hpp"
 #include "drive.h"
 extern std::vector<CDevice*> devices;   // hipi.cpp -- the HP-IL devices, loop order
@@ -85,7 +86,7 @@ hipi::Config config;
 // Run the loop as long as true ...
 bool bRunning = true;
 
-extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
+extern "C" bool tud_vendor_control_xfer_cb(uint8_t /*rhport*/,
                                             uint8_t stage,
                                             tusb_control_request_t const* request) {
     if (stage != CONTROL_STAGE_SETUP) return true;
@@ -95,35 +96,6 @@ extern "C" bool tud_vendor_control_xfer_cb(uint8_t rhport,
     return true;
 }
 
-/*
- * alien_startup.cpp
- *
- * Drives 5 LEDs through a dramatic "alien intelligence" boot sequence.
- *
- * Usage example (Arduino-Pico / Arduino IDE):
- * -----------------------------------------------
- *   #include "alien_startup.cpp"   // or add to your sketch directly
- *
- *   void setup() {
- *       alienBegin();          // configure all LED pins as OUTPUT
- *       alienStartup(2000);    // run the boot sequence for ~2 s
- *   }
- *
- *   void loop() {
- *       // your main code here
- *   }
- *
- * Usage example (Pico SDK):
- * -----------------------------------------------
- *   int main() {
- *       stdio_init_all();
- *       alienBegin();
- *       alienStartup(2000);
- *       while (true) { tight_loop_contents(); }
- *   }
- *
- * Wiring: connect LEDs (+ series resistor ~220 Ω) from each pin to GND.
- */
 
 // ─── Compatibility shim ───────────────────────────────────────────────────────
 #include "pico/stdlib.h"
@@ -355,49 +327,6 @@ int main() {
     LOGF("\r\n\t* %s", DISPLAY_DEVICE);
     LOGF("\r\n\t* SPI baudrate: requested 30000000, actual %lu",
          static_cast<unsigned long>(transport->actualBaudrate()));
-#ifdef DISPLAY_7INCH
-    // TEMPORARY diagnostic -- see LT7683::verifyCgramChar()'s own
-    // comment (LT7683.hpp) for why the actual LOGF calls live HERE
-    // rather than in a method on LT7683 itself: that class is part of
-    // hipi_core_7 (see CMakeLists.txt), shared with the Linux demo
-    // build, which never links tinyusb_device -- usb_serial.h's own
-    // tusb.h include isn't reachable there at all. pico_main.cpp IS
-    // part of the USB-linked executable target, so LOGF is safe to call
-    // directly here instead. tusb_init() has already run by this point
-    // (main() calls it before initSD(), which is what calls this
-    // function), so LOGF() itself is safe to use; bTrace isn't set yet
-    // (that happens later in THIS SAME function, from config.load()),
-    // which is why this isn't just a TRC_LOGF call instead. Remove this
-    // whole block once the underlying "custom font shows nothing" issue
-    // (see Screen.cpp's own comment on the currently-reverted
-    // selectCustomFont() call) is found and fixed.
-    {
-        struct Check { std::uint8_t code; const std::uint8_t* bitmap; const char* label; };
-        uint8_t res[16];
-        const Check checks[] = {
-            { static_cast<std::uint8_t>('A'), hipi::font['A' - hipi::FONT_FIRST_ASCII], "'A'" },
-            { static_cast<std::uint8_t>('0'), hipi::font['0' - hipi::FONT_FIRST_ASCII], "'0'" },
-            { hipi::extra_font[0].code, hipi::extra_font[0].bitmap, "extra_font[0] ('\xC3\x84', Ä)" },
-        };
-        mLOGF("LT7683", "CGRAM upload verification (a few representative chars):");
-        int i=0;
-        for (const auto& c : checks) {
-            const bool ok = display->verifyCgramChar(c.code, c.bitmap, res);
-            LOGF("\r\n  code=0x%02X (%s): read-back %s {%02X}", c.code, c.label,
-                 ok ? "MATCHES what was uploaded" : "DOES NOT MATCH -- upload/readback broken", res[i++]);
-        }
-    }
-#else
-    {
-        uint32_t addr = 0x1234ABCD;
-        uint8_t *pData = (uint8_t*)&addr;
-        uint16_t data1 = addr & 0xFFFF;
-        uint16_t data2 = (addr >> 16) & 0xFFFF;
-        mLOGF("TEST", "%04X --> %02X %02X", data1, data1 & 0xFF, (data1 >> 8) & 0xFF);
-        mLOGF("TEST", "%04X --> %02X %02X", data2, data2 & 0xFF, (data2 >> 8) & 0xFF);
-        mLOGF("TEST", "%02X %02X %02X %02X", pData[0], pData[1], pData[2], pData[3]);
-    }
-#endif
     // Show buttons -- draws and caches the strip, and tells us how wide it
     // is so Screen's initial text width can be sized around it.
     const std::uint16_t buttonStripWidth = hipi::boardui_loadButtonStrip(display);
@@ -550,6 +479,7 @@ int main() {
     // Wire up the plotter's live-draw callbacks now that display/screen/
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
+    hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
     // "ESC # D" / "ESC # M" from the HP-41: screen dump without / with the
@@ -631,6 +561,9 @@ int main() {
         touch_poll();                   // debounced tap/release detection (touch.h)
         hipi::boardui_poll();        // auto-hide timers + status LED poll
         hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
+#if HIPI_ANALYZER
+        hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
+#endif
 
         tight_loop_contents();
     }

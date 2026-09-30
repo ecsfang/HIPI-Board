@@ -3,7 +3,7 @@
 
 #include "hpil.h"
 #include "sd_paths.h"
-#include "tape.h"   // CTape, CTapeSD, CTapeMem, CTapeFlash
+#include "tape.h"   // CTape, CTapeSD
 #include "pico/time.h"
 #include <cstdint>
 #include <functional>
@@ -290,10 +290,6 @@ public:
     }
     void size(size_t sz) {
         m_size = sz;
-    }
-    void selectMedia(const char *media) {
-        tape->close();
-
     }
 };
 
