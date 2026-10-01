@@ -7,6 +7,7 @@
 #pragma once
 
 #include "display_config.h"
+#include "boot_service.h"
 #include "usb_serial.h"  // LOGF
 #include "ff.h"
 #include <cstdint>
@@ -135,6 +136,7 @@ inline bool drawBmpAt(DisplayDriver* display, const char* path,
     std::int64_t readUs = 0;
 
     for (std::uint32_t fileRow = 0; fileRow < height; fileRow += rowsPerChunk) {
+        hipi_bootService();     // start-up: keep USB/PILBox answered (no-op later)
         const std::uint32_t n = std::min<std::uint32_t>(rowsPerChunk, height - fileRow);
         const UINT bytes = static_cast<UINT>(n * rowSize);
 

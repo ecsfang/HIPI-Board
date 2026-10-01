@@ -14,12 +14,15 @@ class CPilBox : public CDevice {
     char pbBuf[32];
     IL_CMD_t m_wLastCmd;
     IL_CMD_t loopbackFrame = NO_FRAME;    // loopback frame when no valid serial link is available
+    bool lastConnected_ = false;         // PC port open, as last seen (checkConnection())
     int pendingRx_ = -1;                 // byte read ahead by drainTdisBacklog(), -1 = none
     bool tdisBacklogDrained_ = false;    // the TDIS backlog is dropped only once
     bool m_hadCmd = false;               // true right after a CMD frame, until the next RFC consumes it (matches the PIC firmware's FCMD flag)
 public:
-    CPilBox(const char *name) : CDevice(name, 0, 0, NONE) {
-    }
+    // Takes over what pilbox_serviceEarly() already agreed with the PC
+    // during start-up (mode, and that the port is open), so the PC
+    // doesn't have to start again.
+    CPilBox(const char *name);
     IL_CMD_t hpil(IL_CMD_t cmd);
     void idle(void);
     void clear(void) {}
@@ -34,11 +37,19 @@ private:
     IL_CMD_t sendFrame(IL_CMD_t cmd);
     IL_CMD_t receiveFrame(void);
     void drainTdisBacklog(void);
+    void checkConnection(void);
 };
 
 // The single CPilBox instance created in hipi_init() (see hipi.cpp) --
 // exposed so other modules (e.g. boardui.cpp's PILBOX status LED) can
 // query isConnected() without needing to search the `devices` vector.
 extern CPilBox* pilbox;
+
+
+// Start-up: answers the PC's PILBox commands (TDIS/CON/COFF/COFI) before
+// the PILBOX device exists, so a PC program that connects while HIPI
+// starts isn't left without an answer (pyILPER gives up after one
+// timeout). See hipi_bootService() in hipi.h.
+void pilbox_serviceEarly(void);
 
 #endif//__PILBOX_H__

@@ -2,6 +2,8 @@
 #include <ctype.h>
 
 #include "pilbox.h"
+#include "boot_service.h"
+#include "tusb.h"
 #include "plotter.h"
 #include "terminal.h"
 #include "hipi.h"
@@ -505,6 +507,13 @@ bool hipi_loop(HpIlLoop& loop) {
         }
         // Turn off HPIL-active led
         led_off(HPIL_ACT_LED);
+        // PILBox commands from the PC (TDIS/COFI/COFF/CON) must be answered
+        // even while frames keep coming -- the HP-41 polls with IDY frames
+        // non-stop, so idle() below may never run. While translation is off
+        // the PC sends nothing but such commands, so reading them here is
+        // safe (in translation mode the PC's frames are read in hpil()).
+        if (pilbox != nullptr && pilbox->enabled() && !pilbox->isConnected())
+            pilbox->idle();
         return true;    // Handled a frame
     } else {
         led_on(HPIL_IDY_LED);
@@ -517,3 +526,17 @@ bool hipi_loop(HpIlLoop& loop) {
         return false;   // No frame handled
     }
 }
+// ── Start-up service (boot_service.h) ──────────────────────────────────
+static bool bootServiceOn = true;
+
+void hipi_bootService() {
+    if (!bootServiceOn) return;
+    tud_task();
+    if (pilbox == nullptr) {
+        pilbox_serviceEarly();              // the device doesn't exist yet
+    } else if (pilbox->enabled() && !pilbox->isConnected()) {
+        pilbox->idle();                     // commands only, see hipi_loop()
+    }
+}
+
+void hipi_bootServiceDone() { bootServiceOn = false; }

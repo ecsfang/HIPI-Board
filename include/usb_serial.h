@@ -42,7 +42,7 @@ static inline void usb_task(void) {
 // the moment the port does connect, so early boot messages aren't silently
 // lost just because you were a bit slow opening your terminal after a reset.
 namespace usb_serial_detail {
-constexpr size_t kBootLogCapacity = 4096;
+constexpr size_t kBootLogCapacity = 8192;
 inline char   bootLogBuf[kBootLogCapacity];
 inline size_t bootLogLen = 0;
 inline bool   bootLogFlushed = false;
@@ -135,7 +135,10 @@ static inline void cdc0_printf(const char* fmt, ...) {
 extern bool usb_connected;
 extern bool bTrace;
 extern bool bExtTrace;
-#define LOGF(...) do { if (tud_mounted()) cdc0_printf(__VA_ARGS__); } while (0)
+// Not gated on tud_mounted() any more: USB is now connected late in
+// start-up (see main()), so everything logged before that must go into
+// cdc0_write()'s boot-log buffer, not be dropped.
+#define LOGF(...) do { cdc0_printf(__VA_ARGS__); } while (0)
 #define mLOGF(mod, ...) do { LOGF("\r\n[" mod "] " __VA_ARGS__); } while (0)
 #define MLOGF(...) do { LOGF("\r\n[" MODULE "] " __VA_ARGS__); } while (0)
 #define TRC_LOGF(...) do { if (bTrace) LOGF(__VA_ARGS__); } while (0)

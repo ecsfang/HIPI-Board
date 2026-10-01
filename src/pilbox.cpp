@@ -50,6 +50,40 @@ extern hipi::DisplayDriver* display;
     } while(0)
 
 
+// ── Start-up: PILBox commands before the device exists ───────────────
+namespace {
+IL_CMD_t earlyMode = TDIS;          // last mode command the PC sent
+bool earlyConnected = false;        // the PC had the port open
+std::uint8_t earlyHi = 0;
+bool earlyDone = false;             // CPilBox exists: it takes over
+}
+
+void pilbox_serviceEarly(void)
+{
+    if (earlyDone || !tud_cdc_n_connected(ITF_HPIL)) return;
+    earlyConnected = true;
+    while (tud_cdc_n_available(ITF_HPIL) > 0) {
+        const std::uint8_t b = static_cast<std::uint8_t>(tud_cdc_n_read_char(ITF_HPIL));
+        if ((b & 0xE0) == 0x20) { earlyHi = b; continue; }      // high byte
+        if (!(b & 0x80)) continue;                               // only 8-bit low bytes
+        const IL_CMD_t frame = static_cast<IL_CMD_t>(((earlyHi & 0x1E) << 6) | (b & 0x7F));
+        if (frame == TDIS || frame == CON || frame == COFF || frame == COFI) {
+            earlyMode = frame;
+            tud_cdc_n_write_char(ITF_HPIL, b);                   // acknowledge, like a PIL-Box
+            tud_cdc_n_write_flush(ITF_HPIL);
+            MLOGF("start-up: PC command %03X answered", frame);
+        }
+        // Anything else: no HP-IL yet -- dropped
+    }
+}
+
+CPilBox::CPilBox(const char *name) : CDevice(name, 0, 0, PILBOX)
+{
+    earlyDone = true;
+    PILBox_mode = earlyMode;
+    lastConnected_ = earlyConnected && tud_cdc_n_connected(ITF_HPIL);
+}
+
 IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
 {
     IL_CMD_t pil_cmd = NO_FRAME;
@@ -157,9 +191,31 @@ void CPilBox::drainTdisBacklog(void)
     }
 }
 
+// The PC side (pyILPER) opened or closed the port: start clean --
+// translation off until the PC sends its commands (like a real PIL-Box
+// after power-up), nothing old left to send to the PC (frames forwarded to
+// a closed port), and the TDIS backlog handling armed again.
+// What the PC sent is NOT thrown away on connect: its first TDIS may well
+// be here already when the connection is noticed. (On disconnect, unread
+// bytes from the PC are dropped.)
+void CPilBox::checkConnection(void)
+{
+    const bool connected = tud_cdc_n_connected(ITF_HPIL);
+    if (connected == lastConnected_) return;
+    lastConnected_ = connected;
+    if (!connected) tud_cdc_n_read_flush(ITF_HPIL);
+    tud_cdc_n_write_clear(ITF_HPIL);
+    PILBox_mode = TDIS;
+    PIL_tx_hi = 0;
+    pendingRx_ = -1;
+    tdisBacklogDrained_ = false;
+    MLOGF("PC %s -- link reset (TDIS)", connected ? "connected" : "disconnected");
+}
+
 IL_CMD_t CPilBox::receiveFrame(void)
 {
     IL_CMD_t frame;
+    checkConnection();
     if (!tud_cdc_n_connected(ITF_HPIL))
     {
         // no valid serial link, loopback mode 

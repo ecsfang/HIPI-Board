@@ -74,6 +74,7 @@ extern void init_spi(void);
 #include "plotterview.h"
 #include "screendump.h"
 #include "bootscreen.h"
+#include "boot_service.h"
 #include "analyzer.h"
 #include "config.hpp"
 #include "drive.h"
@@ -224,6 +225,12 @@ static void bootRowsDevices() {
 int main() {
     board_init(); 
     tusb_init();
+    // Stay invisible to the PC until HIPI is ready (tud_connect() just
+    // before the start-up screen's wait loop): a PC program such as pyILPER
+    // starts its PILBox handshake the moment the port shows up, and gives
+    // up after a short timeout. Logging meanwhile goes to the boot-log
+    // buffer (usb_serial.h) and is sent once a terminal connects.
+    tud_disconnect();
 
     // Init all leds ...
     //alienBegin();
@@ -258,31 +265,7 @@ int main() {
     hipi::showSplashScreen(display, HIPI_VERSION, 2000);
 #endif
 
-    absolute_time_t timeout = make_timeout_time_ms(2000);
-
-    // Wait until USB CDC is connected (max 3 seconds)
-    while (!time_reached(timeout)) {
-        tud_task();  // drives the USB stack (host requests, enumeration, IN/OUT)
-        if (tud_mounted()) {
-            usb_connected = true;
-            //ledPower.on();
-            break;
-        }
-        sleep_ms(10);   // a bit gentler than tight_loop_contents
-    }
-
-#ifdef DISPLAY_7INCH
-    hipi::bootscreen_row("USB", usb_connected ? hipi::BootState::Ok : hipi::BootState::Off,
-                         usb_connected ? "connected" : "not connected");
-#endif
-
-    // Wait for a terminal to actually open the CDC port too (max 2 seconds --
-    // previously unbounded, so boot would hang forever with no USB present).
-    absolute_time_t cdcTimeout = make_timeout_time_ms(2000);
-    while (!tud_cdc_n_connected(0) && !time_reached(cdcTimeout)) {
-        tud_task();
-        sleep_ms(10);
-    }
+    // (USB is connected late, see tud_connect() before the wait loop)
 
     ledA.off();
 
@@ -378,6 +361,7 @@ int main() {
     // than one iteration.
     for (int i = 0; i < 5; ++i) {
         touch_is_down();
+        hipi_bootService();
         sleep_ms(20);
     }
 
@@ -387,10 +371,7 @@ int main() {
     // 5": the classic text summary (the 7" panel has the start-up screen)
     screen->pr_str("# HIPI - HP-IL Pico Interface #");
 
-    if( usb_connected )
-        screen->pr_str("USB connected!");
-    else
-        screen->pr_str("Stand alone - no USB");
+    // (USB connects at the end of start-up -- its state is on the status LED)
     {
         char buf[64];
         for (CDevice* dev : devices) {       // each cassette drive's file
@@ -508,6 +489,22 @@ int main() {
     // for why doing it there (rather than just here, right before the
     // wait loop) is what actually fixes a cold-boot spurious touch.
 
+    // Now HIPI is ready: show up on USB. HP-IL (and with it PILBox) runs
+    // right away -- the PC's first PILBox command is answered at once.
+    tud_connect();
+    {
+        const absolute_time_t usbTimeout = make_timeout_time_ms(1500);
+        while (!time_reached(usbTimeout)) {
+            hipi_bootService();
+            hipi_loop(hpil);
+            if (tud_mounted()) { usb_connected = true; break; }
+        }
+    }
+#ifdef DISPLAY_7INCH
+    hipi::bootscreen_row("USB", usb_connected ? hipi::BootState::Ok : hipi::BootState::Off,
+                         usb_connected ? "connected" : "not connected");
+#endif
+
 #ifdef DISPLAY_7INCH
     // The start-up screen stays for kBootScreenMs (a touch skips it), with
     // a countdown bar
@@ -518,9 +515,13 @@ int main() {
     bool devReadyDumped = false;
 #endif
 #endif
+    // HP-IL (and with it PILBox, for the PC) runs already while the
+    // start-up screen is shown -- the loop must not be dead for that time
+    absolute_time_t nextTouchCheck = nil_time;
     while (!time_reached(infoTimeout)) {
-        tud_task();
+        hipi_bootService();
         usb_serial_flush_boot_log();
+        const bool hadFrame = hipi_loop(hpil);
 #ifdef DISPLAY_7INCH
         const float bootFraction = static_cast<float>(absolute_time_diff_us(bootWaitStart, get_absolute_time()))
                                    / (kBootScreenMs * 1000.0f);
@@ -543,8 +544,12 @@ int main() {
         // flow) -- lets someone skip the wait early without also
         // processing this same touch as a real tap, which would show
         // the button strip right as boot finishes.
-        if (touch_is_down()) break;
-        sleep_ms(10);
+        // (Checked every 10 ms: an I2C read, too slow for every frame)
+        if (time_reached(nextTouchCheck)) {
+            nextTouchCheck = make_timeout_time_ms(10);
+            if (touch_is_down()) break;
+        }
+        if (!hadFrame) sleep_us(200);
     }
 
 #ifdef DISPLAY_7INCH
@@ -554,6 +559,7 @@ int main() {
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());
 
+    hipi_bootServiceDone();   // the main loop handles USB and PILBox from here
     while (bRunning) {
         tud_task();                     // TinyUSB background task
         usb_serial_flush_boot_log();    // flush buffered boot messages once a terminal connects

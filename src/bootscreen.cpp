@@ -4,6 +4,7 @@
 #include "uidialog.hpp"     // MenuFrame (same look as the menus)
 #include "bmp_loader.hpp"   // drawBmpAt(), peekBmpDimensions()
 #include "usb_serial.h"
+#include "boot_service.h"
 #include "pico/time.h"
 #include <cstdio>
 #include <cstring>
@@ -113,7 +114,10 @@ void bootscreen_row(const char* label, BootState state, const char* value) {
     // Short "working on it" animation before the result appears
     for (int i = 1; i <= 3; ++i) {
         onOverlay([&] { text(kStatusX + 220 + (i - 1) * 16, y, ".", 1, kGrey); });
-        sleep_ms(70);
+        for (int k = 0; k < 7; ++k) {       // 70 ms, keeping USB/PILBox answered
+            hipi_bootService();
+            sleep_ms(10);
+        }
     }
     onOverlay([&] {
         d_->fillRect(kStatusX + 220, y, kStatusW - 230, 34, kBlack);
