@@ -109,7 +109,24 @@ if(NOT HIPI_DISPLAY_PANEL STREQUAL "5INCH" AND NOT HIPI_DISPLAY_PANEL STREQUAL "
 endif()
 
 # Initialise the Raspberry Pi Pico SDK
+# C++ exceptions: PicoLED (the NeoPixel library) throws them. The SDK reads
+# this while initialising, so it must be set BEFORE pico_sdk_init() --
+# set afterwards it has no effect ("exception handling disabled").
+set(PICO_CXX_ENABLE_EXCEPTIONS 1)
 pico_sdk_init()
+
+# HIPI needs an RP2350 board -- Raspberry Pi Pico 2 (PICO_BOARD=pico2) or
+# Pico 2 W (PICO_BOARD=pico2_w; its wireless chip isn't used), ARM cores.
+# A firmware built for another board/platform copies onto the BOOTSEL drive
+# fine but is then ignored by the RP2350 -- the board doesn't restart.
+message(STATUS "HIPI: board ${PICO_BOARD}, platform ${PICO_PLATFORM}")
+if(NOT PICO_PLATFORM STREQUAL "rp2350-arm-s")
+    message(FATAL_ERROR
+        "HIPI must be built for the Raspberry Pi Pico 2 / Pico 2 W (RP2350, ARM) -- "
+        "this build is for board '${PICO_BOARD}', platform '${PICO_PLATFORM}'. "
+        "Choose board pico2 (or pico2_w) -- in VS Code: Raspberry Pi Pico: Switch Board; "
+        "on the command line: -DPICO_BOARD=pico2 -- and configure again from an empty build folder.")
+endif()
 
 # 1. Include the helper file
 include(${PICO_SDK_PATH}/tools/Findpioasm.cmake)
@@ -137,8 +154,7 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 # ----------------------------------------------------------------------
 add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
 
-include("PicoLed/PicoLed.cmake")
-set(PICO_CXX_ENABLE_EXCEPTIONS 1)
+include("PicoLED/PicoLed.cmake")
 
 # ----------------------------------------------------------------------
 # Defines one full target chain (core lib -> Pico transport lib -> Pico

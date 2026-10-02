@@ -33,6 +33,7 @@ public:
     // connected", regardless of whether the underlying serial channel
     // itself is open.
     bool isConnected() const { return PILBox_mode != TDIS; }
+    IL_CMD_t mode() const { return PILBox_mode; }   // TDIS, COFF, COFI or CON
 private:
     IL_CMD_t sendFrame(IL_CMD_t cmd);
     IL_CMD_t receiveFrame(void);

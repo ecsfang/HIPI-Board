@@ -64,9 +64,57 @@ After this you should have:
 ```
 HIPI-Board/
 ├── lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/   ← submodule
-├── PicoLed/                                ← submodule
+├── PicoLED/                                ← submodule (see 1.2.1)
 ├── include/  src/  resources/  scripts/  pcb/
 └── CMakeLists.txt
+```
+
+### 1.2.1 The PicoLED library (NeoPixels)
+
+[PicoLED](https://github.com/ForsakenNGS/PicoLED) drives the WS2812 colour
+LEDs ("NeoPixels") behind the `TFPIXEL` device. It is used through one file
+only, `include/pixels.h` / `src/pixels.cpp` (`CPixelStrip`), and built as part
+of the firmware -- there is nothing to install separately.
+
+**Adding it** (if it isn't already there, e.g. after a clone without
+`--recurse-submodules`, or to set up a new copy of the project):
+
+```bash
+cd ~/Projects/HIPI-Board
+git submodule add https://github.com/ForsakenNGS/PicoLED.git PicoLED
+git submodule update --init --recursive
+```
+
+Without git submodules a plain clone into the project folder works too:
+
+```bash
+cd ~/Projects/HIPI-Board
+git clone https://github.com/ForsakenNGS/PicoLED.git PicoLED
+```
+
+**The folder name must match the build.** The build expects the library in
+the project root under the name used in these three places -- keep them and
+the folder name the same (Linux file names are case-sensitive):
+
+| File | Line |
+|------|------|
+| `CMakeLists.txt` | `include("PicoLED/PicoLed.cmake")` |
+| `CMakeLists.txt` | `PicoLed` in `target_link_libraries()` -- the CMake *target* name, defined by the library itself; stays as it is |
+| `include/pixels.h` | `#include "../PicoLED/PicoLed.hpp"` |
+
+**C++ exceptions.** PicoLED throws C++ exceptions when it can't get a PIO
+state machine, so the project enables them with
+`set(PICO_CXX_ENABLE_EXCEPTIONS 1)` in `CMakeLists.txt`. That line must come
+*before* `pico_sdk_init()` -- the SDK reads it while initialising; set later
+it has no effect, and `src/pixels.cpp` fails with
+`exception handling disabled, use '-fexceptions' to enable`. After changing
+it, run CMake again from an empty `build/` folder.
+
+**Updating** to a newer PicoLED:
+
+```bash
+cd ~/Projects/HIPI-Board/PicoLED
+git pull
 ```
 
 ### 1.3 Open in VS Code
@@ -75,11 +123,38 @@ HIPI-Board/
    "Raspberry Pi Pico").
 2. Do **not** use *File → Open Folder* the first time. Instead:
    `Ctrl+Shift+P` → **Raspberry Pi Pico: Import Project**.
-3. Select the folder containing `CMakeLists.txt`, board **pico2**, SDK
-   **2.2.0**.
+3. Select the folder containing `CMakeLists.txt`, board **pico2** (or
+   **pico2_w**, see 1.4), SDK **2.2.0**.
 
 The extension downloads the SDK/toolchain into `~/.pico-sdk/` if needed and
 configures CMake for you.
+
+### 1.4 Choosing the Pico board
+
+HIPI runs on an **RP2350** board with ARM cores:
+
+| Board | `PICO_BOARD` | Notes |
+|-------|--------------|-------|
+| Raspberry Pi **Pico 2** | `pico2` | The default in `CMakeLists.txt` |
+| Raspberry Pi **Pico 2 W** | `pico2_w` | Works the same -- the wireless chip isn't used, and HIPI uses none of the pins it occupies (GPIO 23, 24, 25, 29) |
+| Pico / Pico W (RP2040) | -- | **Not supported** |
+
+**In VS Code:** `Ctrl+Shift+P` → **Raspberry Pi Pico: Switch Board** → pick
+the board. The extension's choice overrides the default in `CMakeLists.txt`.
+
+**On the command line:** pass it when configuring, e.g.
+`cmake -DPICO_BOARD=pico2_w ..`.
+
+CMake prints the result (`-- HIPI: board pico2, platform rp2350-arm-s`) and
+stops with an error if the board isn't an RP2350 one. After changing the
+board, configure again from an **empty** `build/` folder -- the board is
+stored in CMake's cache.
+
+> **Symptom of a wrong board:** copying the `.uf2` to the BOOTSEL drive
+> seems to work, but the Pico doesn't restart -- the RP2350 ignores a
+> firmware built for another chip. Check with
+> `grep -E "PICO_BOARD|PICO_PLATFORM" build/CMakeCache.txt`
+> (expect `pico2` or `pico2_w`, and `rp2350-arm-s`).
 
 ---
 
@@ -837,6 +912,7 @@ redrawn completely when the user switches back to it.
 
 | Symptom | Check |
 |---------|-------|
+| The `.uf2` copies to the BOOTSEL drive but the Pico doesn't restart | Built for the wrong board -- see 1.4 (needs `pico2` / `pico2_w`), then rebuild from an empty `build/` |
 | "PANIC: f_mount error" in the log | SD card not inserted / not formatted / bad contact |
 | HP-IL doesn't respond | Run **Config → Loopback test** with a cable from OUT to IN. Check that the device isn't `[OFF]` in **Devices** |
 | A device has no address | It is disabled, or the controller has not run auto-addressing yet (e.g. power-cycle the HP-41 loop) |

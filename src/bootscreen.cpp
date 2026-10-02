@@ -36,7 +36,15 @@ constexpr int kW = SCREEN_MAX_X, kH = SCREEN_MAX_Y;
 constexpr int kCardY = 180, kCardH = 330;
 constexpr int kStatusX = 30, kStatusW = 470;
 constexpr int kDevX = 520, kDevW = kW - 520 - 30;
-constexpr int kRowY0 = 204, kRowPitch = 40, kMaxRows = 7;
+constexpr int kRowY0 = 200, kRowPitch = 36, kMaxRows = 8;
+// STATUS row columns: dot, label, value. The value gets the room up to the
+// card's right edge: 17 characters in the large font (16 px each), longer
+// values (file names) use the small font.
+constexpr int kDotX = kStatusX + 22;                 // centre of the dot
+constexpr int kLabelX = kStatusX + 38;
+constexpr int kValueX = kStatusX + 186;
+constexpr int kValueW = kStatusX + kStatusW - 10 - kValueX;
+constexpr std::size_t kValueLargeChars = static_cast<std::size_t>(kValueW / 16);
 constexpr int kBarX = 40, kBarY = 572, kBarW = kW - 80, kBarH = 6;
 
 int rows_ = 0;
@@ -106,31 +114,45 @@ void bootscreen_begin(DisplayDriver* display, const char* version) {
     d_->showPipOverlay(0, 0, kW, kH);
 }
 
-void bootscreen_row(const char* label, BootState state, const char* value) {
-    if (d_ == nullptr || rows_ >= kMaxRows) return;
+// A row's result: coloured dot + value (replacing what was there)
+static void drawRowResult(int y, BootState state, const char* value) {
+    onOverlay([&] {
+        d_->fillRect(kDotX - 10, y, 20, 34, kBlack);
+        d_->fillRect(kValueX, y, kValueW, 34, kBlack);
+        const std::uint16_t dot = state == BootState::Ok   ? kGreen
+                                : state == BootState::Fail ? kRed
+                                : state == BootState::Off  ? kDark : kYellow;
+        d_->fillCircle(kDotX, y + 16, 7, dot);
+        // Long values (file names) in the small font so they fit
+        const bool small = std::strlen(value) > kValueLargeChars;
+        text(kValueX, small ? y + 8 : y, value, small ? 0 : 1,
+             state == BootState::Fail ? kRed : kWhite);
+    });
+}
+
+int bootscreen_row(const char* label, BootState state, const char* value) {
+    if (d_ == nullptr || rows_ >= kMaxRows) return -1;
+    const int row = rows_;
     const int y = kRowY0 + rows_ * kRowPitch;
     ++rows_;
-    onOverlay([&] { text(kStatusX + 52, y, label, 1, kWhite); });
+    onOverlay([&] { text(kLabelX, y, label, 1, kWhite); });
     // Short "working on it" animation before the result appears
     for (int i = 1; i <= 3; ++i) {
-        onOverlay([&] { text(kStatusX + 220 + (i - 1) * 16, y, ".", 1, kGrey); });
+        onOverlay([&] { text(kValueX + (i - 1) * 16, y, ".", 1, kGrey); });
         for (int k = 0; k < 7; ++k) {       // 70 ms, keeping USB/PILBox answered
             hipi_bootService();
             sleep_ms(10);
         }
     }
-    onOverlay([&] {
-        d_->fillRect(kStatusX + 220, y, kStatusW - 230, 34, kBlack);
-        const std::uint16_t dot = state == BootState::Ok   ? kGreen
-                                : state == BootState::Fail ? kRed
-                                : state == BootState::Off  ? kDark : kYellow;
-        d_->fillCircle(kStatusX + 30, y + 16, 7, dot);
-        // Long values (file names) in the small font so they fit
-        const bool small = std::strlen(value) > 14;
-        text(kStatusX + 220, small ? y + 8 : y, value, small ? 0 : 1,
-             state == BootState::Fail ? kRed : kWhite);
-    });
+    drawRowResult(y, state, value);
     LOGF("\r\n * Boot: %-10s %s", label, value);
+    return row;
+}
+
+void bootscreen_updateRow(int row, BootState state, const char* value) {
+    if (d_ == nullptr || row < 0 || row >= rows_) return;
+    drawRowResult(kRowY0 + row * kRowPitch, state, value);
+    LOGF("\r\n * Boot: row %d now %s", row, value);
 }
 
 void bootscreen_devices(const std::vector<CDevice*>& devices) {
@@ -182,7 +204,8 @@ void bootscreen_end() {
 #else  // 5" panel: start-up keeps the classic splash + text summary
 
 void bootscreen_begin(DisplayDriver*, const char*) {}
-void bootscreen_row(const char*, BootState, const char*) {}
+int bootscreen_row(const char*, BootState, const char*) { return -1; }
+void bootscreen_updateRow(int, BootState, const char*) {}
 void bootscreen_devices(const std::vector<CDevice*>&) {}
 void bootscreen_progress(float) {}
 void bootscreen_end() {}

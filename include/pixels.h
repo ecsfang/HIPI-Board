@@ -5,16 +5,17 @@
 #include <vector>
 #include <string>
 #include "hardware/pio.h"
-#include "../PicoLed/PicoLed.hpp"
+#include "../PicoLED/PicoLed.hpp"
 
 // ─── Pin/PIO configuration (edit here) ───────────────────────────────────────
-// Matches this project's own earlier NeoPixel prototype (pico_main.cpp's
-// retired neoTest()) -- PIXEL_PIO uses pio2 (the RP2350's third PIO block,
-// not available on the older RP2040) specifically to stay clear of pio0,
-// which the HP-IL loop itself already owns (see hpil_pio.hpp) -- no shared
-// state machines, no risk of one stealing timing from the other.
+// PIXEL_PIO is pio1, to stay clear of pio0, which the HP-IL loop owns (see
+// hpil_pio.hpp) -- no shared state machines, no risk of one stealing timing
+// from the other. NOT pio2 (the RP2350's third PIO block): the PicoLED
+// library only accepts pio0/pio1 and throws InvalidPioBlock otherwise --
+// and since pixelStrip is a global object, that happens before main() and
+// the firmware never starts.
 #define PIXEL_PIN           26
-#define PIXEL_PIO           pio2
+#define PIXEL_PIO           pio1
 #define PIXEL_SM            0
 
 // Not a hard architectural limit -- construct CPixelStrip with a different

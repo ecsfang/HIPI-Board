@@ -15,8 +15,12 @@ enum class BootState { Ok, Fail, Off, Info };
 
 // Frame, header (logo, name, version) and the two empty cards
 void bootscreen_begin(DisplayDriver* display, const char* version);
-// Adds the next STATUS row: label, then "..." and the result
-void bootscreen_row(const char* label, BootState state, const char* value);
+// Adds the next STATUS row: label, then "..." and the result. Returns the
+// row's number (for bootscreen_updateRow()), -1 if the card is full.
+int bootscreen_row(const char* label, BootState state, const char* value);
+// Changes a row's result later, without the animation (e.g. PILBox
+// connecting while the start-up screen is shown)
+void bootscreen_updateRow(int row, BootState state, const char* value);
 // Fills the DEVICES card: every device in loop order, on/off
 void bootscreen_devices(const std::vector<CDevice*>& devices);
 // Footer "Ready" + countdown bar, fraction 0..1 of the waiting time gone

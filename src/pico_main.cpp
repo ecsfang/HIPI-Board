@@ -75,6 +75,7 @@ extern void init_spi(void);
 #include "screendump.h"
 #include "bootscreen.h"
 #include "boot_service.h"
+#include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
 #include "config.hpp"
 #include "drive.h"
@@ -202,6 +203,26 @@ static void bootRowsSdAndSettings(FRESULT fr) {
     const bool haveConfig = f_stat("CONFIG.TXT", &fi) == FR_OK;
     hipi::bootscreen_row("Settings", haveConfig ? hipi::BootState::Ok : hipi::BootState::Info,
                          haveConfig ? "CONFIG.TXT" : "defaults");
+}
+
+// The PILBox row: "waiting (TDIS)" until the PC's program has done its
+// handshake, then "connected (COFF)" etc.; "off" if switched off
+static const char* pilboxModeName(IL_CMD_t m) {
+    switch (m) {
+        case COFF: return "COFF";
+        case COFI: return "COFI";
+        case CON:  return "CON";
+        default:   return "TDIS";
+    }
+}
+static std::string pilboxStatus() {
+    if (pilbox == nullptr || !pilbox->enabled()) return "off";
+    if (!pilbox->isConnected()) return "waiting (TDIS)";
+    return std::string("connected (") + pilboxModeName(pilbox->mode()) + ")";
+}
+static hipi::BootState pilboxState() {
+    return (pilbox != nullptr && pilbox->enabled() && pilbox->isConnected()) ? hipi::BootState::Ok
+                                                                             : hipi::BootState::Off;
 }
 
 // Rows after the devices exist: Tape view, each drive's cassette, trace,
@@ -503,6 +524,10 @@ int main() {
 #ifdef DISPLAY_7INCH
     hipi::bootscreen_row("USB", usb_connected ? hipi::BootState::Ok : hipi::BootState::Off,
                          usb_connected ? "connected" : "not connected");
+    // PILBox: the PC's program usually connects during the countdown, so
+    // this row is kept up to date in the wait loop below
+    std::string pilboxShown = pilboxStatus();
+    const int pilboxRow = hipi::bootscreen_row("PILBox", pilboxState(), pilboxShown.c_str());
 #endif
 
 #ifdef DISPLAY_7INCH
@@ -523,6 +548,13 @@ int main() {
         usb_serial_flush_boot_log();
         const bool hadFrame = hipi_loop(hpil);
 #ifdef DISPLAY_7INCH
+        {
+            const std::string now = pilboxStatus();
+            if (now != pilboxShown) {
+                pilboxShown = now;
+                hipi::bootscreen_updateRow(pilboxRow, pilboxState(), now.c_str());
+            }
+        }
         const float bootFraction = static_cast<float>(absolute_time_diff_us(bootWaitStart, get_absolute_time()))
                                    / (kBootScreenMs * 1000.0f);
         hipi::bootscreen_progress(bootFraction);

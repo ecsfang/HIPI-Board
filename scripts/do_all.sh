@@ -11,7 +11,8 @@
 set -u
 
 PROJECT_DIR="$HOME/Projects/HIPI-Board"
-DOWNLOAD_DIR="$HOME/Downloads"
+#DOWNLOAD_DIR="$HOME/Downloads"
+DOWNLOAD_DIR="$HOME/Hämtningar"
 PICO_MOUNT="/media/thomas/RP2350"
 
 # Hur länge vi väntar på BOOTSEL innan vi ger upp (sekunder)

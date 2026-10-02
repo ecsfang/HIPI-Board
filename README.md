@@ -38,7 +38,7 @@ Do **not** open the folder via `File → Open Folder`. Instead run:
 Raspberry Pi Pico: Import Project
 ```
 
-Point to the folder containing `CMakeLists.txt`, select board **pico2**
+Point to the folder containing `CMakeLists.txt`, select board **pico2** (Pico 2) or **pico2_w** (Pico 2 W)
 (Pico 2 / RP2350).
 
 ### 4. Build
