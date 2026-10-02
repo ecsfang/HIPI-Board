@@ -70,6 +70,7 @@ public:
     void suspend()  { suspended_ = true; }
     void resume()   { suspended_ = false; txt_size(size_); full(); }
     bool isSuspended() const { return suspended_; }
+    DisplayDriver* display() const { return d_; }   // e.g. backlight.cpp
 
     // Explicitly turns off the hardware cursor without touching cv_ (the
     // user's own cursor-visible HP-41 stream setting) -- suspend() alone

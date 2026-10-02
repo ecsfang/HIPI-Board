@@ -52,5 +52,8 @@ extern CPilBox* pilbox;
 // starts isn't left without an answer (pyILPER gives up after one
 // timeout). See hipi_bootService() in hipi.h.
 void pilbox_serviceEarly(void);
+// Whether PILBOX is switched on (Devices menu / CONFIG.TXT) -- set as soon
+// as the settings are read, so a switched-off PILBox doesn't answer either
+void pilbox_setEarlyEnabled(bool enabled);
 
 #endif//__PILBOX_H__

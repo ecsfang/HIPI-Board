@@ -226,6 +226,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
         src/bootscreen.cpp
         src/analyzer.cpp
+        src/backlight.cpp
         src/logo_image.cpp          # built-in logo, see scripts/bmp_to_rgb565.py
     )
 

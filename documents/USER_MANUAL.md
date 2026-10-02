@@ -105,11 +105,18 @@ HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons, menus and 
 ### 3.3 First start
 
 HIPI shows its start-up screen: the version, and a **STATUS** list that fills
-in line by line as HIPI starts — SD card, settings, USB, the HP-IL loop, the
-tape pictures, each cassette drive's file and the trace setting. A green dot
-means OK, red means something is missing, grey means off. On the right, the
-**DEVICES ON THE LOOP** are shown in loop order: yellow when switched on,
-grey when off.
+in line by line as HIPI starts — SD card, settings, the HP-IL loop, the
+tape pictures, each cassette drive's file, the trace setting, USB and the
+PILBox link to a PC program. A green dot means OK, red means something is
+missing, grey means off.
+
+The **PILBox** line changes as soon as a PC program (e.g. pyILPER) connects:
+`waiting (TDIS)` until then, `connected (COFF)`, `(COFI)` or `(CON)` after
+— the mode the program chose — or `disabled` if PILBOX is switched off in
+**Devices**.
+
+On the right, the **DEVICES ON THE LOOP** are shown in loop order: yellow
+when switched on, grey when off.
 
 After a few seconds (or when you touch the screen) HIPI is ready. Anything
 the HP-41 prints now appears on the screen.
@@ -143,7 +150,7 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 | Touch | What happens |
 |-------|--------------|
 | **Top-left corner** | Info box: current file, settings, version |
-| **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. Swipe up/down to scroll |
+| **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Swipe up/down to scroll |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
 <a href="images/screen-infobox.png"><img src="images/screen-infobox.png" alt="Info box" width="512"></a>
@@ -154,6 +161,13 @@ When you switch view, a yellow box shows the name of the new view for a moment.
 Touches are ignored while it's showing.
 
 <a href="images/screen-swipe-splash.png"><img src="images/screen-swipe-splash.png" alt="View switch" width="512"></a>
+
+### 4.3 Dimming
+
+After 10 minutes without anything happening — no new text or drawing on the
+screen, no touch — HIPI dims the screen to save the backlight. Anything new
+on the screen brings the normal brightness back at once. A touch also wakes
+it; that first touch only wakes the screen and doesn't press anything.
 
 ---
 
@@ -325,6 +339,8 @@ Two things make plotter commands easy to type on the HP-41:
   at most 15 characters. `⊢` is **APPEND** (in ALPHA mode: shift + K), which
   adds the text to what's already in ALPHA.
 
+The following is the result from the example on page 13 in the Plotter Module (82184A) manual.
+
 <a href="images/example-plotter-box.png"><img src="images/example-plotter-box.png" alt="Plotter example" width="512"></a>
 
 ### 8.2 Temperature and pressure — `TFTEMP`
@@ -436,6 +452,16 @@ HIPI creates (on Linux usually `/dev/ttyACM1`) as its PILBox port.
 
 When no emulator is running, `PILBOX` simply passes everything on.
 
+The emulator chooses how PILBox works, and the device list (bottom-left
+corner) shows it on the PILBOX line:
+
+| Mode | Means |
+|------|-------|
+| `TDIS` | No PC program connected — PILBox just passes frames on |
+| `COFF` | Connected; the HP-41 is the loop's controller |
+| `COFI` | As `COFF`, and idle frames (IDY) are passed to the PC too |
+| `CON` | Connected; the PC program is the loop's controller |
+
 <!-- TODO image: replace the placeholder below with:
 <a href="images/example-pyilper.png"><img src="images/example-pyilper.png" alt="pyILPER" width="512"></a> -->
 > 📷 **Image placeholder:** pyILPER connected to HIPI's PILBox port (`images/example-pyilper.png`)
@@ -490,7 +516,9 @@ a page, hold to keep scrolling), **X** jumps to the newest line, **Shift + X**
 clears it. **Touch the middle of the screen** to pause: the screen freezes
 with a red PAUSED banner while recording goes on; touch again to resume.
 
-<a href="images/analyzer-overview.png"><img src="images/analyzer-overview.png" alt="The analyzer view in overview mode" width="512"></a>
+<!-- TODO image: replace the placeholder below with:
+![The analyzer](images/analyzer-overview.png) -->
+> 📷 **Image placeholder:** The analyzer view in overview mode (`images/analyzer-overview.png`)
 
 **Overview** (the default) shows one line per event:
 

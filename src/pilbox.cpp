@@ -56,11 +56,18 @@ IL_CMD_t earlyMode = TDIS;          // last mode command the PC sent
 bool earlyConnected = false;        // the PC had the port open
 std::uint8_t earlyHi = 0;
 bool earlyDone = false;             // CPilBox exists: it takes over
+bool earlyEnabled = true;           // PILBOX not switched off (Devices)
+}
+
+void pilbox_setEarlyEnabled(bool enabled)
+{
+    earlyEnabled = enabled;
 }
 
 void pilbox_serviceEarly(void)
 {
-    if (earlyDone || !tud_cdc_n_connected(ITF_HPIL)) return;
+    // Switched off: no PIL-Box -- the PC gets no answers, as with none plugged in
+    if (earlyDone || !earlyEnabled || !tud_cdc_n_connected(ITF_HPIL)) return;
     earlyConnected = true;
     while (tud_cdc_n_available(ITF_HPIL) > 0) {
         const std::uint8_t b = static_cast<std::uint8_t>(tud_cdc_n_read_char(ITF_HPIL));

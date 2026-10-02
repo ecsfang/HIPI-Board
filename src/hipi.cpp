@@ -232,9 +232,14 @@ std::vector<DeviceInfo> hipi_enumerateDevices() {
         info.addr = (info.enabled && a < 31) ? a : -1;
         info.sai = static_cast<std::uint8_t>(dev->accessoryId());
         info.extDevices = -1;
-        if (dev->type() == PILBOX && info.enabled && pilboxDevices >= 0) {
-            info.extDevices = pilboxDevices;
-            info.extFirstAddr = pilboxFirstAddr;
+        if (dev->type() == PILBOX && info.enabled) {
+            const IL_CMD_t m = static_cast<CPilBox*>(dev)->mode();
+            std::snprintf(info.extMode, sizeof(info.extMode), "%s",
+                          m == COFF ? "COFF" : m == COFI ? "COFI" : m == CON ? "CON" : "TDIS");
+            if (pilboxDevices >= 0) {
+                info.extDevices = pilboxDevices;
+                info.extFirstAddr = pilboxFirstAddr;
+            }
         }
         result.push_back(info);
     }

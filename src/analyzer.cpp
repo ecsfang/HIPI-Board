@@ -5,6 +5,7 @@
 #include "usb_serial.h"
 #include "boardui.h"
 #include "plotterview.h"
+#include "backlight.h"
 #include "ff.h"
 #include "pico/time.h"
 #include <cctype>
@@ -643,6 +644,7 @@ void drawText(int x, int y, const std::string& s, std::uint16_t fg, std::uint16_
 }
 
 void draw() {
+    if (!lines_.empty()) backlight_activity();   // new lines shown (backlight.h)
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     d_->selectBuiltinFont();
     d_->txtSize(0);

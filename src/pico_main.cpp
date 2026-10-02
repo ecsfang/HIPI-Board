@@ -75,6 +75,7 @@ extern void init_spi(void);
 #include "screendump.h"
 #include "bootscreen.h"
 #include "boot_service.h"
+#include "backlight.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
 #include "config.hpp"
@@ -178,6 +179,7 @@ FRESULT initSD()
         enableSD();
         config.load();
         bTrace = config.trace();
+        pilbox_setEarlyEnabled(config.isDeviceEnabled("PILBOX"));
         bExtTrace = config.extTrace();
     }
     return fr;
@@ -216,7 +218,7 @@ static const char* pilboxModeName(IL_CMD_t m) {
     }
 }
 static std::string pilboxStatus() {
-    if (pilbox == nullptr || !pilbox->enabled()) return "off";
+    if (pilbox == nullptr || !pilbox->enabled()) return "disabled";
     if (!pilbox->isConnected()) return "waiting (TDIS)";
     return std::string("connected (") + pilboxModeName(pilbox->mode()) + ")";
 }
@@ -591,6 +593,7 @@ int main() {
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());
 
+    hipi::backlight_init(screen);   // the dimming timer starts now (backlight.h)
     hipi_bootServiceDone();   // the main loop handles USB and PILBox from here
     while (bRunning) {
         tud_task();                     // TinyUSB background task
@@ -599,6 +602,7 @@ int main() {
         touch_poll();                   // debounced tap/release detection (touch.h)
         hipi::boardui_poll();        // auto-hide timers + status LED poll
         hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
+        hipi::backlight_poll();      // dim the backlight after a while without use
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
 #endif

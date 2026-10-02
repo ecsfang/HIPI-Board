@@ -11,6 +11,7 @@
 #include "usb_serial.h"
 #include "sd_paths.h"
 #include "analyzer.h"
+#include "backlight.h"
 #include "plotterview.h"
 
 #include "boardui.h"
@@ -587,14 +588,15 @@ void drawDeviceListRows() {
         const std::size_t idx = static_cast<std::size_t>(deviceListScrollOffset + i);
         if (idx >= deviceListCache.size()) break;
         const DeviceInfo& info = deviceListCache[idx];
-        if (info.extDevices > 0) {
-            // PILBox with devices on the PC: how many, and their addresses
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] PC: %d (addr %d-%d)",
-                          "--", info.devName, info.enabled ? 'X' : ' ', info.extDevices,
-                          info.extFirstAddr, info.extFirstAddr + info.extDevices - 1);
-        } else if (info.extDevices == 0) {
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] PC: none",
-                          "--", info.devName, info.enabled ? 'X' : ' ');
+        if (info.extMode[0] != '\0' && info.extDevices > 0) {
+            // PILBox: link mode (COFF/COFI/CON, or TDIS when no PC program
+            // is connected) + the PC-side devices and their addresses
+            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] %s: %d (addr %d-%d)",
+                          "--", info.devName, info.enabled ? 'X' : ' ', info.extMode,
+                          info.extDevices, info.extFirstAddr, info.extFirstAddr + info.extDevices - 1);
+        } else if (info.extMode[0] != '\0') {
+            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] %s",
+                          "--", info.devName, info.enabled ? 'X' : ' ', info.extMode);
         } else if (info.addr < 0) {
             std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c]",
                           "--", info.devName, info.enabled ? 'X' : ' ');
@@ -933,6 +935,8 @@ void boardui_poll() {
 }
 
 void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
+    // A dimmed screen: this touch only wakes it (backlight.h)
+    if (backlight_wakeByTouch()) return;
 #ifdef DISPLAY_7INCH
     // The view-switch splash owns the PIP overlay for its 1.5 s -- ignore
     // taps meanwhile, so the menu, info box or device list
@@ -1106,6 +1110,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 }
 
 void boardui_handleRelease() {
+    backlight_activity();
     repeatButton = Button::None;          // finger lifted: stop auto-repeat
     if (pressedButton == Button::None) return;
     // The button strip may have been hidden entirely DURING the press
@@ -1139,6 +1144,7 @@ void boardui_handleRelease() {
 }
 
 void boardui_handleSwipe(bool forward) {
+    if (backlight_wakeByTouch()) return;
     // Ignore while the menu -- or the Devices list dialog -- is open; a
     // swipe crossing either box shouldn't also switch views underneath it.
     if (dialog_->isOpen() || deviceListVisible) {
@@ -1172,6 +1178,7 @@ bool boardui_isMenuOpen() {
 }
 
 void boardui_handleVerticalSwipe(bool down) {
+    if (backlight_wakeByTouch()) return;
     if (bTrace) {
         mLOGF("TOUCH", "vertical swipe down=%d deviceListVisible=%d", down, deviceListVisible);
     }

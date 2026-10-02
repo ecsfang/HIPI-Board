@@ -5,6 +5,7 @@
 #include "bmp_loader.hpp"
 #include "drive.h"
 #include "analyzer.h"
+#include "backlight.h"
 #include <cctype>
 #include <vector>
 extern std::vector<CDevice*> devices;   // hipi.cpp -- loop order
@@ -109,6 +110,7 @@ void drawMappedSegment(std::int16_t x0, std::int16_t y0,
 // later redraw) unless Plotter output is what's actually showing right now.
 void onPlotterDraw(std::int16_t x0, std::int16_t y0,
                    std::int16_t x1, std::int16_t y1, std::uint8_t pen) {
+    backlight_activity();        // new drawing: screen in use (backlight.h)
     if (output_ != DisplayOutput::Plotter) return;
 #ifndef DISPLAY_7INCH
     // FIXED: was checking screen_->isSuspended() here -- but
@@ -895,7 +897,7 @@ void plotterview_poll() {
             switchShown_ = sw;
             refreshLed(kSwitchOn);           // same area for all positions
         }
-        if (busy  != busyLit_)  { busyLit_  = busy;  refreshLed(kBusyLed); }
+        if (busy  != busyLit_)  { busyLit_  = busy;  refreshLed(kBusyLed); backlight_activity(); }
     }
     // Spinning reels while the drive works (BUSY) -- one frame step per
     // kReelFrameMs, only the two small hub squares are redrawn

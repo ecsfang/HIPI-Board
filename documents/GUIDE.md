@@ -110,6 +110,12 @@ it has no effect, and `src/pixels.cpp` fails with
 `exception handling disabled, use '-fexceptions' to enable`. After changing
 it, run CMake again from an empty `build/` folder.
 
+**PIO block.** PicoLED only accepts `pio0` and `pio1` (it throws
+`InvalidPioBlock` for the RP2350's `pio2`). HIPI uses `pio1` for the strip
+(`PIXEL_PIO` in `include/pixels.h`); `pio0` belongs to the HP-IL loop.
+Because the strip is a global object, a wrong PIO block makes the firmware
+stop before `main()` -- the Pico then seems not to start at all.
+
 **Updating** to a newer PicoLED:
 
 ```bash
@@ -315,6 +321,13 @@ Unknown keys are ignored, so older files keep working.
 ---
 
 ## 5. Using the board
+
+**Backlight dimming.** `src/backlight.cpp`: after `kDimAfterMs` (10 min,
+`include/backlight.h`) without activity the backlight goes to `kDimLevel`
+(~10 %). Activity = HP-41 text reaching the screen (`CDisplay::idle()`),
+plotter drawing, the Tape view's lights changing, new analyzer lines, any
+touch. Restoring uses `Screen::brightness()` (the menu setting); dimming only
+changes the hardware. A touch on a dimmed screen only wakes it.
 
 **HP-IL analyzer.** `src/analyzer.cpp` is a passive observer, not a
 `CDevice`: `hipi_loop()` calls `analyzer_capture(in, out)` for every frame

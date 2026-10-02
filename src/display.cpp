@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <cctype>
 #include "display.h"
+#include "backlight.h"
 
 #include "PicoSpiTransport.hpp"
 #include "display_config.h"
@@ -19,6 +20,7 @@ void CDisplay::clear(void)
 void CDisplay::idle(void)
 {
     if( !fifo.empty() ) {
+        hipi::backlight_activity();     // new output: screen in use (backlight.h)
         screen->pr_char(fifo.front());
         fifo.pop();
     }

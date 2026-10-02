@@ -23,6 +23,9 @@ struct DeviceInfo {
     // at the last auto-addressing (-1 = not known / not applicable)
     int extDevices = -1;
     int extFirstAddr = -1;
+    // PILBOX only: the link mode to the PC -- "COFF"/"COFI"/"CON" when a PC
+    // program is connected, "TDIS" when not; "" for other devices
+    char extMode[6] = "";
 };
 
 // Lists every device in hipi.cpp's own `devices` vector, in loop order,
