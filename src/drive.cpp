@@ -480,8 +480,9 @@ static void list_dir(const char* path, int depth) {
 
         // Recurse into subdirectories (but not "." and "..")
         if (fno.fattrib & AM_DIR) {
-            char subpath[512];     // path (<= 255) + '/' + name (<= 255)
-            snprintf(subpath, sizeof(subpath), "%s/%s", path, fno.fname);
+            char subpath[520];     // path (<= 255) + "/" + name (<= 255) + NUL
+            if (snprintf(subpath, sizeof(subpath), "%s/%s", path, fno.fname) >= static_cast<int>(sizeof(subpath)))
+                continue;          // path too long -- skip it
             list_dir(subpath, depth + 1);
         }
     }

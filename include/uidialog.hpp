@@ -13,6 +13,10 @@
 #include "drive.h"        // CDrive -- deferred switch-off in the Devices menu
 #include "screendump.h"   // Display -> Screendump
 #include "analyzer.h"     // Display -> Analyzer
+#include "backlight.h"    // Settings -> Screen saver
+#include "config.hpp"     // Settings -> Screen saver (saved settings)
+namespace hipi { class Config; }
+extern hipi::Config config;      // pico_main.cpp
 #include "hipi.h"         // hipi_applyDeviceOrder(), Devices -> Change order
 #include "lif_info.hpp"   // file picker: contents of a LIF .dat image
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
@@ -562,6 +566,13 @@ public:
                 }
                 break;
 
+            case State::SaverMenu:
+                if (b == Button::Up)   moveListSelection(saverLabels_, saverScroll_, -1);
+                if (b == Button::Down) moveListSelection(saverLabels_, saverScroll_, +1);
+                if (b == Button::Ok)   enterSaverMenuItem();
+                if (b == Button::X)    openSettingsMenu();
+                break;
+
             case State::AnalyzerLogMenu:
                 if (b == Button::Up)   moveListSelection(analyzerLogLabels_, analyzerLogScroll_, -1);
                 if (b == Button::Down) moveListSelection(analyzerLogLabels_, analyzerLogScroll_, +1);
@@ -662,7 +673,7 @@ private:
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
         FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
         LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo, DeviceOrder,
-        DevicesMenu, AnalyzerMenu, AnalyzerLogMenu
+        DevicesMenu, AnalyzerMenu, AnalyzerLogMenu, SaverMenu
     };
 
     static constexpr const char* kMainMenuLabels[] = { "Config >", "Settings >", "Devices >", "Display >" };
@@ -671,8 +682,8 @@ private:
     static constexpr const char* kConfigMenuLabels[] = { "Select file >", "Trace >", "Connect to PC", "Loopback test >", "Scan I2C", "Bootsel mode" };
     static constexpr int kConfigMenuCount = 6;
 
-    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor >", "Font size >", "Brightness >", "Columns >" };
-    static constexpr int kSettingsMenuCount = 4;
+    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor >", "Font size >", "Brightness >", "Columns >", "Screen saver >" };
+    static constexpr int kSettingsMenuCount = 5;
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
     static constexpr const char*   kColorLabels[] = { "White", "Yellow", "Green", "Cyan", "Red" };
@@ -1262,7 +1273,74 @@ private:
             openBrightnessMenu();
         } else if (selected_ == 3) {
             openColumnsMenu();
+        } else if (selected_ == 4) {
+            openSaverMenu();
         }
+    }
+
+    // ── Settings -> Screen saver ─────────────────────────────────────────
+    // After 10 minutes without use: dim, show the clock (clock.h), or
+    // nothing; and how the clock looks. OK changes the selected setting
+    // (saved at once); "Show now" starts the screen saver right away.
+    std::vector<std::string> saverLabels_;
+    int saverScroll_ = 0;
+
+    void buildSaverLabels() {
+        static const char* kModes[] = { "Mode: Dim", "Mode: Clock", "Mode: Off", "Mode: HP-IL rain",
+                                        "Mode: Goose", "Mode: Random" };
+        static const char* kFallbacks[] = { "No clock: Dim", "No clock: Clock", "No clock: Off",
+                                            "No clock: HP-IL rain", "No clock: Goose", "No clock: Random" };
+        const std::uint8_t m = config.saverMode();
+        const std::uint8_t f = config.clockFallback();
+        saverLabels_ = {
+            kModes[m < hipi::Config::kSaverModes ? m : 0],
+            kFallbacks[f < hipi::Config::kSaverModes ? f : 3],
+            config.clockStyle() == 1 ? "Style: LCD" : "Style: Dark",
+            config.clockUs() ? "Date: US mm/dd/yyyy" : "Date: EU yyyy-mm-dd",
+            config.clock12h() ? "Time: 12 h (AM/PM)" : "Time: 24 h",
+            "Show now",
+        };
+    }
+
+    void openSaverMenu(int sel = 0) {
+        state_ = State::SaverMenu;
+        selected_ = sel;
+        saverScroll_ = 0;
+        buildSaverLabels();
+        drawBox();
+        drawListRows(saverLabels_, saverScroll_);
+    }
+
+    void enterSaverMenuItem() {
+        switch (selected_) {
+            case 0:     // Dim -> Clock -> HP-IL rain -> Goose -> Random -> Off -> Dim
+            {
+                static const std::uint8_t kNext[] = { hipi::Config::SaverClock, hipi::Config::SaverRain,
+                                                      hipi::Config::SaverDim, hipi::Config::SaverGoose,
+                                                      hipi::Config::SaverRandom, hipi::Config::SaverOff };
+                const std::uint8_t m = config.saverMode();
+                config.setSaverMode(kNext[m < hipi::Config::kSaverModes ? m : 0]);
+                break;
+            }
+            case 1:     // without a clock: HP-IL rain -> Goose -> Random -> Dim -> HP-IL rain
+            {
+                const std::uint8_t f = config.clockFallback();
+                config.setClockFallback(f == hipi::Config::SaverRain   ? hipi::Config::SaverGoose
+                                      : f == hipi::Config::SaverGoose  ? hipi::Config::SaverRandom
+                                      : f == hipi::Config::SaverRandom ? hipi::Config::SaverDim
+                                                                       : hipi::Config::SaverRain);
+                break;
+            }
+            case 2: config.setClockStyle(config.clockStyle() == 1 ? 0 : 1); break;
+            case 3: config.setClockUs(!config.clockUs()); break;
+            case 4: config.setClock12h(!config.clock12h()); break;
+            default:
+                backlight_showClockNow();
+                close();
+                return;
+        }
+        buildSaverLabels();
+        drawListRows(saverLabels_, saverScroll_);
     }
 
     // Config -> Bootsel mode
@@ -1997,6 +2075,9 @@ private:
                 break;
             case State::AnalyzerLogMenu:
                 drawListRows(analyzerLogLabels_, analyzerLogScroll_);
+                break;
+            case State::SaverMenu:
+                drawListRows(saverLabels_, saverScroll_);
                 break;
             case State::DisplayMenu:
                 (void)index;

@@ -103,6 +103,11 @@ public:
                            static_cast<unsigned>(columns_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "saver=%u\nclock_style=%u\nclock_us=%d\nclock_12h=%d\nclock_fallback=%u\n",
+                          static_cast<unsigned>(saverMode_), static_cast<unsigned>(clockStyle_),
+                          clockUs_ ? 1 : 0, clock12h_ ? 1 : 0, static_cast<unsigned>(clockFallback_));
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         n = std::snprintf(line, sizeof(line), "disabled_devices=%s\n",
                            disabledDevices_.c_str());
         f_write(&file, line, static_cast<UINT>(n), &bw);
@@ -155,6 +160,24 @@ public:
     // 0 = auto (max for current font size); see Screen::setColumns().
     std::uint8_t columns() const { return columns_; }
     void setColumns(std::uint8_t c) { columns_ = c; save(); }
+
+    // Screen saver (Settings -> Screen saver): what happens after a while
+    // without use, and how the clock looks
+    enum SaverMode : std::uint8_t { SaverDim = 0, SaverClock = 1, SaverOff = 2, SaverRain = 3, SaverGoose = 4,
+                                    SaverRandom = 5 };   // Random: one of the animations, random style
+    static constexpr std::uint8_t kSaverModes = 6;
+    // Clock mode without a usable clock (no RTC / time not set): this
+    // screen saver instead -- SaverRain, SaverGoose or SaverDim
+    std::uint8_t clockFallback() const { return clockFallback_; }
+    void setClockFallback(std::uint8_t m) { clockFallback_ = m; save(); }
+    std::uint8_t saverMode() const { return saverMode_; }
+    void setSaverMode(std::uint8_t m) { saverMode_ = m; save(); }
+    std::uint8_t clockStyle() const { return clockStyle_; }     // 0 dark, 1 LCD
+    void setClockStyle(std::uint8_t s) { clockStyle_ = s; save(); }
+    bool clockUs() const { return clockUs_; }                     // US date format
+    void setClockUs(bool us) { clockUs_ = us; save(); }
+    bool clock12h() const { return clock12h_; }                   // 12-hour time
+    void setClock12h(bool h12) { clock12h_ = h12; save(); }
 
     // Sets trace_ and extTrace_ together with a single save() -- used by the
     // 3-state "Trace" menu (Off / On / Extended) so it doesn't write the
@@ -249,6 +272,16 @@ private:
                     brightness_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "columns") == 0) {
                     columns_ = static_cast<std::uint8_t>(std::atoi(value));
+                } else if (std::strcmp(key, "saver") == 0) {
+                    saverMode_ = static_cast<std::uint8_t>(std::atoi(value));
+                } else if (std::strcmp(key, "clock_style") == 0) {
+                    clockStyle_ = static_cast<std::uint8_t>(std::atoi(value));
+                } else if (std::strcmp(key, "clock_us") == 0) {
+                    clockUs_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "clock_12h") == 0) {
+                    clock12h_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "clock_fallback") == 0) {
+                    clockFallback_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "disabled_devices") == 0) {
                     disabledDevices_ = value;
                 } else if (std::strcmp(key, "device_order") == 0) {
@@ -279,6 +312,11 @@ private:
     bool          driveStandby_ = false;
     unsigned      screendumpNext_ = 0;
     std::uint8_t  columns_    = 0;   // 0 = auto
+    std::uint8_t  saverMode_  = 0;   // SaverDim
+    std::uint8_t  clockStyle_ = 0;   // dark
+    bool          clockUs_    = false;
+    bool          clock12h_   = false;
+    std::uint8_t  clockFallback_ = 3;  // SaverRain
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).
     std::string   disabledDevices_ = "";

@@ -5,6 +5,7 @@
 #include "bmp_loader.hpp"
 #include "drive.h"
 #include "analyzer.h"
+#include "clock.h"
 #include "backlight.h"
 #include <cctype>
 #include <vector>
@@ -186,6 +187,7 @@ const char* outputName(DisplayOutput mode) {
         case DisplayOutput::Plotter: return "PLOTTER";
         case DisplayOutput::Tape:    return "TAPE";
         case DisplayOutput::Analyzer: return "ANALYZER";
+        case DisplayOutput::Clock:    return "CLOCK";
     }
     return "?";
 }
@@ -705,6 +707,10 @@ bool plotterview_isAvailable(DisplayOutput mode) {
 }
 
 void plotterview_redraw() {
+    if (output_ == DisplayOutput::Clock) {
+        clock_drawAll();
+        return;
+    }
     if (output_ == DisplayOutput::Analyzer) {
         analyzer_redrawAll();
         return;
@@ -786,7 +792,8 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
 
 // Switches the panel to `mode`, for device `dev` (its title goes in the
 // splash). Tape -> Tape with another drive also counts as a switch.
-static void switchView(DisplayOutput mode, CDevice* dev) {
+// splash = false: switch at once, no name box (the screen saver)
+static void switchView(DisplayOutput mode, CDevice* dev, bool splash = true) {
     if (!plotterview_isAvailable(mode)) return;
     if (mode == output_ && dev == viewDevice_) return;
     viewDevice_ = dev;
@@ -812,6 +819,10 @@ static void switchView(DisplayOutput mode, CDevice* dev) {
         // own hardware timer regardless of software suspension.
         screen_->suspend();
         screen_->hideCursorHardware();
+    }
+    if (!splash) {
+        revealCurrentView();
+        return;
     }
     std::string title = dev ? plotterview_viewTitle(dev) : std::string(outputName(mode));
     for (char& c : title) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -841,6 +852,28 @@ void plotterview_showAnalyzer() {
     beforeAnalyzer_ = viewDevice_;
     beforeAnalyzerOutput_ = output_;
     switchView(DisplayOutput::Analyzer, nullptr);
+}
+
+// The view to go back to when the clock screen saver ends
+static CDevice* beforeClock_ = nullptr;
+static DisplayOutput beforeClockOutput_ = DisplayOutput::Display;
+
+void plotterview_showClock() {
+    if (output_ == DisplayOutput::Clock) return;
+    beforeClock_ = viewDevice_;
+    beforeClockOutput_ = output_;
+    switchView(DisplayOutput::Clock, nullptr, /*splash=*/false);
+}
+
+void plotterview_leaveClock() {
+    if (output_ != DisplayOutput::Clock) return;
+    if (beforeClockOutput_ == DisplayOutput::Analyzer) {
+        switchView(DisplayOutput::Analyzer, nullptr, false);
+    } else if (deviceHasView(beforeClock_)) {
+        switchView(outputFor(beforeClock_->viewKind()), beforeClock_, false);
+    } else {
+        switchView(DisplayOutput::Display, nullptr, false);
+    }
 }
 
 void plotterview_leaveAnalyzer() {

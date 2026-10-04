@@ -1110,7 +1110,6 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 }
 
 void boardui_handleRelease() {
-    backlight_activity();
     repeatButton = Button::None;          // finger lifted: stop auto-repeat
     if (pressedButton == Button::None) return;
     // The button strip may have been hidden entirely DURING the press

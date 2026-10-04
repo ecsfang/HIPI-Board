@@ -162,12 +162,44 @@ Touches are ignored while it's showing.
 
 <a href="images/screen-swipe-splash.png"><img src="images/screen-swipe-splash.png" alt="View switch" width="512"></a>
 
-### 4.3 Dimming
+### 4.3 Screen saver and clock
 
 After 10 minutes without anything happening — no new text or drawing on the
-screen, no touch — HIPI dims the screen to save the backlight. Anything new
-on the screen brings the normal brightness back at once. A touch also wakes
-it; that first touch only wakes the screen and doesn't press anything.
+screen, no touch — HIPI starts its screen saver. Choose what it does in
+**Settings → Screen saver**:
+
+| Setting | Choices |
+|---------|---------|
+| **Mode** | **Dim** (the default) — only the backlight goes down to 10 %; the screen keeps showing what it showed · **Clock** — a big clock fills the screen · **HP-IL rain** — HP-IL messages fall down the screen like in *The Matrix*, taken from the real traffic on the loop when there is any · **Goose** — the HP-41's "running" goose, in flocks of different sizes, flies across the screen · **Random** — HP-IL rain or Goose, picked anew each time the screen saver starts, in a random style (Dark or LCD) · **Off** |
+| **No clock** | What Clock mode shows when there's no clock chip or its time isn't set: **HP-IL rain**, **Goose**, **Random** or **Dim** |
+| **Style** | **Dark** — light on black · **LCD** — dark on a light background, like an old LCD (clock, rain and geese) |
+| **Date** | **EU** — `2026-10-03` · **US** — `10/03/2026` |
+| **Time** | **24 h** — `14:05` · **12 h** — `2:05 PM` |
+| **Show now** | Starts the screen saver right away (the clock if the mode is Dim or Off), to try the settings |
+
+With the clock, the rain and the goose the backlight also slowly dims to
+10 %.
+
+Anything new on the screen ends the screen saver at once and brings back
+what was shown before. A touch also ends it; that first touch only wakes
+the screen and doesn't press anything.
+
+<a href="images/screen-clock.png"><img src="images/screen-clock.png" alt="The clock screen saver" width="512"></a>
+
+**The clock needs a clock chip** (a DS3231 real-time clock module) connected
+to HIPI, with its battery. Without it — or before its time has been set —
+the screen saver dims instead.
+
+**Setting the time:** connect HIPI to a computer with USB, open the debug
+serial port in a terminal program (on Linux usually `/dev/ttyACM0`), type
+
+```
+time 2026-10-03 14:05
+```
+
+and press Enter (seconds can be added: `14:05:30`). Typing `time` alone shows
+the clock's current time. The clock keeps its time on its battery, also
+when HIPI is switched off.
 
 ---
 
@@ -229,7 +261,8 @@ Main menu
 │   ├── Textcolor          White, yellow, green, cyan or red
 │   ├── Font size          0 – 3
 │   ├── Brightness         20 – 100 %
-│   └── Columns            Characters per line
+│   ├── Columns            Characters per line
+│   └── Screen saver       Dim, clock or off; clock style, date and time format
 ├── Devices
 │   ├── Enable/disable     Turn HIPI's devices on or off
 │   └── Change order       Change the devices' order on the loop

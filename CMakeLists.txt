@@ -227,6 +227,18 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/bootscreen.cpp
         src/analyzer.cpp
         src/backlight.cpp
+        src/clock.cpp
+        src/rtc.cpp
+        src/glyph_font.cpp
+        src/clock_font_big.cpp      # generated, see scripts/ttf_to_glyphs.py
+        src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py
+        src/saver_anim.cpp
+        src/saver_font_rain.cpp     # generated, see scripts/ttf_to_glyphs.py
+        src/saver_font_goose40.cpp  # generated (5 goose sizes), see scripts/ttf_to_glyphs.py
+        src/saver_font_goose56.cpp
+        src/saver_font_goose72.cpp
+        src/saver_font_goose92.cpp
+        src/saver_font_goose112.cpp
         src/logo_image.cpp          # built-in logo, see scripts/bmp_to_rgb565.py
     )
 
@@ -238,6 +250,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         hardware_gpio
         ${TRANSPORT_TARGET}
         pico_stdlib
+        pico_rand               # screen saver animations (saver_anim.cpp)
         tinyusb_device          # ← replace pico_stdio_usb with this
         tinyusb_board
     #    pico_bootsel_via_double_reset

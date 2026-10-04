@@ -322,6 +322,52 @@ Unknown keys are ignored, so older files keep working.
 
 ## 5. Using the board
 
+**Clock screen saver.** `src/clock.cpp` draws the time, date, weekday and
+month with fonts pre-rendered from `resources/fonts/41charset_x.ttf` ("HP41 Character Set Xtended", the HP-41
+display's own character shapes -- a symbol-encoded font, which the script
+handles) by
+`scripts/ttf_to_glyphs.py` into `src/clock_font_big.cpp` (250 pt, digits and
+`:`) and `src/clock_font_small.cpp` (50 pt, A-Z, digits, `-/:,.`). Like on the
+HP-41, `:` `.` `,` take no room of their own -- they're drawn into the gap
+after the previous character (negative left bearing). 4-bit
+anti-aliased glyphs, drawn by `drawGlyphText()` (`src/glyph_font.cpp`)
+blended between the style's colours. To change font or sizes:
+
+```bash
+scripts/ttf_to_glyphs.py resources/fonts/41charset_x.ttf 250 "0123456789: " src/clock_font_big.cpp kClockFontBig
+scripts/ttf_to_glyphs.py resources/fonts/41charset_x.ttf 50 "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/:,. " src/clock_font_small.cpp kClockFontSmall
+```
+
+The time comes from a **DS3231** RTC module (`src/rtc.cpp`, address 0x68) on
+the board's I2C bus -- the same bus as the touch controller and the BMP280:
+SDA GPIO 16, SCL GPIO 17, 3.3 V and GND. The clock is shown as the
+`DisplayOutput::Clock` view (no splash, not in the swipe order) by
+`backlight_poll()` when **Settings → Screen saver → Mode** is Clock and the
+RTC has a valid time (the backlight then fades down to `kDimLevel` over
+`kClockFadeMs`, 4 s; any activity restores it at once); otherwise the
+backlight dims. The time is set with
+`time YYYY-MM-DD HH:MM[:SS]` on the USB debug console (CDC 0).
+
+Until the DS3231 is fitted, `HIPI_FAKE_RTC` (`include/clock.h`, default 1)
+replaces it with a stand-in clock: it starts at the firmware's build time,
+counts with the Pico's timer, and can be set with the same `time` command
+(lost at every restart). Set it to 0 once the RTC module is connected.
+
+**Animated screen savers.** `src/saver_anim.cpp`, shown in the same screen
+saver view as the clock (`clock_setShow()` picks what it shows):
+*HP-IL rain* -- mnemonics falling in columns of `kSaverFontRain` (28 pt),
+each column with its own speed and trail; the text comes from
+`analyzer_nextFrameText()` (real frames seen on the loop) or a list of
+made-up ones; at most `kColumnsPerStep` columns are drawn per main-loop
+pass, so HP-IL isn't held up. *Goose* -- flocks of 1..5 of the HP-41 font's goose (0xFE), pre-rendered in
+five sizes (`kSaverGoose40` .. `kSaverGoose112`, `src/saver_font_goose*.cpp`),
+flying left to right at random heights (non-overlapping bands) and speeds;
+a new group of 1..5 every 0.4..2.5 s while there's room (up to 8 at once). Clipped at the screen edges with
+`drawBitmap565Cropped()`. *Random* (`SaverRandom`) picks one of `kRandomAnims[]` (`saver_anim.h` --
+add new animations there) and Dark/LCD at random each time. In Clock mode
+without a usable RTC,
+`clock_fallback` (Settings → Screen saver → No clock) picks one of them, or Dim.
+
 **Backlight dimming.** `src/backlight.cpp`: after `kDimAfterMs` (10 min,
 `include/backlight.h`) without activity the backlight goes to `kDimLevel`
 (~10 %). Activity = HP-41 text reaching the screen (`CDisplay::idle()`),

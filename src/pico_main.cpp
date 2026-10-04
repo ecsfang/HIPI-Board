@@ -76,6 +76,7 @@ extern void init_spi(void);
 #include "bootscreen.h"
 #include "boot_service.h"
 #include "backlight.h"
+#include "clock.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
 #include "config.hpp"
@@ -484,6 +485,7 @@ int main() {
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
+    hipi::clock_init(display);               // DS3231 clock, clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
     // "ESC # D" / "ESC # M" from the HP-41: screen dump without / with the
@@ -593,7 +595,7 @@ int main() {
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());
 
-    hipi::backlight_init(screen);   // the dimming timer starts now (backlight.h)
+    hipi::backlight_init(screen);   // the screen saver timer starts now (backlight.h)
     hipi_bootServiceDone();   // the main loop handles USB and PILBox from here
     while (bRunning) {
         tud_task();                     // TinyUSB background task
@@ -602,7 +604,8 @@ int main() {
         touch_poll();                   // debounced tap/release detection (touch.h)
         hipi::boardui_poll();        // auto-hide timers + status LED poll
         hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
-        hipi::backlight_poll();      // dim the backlight after a while without use
+        hipi::backlight_poll();      // screen saver (dim / clock) after a while without use
+        hipi::clock_poll();          // clock screen saver; "time" command on the USB console
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
 #endif

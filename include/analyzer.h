@@ -55,6 +55,10 @@ bool analyzer_showIdle();
 void analyzer_setPaused(bool paused);           // freezes the screen, capture goes on
 bool analyzer_paused();
 
+// The rain screen saver: the mnemonic of the next frame seen on the loop
+// since the last call (idle polling skipped) -- false if there's none
+bool analyzer_nextFrameText(char* buf, std::size_t size);
+
 // Logging to logs/analyzer_<n>.txt, in the same form as the screen.
 // message: the file name, or why it couldn't start.
 bool analyzer_startLog(std::string& message);

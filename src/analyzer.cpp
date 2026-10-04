@@ -875,4 +875,21 @@ void analyzer_stopLog() {
 
 bool analyzer_logging() { return logging_; }
 
+bool analyzer_nextFrameText(char* buf, std::size_t size) {
+    static std::uint32_t read = 0;
+    const std::uint32_t head = head_;
+    if (read > head || head - read > kRingSize) read = head;   // cleared / too far behind
+    while (read < head) {
+        const Capture& c = ring_[read % kRingSize];
+        ++read;
+        if (IS_IDLE(c.in)) continue;
+        // What HIPI's devices answered, else what arrived
+        const IL_CMD_t f = (c.out != c.in && c.out != IL_NO_FRAME && !(c.out & 0x8000)) ? c.out : c.in;
+        std::string m = mnem(f);
+        std::snprintf(buf, size, "%s", m.c_str());
+        return true;
+    }
+    return false;
+}
+
 }  // namespace hipi
