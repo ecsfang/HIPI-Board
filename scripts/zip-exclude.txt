@@ -7,4 +7,7 @@ documents/*
 .vscode/*
 logs/*
 PicoLed/*
+PicoLED/*
+pyilper2/*
 ./*.zip
+./tio*.log

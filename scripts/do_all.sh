@@ -2,17 +2,35 @@
 #
 # HIPI-Board build + flash
 #
-# Detta är din fungerande version med EN ändring: väntetestet på BOOTSEL.
-# Ingenting körs mot enheten före det testet.
+# Hanterar:
+#   *.zip       -> packas upp i projektet
+#   *.cpp       -> flyttas från Downloads till src/
+#   *.h/*.hpp   -> flyttas från Downloads till include/
 #
-# Nyligen tillagt: lösa filer kan skickas in som parametrar och kopieras
-# in i projektet (se "Lägg till filer" nedan).
+# Flera filer kan anges på kommandoraden, t.ex.:
+#   ./do_all.sh fil1.cpp fil1.h test.zip ALL
+#
+# Panel:
+#   5 eller 7
+#
+# ALL:
+#   gör en komplett build
+#
 
 set -u
 
 PROJECT_DIR="$HOME/Projects/HIPI-Board"
-#DOWNLOAD_DIR="$HOME/Downloads"
-DOWNLOAD_DIR="$HOME/Hämtningar"
+
+# Hitta användarens Downloads-katalog automatiskt.
+# Kan t.ex. vara ~/Downloads eller ~/Hämtningar.
+DOWNLOAD_DIR="$(xdg-user-dir DOWNLOAD)"
+
+if [ -z "$DOWNLOAD_DIR" ] || [ ! -d "$DOWNLOAD_DIR" ]; then
+    echo "FEL: Kunde inte hitta Downloads-katalogen."
+    echo "Försökte använda: $DOWNLOAD_DIR"
+    exit 1
+fi
+
 PICO_MOUNT="/media/thomas/RP2350"
 
 # Hur länge vi väntar på BOOTSEL innan vi ger upp (sekunder)
@@ -21,29 +39,16 @@ BOOTSEL_TIMEOUT=300
 # Defaults
 PANEL="7"
 FULL_BUILD=false
-ZIP_FILE=""
 
-# Lösa filer som skall kopieras in i projektet
+# Filer som skall hanteras
 FILES=()
 
-# Filerna som faktiskt kopierades in, som "<namn> -> <mål>"
+# Filer som faktiskt flyttades/kopierades in
 COPIED=()
 
 
 # ------------------------------------------------------------
 # Väntetest
-#
-# [-d] räcker inte: udisks lämnar ofta kvar en tom katalog efter en
-# urkopplad enhet, och då är loopen igenom direkt medan monteringen
-# ännu inte är redo (eller är read-only). Det gav "Permission denied"
-# och den tidiga kopieringen.
-#
-# Fem villkor, och det sista är det enda som är ett bevis:
-#   1. sökvägen är en riktig monteringspunkt, inte bara en katalog
-#   2. den underliggande blockenheten finns (fångar stale montering)
-#   3. den är monterad read-write
-#   4. INFO_UF2.TXT finns -- bootloaderns eget fingeravtryck
-#   5. ett riktigt skrivtest: skapa och ta bort en probe-fil
 # ------------------------------------------------------------
 
 bootsel_ready() {
@@ -77,8 +82,10 @@ bootsel_ready() {
 # Kända parametrar:
 #   5 | 7          panelval
 #   ALL            komplett build
-#   *.zip          projektarkiv som packas upp
-#   *.h *.cpp *.bmp  lösa filer som kopieras in i projektet
+#   *.zip          projektarkiv
+#   *.cpp          C++-fil
+#   *.h            header
+#   *.hpp          C++ header
 # ------------------------------------------------------------
 
 for ARG in "$@"; do
@@ -97,11 +104,7 @@ for ARG in "$@"; do
             FULL_BUILD=true
             ;;
 
-        *.zip)
-            ZIP_FILE="$ARG"
-            ;;
-
-        *.h|*.H)
+        *.zip|*.ZIP)
             FILES+=("$ARG")
             ;;
 
@@ -109,7 +112,11 @@ for ARG in "$@"; do
             FILES+=("$ARG")
             ;;
 
-        *.bmp|*.BMP)
+        *.h|*.H)
+            FILES+=("$ARG")
+            ;;
+
+        *.hpp|*.HPP)
             FILES+=("$ARG")
             ;;
 
@@ -117,27 +124,29 @@ for ARG in "$@"; do
             echo "FEL: Okänd parameter: $ARG"
             echo
             echo "Användning:"
-            echo "  $0 [zip-fil] [filer...] [5|7] [ALL]"
+            echo "  $0 [filer...] [5|7] [ALL]"
             echo
             echo "Exempel:"
             echo "  $0"
             echo "  $0 ALL"
             echo "  $0 5"
             echo "  $0 5 ALL"
-            echo "  $0 projekt.zip"
-            echo "  $0 projekt.zip ALL"
-            echo "  $0 projekt.zip 5"
-            echo "  $0 projekt.zip 5 ALL"
+            echo "  $0 test.zip"
+            echo "  $0 fil1.cpp"
             echo "  $0 fil1.h"
-            echo "  $0 fil1.h fil2.h fil3.cpp"
-            echo "  $0 fil1.h fil2.h fil3.cpp ALL"
+            echo "  $0 fil1.hpp"
+            echo "  $0 fil1.cpp fil1.h test.zip ALL"
             echo
-            echo "Lösa filer hämtas från $DOWNLOAD_DIR och kopieras in i projektet:"
-            echo "  *.h    -> include/"
-            echo "  *.cpp  -> src/"
-            echo "  *.bmp  -> resources/"
+            echo "Filer hämtas från:"
+            echo "  $DOWNLOAD_DIR"
             echo
-            echo "Källfilerna tas bort från $DOWNLOAD_DIR efter lyckad kopiering."
+            echo "Hantering:"
+            echo "  *.zip       -> packas upp i projektet"
+            echo "  *.cpp       -> src/"
+            echo "  *.h         -> include/"
+            echo "  *.hpp       -> include/"
+            echo
+            echo "Filer från Downloads flyttas/tas bort efter lyckad hantering."
             exit 1
             ;;
 
@@ -166,62 +175,21 @@ pushd "$PROJECT_DIR" > /dev/null || {
 
 
 # ------------------------------------------------------------
-# Packa upp projekt om en zip-fil angivits
-# ------------------------------------------------------------
-
-if [ -n "$ZIP_FILE" ]; then
-
-    ZIP_PATH="$DOWNLOAD_DIR/$ZIP_FILE"
-
-    if [ -f "$ZIP_PATH" ]; then
-
-        echo
-        echo "=== Packar upp $ZIP_FILE ==="
-
-        unzip -o "$ZIP_PATH" -x "scripts/*"
-
-        rm "$ZIP_PATH"
-
-    else
-
-        echo
-        echo "FEL: Filen finns inte:"
-        echo "  $ZIP_PATH"
-        echo
-
-        read -n 1 -s -r -p "Tryck på en tangent för att fortsätta..."
-        echo
-
-    fi
-
-else
-
-    echo
-    echo "Ingen zip-fil angiven."
-    echo "Bygger befintligt projekt."
-
-fi
-
-
-# ------------------------------------------------------------
-# Lägg till filer
+# Hantera alla angivna filer
 #
-# Filändelsen bestämmer målkatalogen:
-#   *.h   -> ./include
-#   *.cpp -> ./src
-#   *.bmp -> ./resources
+# Varje fil behandlas individuellt:
 #
-# Källan letas upp i $DOWNLOAD_DIR. Anges en sökväg används den i
-# stället. Filen tas bort från $DOWNLOAD_DIR efter lyckad kopiering,
-# men bara om den verkligen kom därifrån.
+#   *.zip       -> unzip i projektet
+#   *.cpp       -> flyttas till ./src/
+#   *.h/*.hpp   -> flyttas till ./include/
 #
-# Läggs efter uppackningen, så att lösa filer vinner över zip-innehåll.
+# Ordningen på kommandoraden spelar ingen roll.
 # ------------------------------------------------------------
 
 if [ "${#FILES[@]}" -gt 0 ]; then
 
     echo
-    echo "=== Lägger till filer ==="
+    echo "=== Hanterar filer ==="
 
     ADDED=0
 
@@ -229,69 +197,123 @@ if [ "${#FILES[@]}" -gt 0 ]; then
 
         NAME=$(basename "$FILE_ARG")
 
+        # ----------------------------------------------------
+        # Leta efter filen i Downloads
+        # ----------------------------------------------------
+
         SRC="$DOWNLOAD_DIR/$NAME"
-        FROM_DOWNLOADS=false
 
-        if [ -f "$SRC" ]; then
-            FROM_DOWNLOADS=true
-        elif [ -f "$FILE_ARG" ]; then
-            SRC="$FILE_ARG"
-        else
-            echo
-            echo "FEL: Filen finns inte:"
-            echo "  $DOWNLOAD_DIR/$NAME"
-            echo
+        if [ ! -f "$SRC" ]; then
 
-            popd > /dev/null
-            exit 1
+            # Tillåt även en explicit sökväg
+            if [ -f "$FILE_ARG" ]; then
+                SRC="$FILE_ARG"
+            else
+                echo
+                echo "FEL: Filen finns inte:"
+                echo "  $DOWNLOAD_DIR/$NAME"
+                echo
+                popd > /dev/null
+                exit 1
+            fi
+
         fi
+
+
+        # ----------------------------------------------------
+        # Bestäm filtyp och destination
+        # ----------------------------------------------------
 
         EXT="${NAME##*.}"
         EXT="${EXT,,}"
 
         case "$EXT" in
-            h)   DEST="./include" ;;
-            cpp) DEST="./src" ;;
-            bmp) DEST="./resources" ;;
+
+            zip)
+                echo
+                echo "=== Packar upp $NAME ==="
+
+                if unzip -o "$SRC" -x "scripts/*"; then
+
+                    # Ta bort zip-filen om den låg i Downloads
+                    if [ "$SRC" = "$DOWNLOAD_DIR/$NAME" ]; then
+                        rm -f "$SRC"
+                    fi
+
+                    COPIED+=("$NAME -> projektet")
+                    ADDED=$((ADDED + 1))
+
+                else
+
+                    echo
+                    echo "FEL: Kunde inte packa upp $NAME"
+                    echo
+                    popd > /dev/null
+                    exit 1
+
+                fi
+                ;;
+
+            cpp)
+                DEST="./src"
+                mkdir -p "$DEST"
+
+                echo "  $NAME -> $DEST"
+
+                if mv -f "$SRC" "$DEST/$NAME"; then
+                    COPIED+=("$NAME -> $DEST")
+                    ADDED=$((ADDED + 1))
+                else
+                    echo
+                    echo "FEL: Kunde inte flytta $NAME till $DEST"
+                    echo
+                    popd > /dev/null
+                    exit 1
+                fi
+                ;;
+
+
+            h|hpp)
+                DEST="./include"
+                mkdir -p "$DEST"
+
+                echo "  $NAME -> $DEST"
+
+                if mv -f "$SRC" "$DEST/$NAME"; then
+                    COPIED+=("$NAME -> $DEST")
+                    ADDED=$((ADDED + 1))
+                else
+                    echo
+                    echo "FEL: Kunde inte flytta $NAME till $DEST"
+                    echo
+                    popd > /dev/null
+                    exit 1
+                fi
+                ;;
+
+
             *)
                 echo
                 echo "FEL: Filändelsen stöds inte: $NAME"
                 echo
-                echo "Stödda: .h, .cpp, .bmp"
-
+                echo "Stödda: .zip, .cpp, .h, .hpp"
+                echo
                 popd > /dev/null
                 exit 1
                 ;;
+
         esac
-
-        mkdir -p "$DEST"
-
-        if cp -f "$SRC" "$DEST/$NAME"; then
-
-            echo "  $NAME -> $DEST"
-
-            COPIED+=("$NAME -> $DEST")
-
-            if [ "$FROM_DOWNLOADS" = true ]; then
-                rm -f "$SRC"
-            fi
-
-            ADDED=$((ADDED + 1))
-
-        else
-
-            echo
-            echo "FEL: Kunde inte kopiera $NAME till $DEST"
-            echo
-
-            popd > /dev/null
-            exit 1
-
-        fi
 
     done
 
-    echo "  ($ADDED fil(er) inlagda)"
+    echo
+    echo "  ($ADDED fil(er) hanterade)"
+
+else
+
+    echo
+    echo "Inga filer angivna."
+    echo "Bygger befintligt projekt."
 
 fi
 
@@ -305,7 +327,7 @@ echo "============================================================"
 echo " HIPI BUILD"
 echo "============================================================"
 echo
-echo "Panel: ${PANEL}\""
+echo "Panel: ${PANEL}"
 
 if [ "$FULL_BUILD" = true ]; then
     echo "Build: FULL"
@@ -314,7 +336,7 @@ else
 fi
 
 if [ "${#COPIED[@]}" -gt 0 ]; then
-    echo "Filer inlagda (${#COPIED[@]}):"
+    echo "Filer hanterade (${#COPIED[@]}):"
     for C in "${COPIED[@]}"; do
         echo "  $C"
     done
@@ -362,7 +384,6 @@ fi
 
 echo "=== Building hipi_${PANEL}_pico ==="
 echo
-
 
 cmake --build build -j"$(nproc)" > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
@@ -450,7 +471,7 @@ fi
 echo
 echo "=== Väntar på Pico 2 i BOOTSEL-läge ==="
 echo
-echo "Panel:    ${PANEL}\""
+echo "Panel:    ${PANEL}"
 echo "Firmware: hipi_${PANEL}_pico.uf2"
 echo
 echo "Sätt Pico 2 i BOOTSEL om den inte redan är det."
@@ -505,8 +526,8 @@ if ! cp "$UF2_FILE" "$PICO_MOUNT/"; then
     exit 1
 fi
 
-# Se till att datat når enheten. Efter detta startar Picon om och volymen
-# försvinner -- ingenting kontrolleras efter denna rad.
+# Se till att datat når enheten.
+# Efter detta startar Picon om och volymen försvinner.
 sync
 
 
@@ -519,17 +540,16 @@ echo "============================================================"
 echo " KLART!"
 echo "============================================================"
 echo
-echo "Panel:    ${PANEL}\""
+echo "Panel:    ${PANEL}"
 echo "Firmware: hipi_${PANEL}_pico.uf2"
 echo
 
 if [ "${#COPIED[@]}" -gt 0 ]; then
-    echo "Filer inlagda (${#COPIED[@]}):"
+    echo "Filer hanterade (${#COPIED[@]}):"
     for C in "${COPIED[@]}"; do
         echo "  $C"
     done
     echo
 fi
-
 
 popd > /dev/null

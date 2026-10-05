@@ -30,6 +30,8 @@
 // TEST_DISPLAY too (runs first, see the call site below).
 //#define TEST_FONT
 
+#define HIPI_VERSION_TEXT "v3.2beta"
+
 #include <stdlib.h>
 #include <cstring>
 #include <vector>
@@ -77,6 +79,8 @@ extern void init_spi(void);
 #include "boot_service.h"
 #include "backlight.h"
 #include "clock.h"
+#include "loopmap.h"
+#include "hpil_diag.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
 #include "config.hpp"
@@ -108,7 +112,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = "3.0(beta)";  // shown on splash screen
+constexpr const char* HIPI_VERSION = HIPI_VERSION_TEXT;  // shown on splash screen
 }  // namespace
 
 bool usb_connected = false;
@@ -485,6 +489,8 @@ int main() {
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
+    hipi::loopmap_init(display);             // HP-IL loop map (Display -> Loop map)
+    hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
     hipi::clock_init(display);               // DS3231 clock, clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
@@ -608,6 +614,8 @@ int main() {
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
+        hipi::loopmap_poll();        // HP-IL loop map: learn from the traffic, redraw
+        hipi::hpil_diag_poll();      // HP-IL signals view: scope captures while shown
 #endif
 
         tight_loop_contents();

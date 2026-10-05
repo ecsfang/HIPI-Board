@@ -153,7 +153,9 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
     // path below would otherwise send+wait for a PC reply to routine
     // bus polling traffic the PC was never going to answer.
     if ( IS_IDLE(cmd) && PILBox_mode == COFF) {
-        return cmd;
+        // SSRQ: the PC wants service -- the SRQ bit set in IDY frames
+        // passing by (IDY 0x600-0x6FF -> ISR 0x700-0x7FF), like the PIC firmware
+        return m_ssrq ? static_cast<IL_CMD_t>(cmd | 0x100) : cmd;
     }
 
     // Send all other frames to PyIlPer
@@ -293,12 +295,16 @@ IL_CMD_t CPilBox::receiveFrame(void)
                 drainTdisBacklog();         // answer a queued-up series only once
             }
             PL_SEND(pil_recv);              // return command for confirmation
+            PIL_rx_frame = NO_FRAME;        // (a command, not a frame for the loop)
+            m_ssrq = false;
+            m_hadCmd = false;
             type( NONE );
             //hipi::setStatusLed(display, hipi::StatusLed::Pil, false);
             break;
         case CON:                           // CON: Controller ON
             PL_LOG_MODE("CON");
             PILBox_mode = CON;              // set mode to controller ON
+            m_hadCmd = false;               // (the loop's handshake starts afresh, see conReturned())
                                             // default on the HP41
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
@@ -309,6 +315,7 @@ IL_CMD_t CPilBox::receiveFrame(void)
         case COFF:                          // COFF: Controller OFF
             PL_LOG_MODE("COFF");
             PILBox_mode = COFF;             // set mode to controller OFF
+            m_ssrq = false;
                                             // the PILBox is now a device
                                             // not used on the HP41
                                             // frame is not forwarded to the HP-IL emulation
@@ -320,12 +327,27 @@ IL_CMD_t CPilBox::receiveFrame(void)
         case COFI:                          // COFI: Controller OFF with IDY 
             PL_LOG_MODE("COFI");
             PILBox_mode = COFI;             // set mode to COFI
+            m_ssrq = false;
                                             // device with sending IDY frame
                                             // frame is not forwarded to the HP-IL emulation
             PL_SEND(pil_recv);              // return command for confirmation
             PIL_rx_frame = NO_FRAME;          // and return with no data
             type( PILBOX );
             //hipi::setStatusLed(display, hipi::StatusLed::Pil, true);
+            break;
+        case SSRQ:                          // set service request (PIC: SSRQ, clears TRIDY)
+            PL_LOG_MODE("SSRQ");
+            m_ssrq = true;
+            if (PILBox_mode == COFI) PILBox_mode = COFF;
+            PL_SEND(pil_recv);
+            PIL_rx_frame = NO_FRAME;
+            break;
+        case CSRQ:                          // clear service request (PIC: CSRQ, clears TRIDY)
+            PL_LOG_MODE("CSRQ");
+            m_ssrq = false;
+            if (PILBox_mode == COFI) PILBox_mode = COFF;
+            PL_SEND(pil_recv);
+            PIL_rx_frame = NO_FRAME;
             break;
         // default:
             // all other frames are sent on to the HP-IL loop
@@ -365,6 +387,38 @@ IL_CMD_t CPilBox::sendFrame(IL_CMD_t cmd)
     PD_IDY_LOGF(frame, "\t   ==> %s (pilbox)\r\n", ilMnemonic(frame, pbBuf));
 
     return frame;
+}
+
+// ── CON: the loop's controller is the PC program ────────────────────────
+// Like the PIC firmware (PILBox21.asm): every frame from the PC goes onto
+// the loop as it is; what comes back round goes to the PC -- except a
+// command frame, which is kept while an RFC goes round, and only then
+// handed to the PC (meaning: every device has done it).
+
+IL_CMD_t CPilBox::conFromPc(void)
+{
+    const IL_CMD_t f = receiveFrame();          // PILBox commands are handled in there
+    if (f == NO_FRAME) return NO_FRAME;
+    // PILBox's own commands 0x494-0x497 / 0x49C-0x49F (as the PIC tests:
+    // low byte & 0xF4 == 0x94) are never loop frames -- IFC 0x490, AAU 0x49A... are
+    if ((f & 0x7F4) == 0x494) return NO_FRAME;
+    return f;
+}
+
+IL_CMD_t CPilBox::conReturned(IL_CMD_t frame)
+{
+    if ((frame & CMD_MASK) == CMD) {            // a command came back: RFC round the loop next
+        m_wLastCmd = frame;
+        m_hadCmd = true;
+        return RFC;
+    }
+    if (frame == RFC && m_hadCmd) {             // the RFC came back: the command is done
+        m_hadCmd = false;
+        sendFrame(m_wLastCmd);
+        return NO_FRAME;
+    }
+    sendFrame(frame);                           // data, ready, IDY, a bare RFC
+    return NO_FRAME;
 }
 
 void CPilBox::idle(void)

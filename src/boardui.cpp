@@ -12,6 +12,7 @@
 #include "sd_paths.h"
 #include "analyzer.h"
 #include "backlight.h"
+#include "loopmap.h"
 #include "plotterview.h"
 
 #include "boardui.h"
@@ -853,6 +854,10 @@ void boardui_init(Screen* screen, UiDialog* dialog, const char* version) {
     // call too), so no one-shot draw is needed here.
 }
 
+void boardui_showWarning(const char* title, const char* line1, const char* line2) {
+    if (dialog_ != nullptr) dialog_->showWarning(title, line1, line2);
+}
+
 void boardui_poll() {
     // Held ▲/▼: repeat (see kRepeatDelayMs). Released -> boardui_handleRelease()
     if (repeatButton != Button::None && pressedButton == repeatButton &&
@@ -955,6 +960,9 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // deviceListVisible below -- consumed here, not treated as a
         // button-strip wake/press or corner-tap.
         dialog_->dismissLoopbackResult();
+    } else if (dialog_ != nullptr && dialog_->isShowingWarning()) {
+        // A warning box (UiDialog::showWarning()): any touch closes it
+        dialog_->dismissWarning();
     } else if (dialog_ != nullptr && dialog_->isShowingI2CScanResult()) {
         // Same pattern as isShowingLoopbackResult() just above -- see
         // uidialog.hpp's own runI2CScan()/dismissI2CScanResult().
@@ -970,6 +978,10 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         if (!isInsideDeviceListBox(x, y)) {
             hideDeviceList();
         }
+    } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::LoopMap &&
+               loopmap_tap(x, y)) {
+        // Loop map: a card -> its details; the details box -> closed
+        // (checked before the corners: cards may sit in them)
     } else if (isInfoCornerTouch(x, y)) {
         showInfoBox();
     } else if (isDeviceListCornerTouch(x, y)) {

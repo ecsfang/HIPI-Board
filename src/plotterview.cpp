@@ -6,6 +6,8 @@
 #include "drive.h"
 #include "analyzer.h"
 #include "clock.h"
+#include "loopmap.h"
+#include "hpil_diag.h"
 #include "backlight.h"
 #include <cctype>
 #include <vector>
@@ -188,6 +190,8 @@ const char* outputName(DisplayOutput mode) {
         case DisplayOutput::Tape:    return "TAPE";
         case DisplayOutput::Analyzer: return "ANALYZER";
         case DisplayOutput::Clock:    return "CLOCK";
+        case DisplayOutput::LoopMap:  return "LOOP MAP";
+        case DisplayOutput::Signals:  return "HP-IL SIGNALS";
     }
     return "?";
 }
@@ -707,6 +711,14 @@ bool plotterview_isAvailable(DisplayOutput mode) {
 }
 
 void plotterview_redraw() {
+    if (output_ == DisplayOutput::Signals) {
+        hpil_diag_drawAll();
+        return;
+    }
+    if (output_ == DisplayOutput::LoopMap) {
+        loopmap_drawAll();
+        return;
+    }
     if (output_ == DisplayOutput::Clock) {
         clock_drawAll();
         return;
@@ -852,6 +864,50 @@ void plotterview_showAnalyzer() {
     beforeAnalyzer_ = viewDevice_;
     beforeAnalyzerOutput_ = output_;
     switchView(DisplayOutput::Analyzer, nullptr);
+}
+
+// The view to go back to when leaving the loop map
+static CDevice* beforeLoopMap_ = nullptr;
+static DisplayOutput beforeLoopMapOutput_ = DisplayOutput::Display;
+
+void plotterview_showLoopMap() {
+    if (output_ == DisplayOutput::LoopMap) return;
+    beforeLoopMap_ = viewDevice_;
+    beforeLoopMapOutput_ = output_;
+    switchView(DisplayOutput::LoopMap, nullptr);
+}
+
+void plotterview_leaveLoopMap() {
+    if (output_ != DisplayOutput::LoopMap) return;
+    if (beforeLoopMapOutput_ == DisplayOutput::Analyzer) {
+        switchView(DisplayOutput::Analyzer, nullptr);
+    } else if (deviceHasView(beforeLoopMap_)) {
+        switchView(outputFor(beforeLoopMap_->viewKind()), beforeLoopMap_);
+    } else {
+        switchView(DisplayOutput::Display, nullptr);
+    }
+}
+
+// The view to go back to when leaving the HP-IL signals view
+static CDevice* beforeSignals_ = nullptr;
+static DisplayOutput beforeSignalsOutput_ = DisplayOutput::Display;
+
+void plotterview_showSignals() {
+    if (output_ == DisplayOutput::Signals) return;
+    beforeSignals_ = viewDevice_;
+    beforeSignalsOutput_ = output_;
+    switchView(DisplayOutput::Signals, nullptr);
+}
+
+void plotterview_leaveSignals() {
+    if (output_ != DisplayOutput::Signals) return;
+    if (beforeSignalsOutput_ == DisplayOutput::Analyzer || beforeSignalsOutput_ == DisplayOutput::LoopMap) {
+        switchView(beforeSignalsOutput_, nullptr);
+    } else if (deviceHasView(beforeSignals_)) {
+        switchView(outputFor(beforeSignals_->viewKind()), beforeSignals_);
+    } else {
+        switchView(DisplayOutput::Display, nullptr);
+    }
 }
 
 // The view to go back to when the clock screen saver ends

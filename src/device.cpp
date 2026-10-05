@@ -93,16 +93,26 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
         *rtn = cmd + 1;
         return true;
     }
+    // NRD (Not Ready for Data) while sending the accessory or device ID:
+    // the controller wants no more -- pass NRD on, and end with ETO when our
+    // last byte comes back (as ILCtrl and a PIL-Box controller expect)
+    if( (m_sai || m_sdi) && cmd == NRD ) {
+        m_nrdStop = true;
+        *rtn = NRD;
+        return true;
+    }
     if( m_sai ) {
-        *rtn = (cmd == m_nSai) ? ETO : ETE;
+        *rtn = (cmd == m_nSai || m_nrdStop) ? ETO : ETE;
         m_sai = false;
+        m_nrdStop = false;
         return true;
     }
     if( m_sdi ) {
-        *rtn = *m_sdi++;
+        *rtn = m_nrdStop ? 0 : *m_sdi++;
         if( *rtn == 0 ) {
             *rtn = ETO;
             m_sdi = NULL;
+            m_nrdStop = false;
         }
         return true;
     }

@@ -59,6 +59,16 @@ bool analyzer_paused();
 // since the last call (idle polling skipped) -- false if there's none
 bool analyzer_nextFrameText(char* buf, std::size_t size);
 
+// What the loop's controller is called in the analysis: "CTRL" (unknown --
+// usually the HP-41), or "PC" while PILBox is in CON mode
+void analyzer_setController(const char* name);
+
+// Frames captured since `cursor` (start with 0), one per call, idle
+// polling skipped: as it arrived (in), as it left (out, IL_NO_FRAME if
+// absorbed) and when (µs since start-up). False when there's no more --
+// for other passive users of the capture (the loop map).
+bool analyzer_nextFrame(std::uint32_t& cursor, IL_CMD_t& in, IL_CMD_t& out, std::uint64_t& tUs);
+
 // Logging to logs/analyzer_<n>.txt, in the same form as the screen.
 // message: the file name, or why it couldn't start.
 bool analyzer_startLog(std::string& message);

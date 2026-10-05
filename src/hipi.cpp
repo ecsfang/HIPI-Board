@@ -15,6 +15,7 @@
 #include "iltemp.h"
 #include "touch.h"
 #include "uidialog.hpp"
+#include "boardui.h"
 #include "analyzer.h"
 #include "config.hpp"
 
@@ -460,7 +461,140 @@ inline void postTrace(IL_CMD_t frame) {
     }
 }
 
+// ── PILBox CON: the loop's controller is the PC program ─────────────────
+// HIPI then starts every frame itself. PILBOX's place in the device order
+// is where the loop begins and ends:
+//
+//   PC -> PILBOX -> HIPI devices after it -> OUT -> (cable, devices) -> IN
+//      -> HIPI devices before it -> PILBOX -> PC
+//
+// Settings -> CON loop: Internal closes the loop inside HIPI instead (no
+// cable: the frame goes from the last device straight to the first).
+// One frame at a time, as on any HP-IL loop; the CMD/RFC handshake is
+// CPilBox::conReturned()'s (like the PIC firmware).
+static bool bootDone();                   // the main loop runs (warning boxes allowed)
+static bool conInFlight = false;          // a frame of ours is out on the cable
+static IL_CMD_t conSent = 0;              // the frame that started the round (analyzer)
+static bool conWasActive = false;         // (to tell the analyzer when CON starts/ends)
+static absolute_time_t conDeadline = nil_time;
+static absolute_time_t conNextWarn = nil_time;
+constexpr std::uint32_t kConReturnMs = 1000;
+
+static bool conActive() {
+    return pilbox != nullptr && pilbox->enabled() && pilbox->mode() == CON;
+}
+
+static std::size_t pilboxIndex() {
+    for (std::size_t i = 0; i < devices.size(); ++i)
+        if (devices[i] == pilbox) return i;
+    return devices.size();
+}
+
+// The frame through devices [from, to) -- IL_NO_FRAME if one absorbed it
+static IL_CMD_t conRunDevices(IL_CMD_t f, std::size_t from, std::size_t to) {
+    for (std::size_t i = from; i < to && i < devices.size(); ++i) {
+        CDevice* dev = devices[i];
+        if (!dev->enabled()) { dev->offLoopFrame(f); continue; }
+        const IL_CMD_t rtn = dev->hpil(f);
+        if (rtn == IL_NO_FRAME) return IL_NO_FRAME;
+        doTrace(dev, f, rtn);
+        f = rtn;
+    }
+    return f;
+}
+
+static void conWarn(const char* line1, const char* line2) {
+    if (!time_reached(conNextWarn)) return;           // (at most every few seconds)
+    conNextWarn = make_timeout_time_ms(3000);
+    LOGF("\r\n * PILBox CON: %s %s", line1, line2);
+    if (bootDone()) hipi::boardui_showWarning("PILBox CON", line1, line2);
+}
+
+static void conArrived(HpIlLoop& loop, IL_CMD_t f, int depth, IL_CMD_t sent);
+
+// A frame from PILBOX's place onto the loop
+static void conInject(HpIlLoop& loop, IL_CMD_t f, int depth) {
+    const std::size_t p = pilboxIndex();
+    const IL_CMD_t g = conRunDevices(f, p + 1, devices.size());
+    // The analyzer sees each round ONCE, as it does with an HP-41 in
+    // control: what the controller (here the PC) sent, and what came back
+    // to it -- captured in conArrived() when the round is complete
+    conSent = f;
+#if HIPI_ANALYZER
+    if (g == IL_NO_FRAME) hipi::analyzer_capture(f, g);
+#endif
+    if (g == IL_NO_FRAME) { conInFlight = false; return; }
+    if (config.conInternal()) {
+        conArrived(loop, g, depth + 1, f);            // straight round to the start
+    } else {
+        TRC_LOGF("\r\n\t   CON ==> %03X", g);
+        loop.sendFrame(g);
+        conInFlight = true;
+        conDeadline = make_timeout_time_ms(kConReturnMs);
+    }
+}
+
+// A frame back from the loop (IN, or round inside HIPI)
+// (sent: internal loop -- the frame as the PC sent it, for the analyzer)
+static void conArrived(HpIlLoop& loop, IL_CMD_t f, int depth, IL_CMD_t sent) {
+    conInFlight = false;
+    const IL_CMD_t g = conRunDevices(f, 0, pilboxIndex());
+#if HIPI_ANALYZER
+    // The whole round: what the PC sent -> what came back to it
+    hipi::analyzer_capture(sent, g);
+#endif
+    if (g == IL_NO_FRAME) return;
+    const IL_CMD_t next = pilbox->conReturned(g);     // to the PC -- or RFC round next
+    if (next != NO_FRAME && depth < 6) conInject(loop, next, depth);
+}
+
+static bool conLoop(HpIlLoop& loop) {
+    uint32_t rx;
+    if (loop.receiveFrame(rx)) {
+        led_on(HPIL_ACT_LED);
+        if (!conInFlight) {
+            // Nothing of ours is out there: someone else controls the loop
+            conWarn("Another controller is on the loop.", "Only one may control it (PC or HP-41).");
+            loop.sendFrame(rx);                       // passed on unchanged
+#if HIPI_ANALYZER
+            hipi::analyzer_capture(static_cast<IL_CMD_t>(rx), static_cast<IL_CMD_t>(rx));
+#endif
+        } else {
+            TRC_LOGF("\r\n\t   CON <== %03X", static_cast<unsigned>(rx));
+            conArrived(loop, static_cast<IL_CMD_t>(rx), 0, conSent);
+        }
+        led_off(HPIL_ACT_LED);
+        return true;
+    }
+    if (conInFlight) {
+        if (time_reached(conDeadline)) {
+            conInFlight = false;
+            conWarn("No frame came back round the loop.", "Is the HP-IL cable connected?");
+        }
+        return false;
+    }
+    const IL_CMD_t f = pilbox->conFromPc();
+    if (f != NO_FRAME) {
+        led_on(HPIL_ACT_LED);
+        conInject(loop, f, 0);
+        led_off(HPIL_ACT_LED);
+        return true;
+    }
+    for (CDevice* dev : devices)                      // (not PILBOX: it reads the PC above)
+        if (dev->enabled() && dev != pilbox) dev->idle();
+    return false;
+}
+
 bool hipi_loop(HpIlLoop& loop) {
+    const bool con = conActive();
+    if (con != conWasActive) {                        // CON started / ended
+        conWasActive = con;
+#if HIPI_ANALYZER
+        hipi::analyzer_setController(con ? "PC" : "CTRL");
+#endif
+    }
+    if (con) return conLoop(loop);
+    conInFlight = false;
     uint32_t rx_frame;
     // Check if any HP-IL frame from the PIO interface is available
     if( loop.receiveFrame(rx_frame) ) {
@@ -545,3 +679,5 @@ void hipi_bootService() {
 }
 
 void hipi_bootServiceDone() { bootServiceOn = false; }
+
+static bool bootDone() { return !bootServiceOn; }

@@ -1,0 +1,15 @@
+; src/hpil_diag.pio -- the HP-IL signals view's scope (hpil_diag.cpp), on
+; PIO2, only READING the HP-IL input pins (they stay the receiver's, on PIO0).
+;
+; Samples both input pins (in_base, in_base+1) every 2 PIO cycles once
+; either goes high; autopush every 16 samples (32 bits), read by DMA.
+.program hpil_scope
+public trig:
+    mov isr, null
+    in pins, 2
+    mov x, isr
+    jmp !x, trig
+    mov isr, null
+sample:
+    in pins, 2
+    jmp sample

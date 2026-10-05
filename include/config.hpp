@@ -103,6 +103,9 @@ public:
                            static_cast<unsigned>(columns_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "con_loop=%s\n", conInternal_ ? "internal" : "cable");
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         n = std::snprintf(line, sizeof(line), "saver=%u\nclock_style=%u\nclock_us=%d\nclock_12h=%d\nclock_fallback=%u\n",
                           static_cast<unsigned>(saverMode_), static_cast<unsigned>(clockStyle_),
                           clockUs_ ? 1 : 0, clock12h_ ? 1 : 0, static_cast<unsigned>(clockFallback_));
@@ -176,6 +179,9 @@ public:
     void setClockStyle(std::uint8_t s) { clockStyle_ = s; save(); }
     bool clockUs() const { return clockUs_; }                     // US date format
     void setClockUs(bool us) { clockUs_ = us; save(); }
+    // PILBox CON mode: the loop closed inside HIPI (no cable needed)
+    bool conInternal() const { return conInternal_; }
+    void setConInternal(bool in) { conInternal_ = in; save(); }
     bool clock12h() const { return clock12h_; }                   // 12-hour time
     void setClock12h(bool h12) { clock12h_ = h12; save(); }
 
@@ -278,6 +284,8 @@ private:
                     clockStyle_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "clock_us") == 0) {
                     clockUs_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "con_loop") == 0) {
+                    conInternal_ = std::strcmp(value, "internal") == 0;
                 } else if (std::strcmp(key, "clock_12h") == 0) {
                     clock12h_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "clock_fallback") == 0) {
@@ -316,6 +324,7 @@ private:
     std::uint8_t  clockStyle_ = 0;   // dark
     bool          clockUs_    = false;
     bool          clock12h_   = false;
+    bool          conInternal_ = false;   // con_loop=cable|internal
     std::uint8_t  clockFallback_ = 3;  // SaverRain
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).

@@ -59,6 +59,8 @@
 #define COFI    0x495   // COFF with IDY, firmware >= v1.6, not used if no IDY frames are supported
 #define CON     0x496   // Controller ON, not used, HP41 can only be controller (check HP-IL DEVELOPMENT ROM Scope function!)
 #define COFF    0x497   // Controller OFF
+#define SSRQ    0x49C   // PILBox: set service request (SRQ bit in IDY frames)
+#define CSRQ    0x49D   // PILBox: clear service request
 #define SSRQ    0x49C   // Set Service Request, obsolete, not used on HP41
 #define CSRQ    0x49D   // Clear Service Request, obsolete, not used on HP41
 
@@ -129,6 +131,7 @@ protected:
     IL_ADDR_t       m_addr;
     const char      *m_devName;
     bool            m_sai;
+    bool            m_nrdStop = false;   // NRD seen while sending SAI/SDI: end with ETO
     IL_ADDR_t       m_nSai;
     IL_ADDR_t       m_nAau;
     const char      *m_sdi;

@@ -590,8 +590,11 @@ void detailedFrame(std::uint64_t t, IL_CMD_t in, IL_CMD_t out, std::uint32_t cou
     else if (in == UNT || in == IFC) { st_.talker = -1; if (in == IFC) st_.listeners = 0; }
 }
 
+std::string ctrlName_ = "CTRL";            // analyzer_setController()
+
 void resetAnalysis() {
     st_ = State();
+    st_.ctrl = ctrlName_;
     lines_.clear();
     scroll_ = 0;
     dirty_ = true;
@@ -892,4 +895,26 @@ bool analyzer_nextFrameText(char* buf, std::size_t size) {
     return false;
 }
 
+bool analyzer_nextFrame(std::uint32_t& cursor, IL_CMD_t& in, IL_CMD_t& out, std::uint64_t& tUs) {
+    const std::uint32_t head = head_;
+    if (cursor > head || head - cursor > kRingSize) cursor = head;   // cleared / too far behind
+    while (cursor < head) {
+        const Capture& c = ring_[cursor % kRingSize];
+        ++cursor;
+        if (isRun(c) || IS_IDLE(c.in)) continue;     // idle polling
+        in = c.in;
+        out = c.out;
+        tUs = fullTime(c.tUs);
+        return true;
+    }
+    return false;
+}
+
+void analyzer_setController(const char* name) {
+    ctrlName_ = name;
+    st_.ctrl = name;
+    dirty_ = true;
+}
+
 }  // namespace hipi
+

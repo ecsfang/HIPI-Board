@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <array>
 #include <string>
 #include "hardware/pio.h"
 #include "../PicoLED/PicoLed.hpp"
@@ -16,6 +17,15 @@
 // the firmware never starts.
 #define PIXEL_PIN           26
 #define PIXEL_PIO           pio1
+
+// The order the LED strip takes its color bytes in. Classic WS2812B want
+// green-red-blue (PicoLed::FORMAT_GRB), but many strips sold as WS2812/
+// "NeoPixel" take red-green-blue -- the one on the HIPI board does: with
+// FORMAT_GRB, red and green came out swapped (224 = green, 28 = red).
+// If red and green are swapped on your strip, switch to the other one.
+#ifndef PIXEL_COLOR_ORDER
+#define PIXEL_COLOR_ORDER   PicoLed::FORMAT_GRB
+#endif
 #define PIXEL_SM            0
 
 // Not a hard architectural limit -- construct CPixelStrip with a different
@@ -113,8 +123,9 @@ extern CPixelStrip pixelStrip;
 //     style) -- <pixels><cmd>[<params>], groups separated by space/newline/
 //     semicolon/null:
 //
-//       Pixels:  '0' = all, decimal digits = a single index, "N-M" = an
-//                inclusive range (e.g. "3-10")
+//       Pixels:  '0' = all, decimal digits = a single pixel NUMBER -- the
+//                first pixel is 1 -- and "N-M" an inclusive range (e.g.
+//                "3-10").
 //
 //       Commands:
 //         C            off (black)
@@ -130,7 +141,7 @@ extern CPixelStrip pixelStrip;
 //       Examples:
 //         "0C"             all pixels off
 //         "0S50"           strip brightness to 50%
-//         "5X<byte>"       pixel 5 to an RGB332 color
+//         "1X<byte>"       the first pixel to an RGB332 color
 //         "3-10X<byte>"    pixels 3..10 to the same RGB332 color
 //         "0Y<r><g><b>"    all pixels to the same 24-bit color
 //
@@ -141,10 +152,14 @@ extern CPixelStrip pixelStrip;
 //     left over to use as an in-band terminator the way group-ending
 //     spaces/etc. work for the ASCII commands above):
 //
-//       '#' <count> <startIndex> <color0> ... <color(count-1)>   -- RGB332,
+//       '#' <count> <start> <color0> ... <color(count-1)>   -- RGB332,
 //           1 byte per pixel
-//       '@' <count> <startIndex> <r0><g0><b0> ... <r_n><g_n><b_n> -- 24-bit
+//       '@' <count> <start> <r0><g0><b0> ... <r_n><g_n><b_n> -- 24-bit
 //           RGB, 3 bytes per pixel
+//
+//     <start> is a pixel number like in the ASCII commands: 1 = the first
+//     pixel. 0 = all: the <count> colors are repeated over the whole strip
+//     (count=1: the whole strip one color; count=3: a 3-color pattern).
 //
 //     Both apply (and show()) once the full run has been consumed. count=0
 //     is valid (applies nothing, just consumes startIndex and returns to
@@ -191,6 +206,9 @@ private:
     bool         _run332;      // true = '#' (RGB332 run), false = '@' (24-bit run)
     std::uint8_t _runCount, _runStart, _runIndex;
     std::uint8_t _runR, _runG;  // partial 24-bit color while awaiting the rest
+    std::vector<std::array<std::uint8_t, 3>> _runPattern;   // start 0: colors to repeat
+    void _runPixel(std::uint8_t a, std::uint8_t g, std::uint8_t b, bool is332);
+    void _runFinish();
 
     void _reset();
     void _finalize();                 // apply the current ASCII group

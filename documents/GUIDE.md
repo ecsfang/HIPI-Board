@@ -116,6 +116,11 @@ it, run CMake again from an empty `build/` folder.
 Because the strip is a global object, a wrong PIO block makes the firmware
 stop before `main()` -- the Pico then seems not to start at all.
 
+**Colour order.** `PIXEL_COLOR_ORDER` in `include/pixels.h` sets the order the
+strip takes its colour bytes in: `PicoLed::FORMAT_RGB` (HIPI's default, what
+the strip on the board needs) or `PicoLed::FORMAT_GRB` (classic WS2812B). If
+red and green come out swapped, switch it.
+
 **Updating** to a newer PicoLED:
 
 ```bash
@@ -367,6 +372,38 @@ a new group of 1..5 every 0.4..2.5 s while there's room (up to 8 at once). Clipp
 add new animations there) and Dark/LCD at random each time. In Clock mode
 without a usable RTC,
 `clock_fallback` (Settings → Screen saver → No clock) picks one of them, or Dim.
+
+**Loop map.** `src/loopmap.cpp` reads the analyzer's capture with its own
+cursor (`analyzer_nextFrame()`) and keeps one record per address: AAD passing
+HIPI gives the addresses before HIPI (in-1), HIPI's range and, within it,
+the PC side of PILBOX (addresses that aren't HIPI devices); TAD/LAD to
+other addresses add devices after HIPI; SAI/SDI/SST answers fill in type,
+ID and status. The layout (`layout()`) spreads the cards evenly over the
+ring's top, right and bottom sides and picks full cards (<= 8), compact
+cards (<= 16) or tiles (<= 30). Taps go to `loopmap_tap()` before the corner
+checks in `boardui_handleTap()`.
+
+**HP-IL signals view.** `src/hpil_diag.cpp` + `src/hpil_diag.pio`, on
+**PIO2** + one DMA channel, only *reading* the input pins (no
+`pio_gpio_init()` -- they stay PIO0's, the receiver isn't touched): while
+the view is shown, the `hpil_scope` state machine samples both pins at 8 MHz
+once either goes high and DMA fills a 32768-sample buffer (~4 ms); a new
+capture every 0.5 s. The view (`DisplayOutput::Signals`) replays the
+receiver's algorithm on the samples (plus = `IN_P_PIN`, minus sampled 0.5 µs
+after plus ends) to show the bits it reads. Nothing runs while it's closed.
+
+**PILBox CON.** In CON (`pilbox->mode() == CON`) `hipi_loop()` runs
+`conLoop()` instead: HIPI is the frame's origin. A frame from the PC
+(`CPilBox::conFromPc()`) goes through the devices after PILBOX in `devices`,
+then out on HP-IL OUT (or, with `con_loop=internal`, straight on); when it
+comes back (IN) it goes through the devices before PILBOX and to
+`CPilBox::conReturned()`, which -- like the PIC firmware's `inIL` -- keeps a
+returning command and puts an RFC round the loop, hands the command to the
+PC when the RFC is back, and hands everything else to the PC. One frame at a
+time; no return within 1 s, or a frame arriving with none of ours out,
+gives a log line and a warning box (`boardui_showWarning()`). SSRQ (0x49C)
+and CSRQ (0x49D) set/clear the SRQ bit HIPI puts in passing IDY frames in
+COFF (and switch COFI to COFF), as in the PIC firmware.
 
 **Backlight dimming.** `src/backlight.cpp`: after `kDimAfterMs` (10 min,
 `include/backlight.h`) without activity the backlight goes to `kDimLevel`

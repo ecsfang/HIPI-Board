@@ -17,6 +17,7 @@ class CPilBox : public CDevice {
     bool lastConnected_ = false;         // PC port open, as last seen (checkConnection())
     int pendingRx_ = -1;                 // byte read ahead by drainTdisBacklog(), -1 = none
     bool tdisBacklogDrained_ = false;    // the TDIS backlog is dropped only once
+    bool m_ssrq = false;                 // SSRQ: set the SRQ bit in IDY frames (COFF)
     bool m_hadCmd = false;               // true right after a CMD frame, until the next RFC consumes it (matches the PIC firmware's FCMD flag)
 public:
     // Takes over what pilbox_serviceEarly() already agreed with the PC
@@ -34,6 +35,13 @@ public:
     // itself is open.
     bool isConnected() const { return PILBox_mode != TDIS; }
     IL_CMD_t mode() const { return PILBox_mode; }   // TDIS, COFF, COFI or CON
+
+    // CON (the PC program is the loop's controller, see hipi_loop()):
+    // the next frame from the PC to put on the loop (NO_FRAME if none), and
+    // what to do with a frame that came back round -- returns the frame to
+    // put on the loop next (RFC after a command) or NO_FRAME (it went to the PC)
+    IL_CMD_t conFromPc(void);
+    IL_CMD_t conReturned(IL_CMD_t frame);
 private:
     IL_CMD_t sendFrame(IL_CMD_t cmd);
     IL_CMD_t receiveFrame(void);

@@ -55,6 +55,11 @@ void boardui_init(Screen* screen, UiDialog* dialog, const char* version);
 // box's auto-hide timers, and the periodic USB/PILBOX status LED poll.
 void boardui_poll();
 
+// A warning box that stays until the screen is touched (UiDialog::
+// showWarning()) -- e.g. PILBox CON: no frame came back. Not shown while a
+// menu or another box is open.
+void boardui_showWarning(const char* title, const char* line1, const char* line2 = "");
+
 // Register these with touch_set_tap_callback()/touch_set_release_callback()
 // (see touch.h). boardui_handleTap() decides whether a confirmed touch
 // dismisses/opens the info box, wakes/uses the button strip, or forwards to

@@ -226,6 +226,8 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
         src/bootscreen.cpp
         src/analyzer.cpp
+        src/loopmap.cpp
+        src/hpil_diag.cpp
         src/backlight.cpp
         src/clock.cpp
         src/rtc.cpp
@@ -251,6 +253,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         ${TRANSPORT_TARGET}
         pico_stdlib
         pico_rand               # screen saver animations (saver_anim.cpp)
+        hardware_dma            # HP-IL signal scope (hpil_diag.cpp)
         tinyusb_device          # ← replace pico_stdio_usb with this
         tinyusb_board
     #    pico_bootsel_via_double_reset
@@ -268,6 +271,9 @@ function(hipi_add_pico_targets PANEL SUFFIX)
     # Generate header from the .pio file
     pico_generate_pio_header(${EXE_TARGET}
         ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
+    )
+    pico_generate_pio_header(${EXE_TARGET}
+        ${CMAKE_CURRENT_LIST_DIR}/src/hpil_diag.pio
     )
 
     pico_enable_stdio_usb(${EXE_TARGET} 0)

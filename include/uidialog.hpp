@@ -260,6 +260,47 @@ public:
     // through UiDialog since this result IS one of its own menu states
     // (see openLoopbackConfirm()/runLoopbackTest() further down) rather
     // than a separate corner-tap box like infoBox/deviceList are.
+    // ── Warning box ──────────────────────────────────────────────────────
+    // A box with a warning (e.g. PILBox in CON mode: no frame came back, or
+    // another controller on the loop) that stays until the screen is
+    // touched. Called from the main loop; does nothing while a menu or
+    // another box is open (the warning is in the log anyway).
+    void showWarning(const char* title, const char* line1, const char* line2 = "") {
+        if (state_ != State::Closed) return;
+#ifndef DISPLAY_7INCH
+        screen_.suspend();
+#endif
+        d_->setTextCursorVisible(false, false);
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        state_ = State::Warning;
+        drawBox();
+        d_->txtSize(1);
+        d_->txtColor(MenuFrame::Yellow, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        d_->txtWrite(title);
+        d_->txtSize(0);
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch + 8);
+        d_->txtWrite(line1);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch + 32);
+        d_->txtWrite(line2);
+        d_->txtColor(0x7BEF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + MenuFrame::H - 40);
+        d_->txtWrite("Touch the screen to close");
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+#endif
+    }
+    bool isShowingWarning() const { return state_ == State::Warning; }
+    void dismissWarning() {
+        if (state_ != State::Warning) return;
+        close();
+    }
+
     bool isShowingLoopbackResult() const { return state_ == State::LoopbackResult; }
     void dismissLoopbackResult() {
         if (state_ != State::LoopbackResult) return;
@@ -400,8 +441,16 @@ public:
 #endif
 
         switch (state_) {
+            case State::Warning:                // also closed by any touch (boardui.cpp)
+                if (b == Button::Ok || b == Button::X) close();
+                break;
             case State::Closed:
-                if (plotterview_output() == DisplayOutput::Analyzer) {
+                if (plotterview_output() == DisplayOutput::LoopMap && b == Button::X) {
+                    // The loop map: X leaves it (back to the view before)
+                    plotterview_leaveLoopMap();
+                } else if (plotterview_output() == DisplayOutput::Signals && b == Button::X) {
+                    plotterview_leaveSignals();
+                } else if (plotterview_output() == DisplayOutput::Analyzer) {
                     // The Analyzer view: its own menu, and the arrows scroll
                     // its log instead of the HP-41 text
                     if (b == Button::Ok)        openAnalyzerMenu();
@@ -673,7 +722,7 @@ private:
         ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
         FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
         LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo, DeviceOrder,
-        DevicesMenu, AnalyzerMenu, AnalyzerLogMenu, SaverMenu
+        DevicesMenu, AnalyzerMenu, AnalyzerLogMenu, SaverMenu, Warning
     };
 
     static constexpr const char* kMainMenuLabels[] = { "Config >", "Settings >", "Devices >", "Display >" };
@@ -682,8 +731,13 @@ private:
     static constexpr const char* kConfigMenuLabels[] = { "Select file >", "Trace >", "Connect to PC", "Loopback test >", "Scan I2C", "Bootsel mode" };
     static constexpr int kConfigMenuCount = 6;
 
-    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor >", "Font size >", "Brightness >", "Columns >", "Screen saver >" };
-    static constexpr int kSettingsMenuCount = 5;
+    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor >", "Font size >", "Brightness >", "Columns >", "Screen saver >", "" };
+    static constexpr int kSettingsMenuCount = 6;
+    // Row 5 is a setting shown with its value (toggled with OK)
+    static const char* settingsLabel(int i) {
+        if (i == 5) return config.conInternal() ? "CON loop: Internal" : "CON loop: Cable";
+        return kSettingsMenuLabels[i];
+    }
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
     static constexpr const char*   kColorLabels[] = { "White", "Yellow", "Green", "Cyan", "Red" };
@@ -723,17 +777,21 @@ private:
     // loop order -- "Display", "Plotter", "Tape", or "Tape TFDRIVE2" when
     // there are several), then these actions. Screendump: 7" only (no
     // read-back in the RA8875 driver).
-    enum class DisplayAction { Analyzer, ClearPlotter, ClearScreen, Screendump };
+    enum class DisplayAction { Analyzer, LoopMap, Signals, ClearPlotter, ClearScreen, Screendump };
 #ifdef DISPLAY_7INCH
     static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::Analyzer, DisplayAction::ClearPlotter, DisplayAction::ClearScreen, DisplayAction::Screendump };
-    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Clear plotter", "Clear screen", "Screendump" };
-    static constexpr int kDisplayActionCount = 4;
+        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::ClearPlotter,
+        DisplayAction::ClearScreen, DisplayAction::Screendump };
+    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Clear plotter",
+                                                            "Clear screen", "Screendump" };
+    static constexpr int kDisplayActionCount = 6;
 #else
     static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::Analyzer, DisplayAction::ClearPlotter, DisplayAction::ClearScreen };
-    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Clear plotter", "Clear screen" };
-    static constexpr int kDisplayActionCount = 3;
+        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::ClearPlotter,
+        DisplayAction::ClearScreen };
+    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Clear plotter",
+                                                            "Clear screen" };
+    static constexpr int kDisplayActionCount = 5;
 #endif
     std::vector<CDevice*> viewDevs_;          // Display menu: the view rows
     std::vector<std::string> displayLabels_;  // Display menu: all row labels
@@ -935,6 +993,12 @@ private:
         const DisplayAction action = kDisplayActions[selected_ - views];
         if (action == DisplayAction::Analyzer) {
             withMainCanvas([&]{ plotterview_showAnalyzer(); });
+            close();
+        } else if (action == DisplayAction::LoopMap) {
+            withMainCanvas([&]{ plotterview_showLoopMap(); });
+            close();
+        } else if (action == DisplayAction::Signals) {
+            withMainCanvas([&]{ plotterview_showSignals(); });
             close();
         } else if (action == DisplayAction::ClearPlotter) {
             withMainCanvas([&]{ plotterview_clearPlotter(); });
@@ -1255,7 +1319,7 @@ private:
         state_ = State::SettingsMenu;
         selected_ = 0;
         drawBox();
-        for (int i = 0; i < kSettingsMenuCount; ++i) drawRow(i, kSettingsMenuLabels[i]);
+        for (int i = 0; i < kSettingsMenuCount; ++i) drawRow(i, settingsLabel(i));
     }
 
     void enterSettingsMenuItem() {
@@ -1275,6 +1339,11 @@ private:
             openColumnsMenu();
         } else if (selected_ == 4) {
             openSaverMenu();
+        } else if (selected_ == 5) {
+            // PILBox CON: is the loop the HP-IL cable (OUT -> devices -> IN),
+            // or closed inside HIPI (just HIPI's own devices, no cable needed)?
+            config.setConInternal(!config.conInternal());
+            drawRow(5, settingsLabel(5));
         }
     }
 
@@ -1869,7 +1938,9 @@ private:
             return;
         }
         if (plotterview_output() == DisplayOutput::Plotter ||
-            plotterview_output() == DisplayOutput::Analyzer) {
+            plotterview_output() == DisplayOutput::Analyzer ||
+            plotterview_output() == DisplayOutput::LoopMap ||
+            plotterview_output() == DisplayOutput::Signals) {
             // Screen stays suspended (it's not what's showing) -- just
             // erase the menu box by redrawing the plot underneath it,
             // instead of screen_.resume()'s HP-41 text redraw below.
@@ -2034,7 +2105,7 @@ private:
                 break;
             case State::SettingsMenu:
                 if (index >= 0 && index < kSettingsMenuCount)
-                    drawRow(index, kSettingsMenuLabels[index]);
+                    drawRow(index, settingsLabel(index));
                 break;
             case State::ColorPicker:
                 if (index >= 0 && index < kColorCount)
@@ -2094,6 +2165,8 @@ private:
             case State::LoopbackResult:
                 break;
             case State::I2CScanResult:
+                break;
+            case State::Warning:
                 break;
         }
     }

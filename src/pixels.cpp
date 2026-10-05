@@ -23,7 +23,7 @@ static void rgb332ToRgb888(std::uint8_t colorByte, std::uint8_t& r, std::uint8_t
 // ─── CPixelStrip ────────────────────────────────────────────────────────────
 
 CPixelStrip::CPixelStrip(uint pin, uint count, PIO pio, uint sm)
-    : strip_(PicoLed::addLeds<PicoLed::WS2812B>(pio, sm, pin, count, PicoLed::FORMAT_GRB)),
+    : strip_(PicoLed::addLeds<PicoLed::WS2812B>(pio, sm, pin, count, PIXEL_COLOR_ORDER)),
       count_(count),
       lastR_(count, 0), lastG_(count, 0), lastB_(count, 0),
       currentR_(count, 0), currentG_(count, 0), currentB_(count, 0) {
@@ -185,8 +185,9 @@ void CPixelParser::feed(std::uint8_t c) {
             return;
 
         case State::AwaitRunStart:
-            _runStart = c;
+            _runStart = c;          // pixel number: 1 = first; 0 = all (pattern repeated)
             _runIndex = 0;
+            _runPattern.clear();
             if (_runCount == 0) {
                 MTRC_LOGF("run(%s): count=0, start=%u -- nothing to do",
                                  _run332 ? "RGB332" : "RGB24", _runStart);
@@ -199,8 +200,9 @@ void CPixelParser::feed(std::uint8_t c) {
             return;
 
         case State::AwaitRun332:
-            _strip.setPixelRGB332(static_cast<uint32_t>(_runStart) + _runIndex, c);
+            _runPixel(c, 0, 0, true);
             if (++_runIndex >= _runCount) {
+                _runFinish();
                 _strip.show();
                 MTRC_LOGF("run(RGB332) complete: %u pixel(s) from %u",
                                  _runCount, _runStart);
@@ -219,8 +221,9 @@ void CPixelParser::feed(std::uint8_t c) {
             return;
 
         case State::AwaitRunB:
-            _strip.setPixelRGB(static_cast<uint32_t>(_runStart) + _runIndex, _runR, _runG, c);
+            _runPixel(_runR, _runG, c, false);
             if (++_runIndex >= _runCount) {
+                _runFinish();
                 _strip.show();
                 MTRC_LOGF("run(RGB24) complete: %u pixel(s) from %u",
                                  _runCount, _runStart);
@@ -363,6 +366,34 @@ void CPixelParser::flush() {
     _reset();
 }
 
+// One color of a binary run: to pixel number _runStart + _runIndex (1 =
+// first), or -- with start 0, "all" -- collected as a pattern that
+// _runFinish() repeats over the whole strip
+void CPixelParser::_runPixel(std::uint8_t a, std::uint8_t g, std::uint8_t b, bool is332) {
+    if (_runStart == 0) {
+        if (is332) {
+            std::uint8_t r8, g8, b8;
+            rgb332ToRgb888(a, r8, g8, b8);              // same as setPixelRGB332()
+            _runPattern.push_back({ r8, g8, b8 });
+        } else {
+            _runPattern.push_back({ a, g, b });
+        }
+        return;
+    }
+    const uint32_t index = static_cast<uint32_t>(_runStart) - 1u + _runIndex;
+    if (is332) _strip.setPixelRGB332(index, a);
+    else       _strip.setPixelRGB(index, a, g, b);
+}
+
+void CPixelParser::_runFinish() {
+    if (_runStart != 0 || _runPattern.empty()) return;
+    for (uint32_t i = 0; i < _strip.count(); ++i) {
+        const auto& c = _runPattern[i % _runPattern.size()];
+        _strip.setPixelRGB(i, c[0], c[1], c[2]);
+    }
+    _runPattern.clear();
+}
+
 void CPixelParser::_applyToSelection(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
     if (_selectAll) {
         for (uint32_t i = 0; i < _strip.count(); ++i) _strip.setPixelRGB(i, r, g, b);
@@ -370,8 +401,8 @@ void CPixelParser::_applyToSelection(std::uint8_t r, std::uint8_t g, std::uint8_
     }
     if (_selectFrom < 0) return;  // no selection at all -- nothing to do
     const int32_t to = (_selectTo >= 0) ? _selectTo : _selectFrom;
-    for (int32_t i = _selectFrom; i <= to; ++i) {
-        if (i >= 0) _strip.setPixelRGB(static_cast<uint32_t>(i), r, g, b);
+    for (int32_t i = _selectFrom; i <= to; ++i) {          // pixel numbers start at 1
+        if (i >= 1) _strip.setPixelRGB(static_cast<uint32_t>(i - 1), r, g, b);
     }
 }
 
@@ -382,8 +413,8 @@ void CPixelParser::_applyToSelection332(std::uint8_t colorByte) {
     }
     if (_selectFrom < 0) return;
     const int32_t to = (_selectTo >= 0) ? _selectTo : _selectFrom;
-    for (int32_t i = _selectFrom; i <= to; ++i) {
-        if (i >= 0) _strip.setPixelRGB332(static_cast<uint32_t>(i), colorByte);
+    for (int32_t i = _selectFrom; i <= to; ++i) {          // pixel numbers start at 1
+        if (i >= 1) _strip.setPixelRGB332(static_cast<uint32_t>(i - 1), colorByte);
     }
 }
 
@@ -394,8 +425,8 @@ void CPixelParser::_onOff() {
     }
     if (_selectFrom < 0) return;
     const int32_t to = (_selectTo >= 0) ? _selectTo : _selectFrom;
-    for (int32_t i = _selectFrom; i <= to; ++i) {
-        if (i >= 0) _strip.off(static_cast<uint32_t>(i));
+    for (int32_t i = _selectFrom; i <= to; ++i) {          // pixel numbers start at 1
+        if (i >= 1) _strip.off(static_cast<uint32_t>(i - 1));
     }
 }
 
@@ -406,7 +437,7 @@ void CPixelParser::_onOn() {
     }
     if (_selectFrom < 0) return;
     const int32_t to = (_selectTo >= 0) ? _selectTo : _selectFrom;
-    for (int32_t i = _selectFrom; i <= to; ++i) {
-        if (i >= 0) _strip.on(static_cast<uint32_t>(i));
+    for (int32_t i = _selectFrom; i <= to; ++i) {          // pixel numbers start at 1
+        if (i >= 1) _strip.on(static_cast<uint32_t>(i - 1));
     }
 }

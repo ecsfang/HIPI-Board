@@ -30,7 +30,7 @@ namespace hipi {
 
 // The kinds of view the panel can show (matches ViewKind in hpil.h, plus
 // the Analyzer, which isn't a device's view)
-enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock };
+enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals };
 
 // Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
 enum class TapeHotspot { None, Open, Power, Rewind };
@@ -89,6 +89,15 @@ CDevice* plotterview_viewDevice();
 // swipe order. Leaving it returns to the view shown before.
 void plotterview_showAnalyzer();
 void plotterview_leaveAnalyzer();
+
+// The HP-IL loop map (loopmap.h) -- not a device, not in the swipe order;
+// leaving it returns to the view shown before
+void plotterview_showLoopMap();
+void plotterview_leaveLoopMap();
+
+// HP-IL signal diagnostics (hpil_diag.h) -- like the loop map
+void plotterview_showSignals();
+void plotterview_leaveSignals();
 
 // The clock screen saver (clock.h) -- shown and left without the splash
 void plotterview_showClock();

@@ -262,13 +262,16 @@ Main menu
 │   ├── Font size          0 – 3
 │   ├── Brightness         20 – 100 %
 │   ├── Columns            Characters per line
-│   └── Screen saver       Dim, clock or off; clock style, date and time format
+│   ├── Screen saver       Dim, clock or off; clock style, date and time format
+│   └── CON loop           Cable / Internal: the loop in PILBox's CON mode
 ├── Devices
 │   ├── Enable/disable     Turn HIPI's devices on or off
 │   └── Change order       Change the devices' order on the loop
 └── Display
     ├── Display, Plotter, Tape…    Choose a view (one row per device)
     ├── Analyzer           Watch what happens on the HP-IL loop
+    ├── Loop map           See every device on the loop
+    ├── HP-IL signals      Check the signals on HP-IL IN (troubleshooting)
     ├── Clear plotter
     ├── Clear screen
     └── Screendump         Save the screen as a picture
@@ -432,7 +435,7 @@ LED 1 now flashes briefly once a second, until you send `1C`.
 ### 8.4 Colour pixels — `TFPIXEL`
 
 Controls a strip of colour LEDs (NeoPixels) connected to HIPI. Pixels are chosen
-like the LEDs: a number, `0` for all, or a range like `3-10`.
+like the LEDs: a number (`1` is the first pixel), `0` for all, or a range like `3-10`.
 
 | Send | Means |
 |------|-------|
@@ -493,7 +496,26 @@ corner) shows it on the PILBOX line:
 | `TDIS` | No PC program connected — PILBox just passes frames on |
 | `COFF` | Connected; the HP-41 is the loop's controller |
 | `COFI` | As `COFF`, and idle frames (IDY) are passed to the PC too |
-| `CON` | Connected; the PC program is the loop's controller |
+| `CON` | Connected; the PC program is the loop's controller (see below) |
+
+**CON — the PC as controller.** In CON there is no controller on the HP-IL
+loop: the PC program controls it, and HIPI starts every frame. HIPI's own
+devices are on that loop too: PILBOX's place in the device order
+(**Devices → Change order**) is where the loop begins and ends — the devices
+after PILBOX come first, then the cable (HP-IL OUT → other devices → HP-IL
+IN), then the devices before PILBOX.
+
+**Settings → CON loop** chooses the loop:
+
+- **Cable** (the default) — through the HP-IL cable, so a cable (or other
+  devices) must go from HIPI's OUT back to its IN.
+- **Internal** — closed inside HIPI: the PC reaches HIPI's own devices
+  without any cable.
+
+A warning box (touch to close) appears if a frame doesn't come back round
+the loop within a second (is the cable connected?), or if frames arrive
+that HIPI didn't send — another controller, such as an HP-41, on the loop.
+Only one controller may be on a loop.
 
 <!-- TODO image: replace the placeholder below with:
 <a href="images/example-pyilper.png"><img src="images/example-pyilper.png" alt="pyILPER" width="512"></a> -->
@@ -587,6 +609,46 @@ Press **OK** in the analyzer for its menu:
 | **Idle frames** | Hide or show the loop's idle polling |
 | **Logging >** | **Start** / **Stop**: write everything from now on to a new file, `logs/analyzer_<n>.txt`. **Save**: when not logging, save what the analyzer holds right now to a new file — handy when something just happened. (Not while connected to a PC.) |
 | **Leave view** | Back to the view you came from |
+
+---
+
+### 11.1 The loop map
+
+**Display → Loop map** draws the HP-IL loop as a ring: the controller (usually
+the HP-41) on the left, and every device in loop order around it with its
+address, name, device ID and type. Yellow cards are HIPI's own devices, blue
+ones the devices of a PC program connected through PILBOX (e.g. pyILPER),
+orange ones other devices on the loop. The cards get smaller when there are
+many devices, so up to 30 fit.
+
+**Touch a card** to see everything known about that device — where it is,
+its address, device ID and type, its status, when it was last used and how
+much it has sent and received. Touch again to close the box. **X** leaves the
+map.
+
+<a href="images/loopmap.png"><img src="images/loopmap.png" alt="The loop map" width="512"></a>
+
+HIPI only listens, so the map fills in as the loop is used: the addresses
+come from the HP-41's auto-addressing, a device's type and ID once the
+HP-41 has asked for them (until then the card shows `?`), and devices that
+sit after HIPI on the loop appear the first time the HP-41 talks to them.
+
+---
+
+### 11.2 HP-IL signals (troubleshooting)
+
+If the HP-41 can't reach HIPI (TRANSMIT ERR) although each side passes its
+own loop test, **Display → HP-IL signals** shows what arrives on HIPI's HP-IL
+input, drawn like in the HP-IL specification: the first frame of a capture as
+one line — up for a positive pulse, down for a negative one — with each
+bit's value above it (the first one marked **sync**), the field names below
+(C2 C1 C0 = control, D7…D0 = data), a time scale, and the frame it gives
+(e.g. **SDA**, frame 0x560, ready). Below that: pulse widths, the frame's
+length, and the whole capture (about 4 ms) small, with the name of every
+frame found in it. If the receiver can't make a frame of what arrived, the
+view says after how many bits it gave up.
+
+A new capture every half second while traffic comes in. **X** leaves.
 
 ---
 
