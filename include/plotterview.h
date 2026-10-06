@@ -120,6 +120,11 @@ bool plotterview_isSplashVisible();
 // mode is currently showing.
 void plotterview_clearPlotter();
 
+// Plot view: true = Fit (the plot itself fills the screen), false = Page
+// (the whole P1..P2 area, like the paper). Display -> Plot view.
+void plotterview_setPlotFit(bool fit);
+bool plotterview_plotFit();
+
 // Redraws the current full-screen view from scratch: the plotter output
 // (segments() replayed in full) or the Tape image. Called internally when
 // switching views or when the menu closes back into one (to erase the

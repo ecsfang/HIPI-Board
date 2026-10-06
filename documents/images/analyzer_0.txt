@@ -1,0 +1,26 @@
+HIPI HP-IL analyzer log -- saved buffer, overview
+00:01:21.688  INTERFACE CLEAR
+00:01:21.717  AUTO-ADDRESS   HIPI: TFDISPLAY(1) TFDRIVE(2) TFPLOT(3) addr 4 addr 5 addr 6 addr 7 addr 8
+00:01:21.731  CTRL <- addr 4 (printer)   accessory ID 0x2E (printer)   3.6 ms
+00:01:27.487  AUTO-ADDRESS   HIPI: TFDISPLAY(1) TFDRIVE(2) TFPLOT(3) addr 4 (printer) addr 5 addr 6 addr 7 addr 8
+00:01:27.514  CTRL <- addr 4 (printer)   accessory ID 0x2E (printer)   3.6 ms
+00:01:27.584  AUTO-ADDRESS   HIPI: TFDISPLAY(1) TFDRIVE(2) TFPLOT(3) addr 4 (printer) addr 5 addr 6 addr 7 addr 8
+00:01:27.598  CTRL <- addr 4 (printer)   accessory ID 0x2E (printer)   3.6 ms
+00:01:27.617  CTRL <- addr 5 (display)   accessory ID 0x3E (display)   3.5 ms
+00:01:27.636  CTRL <- addr 6 (mass storage)   accessory ID 0x10 (mass storage)   32.8 ms
+00:01:27.680  CTRL <- addr 6 (mass storage)   status 0   2.4 ms
+00:01:27.851  AUTO-ADDRESS   HIPI: TFDISPLAY(1) TFDRIVE(2) TFPLOT(3) addr 4 (printer) addr 5 (display) addr 6 (mass storage) addr 7 addr 8
+00:01:27.864  CTRL <- addr 4 (printer)   accessory ID 0x2E (printer)   3.6 ms
+00:01:27.906  CTRL -> addr 4 (printer)   "NAME    TYPE     REGS" (23 bytes, CR LF)   241.1 ms
+00:01:28.209  AUTO-ADDRESS   HIPI: TFDISPLAY(1) TFDRIVE(2) TFPLOT(3) addr 4 (printer) addr 5 (display) addr 6 (mass storage) addr 7 addr 8
+00:01:28.224  CTRL <- addr 4 (printer)   accessory ID 0x2E (printer)   3.5 ms
+00:01:28.243  CTRL <- addr 5 (display)   accessory ID 0x3E (display)   3.6 ms
+00:01:28.262  CTRL <- addr 6 (mass storage)   accessory ID 0x10 (mass storage)   4.8 ms
+00:01:28.278  CTRL <- addr 6 (mass storage)   status 0   1.9 ms
+00:01:28.292  addr 6 (mass storage)   DDL 04
+00:01:28.357  addr 6 (mass storage)   SEEK track 0 record 2
+00:01:28.366  CTRL <- addr 6 (mass storage)   status 0   2.1 ms
+00:01:28.388  CTRL <- addr 6 (mass storage)   status 20   2.4 ms
+00:01:28.397  INTERFACE CLEAR
+00:01:28.437  AUTO-ADDRESS   HIPI: TFDISPLAY(1) TFDRIVE(2) TFPLOT(3) addr 4 (printer) addr 5 (display) addr 6 (mass storage) addr 7 addr 8
+00:01:28.513  CTRL <- addr 4 (printer)   accessory ID 0x2E (printer)   3.7 ms

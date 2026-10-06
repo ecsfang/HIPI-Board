@@ -33,7 +33,10 @@ public:
             return;
         }
 
-        char buf[512];
+        // (512 bytes used to be enough -- with several drives and all the
+        // newer settings the file is longer, and anything after byte 511
+        // was silently ignored)
+        static char buf[2048];
         UINT br = 0;
         f_read(&file, buf, sizeof(buf) - 1, &br);
         buf[br] = 0;
@@ -103,7 +106,8 @@ public:
                            static_cast<unsigned>(columns_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
-        n = std::snprintf(line, sizeof(line), "con_loop=%s\n", conInternal_ ? "internal" : "cable");
+        n = std::snprintf(line, sizeof(line), "con_loop=%s\nplot_fit=%d\n", conInternal_ ? "internal" : "cable",
+                          plotFit_ ? 1 : 0);
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
         n = std::snprintf(line, sizeof(line), "saver=%u\nclock_style=%u\nclock_us=%d\nclock_12h=%d\nclock_fallback=%u\n",
@@ -179,6 +183,9 @@ public:
     void setClockStyle(std::uint8_t s) { clockStyle_ = s; save(); }
     bool clockUs() const { return clockUs_; }                     // US date format
     void setClockUs(bool us) { clockUs_ = us; save(); }
+    // Plotter view: fit the plot to the screen (else: the whole page)
+    bool plotFit() const { return plotFit_; }
+    void setPlotFit(bool f) { plotFit_ = f; save(); }
     // PILBox CON mode: the loop closed inside HIPI (no cable needed)
     bool conInternal() const { return conInternal_; }
     void setConInternal(bool in) { conInternal_ = in; save(); }
@@ -247,17 +254,24 @@ private:
     // Very small "key=value" line parser. Unknown keys are ignored, so
     // old config files stay loadable as new keys get added later.
     void parse(const char* buf) {
-        char copy[512];
+        static char copy[2048];
         std::strncpy(copy, buf, sizeof(copy) - 1);
         copy[sizeof(copy) - 1] = 0;
 
         char* line = std::strtok(copy, "\r\n");
         while (line) {
             char* eq = std::strchr(line, '=');
-            if (eq) {
+            while (*line == ' ' || *line == '\t') ++line;
+            if (eq && *line != '#') {               // ('#': a comment line)
+                // Spaces around the key and the value are allowed
+                char* keyEnd = eq;
+                while (keyEnd > line && (keyEnd[-1] == ' ' || keyEnd[-1] == '\t')) --keyEnd;
+                *keyEnd = 0;
                 *eq = 0;
+                char* value = eq + 1;
+                while (*value == ' ' || *value == '\t') ++value;
+                for (char* e = value + std::strlen(value); e > value && (e[-1] == ' ' || e[-1] == '\t'); --e) e[-1] = 0;
                 const char* key = line;
-                const char* value = eq + 1;
                 if (std::strncmp(key, "media.", 6) == 0) {
                     driveMedia_[key + 6] = value;
                 } else if (std::strcmp(key, "filename") == 0) {
@@ -284,6 +298,8 @@ private:
                     clockStyle_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "clock_us") == 0) {
                     clockUs_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "plot_fit") == 0) {
+                    plotFit_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "con_loop") == 0) {
                     conInternal_ = std::strcmp(value, "internal") == 0;
                 } else if (std::strcmp(key, "clock_12h") == 0) {
@@ -325,6 +341,7 @@ private:
     bool          clockUs_    = false;
     bool          clock12h_   = false;
     bool          conInternal_ = false;   // con_loop=cable|internal
+    bool          plotFit_     = true;    // plot_fit=1|0
     std::uint8_t  clockFallback_ = 3;  // SaverRain
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).

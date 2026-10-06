@@ -30,7 +30,7 @@
 // TEST_DISPLAY too (runs first, see the call site below).
 //#define TEST_FONT
 
-#define HIPI_VERSION_TEXT "v3.2beta"
+#define HIPI_VERSION_TEXT "v3.1beta"
 
 #include <stdlib.h>
 #include <cstring>
@@ -488,6 +488,7 @@ int main() {
     // Wire up the plotter's live-draw callbacks now that display/screen/
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
+    hipi::plotterview_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
     hipi::loopmap_init(display);             // HP-IL loop map (Display -> Loop map)
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)

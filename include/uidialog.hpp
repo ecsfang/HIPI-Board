@@ -777,21 +777,21 @@ private:
     // loop order -- "Display", "Plotter", "Tape", or "Tape TFDRIVE2" when
     // there are several), then these actions. Screendump: 7" only (no
     // read-back in the RA8875 driver).
-    enum class DisplayAction { Analyzer, LoopMap, Signals, ClearPlotter, ClearScreen, Screendump };
+    enum class DisplayAction { Analyzer, LoopMap, Signals, PlotView, ClearPlotter, ClearScreen, Screendump };
 #ifdef DISPLAY_7INCH
     static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::ClearPlotter,
-        DisplayAction::ClearScreen, DisplayAction::Screendump };
-    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Clear plotter",
-                                                            "Clear screen", "Screendump" };
-    static constexpr int kDisplayActionCount = 6;
+        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::PlotView,
+        DisplayAction::ClearPlotter, DisplayAction::ClearScreen, DisplayAction::Screendump };
+    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Plot view",
+                                                            "Clear plotter", "Clear screen", "Screendump" };
+    static constexpr int kDisplayActionCount = 7;
 #else
     static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::ClearPlotter,
-        DisplayAction::ClearScreen };
-    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Clear plotter",
-                                                            "Clear screen" };
-    static constexpr int kDisplayActionCount = 5;
+        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::PlotView,
+        DisplayAction::ClearPlotter, DisplayAction::ClearScreen };
+    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Plot view",
+                                                            "Clear plotter", "Clear screen" };
+    static constexpr int kDisplayActionCount = 6;
 #endif
     std::vector<CDevice*> viewDevs_;          // Display menu: the view rows
     std::vector<std::string> displayLabels_;  // Display menu: all row labels
@@ -942,7 +942,13 @@ private:
             displayLabels_.push_back(plotterview_viewTitle(viewDevs_[i]));
             if (viewDevs_[i] == plotterview_viewDevice()) selected_ = static_cast<int>(i);
         }
-        for (int i = 0; i < kDisplayActionCount; ++i) displayLabels_.push_back(kDisplayActionLabels[i]);
+        for (int i = 0; i < kDisplayActionCount; ++i) {
+            // (Plot view shows its current setting)
+            if (kDisplayActions[i] == DisplayAction::PlotView)
+                displayLabels_.push_back(plotterview_plotFit() ? "Plot view: Fit" : "Plot view: Page");
+            else
+                displayLabels_.push_back(kDisplayActionLabels[i]);
+        }
         displayScroll_ = 0;
         keepDisplaySelectionVisible();
         drawBox();
@@ -999,6 +1005,12 @@ private:
             close();
         } else if (action == DisplayAction::Signals) {
             withMainCanvas([&]{ plotterview_showSignals(); });
+            close();
+        } else if (action == DisplayAction::PlotView) {
+            // Fit <-> Page; saved. Shown at once if the plotter view is showing.
+            const bool fit = !plotterview_plotFit();
+            config.setPlotFit(fit);
+            withMainCanvas([&]{ plotterview_setPlotFit(fit); });
             close();
         } else if (action == DisplayAction::ClearPlotter) {
             withMainCanvas([&]{ plotterview_clearPlotter(); });

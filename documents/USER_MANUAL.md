@@ -21,9 +21,10 @@
 9. [Connecting to a PC](#9-connecting-to-a-pc)
 10. [Screen dumps](#10-screen-dumps)
 11. [The HP-IL analyzer](#11-the-hp-il-analyzer)
-12. [Updating the software](#12-updating-the-software)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Words you may meet](#14-words-you-may-meet)
+12. [The settings file, CONFIG.TXT](#12-the-settings-file-configtxt)
+13. [Updating the software](#13-updating-the-software)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Words you may meet](#15-words-you-may-meet)
 
 ---
 
@@ -70,7 +71,7 @@ Cassettes are simply files on a micro-SD card, so you never run out of tape.
 ### 3.1 Prepare the SD card
 
 The HIPI download contains two things: the software (a `.uf2` file, see
-[chapter 12](#12-updating-the-software)) and a **zip file with everything the SD
+[chapter 13](#13-updating-the-software)) and a **zip file with everything the SD
 card needs**.
 
 1. Unzip the SD card zip.
@@ -188,7 +189,8 @@ the screen and doesn't press anything.
 
 **The clock needs a clock chip** (a DS3231 real-time clock module) connected
 to HIPI, with its battery. Without it — or before its time has been set —
-the screen saver dims instead.
+the screen saver shows what **No clock** says instead: HP-IL rain, the geese,
+either of them at random, or just dimming.
 
 **Setting the time:** connect HIPI to a computer with USB, open the debug
 serial port in a terminal program (on Linux usually `/dev/ttyACM0`), type
@@ -200,6 +202,21 @@ time 2026-10-03 14:05
 and press Enter (seconds can be added: `14:05:30`). Typing `time` alone shows
 the clock's current time. The clock keeps its time on its battery, also
 when HIPI is switched off.
+
+**HP-IL rain.** A nod to *The Matrix*: instead of green code, HP-IL messages
+rain down the screen — `RFC`, `TAD 01`, `SDA`, `DAB 41` — each column at its
+own speed, with a bright head and a fading trail. Whenever there is traffic
+on the loop, the rain is made of the real frames HIPI sees passing by; when
+the loop is quiet, it makes them up.
+
+<a href="images/saver_rain.png"><img src="images/saver_rain.png" alt="The HP-IL rain screen saver" width="512"></a>
+
+**Goose.** Every HP-41 owner knows the little goose that flies across the
+display while a program runs. Here it has left the calculator: flocks of
+geese, big and small, fly across the screen from left to right, each at its
+own speed — the program is still running somewhere.
+
+<a href="images/saver_goose.png"><img src="images/saver_goose.png" alt="The goose screen saver" width="512"></a>
 
 ---
 
@@ -216,6 +233,16 @@ program listings. Scroll back with ▲ and ▼.
 
 Shows what the HP-41 draws on the plotter (`TFPLOT`). The drawing keeps growing
 while you look at other views. Clear it with **Display → Clear plotter**.
+
+**Display → Plot view** chooses how the drawing is placed on the screen:
+
+- **Fit** (the default) — the drawing itself, with a small margin, as large
+  as the screen allows and centred. It grows along as more is drawn.
+- **Page** — the plotter's whole drawing area, like the paper. The HP-41's
+  plots don't sit in the middle of it (the plotter module leaves room for
+  the axis labels), so they look shifted up and to the right.
+
+Both keep the proportions: circles stay round and text undistorted.
 
 <a href="images/view-plotter.png"><img src="images/view-plotter.png" alt="Plotter view" width="512"></a>
 
@@ -272,6 +299,7 @@ Main menu
     ├── Analyzer           Watch what happens on the HP-IL loop
     ├── Loop map           See every device on the loop
     ├── HP-IL signals      Check the signals on HP-IL IN (troubleshooting)
+    ├── Plot view          Fit (the drawing fills the screen) / Page (like the paper)
     ├── Clear plotter
     ├── Clear screen
     └── Screendump         Save the screen as a picture
@@ -461,9 +489,7 @@ Full red is 7 × 32 = 224:
 
 A few colours: red 224, green 28, blue 3, yellow 252, white 255.
 
-<!-- TODO image: replace the placeholder below with:
-![Colour pixels](images/example-pixels.jpg) -->
-> 📷 **Image placeholder:** A pixel strip lit up by HIPI (`images/example-pixels.jpg`)
+<a href="images/example-pixels.jpg"><img src="images/example-pixels.jpg" alt="A pixel strip lit up by HIPI" width="512"></a>
 
 ### 8.5 Terminal — `TFTERM`
 
@@ -571,9 +597,7 @@ a page, hold to keep scrolling), **X** jumps to the newest line, **Shift + X**
 clears it. **Touch the middle of the screen** to pause: the screen freezes
 with a red PAUSED banner while recording goes on; touch again to resume.
 
-<!-- TODO image: replace the placeholder below with:
-![The analyzer](images/analyzer-overview.png) -->
-> 📷 **Image placeholder:** The analyzer view in overview mode (`images/analyzer-overview.png`)
+<a href="images/analyzer-overview.png"><img src="images/analyzer-overview.png" alt="The analyzer view in overview mode" width="512"></a>
 
 **Overview** (the default) shows one line per event:
 
@@ -637,8 +661,8 @@ sit after HIPI on the loop appear the first time the HP-41 talks to them.
 
 ### 11.2 HP-IL signals (troubleshooting)
 
-If the HP-41 can't reach HIPI (TRANSMIT ERR) although each side passes its
-own loop test, **Display → HP-IL signals** shows what arrives on HIPI's HP-IL
+If the HP-41 can't reach HIPI (TRANSMIT ERR) or if you experience other errors
+you could check the signal, **Display → HP-IL signals** shows what actually arrives on HIPI's HP-IL
 input, drawn like in the HP-IL specification: the first frame of a capture as
 one line — up for a positive pulse, down for a negative one — with each
 bit's value above it (the first one marked **sync**), the field names below
@@ -650,9 +674,109 @@ view says after how many bits it gave up.
 
 A new capture every half second while traffic comes in. **X** leaves.
 
+<a href="images/signal-overview.png"><img src="images/signal-overview.png" alt="The signal viewer" width="512"></a>
+
 ---
 
-## 12. Updating the software
+## 12. The settings file, CONFIG.TXT
+
+HIPI keeps its settings in `CONFIG.TXT` in the root of the SD card. It
+creates the file itself at the first start and writes it again whenever a
+setting is changed in the menus — so normally you never need to touch it.
+But it is a plain text file, and it can be edited on a computer: take the SD
+card out, or connect HIPI with USB (**Config → Connect to PC**) and open it
+on the SD card drive. The new settings are used at the next start.
+
+**The format:** one setting per line, `name=value`. Spaces around the name
+and the value are allowed; lines starting with `#` are ignored, and so are
+names HIPI doesn't know. Settings missing from the file get their default
+value.
+
+> **Good to know:** as HIPI writes the whole file again when you change a
+> setting in a menu, your own comments and the order of the lines are not
+> kept — only the settings themselves.
+
+### The settings
+
+**Cassettes**
+
+| Setting | Values | Default | What it is |
+|---------|--------|---------|------------|
+| `media.<drive>` | a file name | — | The cassette in a drive: a LIF file in the `lif/` folder, e.g. `media.TFDRIVE=GAMES.DAT`. One line per drive. Empty = no cassette. (`filename=` from older versions still works for `TFDRIVE`.) |
+| `drive_standby` | `0` / `1` | `0` | The cassette drive's power switch at start: `0` = ON, `1` = STANDBY. (OFF = the drive switched off with `disabled_devices`.) |
+
+**Screen**
+
+| Setting | Values | Default | What it is |
+|---------|--------|---------|------------|
+| `textcolor` | `0`–`65535` | `65535` | Text colour of the display view, as an RGB565 number. The menu's colours: `65535` white, `65504` yellow, `2016` green, `2047` cyan, `63488` red — any other RGB565 value works too. |
+| `fontsize` | `0`–`3` | `0` | Text size of the display view (**Settings → Font size**). |
+| `columns` | `0`, `1`–`100` | `0` | Characters per line; `0` = as many as fit. (The menu offers 25, 32 — the HP 82163's own — 33, 50 and 100.) |
+| `brightness` | `0`–`255` | `255` | Backlight. The menu's steps: `51`, `102`, `153`, `204`, `255` (20–100 %). |
+| `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
+
+**Screen saver** (see [4.3](#43-screen-saver-and-clock))
+
+| Setting | Values | Default | What it is |
+|---------|--------|---------|------------|
+| `saver` | `0`–`5` | `0` | What happens after 10 minutes without use: `0` Dim, `1` Clock, `2` Off, `3` HP-IL rain, `4` Goose, `5` Random (rain or goose). |
+| `clock_fallback` | `0`, `3`, `4`, `5` | `3` | What Clock mode shows without a usable clock chip: `0` Dim, `3` HP-IL rain, `4` Goose, `5` Random. |
+| `clock_style` | `0` / `1` | `0` | `0` Dark (light on black), `1` LCD (dark on light). |
+| `clock_us` | `0` / `1` | `0` | Date format: `0` EU `2026-10-03`, `1` US `10/03/2026`. |
+| `clock_12h` | `0` / `1` | `0` | Time: `0` 24 h, `1` 12 h with AM/PM. |
+
+**Devices and the loop**
+
+| Setting | Values | Default | What it is |
+|---------|--------|---------|------------|
+| `disabled_devices` | device names, comma-separated | (empty) | Devices switched off — not on the HP-IL loop (**Devices → Enable/disable**). |
+| `device_order` | device names, comma-separated | (empty = the standard order) | The devices' order on the loop (**Devices → Change order**). Devices not in the list come after the listed ones; unknown names are ignored. |
+| `con_loop` | `cable` / `internal` | `cable` | PILBox CON mode: the loop through the HP-IL cable, or closed inside HIPI (**Settings → CON loop**). |
+
+The device names: `TFDISPLAY`, `TFDRIVE`, `TFLEDS`, `TFPIXEL`, `TFTEMP`,
+`PILBOX`, `TFPLOT`, `TFTERM` — in capitals, and no spaces in the lists.
+
+**Logging and screen dumps**
+
+| Setting | Values | Default | What it is |
+|---------|--------|---------|------------|
+| `trace` | `0` / `1` | `0` | Log every HP-IL frame on the USB debug port (**Config → Trace → On**). |
+| `debug` | `0` / `1` | `0` | Extended trace: more detail, e.g. the PC link (**Config → Trace → Extended** sets both). |
+| `screendump_next` | a number | `0` | The number the next screen dump gets: `screenshots/screendump_<n>.bmp`. |
+
+### An example
+
+A HIPI with the text in green and a little larger, 32 characters per line
+like the original video interface, the backlight at 80 %, the clock as
+screen saver in LCD style with US date and 12-hour time (the geese if the
+clock chip is missing), a cassette, the LEDs and the terminal switched off,
+and PILBOX first on the loop:
+
+```
+# My HIPI
+media.TFDRIVE=GAMES.DAT
+drive_standby=0
+textcolor=2016
+fontsize=1
+columns=32
+brightness=204
+plot_fit=1
+saver=1
+clock_fallback=4
+clock_style=1
+clock_us=1
+clock_12h=1
+disabled_devices=TFLEDS,TFTERM
+device_order=PILBOX,TFDISPLAY,TFDRIVE,TFPIXEL,TFTEMP,TFPLOT,TFLEDS,TFTERM
+con_loop=cable
+trace=0
+debug=0
+screendump_next=12
+```
+
+---
+
+## 13. Updating the software
 
 A new version comes as a `.uf2` file, `hipi_7_pico.uf2`, in the HIPI download.
 
@@ -674,7 +798,7 @@ card files, they are in the SD card zip of that download.
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 | Problem | Try this |
 |---------|----------|
@@ -689,7 +813,7 @@ log helps whoever looks at the problem.
 
 ---
 
-## 14. Words you may meet
+## 15. Words you may meet
 
 - **HP-IL** — HP's cable system that connects the HP-41 to its peripherals.
 - **Loop** — HP-IL devices are connected in a ring, from OUT to IN, back to the

@@ -48,19 +48,59 @@ constexpr double kFitH = kPlotH * kScale;
 constexpr double kOffsetX = (SCREEN_MAX_X - kFitW) / 2.0;
 constexpr double kOffsetY = (SCREEN_MAX_Y - kFitH) / 2.0;
 
+// The mapping in use. Two ways to show the plot (Display -> Plot view):
+//  Page -- the whole P1..P2 area (10000 x 7200 units) fitted to the screen,
+//          centred: what the paper would show, but the HP-41's plots don't
+//          sit in the middle of it (room for the axis labels, left/bottom).
+//  Fit  -- the plot itself (the bounding box of everything drawn, plus a
+//          margin) fitted to the screen and centred, so it uses the screen
+//          best. Grows (with some slack) as the plot grows.
+// Both keep the aspect ratio -- circles stay round, text undistorted.
+double mapOX_ = kP1X, mapOY_ = kP1Y;      // plotter units at the content's left / bottom
+double mapScale_ = kScale;                // pixels per plotter unit
+double mapDX_ = kOffsetX, mapDY_ = kOffsetY, mapH_ = kFitH;
+double fitX0_ = 0, fitY0_ = 0, fitX1_ = -1, fitY1_ = -1;   // Fit: the area shown (units)
+
+void setPageMapping() {
+    mapOX_ = kP1X; mapOY_ = kP1Y; mapScale_ = kScale;
+    mapDX_ = kOffsetX; mapDY_ = kOffsetY; mapH_ = kFitH;
+    fitX0_ = 0; fitY0_ = 0; fitX1_ = -1; fitY1_ = -1;
+}
+
+// Shows the plotter-unit area x0..x1, y0..y1 (plus `margin` of its size
+// on each side) as large as fits, centred
+void setFitMapping(double x0, double y0, double x1, double y1, double margin) {
+    double w = std::max(x1 - x0, 200.0), h = std::max(y1 - y0, 200.0);
+    const double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    w *= 1 + 2 * margin;
+    h *= 1 + 2 * margin;
+    fitX0_ = cx - w / 2; fitX1_ = cx + w / 2;
+    fitY0_ = cy - h / 2; fitY1_ = cy + h / 2;
+    double s = std::min(SCREEN_MAX_X / w, SCREEN_MAX_Y / h);
+    s = std::min(s, kScale * 4);                       // a tiny plot: not more than 4x the page
+    mapScale_ = s;
+    mapOX_ = fitX0_;
+    mapOY_ = fitY0_;
+    mapH_ = h * s;
+    mapDX_ = (SCREEN_MAX_X - w * s) / 2;
+    mapDY_ = (SCREEN_MAX_Y - mapH_) / 2;
+}
+
+bool plotFit_ = true;                     // Display -> Plot view (config plot_fit)
+
 std::int16_t mapX(std::int16_t px) {
     // round(), not a truncating cast -- at our scale (the whole 10000x7200
     // unit P1-P2 page squeezed into 800x480 pixels, ~15 units/pixel), thin
     // details like a minus sign or a comma's tail are only 1-2 pixels to
     // begin with, so truncation's systematic downward bias makes it easy
     // to lose them entirely.
-    return static_cast<std::int16_t>(std::lround(kOffsetX + (static_cast<double>(px) - kP1X) * kScale));
+    return static_cast<std::int16_t>(std::lround(mapDX_ + (static_cast<double>(px) - mapOX_) * mapScale_));
 }
 
 std::int16_t mapY(std::int16_t py) {
     // Flip vertical: plotter Y grows "up" (away from the origin), pixel Y
     // grows down the screen. Same rounding note as mapX() above.
-    return static_cast<std::int16_t>(std::lround(kOffsetY + kFitH - (static_cast<double>(py) - kP1Y) * kScale));
+    return static_cast<std::int16_t>(std::lround(mapDY_ + mapH_ - (static_cast<double>(py) - mapOY_) * mapScale_));
 }
 
 // The plot is drawn like on real plotter paper: dark pens on white.
@@ -115,6 +155,19 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
                    std::int16_t x1, std::int16_t y1, std::uint8_t pen) {
     backlight_activity();        // new drawing: screen in use (backlight.h)
     if (output_ != DisplayOutput::Plotter) return;
+    // Fit: a segment outside what's shown -- fit again, with slack so it
+    // doesn't happen at every step while the plot grows, and redraw
+    if (plotFit_ && (fitX1_ < fitX0_ ||
+                     std::min(x0, x1) < fitX0_ || std::max(x0, x1) > fitX1_ ||
+                     std::min(y0, y1) < fitY0_ || std::max(y0, y1) > fitY1_)) {
+#ifndef DISPLAY_7INCH
+        if (!boardui_isMenuOpen())                // (5": the menu owns the screen while open)
+#endif
+        {
+            plotterview_redraw();                 // (refits to all segments, this one included)
+            return;
+        }
+    }
 #ifndef DISPLAY_7INCH
     // FIXED: was checking screen_->isSuspended() here -- but
     // switchView() itself calls screen_->suspend() the moment
@@ -732,6 +785,19 @@ void plotterview_redraw() {
         return;
     }
     if (output_ != DisplayOutput::Plotter) return;
+    // The mapping: the whole page, or (Fit) the plot itself with a margin
+    // -- 5 % when fitted afresh here, so it has room to grow a little
+    setPageMapping();
+    if (plotFit_ && !plotter_->segments().empty()) {
+        double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        for (const PlotSegment& seg : plotter_->segments()) {
+            x0 = std::min(x0, static_cast<double>(std::min(seg.x0, seg.x1)));
+            x1 = std::max(x1, static_cast<double>(std::max(seg.x0, seg.x1)));
+            y0 = std::min(y0, static_cast<double>(std::min(seg.y0, seg.y1)));
+            y1 = std::max(y1, static_cast<double>(std::max(seg.y0, seg.y1)));
+        }
+        setFitMapping(x0, y0, x1, y1, 0.05);
+    }
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kPaperColor);
     for (const PlotSegment& seg : plotter_->segments()) {
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
@@ -1045,6 +1111,12 @@ void plotterview_cycleOutput(bool forward) {
     // No device has a view at all: the text display is always there
     switchView(DisplayOutput::Display, nullptr);
 }
+
+void plotterview_setPlotFit(bool fit) {
+    plotFit_ = fit;
+    if (output_ == DisplayOutput::Plotter) plotterview_redraw();
+}
+bool plotterview_plotFit() { return plotFit_; }
 
 void plotterview_clearPlotter() {
     plotter_->clear();   // resets state + segments_; fires onPlotterClear() above

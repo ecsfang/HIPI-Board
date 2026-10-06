@@ -289,7 +289,9 @@ void CPixelParser::feed(std::uint8_t c) {
                 _reset();  // no active command -- nothing to finalize
                 return;
             }
-            if (c == '0' && _selectFrom < 0) {
+            // A '0' on its own means all pixels -- but not inside a number
+            // ("10", "20", "100" are pixel numbers)
+            if (c == '0' && _selectFrom < 0 && !_hasDigit) {
                 _selectAll = true;
                 return;
             }
