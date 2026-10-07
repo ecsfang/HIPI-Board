@@ -8,6 +8,7 @@
 #include "clock.h"
 #include "loopmap.h"
 #include "hpil_diag.h"
+#include "chartable.h"
 #include "backlight.h"
 #include <cctype>
 #include <vector>
@@ -245,6 +246,7 @@ const char* outputName(DisplayOutput mode) {
         case DisplayOutput::Clock:    return "CLOCK";
         case DisplayOutput::LoopMap:  return "LOOP MAP";
         case DisplayOutput::Signals:  return "HP-IL SIGNALS";
+        case DisplayOutput::CharTable: return "CHARACTERS";
     }
     return "?";
 }
@@ -764,6 +766,10 @@ bool plotterview_isAvailable(DisplayOutput mode) {
 }
 
 void plotterview_redraw() {
+    if (output_ == DisplayOutput::CharTable) {
+        chartable_drawAll();
+        return;
+    }
     if (output_ == DisplayOutput::Signals) {
         hpil_diag_drawAll();
         return;
@@ -973,6 +979,29 @@ void plotterview_leaveSignals() {
         switchView(outputFor(beforeSignals_->viewKind()), beforeSignals_);
     } else {
         switchView(DisplayOutput::Display, nullptr);
+    }
+}
+
+// The view to go back to when the character table closes
+static CDevice* beforeCharTable_ = nullptr;
+static DisplayOutput beforeCharTableOutput_ = DisplayOutput::Display;
+
+void plotterview_showCharTable() {
+    if (output_ == DisplayOutput::CharTable) return;
+    beforeCharTable_ = viewDevice_;
+    beforeCharTableOutput_ = output_;
+    switchView(DisplayOutput::CharTable, nullptr, /*splash=*/false);
+}
+
+void plotterview_leaveCharTable() {
+    if (output_ != DisplayOutput::CharTable) return;
+    const DisplayOutput o = beforeCharTableOutput_;
+    if (o == DisplayOutput::Analyzer || o == DisplayOutput::LoopMap || o == DisplayOutput::Signals) {
+        switchView(o, nullptr, false);
+    } else if (deviceHasView(beforeCharTable_)) {
+        switchView(outputFor(beforeCharTable_->viewKind()), beforeCharTable_, false);
+    } else {
+        switchView(DisplayOutput::Display, nullptr, false);
     }
 }
 

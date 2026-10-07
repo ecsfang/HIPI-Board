@@ -22,6 +22,13 @@ extern hipi::Config config;      // pico_main.cpp
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
 #include "i2c_device.h"       // CI2CBus::scan(), for "Scan I2C"
 #include "touch.h"            // touch_i2c, the bus "Scan I2C" scans
+#include "glyph_font.h"       // menu titles in the HP-41 font
+
+// Menu titles in the HP-41 display font (1) or the built-in font (0)
+#ifndef HIPI_MENU_TITLE_HP41FONT
+#define HIPI_MENU_TITLE_HP41FONT 1
+#endif
+namespace hipi { extern const GlyphFont kMenuTitleFont; }   // src/menu_font_title.cpp
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -75,6 +82,12 @@ namespace MenuFrame {
     // = 32px at scale 1) with a bit of breathing room.
     constexpr int RowPitch = 36;
 
+    // The menus' title band, above the rows: the frame starts TitleH
+    // higher than Y (rows still start at Y + 20)
+    constexpr int TitleH = 30;
+    constexpr int MenuTop = Y - TitleH;
+    constexpr int MenuH = H + TitleH;
+
     // Thick, rounded frame: fill the whole box yellow (rounded corners),
     // then lay a smaller rounded black rectangle on top, inset by
     // BorderThickness on each side -> leaves an even yellow border.
@@ -91,24 +104,23 @@ namespace MenuFrame {
         // whichever mode was last active" convention (see txtSize()
         // just above, and Screen.cpp's own comment on why).
         d->selectBuiltinFont();
-        // Pre-clear the full (sharp-cornered) bounding rectangle to black
-        // FIRST -- fillRoundRect() below only paints the rounded SHAPE
-        // itself, deliberately leaving the four small square "cutout"
-        // corners (outside the arc, inside this bounding box) completely
-        // untouched. Without this, those four corners show whatever was
-        // last sitting in that part of the menu's own PIP layer SDRAM
-        // (never otherwise cleared to a known state between draws) --
-        // confirmed as visible garbage/noise peeking out right at the
-        // rounded corners on real hardware. This makes them a clean,
-        // uniform black instead (matching the box's own interior, drawn
-        // right after), regardless of whatever stale content -- old menu
-        // text, a differently-sized box from a previous dialog, or plain
-        // uninitialized memory -- was there before. Cheap (one extra
-        // hardware-accelerated fill) and invisible to the user either
-        // way, since every draw here happens to the offscreen PIP layer,
-        // revealed only once by showPipOverlay() after everything's done
-        // (see handleButton()'s own end-of-function sequence).
-        d->fillRect(x, y, w, h, 0x0000);
+        // The four small corners outside the rounded shape show what's
+        // BEHIND the box, so it really looks round (they used to be
+        // filled black). On the 7" panel the box is drawn on the menu
+        // layer, shown as a PIP window on top of the panel: what's behind
+        // is first copied there from the panel (BTE, inside the display
+        // chip) -- otherwise the corners would show stale layer memory. On
+        // the 5" panel the box is drawn straight onto the screen.
+#ifdef DISPLAY_7INCH
+        if (d->canvasAddr() == LT7683::kMenuLayerAddr) {
+            d->copyLayerRegion(0, SCREEN_MAX_X, static_cast<std::int16_t>(x), static_cast<std::int16_t>(y),
+                               LT7683::kMenuLayerAddr, SCREEN_MAX_X, static_cast<std::int16_t>(x),
+                               static_cast<std::int16_t>(y), static_cast<std::uint16_t>(w),
+                               static_cast<std::uint16_t>(h));
+        } else {
+            d->fillRect(x, y, w, h, 0x0000);   // (another layer: no panel picture to show)
+        }
+#endif
         d->fillRoundRect(x, y, w, h, CornerRadius, Yellow);
         const int innerRadius = CornerRadius > BorderThickness
                                      ? CornerRadius - BorderThickness : 0;
@@ -138,6 +150,9 @@ public:
     // unconditionally). boardui.cpp registers this to actually hide the
     // button strip -- UiDialog itself has no access to that (it lives
     // in a different file/namespace), only to its own menu state.
+    // Shown in System -> About
+    void setVersion(const char* v) { version_ = v; }
+
     void setExitRequestedCallback(std::function<void()> cb) {
         onExitRequested_ = std::move(cb);
     }
@@ -220,15 +235,15 @@ public:
     // without going through the menu (the PC ejected the drive, see
     // usbMscPollHostEject()).
     void refreshUsbMscRow() {
-        if (state_ != State::ConfigMenu) return;
+        if (state_ != State::List || title_ != "SYSTEM") return;
 #ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
 #endif
-        highlightRow(2, selected_ == 2);
+        drawItems();
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
     }
 
@@ -240,7 +255,7 @@ public:
         if (state_ != State::Closed) return;
         pickerFromTape_ = true;
 #ifndef DISPLAY_7INCH
-        screen_.suspend();   // same as openMainMenu()
+        screen_.suspend();   // same as menuOpening()
 #endif
         d_->setTextCursorVisible(false, false);
 #ifdef DISPLAY_7INCH
@@ -250,7 +265,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
     }
 
@@ -275,16 +290,13 @@ public:
         d_->beginOverlayDraw();
 #endif
         state_ = State::Warning;
+        title_ = title;
         drawBox();
-        d_->txtSize(1);
-        d_->txtColor(MenuFrame::Yellow, 0x0000);
-        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-        d_->txtWrite(title);
         d_->txtSize(0);
         d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch + 8);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
         d_->txtWrite(line1);
-        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch + 32);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 44);
         d_->txtWrite(line2);
         d_->txtColor(0x7BEF, 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + MenuFrame::H - 40);
@@ -292,7 +304,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
     }
     bool isShowingWarning() const { return state_ == State::Warning; }
@@ -308,7 +320,7 @@ public:
         // path from handleButton(), which normally provides the
         // beginOverlayDraw()/endOverlayDraw()+showPipOverlay() wrapping
         // every other menu-drawing call in this file relies on (see
-        // handleButton()'s own end-of-function sequence). openConfigMenu()
+        // handleButton()'s own end-of-function sequence). openSystemMenu()
         // below draws menu content exactly like any other open*Menu(), so
         // it needs that same wrapping here explicitly, or it would (on
         // the 7" panel) draw straight to the main window's canvas instead
@@ -317,11 +329,11 @@ public:
 #ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
 #endif
-        openConfigMenu();
+        openSystemMenu();
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
     }
 
@@ -337,11 +349,11 @@ public:
 #ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
 #endif
-        openConfigMenu();
+        openSystemMenu();
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
     }
 
@@ -450,10 +462,12 @@ public:
                     plotterview_leaveLoopMap();
                 } else if (plotterview_output() == DisplayOutput::Signals && b == Button::X) {
                     plotterview_leaveSignals();
+                } else if (plotterview_output() == DisplayOutput::CharTable) {
+                    withMainCanvas([] { plotterview_leaveCharTable(); });   // any button closes it
                 } else if (plotterview_output() == DisplayOutput::Analyzer) {
                     // The Analyzer view: its own menu, and the arrows scroll
                     // its log instead of the HP-41 text
-                    if (b == Button::Ok)        openAnalyzerMenu();
+                    if (b == Button::Ok)        openContextMenu();
                     else if (b == Button::Up)   analyzer_scroll(shifted ? analyzer_pageRows() : 1);
                     else if (b == Button::Down) analyzer_scroll(shifted ? -analyzer_pageRows() : -1);
                     else if (b == Button::X) {
@@ -461,7 +475,7 @@ public:
                         else         analyzer_scrollToLive();
                     }
                 } else if (b == Button::Ok) {
-                    openMainMenu();
+                    openContextMenu();
                 } else if (b == Button::Up) {
                     // Up = scroll further into history (older content).
                     // With Shift: a whole page (one screen's worth of rows).
@@ -476,58 +490,15 @@ public:
                 }
                 break;
 
-            case State::MainMenu:
-                if (b == Button::Up)   moveSelection(-1, kMainMenuCount);
-                if (b == Button::Down) moveSelection(+1, kMainMenuCount);
-                if (b == Button::Ok)   enterMainMenuItem();
-                if (b == Button::X)    close();
-                break;
-
-            case State::ConfigMenu:
-                if (b == Button::Up)   moveSelection(-1, kConfigMenuCount);
-                if (b == Button::Down) moveSelection(+1, kConfigMenuCount);
-                if (b == Button::Ok)   enterConfigMenuItem();
-                if (b == Button::X)    openMainMenu();
-                break;
-
-            case State::SettingsMenu:
-                if (b == Button::Up)   moveSelection(-1, kSettingsMenuCount);
-                if (b == Button::Down) moveSelection(+1, kSettingsMenuCount);
-                if (b == Button::Ok)   enterSettingsMenuItem();
-                if (b == Button::X)    openMainMenu();
-                break;
-
-            case State::ColorPicker:
-                if (b == Button::Up)   moveSelection(-1, kColorCount);
-                if (b == Button::Down) moveSelection(+1, kColorCount);
-                if (b == Button::Ok)   { applyColor(selected_); openSettingsMenu(); }
-                if (b == Button::X)    openSettingsMenu();
-                break;
-
-            case State::FontSizeMenu:
-                if (b == Button::Up)   moveSelection(-1, kFontSizeCount);
-                if (b == Button::Down) moveSelection(+1, kFontSizeCount);
-                if (b == Button::Ok)   { applyFontSize(selected_); openSettingsMenu(); }
-                if (b == Button::X)    openSettingsMenu();
-                break;
-
-            case State::BrightnessMenu:
-                // Live preview: the actual screen brightness follows the
-                // cursor as it moves, so the user sees what they're
-                // about to pick rather than just a highlighted label.
-                // Only applyBrightness() (on Ok) persists it / fires
-                // onBrightnessChanged_ -- Up/Down/X below never do.
-                if (b == Button::Up)   { moveSelection(-1, kBrightnessCount); screen_.setBrightness(kBrightnessLevels[selected_]); }
-                if (b == Button::Down) { moveSelection(+1, kBrightnessCount); screen_.setBrightness(kBrightnessLevels[selected_]); }
-                if (b == Button::Ok)   { applyBrightness(selected_); openSettingsMenu(); }
-                if (b == Button::X)    { screen_.setBrightness(brightnessBeforeMenu_); openSettingsMenu(); }
-                break;
-
-            case State::ColumnsMenu:
-                if (b == Button::Up)   moveSelection(-1, kColumnsCount);
-                if (b == Button::Down) moveSelection(+1, kColumnsCount);
-                if (b == Button::Ok)   { applyColumns(selected_); openSettingsMenu(); }
-                if (b == Button::X)    openSettingsMenu();
+            case State::List:
+                if (b == Button::Up)   moveItemSelection(-1);
+                if (b == Button::Down) moveItemSelection(+1);
+                if (b == Button::Ok && !items_.empty())
+                    items_[static_cast<std::size_t>(selected_)].ok();
+                if (b == Button::X) {
+                    if (back_) { auto bk = back_; bk(); }
+                    else       close();
+                }
                 break;
 
             case State::FilePicker:
@@ -537,7 +508,7 @@ public:
                 if (b == Button::X) {
                     // Opened from the Tape view: back means straight back to it
                     if (pickerFromTape_) close();
-                    else                 openConfigMenu();
+                    else                 openSystemMenu();
                 }
                 break;
 
@@ -545,7 +516,7 @@ public:
                 if (b == Button::Ok) {
                     applyFile(pendingFile_);
                     if (pickerFromTape_) close();
-                    else                 openConfigMenu();
+                    else                 openSystemMenu();
                 }
                 if (b == Button::Down && !pendingFile_.empty()) openLifInfo();
                 if (b == Button::X)  returnToFilePicker();
@@ -558,16 +529,9 @@ public:
                 if (b == Button::Ok) {                  // OK: choose this file
                     applyFile(pendingFile_);
                     if (pickerFromTape_) close();
-                    else                 openConfigMenu();
+                    else                 openSystemMenu();
                 }
                 if (b == Button::X)  returnToFilePicker();
-                break;
-
-            case State::TraceMenu:
-                if (b == Button::Up)   moveSelection(-1, kTraceCount);
-                if (b == Button::Down) moveSelection(+1, kTraceCount);
-                if (b == Button::Ok)   { applyTrace(selected_); openConfigMenu(); }
-                if (b == Button::X)    openConfigMenu();
                 break;
 
             case State::DeviceList:
@@ -575,16 +539,6 @@ public:
                 if (b == Button::Down) moveDeviceSelection(+1);
                 if (b == Button::Ok)   toggleDevice(selected_);
                 if (b == Button::X)    openDevicesMenu(0);
-                break;
-
-            case State::DevicesMenu:
-                if (b == Button::Up)   moveSelection(-1, kDevicesMenuCount);
-                if (b == Button::Down) moveSelection(+1, kDevicesMenuCount);
-                if (b == Button::Ok) {
-                    if (selected_ == 0) openDeviceList();
-                    else                openDeviceOrder();
-                }
-                if (b == Button::X)    openMainMenu();
                 break;
 
             case State::DeviceOrder:
@@ -615,37 +569,16 @@ public:
                 }
                 break;
 
-            case State::SaverMenu:
-                if (b == Button::Up)   moveListSelection(saverLabels_, saverScroll_, -1);
-                if (b == Button::Down) moveListSelection(saverLabels_, saverScroll_, +1);
-                if (b == Button::Ok)   enterSaverMenuItem();
-                if (b == Button::X)    openSettingsMenu();
-                break;
-
             case State::AnalyzerLogMenu:
                 if (b == Button::Up)   moveListSelection(analyzerLogLabels_, analyzerLogScroll_, -1);
                 if (b == Button::Down) moveListSelection(analyzerLogLabels_, analyzerLogScroll_, +1);
                 if (b == Button::Ok)   enterAnalyzerLogMenuItem();
-                if (b == Button::X)    openAnalyzerMenu(4);
-                break;
-
-            case State::AnalyzerMenu:
-                if (b == Button::Up)   moveListSelection(analyzerLabels_, analyzerScroll_, -1);
-                if (b == Button::Down) moveListSelection(analyzerLabels_, analyzerScroll_, +1);
-                if (b == Button::Ok)   enterAnalyzerMenuItem();
-                if (b == Button::X)    close();
-                break;
-
-            case State::DisplayMenu:
-                if (b == Button::Up)   moveDisplaySelection(-1);
-                if (b == Button::Down) moveDisplaySelection(+1);
-                if (b == Button::Ok)   enterDisplayMenuItem();
-                if (b == Button::X)    openMainMenu();
+                if (b == Button::X)    openContextMenu(2);
                 break;
 
             case State::LoopbackConfirm:
                 if (b == Button::Ok) runLoopbackTest();
-                if (b == Button::X)  openConfigMenu();
+                if (b == Button::X)  openSystemMenu();
                 break;
 
             case State::LoopbackResult:
@@ -654,14 +587,14 @@ public:
                 // isShowingLoopbackResult()/dismissLoopbackResult() for
                 // this. Ok/X here too, for anyone navigating by buttons
                 // alone.
-                if (b == Button::Ok || b == Button::X) openConfigMenu();
+                if (b == Button::Ok || b == Button::X) openSystemMenu();
                 break;
 
             case State::I2CScanResult:
                 // Same "primarily touch, Ok/X also work" pattern as
                 // State::LoopbackResult just above -- see boardui.cpp's
                 // own isShowingI2CScanResult()/dismissI2CScanResult() check.
-                if (b == Button::Ok || b == Button::X) openConfigMenu();
+                if (b == Button::Ok || b == Button::X) openSystemMenu();
                 break;
         }
 
@@ -697,9 +630,9 @@ public:
                 // just closed the menu (X, or Shift+Ok handled earlier)
                 // -- close() already called hidePipOverlay() itself,
                 // nothing more to do.
-                d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+                d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
             } else {
-                // openMainMenu() (and every other open*Menu()) hides the
+                // menuOpening() (every menu opening from closed) hides the
                 // hardware blinking cursor before drawing -- restore it
                 // now that the canvas is safely back at the main window
                 // (CURH/CURV, which the cursor's own position rides on,
@@ -717,27 +650,21 @@ public:
     }
 
 private:
+#ifdef DISPLAY_7INCH
+    static constexpr bool kHasScreendump = true;     // (no read-back on the 5" panel)
+#else
+    static constexpr bool kHasScreendump = false;
+#endif
+
     enum class State {
-        Closed, MainMenu, ConfigMenu, SettingsMenu,
-        ColorPicker, FontSizeMenu, BrightnessMenu, ColumnsMenu,
-        FilePicker, ConfirmFile, TraceMenu, DeviceList, DisplayMenu,
+        Closed, List,                       // List: every menu (see openList())
+        FilePicker, ConfirmFile, DeviceList,
         LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo, DeviceOrder,
-        DevicesMenu, AnalyzerMenu, AnalyzerLogMenu, SaverMenu, Warning
+        AnalyzerLogMenu, Warning
     };
 
-    static constexpr const char* kMainMenuLabels[] = { "Config >", "Settings >", "Devices >", "Display >" };
-    static constexpr int kMainMenuCount = 4;
 
-    static constexpr const char* kConfigMenuLabels[] = { "Select file >", "Trace >", "Connect to PC", "Loopback test >", "Scan I2C", "Bootsel mode" };
-    static constexpr int kConfigMenuCount = 6;
 
-    static constexpr const char* kSettingsMenuLabels[] = { "Textcolor >", "Font size >", "Brightness >", "Columns >", "Screen saver >", "" };
-    static constexpr int kSettingsMenuCount = 6;
-    // Row 5 is a setting shown with its value (toggled with OK)
-    static const char* settingsLabel(int i) {
-        if (i == 5) return config.conInternal() ? "CON loop: Internal" : "CON loop: Cable";
-        return kSettingsMenuLabels[i];
-    }
 
     static constexpr std::uint16_t kColors[]     = { 0xFFFF, 0xFFE0, 0x07E0, 0x07FF, 0xF800 };
     static constexpr const char*   kColorLabels[] = { "White", "Yellow", "Green", "Cyan", "Red" };
@@ -745,7 +672,6 @@ private:
 
     // Matches Screen's size_ (0..3, built-in CGRAM modes only -- the
     // custom "fon" mode 4 isn't offered here).
-    static constexpr const char* kFontSizeLabels[] = { "0", "1", "2", "3" };
     static constexpr int kFontSizeCount = 4;
 
     // A handful of discrete steps rather than a continuous 0..255 slider,
@@ -773,110 +699,13 @@ private:
     // "Display"/"Plotter" pick which full-screen output is showing (see
     // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
     // not a pickable state, so it doesn't need a selected_-tracked value.
-    // Display menu: one row per device view (plotterview_viewDevices(),
-    // loop order -- "Display", "Plotter", "Tape", or "Tape TFDRIVE2" when
-    // there are several), then these actions. Screendump: 7" only (no
-    // read-back in the RA8875 driver).
-    enum class DisplayAction { Analyzer, LoopMap, Signals, PlotView, ClearPlotter, ClearScreen, Screendump };
-#ifdef DISPLAY_7INCH
-    static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::PlotView,
-        DisplayAction::ClearPlotter, DisplayAction::ClearScreen, DisplayAction::Screendump };
-    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Plot view",
-                                                            "Clear plotter", "Clear screen", "Screendump" };
-    static constexpr int kDisplayActionCount = 7;
-#else
-    static constexpr DisplayAction kDisplayActions[] = {
-        DisplayAction::Analyzer, DisplayAction::LoopMap, DisplayAction::Signals, DisplayAction::PlotView,
-        DisplayAction::ClearPlotter, DisplayAction::ClearScreen };
-    static constexpr const char* kDisplayActionLabels[] = { "Analyzer", "Loop map", "HP-IL signals", "Plot view",
-                                                            "Clear plotter", "Clear screen" };
-    static constexpr int kDisplayActionCount = 6;
-#endif
-    std::vector<CDevice*> viewDevs_;          // Display menu: the view rows
-    std::vector<std::string> displayLabels_;  // Display menu: all row labels
-    int displayScroll_ = 0;                   // Display menu: first row shown
 
-    void openMainMenu() {
-#ifndef DISPLAY_7INCH
-        // Only needed on the 5" (RA8875) path -- the 7" (LT7683) path
-        // draws the menu to its own separate PIP layer instead (see
-        // handleButton()'s own overlay-wrapping), so the live text
-        // screen never needs pausing at all; it just gets visually
-        // covered wherever the PIP overlay sits on top.
-        screen_.suspend();  // idempotent if already open; stops screen_.pr_char()
-                             // from drawing over the dialog while it's showing
-#endif
-        // Hide the hardware blinking cursor too -- suspend() alone only
-        // stops FURTHER drawing, it doesn't touch the cursor already left
-        // blinking at wherever Screen's text last positioned it, which
-        // otherwise shows through/behind the menu box's own text.
-        // close() doesn't need a matching "show it again" call: resume()
-        // -> full() already ends with set_cur(), which re-asserts
-        // visibility from Screen's own cv_ state (see its own comment).
-        d_->setTextCursorVisible(false, false);
-        state_ = State::MainMenu;
-        selected_ = 0;
-        drawBox();
-        for (int i = 0; i < kMainMenuCount; ++i) drawRow(i, kMainMenuLabels[i]);
-    }
 
-    void enterMainMenuItem() {
-        if (selected_ == 0)      openConfigMenu();
-        else if (selected_ == 1) openSettingsMenu();
-        else if (selected_ == 2) openDevicesMenu();
-        else                     openDisplayMenu();
-    }
 
     // ── Analyzer menu (the menu button while the Analyzer view is shown) ─
-    std::vector<std::string> analyzerLabels_;
-    int analyzerScroll_ = 0;
 
-    void buildAnalyzerLabels() {
-        analyzerLabels_ = {
-            "Clear",
-            analyzer_mode() == AnalyzerMode::Overview ? "Mode: Overview" : "Mode: Detailed",
-            analyzer_relativeTime() ? "Time: Relative" : "Time: Since start-up",
-            analyzer_showIdle() ? "Idle frames: Shown" : "Idle frames: Hidden",
-            analyzer_logging() ? "Logging (on) >" : "Logging >",
-            "Leave view",
-        };
-    }
 
-    // `sel`: the row to highlight (back from the Logging submenu: row 4)
-    void openAnalyzerMenu(int sel = 0) {
-        state_ = State::AnalyzerMenu;
-        selected_ = sel;
-        analyzerScroll_ = 0;
-        buildAnalyzerLabels();
-        drawBox();
-        drawListRows(analyzerLabels_, analyzerScroll_);
-    }
 
-    void enterAnalyzerMenuItem() {
-        switch (selected_) {
-            case 0:                                         // Clear
-                analyzer_clear();
-                close();
-                return;
-            case 1:
-                analyzer_setMode(analyzer_mode() == AnalyzerMode::Overview ? AnalyzerMode::Detailed
-                                                                           : AnalyzerMode::Overview);
-                break;
-            case 2: analyzer_setRelativeTime(!analyzer_relativeTime()); break;
-            case 3: analyzer_setShowIdle(!analyzer_showIdle()); break;
-            case 4:                                         // Logging >
-                openAnalyzerLogMenu();
-                return;
-            default:                                        // Leave view
-                withMainCanvas([&]{ plotterview_leaveAnalyzer(); });
-                close();
-                return;
-        }
-        // A setting changed: show its new value, stay in the menu
-        buildAnalyzerLabels();
-        drawListRows(analyzerLabels_, analyzerScroll_);
-    }
 
     // Analyzer -> Logging: Start/Stop (a new file each time), Save (the
     // current buffer to a new file, while not logging). X: back.
@@ -888,6 +717,7 @@ private:
         selected_ = 0;
         analyzerLogScroll_ = 0;
         analyzerLogLabels_ = { analyzer_logging() ? "Stop" : "Start", "Save" };
+        title_ = "ANALYZER / LOGGING";
         drawBox();
         drawListRows(analyzerLogLabels_, analyzerLogScroll_);
     }
@@ -919,7 +749,8 @@ private:
             const bool sel = has && static_cast<int>(i) == selected_;
             _clearRowBackground(row, sel ? MenuFrame::Yellow : 0x0000);
             if (!has) continue;
-            d_->txtColor(sel ? 0x0000 : 0xFFFF, sel ? MenuFrame::Yellow : 0x0000);
+            rowFg_ = sel ? 0x0000 : 0xFFFF;
+            d_->txtColor(rowFg_, sel ? MenuFrame::Yellow : 0x0000);
             writeRowLabel(MenuFrame::Y + 20 + row * MenuFrame::RowPitch, labels[i].c_str());
         }
         drawScrollIndicators(scroll, static_cast<int>(labels.size()));
@@ -933,140 +764,10 @@ private:
         drawListRows(labels, scroll);
     }
 
-    void openDisplayMenu() {
-        state_ = State::DisplayMenu;
-        viewDevs_ = plotterview_viewDevices();
-        displayLabels_.clear();
-        selected_ = 0;
-        for (std::size_t i = 0; i < viewDevs_.size(); ++i) {
-            displayLabels_.push_back(plotterview_viewTitle(viewDevs_[i]));
-            if (viewDevs_[i] == plotterview_viewDevice()) selected_ = static_cast<int>(i);
-        }
-        for (int i = 0; i < kDisplayActionCount; ++i) {
-            // (Plot view shows its current setting)
-            if (kDisplayActions[i] == DisplayAction::PlotView)
-                displayLabels_.push_back(plotterview_plotFit() ? "Plot view: Fit" : "Plot view: Page");
-            else
-                displayLabels_.push_back(kDisplayActionLabels[i]);
-        }
-        displayScroll_ = 0;
-        keepDisplaySelectionVisible();
-        drawBox();
-        drawDisplayMenuRows();
-    }
 
-    // The list can be longer than the box (several drives...): scrolls
-    // like the file list
-    void keepDisplaySelectionVisible() {
-        if (selected_ < displayScroll_) displayScroll_ = selected_;
-        else if (selected_ >= displayScroll_ + kMaxFilesShown) displayScroll_ = selected_ - kMaxFilesShown + 1;
-    }
-    void moveDisplaySelection(int delta) {
-        const int count = static_cast<int>(displayLabels_.size());
-        if (count == 0) return;
-        selected_ = (selected_ + delta + count) % count;
-        keepDisplaySelectionVisible();
-        drawDisplayMenuRows();
-    }
-    void drawDisplayMenuRows() {
-        d_->txtSize(MenuFrame::TextScale);
-        for (int row = 0; row < kMaxFilesShown; ++row) {
-            const std::size_t i = static_cast<std::size_t>(displayScroll_ + row);
-            const bool has = i < displayLabels_.size();
-            const bool sel = has && static_cast<int>(i) == selected_;
-            _clearRowBackground(row, sel ? MenuFrame::Yellow : 0x0000);
-            if (!has) continue;
-            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch);
-            d_->txtColor(sel ? 0x0000 : 0xFFFF, sel ? MenuFrame::Yellow : 0x0000);
-            d_->txtWrite(displayLabels_[i].c_str());
-        }
-        drawScrollIndicators(displayScroll_, static_cast<int>(displayLabels_.size()));
-    }
 
-    void enterDisplayMenuItem() {
-        // View switches and "Clear plotter" draw on the live panel (switch
-        // splash, cleared plot), so they must run on the main canvas --
-        // see withMainCanvas(). Without it, on the 7" panel they ended up
-        // on the invisible menu layer.
-        const int views = static_cast<int>(viewDevs_.size());
-        if (selected_ < views) {
-            // A device's view
-            CDevice* dev = viewDevs_[static_cast<std::size_t>(selected_)];
-            withMainCanvas([&]{ plotterview_showDevice(dev); });
-            close();
-            return;
-        }
-        const DisplayAction action = kDisplayActions[selected_ - views];
-        if (action == DisplayAction::Analyzer) {
-            withMainCanvas([&]{ plotterview_showAnalyzer(); });
-            close();
-        } else if (action == DisplayAction::LoopMap) {
-            withMainCanvas([&]{ plotterview_showLoopMap(); });
-            close();
-        } else if (action == DisplayAction::Signals) {
-            withMainCanvas([&]{ plotterview_showSignals(); });
-            close();
-        } else if (action == DisplayAction::PlotView) {
-            // Fit <-> Page; saved. Shown at once if the plotter view is showing.
-            const bool fit = !plotterview_plotFit();
-            config.setPlotFit(fit);
-            withMainCanvas([&]{ plotterview_setPlotFit(fit); });
-            close();
-        } else if (action == DisplayAction::ClearPlotter) {
-            withMainCanvas([&]{ plotterview_clearPlotter(); });
-            close();
-        } else if (action == DisplayAction::Screendump) {
-            // Save what the panel shows. On the 7" panel the menu is a PIP
-            // overlay, not part of the panel's own image, so it doesn't
-            // end up in the dump. The result is shown for a moment in the
-            // switch-splash box, which close() leaves up.
-            // Saving takes a few seconds, so say so at once: the box
-            // replaces the menu straight away (it's a PIP overlay too, so
-            // it isn't part of the dump either), then shows the result.
-            withMainCanvas([&]{
-                plotterview_showMessage("Saving screendump...");
-                std::string msg;
-                const bool ok = screendump_save(d_, msg);
-                plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
-            });
-            close();
-        } else {
-            // Clear screen -- immediate action, like "Clear plotter"
-            // above: wipes the text buffer, clears the panel, and homes
-            // the cursor (Screen::clear()'s own documented behaviour,
-            // matching the HP82163's own "Clear Device" semantics).
-            // Wrapped in withMainCanvas() -- see its own comment -- since
-            // this runs from within the menu's own button handling,
-            // where (on the 7" panel) the canvas is still pointed at the
-            // menu's own overlay layer; without it, clear()'s own redraw
-            // of the now-empty buffer would silently happen on the
-            // invisible menu layer instead of the actual panel.
-            withMainCanvas([&]{ screen_.clear(); });
-            close();
-        }
-    }
 
-    void openConfigMenu() {
-        setMediaEjected(false);             // back from the file picker, if there
-        state_ = State::ConfigMenu;
-        selected_ = 0;
-        drawBox();
-        drawConfigMenuRows();
-    }
 
-    // Row 2 ("Connect to PC" / "Disconnect from PC") reflects the
-    // current mode dynamically -- everything else just uses the fixed
-    // labels. Shared between openConfigMenu() (full redraw) and
-    // highlightRow()'s own State::ConfigMenu case (single-row redraw
-    // during Up/Down navigation).
-    void drawConfigMenuRows() {
-        drawRow(0, kConfigMenuLabels[0]);
-        drawRow(1, kConfigMenuLabels[1]);
-        drawRow(2, (usbMscModeActive() || devForceDisconnectLabel_) ? "Disconnect from PC" : "Connect to PC");
-        drawRow(3, kConfigMenuLabels[3]);
-        drawRow(4, kConfigMenuLabels[4]);
-        drawRow(5, kConfigMenuLabels[5]);
-    }
 
     // Body of the "Connected" message (box already drawn, first line's
     // cursor already set)
@@ -1101,58 +802,15 @@ private:
 
         const int keep = selected_;
         devForceDisconnectLabel_ = true;
-        selected_ = 2;                      // "Disconnect from PC" highlighted
+        selected_ = 0;                      // "Disconnect from PC" highlighted
         drawBox();
-        drawConfigMenuRows();
-        devScreendump("Config menu, Disconnect from PC");
+        drawItems();
+        devScreendump("System menu, Disconnect from PC");
         devForceDisconnectLabel_ = false;
         selected_ = keep;
     }
 #endif
 
-    void enterConfigMenuItem() {
-        if (selected_ == 0) {
-            openFilePicker();
-        } else if (selected_ == 1) {
-            openTraceMenu();
-        } else if (selected_ == 2) {
-            // "Connect to PC" / "Disconnect from PC" -- toggles USB MSC
-            // mode (see usb_msc.h for the full story). Shows explicit
-            // feedback either way, then returns to this same menu (with
-            // its label now reflecting the new state) rather than
-            // acting like "Bootsel mode"'s one-way, device-reboots
-            // action -- this one's reversible, and the user needs to
-            // see the result to know it's safe to unplug/plug back in.
-            const bool wasActive = usbMscModeActive();
-#if HIPI_DEV_SCREENDUMPS
-            // Once connected, the SD card belongs to the PC and can't be
-            // written -- so dump the two "connected" screens just BEFORE
-            // actually connecting
-            if (!wasActive) devDumpConnectScreens();
-#endif
-            const bool nowActive = wasActive ? (exitUsbMscMode(), false) : enterUsbMscMode();
-            drawBox();
-            d_->txtColor(0xFFFF, 0x0000);
-            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-            if (wasActive) {
-                d_->txtWrite("Disconnected from PC.");
-                d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
-                d_->txtWrite("HP-IL drive access resumed.");
-            } else if (nowActive) {
-                drawConnectedText();
-            } else {
-                d_->txtWrite("Couldn't connect -- no SD card?");
-            }
-            sleep_ms(1500);
-            openConfigMenu();
-        } else if (selected_ == 3) {
-            openLoopbackConfirm();
-        } else if (selected_ == 4) {
-            runI2CScan();
-        } else {
-            enterBootselMode();
-        }
-    }
 
     // "Scan I2C" -- runs immediately (no confirmation needed; scanning
     // is quick, ~112 short probes, and non-destructive to whatever's on
@@ -1160,6 +818,7 @@ private:
     // isShowingI2CScanResult()/dismissI2CScanResult()) or Ok/X.
     void runI2CScan() {
         state_ = State::I2CScanResult;
+        title_ = "SYSTEM / I2C SCAN";
         drawBox();
         d_->txtColor(0xFFFF, 0x0000);
         d_->txtSize(MenuFrame::TextScale);
@@ -1247,6 +906,7 @@ private:
     // anything).
     void openLoopbackConfirm() {
         state_ = State::LoopbackConfirm;
+        title_ = "SYSTEM / LOOPBACK TEST";
         drawBox();
         d_->txtColor(0xFFFF, 0x0000);
         d_->txtSize(MenuFrame::TextScale);
@@ -1327,102 +987,15 @@ private:
     }
 
 
-    void openSettingsMenu() {
-        state_ = State::SettingsMenu;
-        selected_ = 0;
-        drawBox();
-        for (int i = 0; i < kSettingsMenuCount; ++i) drawRow(i, settingsLabel(i));
-    }
 
-    void enterSettingsMenuItem() {
-        if (selected_ == 0) {
-            state_ = State::ColorPicker;
-            selected_ = 0;  // "White" if no exact match found below
-            for (int i = 0; i < kColorCount; ++i) {
-                if (kColors[i] == screen_.color()) { selected_ = i; break; }
-            }
-            drawBox();
-            drawColorList();
-        } else if (selected_ == 1) {
-            openFontSizeMenu();
-        } else if (selected_ == 2) {
-            openBrightnessMenu();
-        } else if (selected_ == 3) {
-            openColumnsMenu();
-        } else if (selected_ == 4) {
-            openSaverMenu();
-        } else if (selected_ == 5) {
-            // PILBox CON: is the loop the HP-IL cable (OUT -> devices -> IN),
-            // or closed inside HIPI (just HIPI's own devices, no cable needed)?
-            config.setConInternal(!config.conInternal());
-            drawRow(5, settingsLabel(5));
-        }
-    }
 
     // ── Settings -> Screen saver ─────────────────────────────────────────
     // After 10 minutes without use: dim, show the clock (clock.h), or
     // nothing; and how the clock looks. OK changes the selected setting
     // (saved at once); "Show now" starts the screen saver right away.
-    std::vector<std::string> saverLabels_;
-    int saverScroll_ = 0;
 
-    void buildSaverLabels() {
-        static const char* kModes[] = { "Mode: Dim", "Mode: Clock", "Mode: Off", "Mode: HP-IL rain",
-                                        "Mode: Goose", "Mode: Random" };
-        static const char* kFallbacks[] = { "No clock: Dim", "No clock: Clock", "No clock: Off",
-                                            "No clock: HP-IL rain", "No clock: Goose", "No clock: Random" };
-        const std::uint8_t m = config.saverMode();
-        const std::uint8_t f = config.clockFallback();
-        saverLabels_ = {
-            kModes[m < hipi::Config::kSaverModes ? m : 0],
-            kFallbacks[f < hipi::Config::kSaverModes ? f : 3],
-            config.clockStyle() == 1 ? "Style: LCD" : "Style: Dark",
-            config.clockUs() ? "Date: US mm/dd/yyyy" : "Date: EU yyyy-mm-dd",
-            config.clock12h() ? "Time: 12 h (AM/PM)" : "Time: 24 h",
-            "Show now",
-        };
-    }
 
-    void openSaverMenu(int sel = 0) {
-        state_ = State::SaverMenu;
-        selected_ = sel;
-        saverScroll_ = 0;
-        buildSaverLabels();
-        drawBox();
-        drawListRows(saverLabels_, saverScroll_);
-    }
 
-    void enterSaverMenuItem() {
-        switch (selected_) {
-            case 0:     // Dim -> Clock -> HP-IL rain -> Goose -> Random -> Off -> Dim
-            {
-                static const std::uint8_t kNext[] = { hipi::Config::SaverClock, hipi::Config::SaverRain,
-                                                      hipi::Config::SaverDim, hipi::Config::SaverGoose,
-                                                      hipi::Config::SaverRandom, hipi::Config::SaverOff };
-                const std::uint8_t m = config.saverMode();
-                config.setSaverMode(kNext[m < hipi::Config::kSaverModes ? m : 0]);
-                break;
-            }
-            case 1:     // without a clock: HP-IL rain -> Goose -> Random -> Dim -> HP-IL rain
-            {
-                const std::uint8_t f = config.clockFallback();
-                config.setClockFallback(f == hipi::Config::SaverRain   ? hipi::Config::SaverGoose
-                                      : f == hipi::Config::SaverGoose  ? hipi::Config::SaverRandom
-                                      : f == hipi::Config::SaverRandom ? hipi::Config::SaverDim
-                                                                       : hipi::Config::SaverRain);
-                break;
-            }
-            case 2: config.setClockStyle(config.clockStyle() == 1 ? 0 : 1); break;
-            case 3: config.setClockUs(!config.clockUs()); break;
-            case 4: config.setClock12h(!config.clock12h()); break;
-            default:
-                backlight_showClockNow();
-                close();
-                return;
-        }
-        buildSaverLabels();
-        drawListRows(saverLabels_, saverScroll_);
-    }
 
     // Config -> Bootsel mode
     void enterBootselMode() {
@@ -1450,7 +1023,7 @@ private:
         // the menu layer while the PIP overlay kept showing whatever
         // was on screen before this button press.
         d_->endOverlayDraw();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
 #if HIPI_DEV_SCREENDUMPS
         devScreendump("Bootsel message");      // last chance -- we reboot next
@@ -1459,31 +1032,8 @@ private:
         reset_usb_boot(0, 0);
     }
 
-    void openFontSizeMenu() {
-        state_ = State::FontSizeMenu;
-        selected_ = screen_.size() < kFontSizeCount ? screen_.size() : 0;
-        drawBox();
-        for (int i = 0; i < kFontSizeCount; ++i) drawRow(i, kFontSizeLabels[i]);
-    }
 
-    void openBrightnessMenu() {
-        state_ = State::BrightnessMenu;
-        // Save value so it can be restored on abort, see handleButton()
-        brightnessBeforeMenu_ = screen_.brightness();
-        selected_ = closestBrightnessIndex(screen_.brightness());
-        drawBox();
-        for (int i = 0; i < kBrightnessCount; ++i) drawRow(i, kBrightnessLabels[i]);
-    }
 
-    void openColumnsMenu() {
-        state_ = State::ColumnsMenu;
-        selected_ = 0;  // "Auto" if no exact match found below
-        for (int i = 0; i < kColumnsCount; ++i) {
-            if (kColumnsValues[i] == screen_.columnsOverride()) { selected_ = i; break; }
-        }
-        drawBox();
-        for (int i = 0; i < kColumnsCount; ++i) drawRow(i, kColumnsLabels[i]);
-    }
 
     static int closestBrightnessIndex(std::uint8_t level) {
         int best = 0;
@@ -1496,14 +1046,6 @@ private:
         return best;
     }
 
-    void openTraceMenu() {
-        state_ = State::TraceMenu;
-        // Off (0): trace=false, debug=false. On (1): trace=true, debug=false.
-        // Extended (2): trace=true, debug=true.
-        selected_ = bExtTrace ? 2 : (bTrace ? 1 : 0);
-        drawBox();
-        for (int i = 0; i < kTraceCount; ++i) drawRow(i, kTraceLabels[i]);
-    }
 
     // Case-insensitive check whether filename ends with the given extension
     // (extension should include the leading dot, e.g. ".dat").
@@ -1567,6 +1109,7 @@ private:
         if (selected_ >= kMaxFilesShown) {
             fileScrollOffset_ = selected_ - kMaxFilesShown + 1;
         }
+        title_ = "SELECT CASSETTE";
         drawBox();
         drawFileList();
     }
@@ -1671,6 +1214,7 @@ private:
         state_ = State::DeviceList;
         selected_ = 0;
         deviceScrollOffset_ = 0;
+        title_ = "DEVICES / ON-OFF";
         drawBox();
         drawDeviceList();
     }
@@ -1727,16 +1271,7 @@ private:
     }
 
     // ── Devices submenu: Enable/disable, Change order ────────────────────
-    static constexpr const char* kDevicesMenuLabels[] = { "Enable/disable >", "Change order >" };
-    static constexpr int kDevicesMenuCount = 2;
 
-    // `sel`: the row to highlight -- the item we're coming back from
-    void openDevicesMenu(int sel = 0) {
-        state_ = State::DevicesMenu;
-        selected_ = sel;
-        drawBox();
-        for (int i = 0; i < kDevicesMenuCount; ++i) drawRow(i, kDevicesMenuLabels[i]);
-    }
 
     // ── Devices -> Change order ──────────────────────────────────────────
     // The loop order of the devices. Up/Down + OK picks one ("moving",
@@ -1749,6 +1284,7 @@ private:
         state_ = State::DeviceOrder;
         selected_ = 0;
         deviceScrollOffset_ = 0;
+        title_ = "DEVICES / ORDER";
         drawBox();
         drawDeviceOrder();
     }
@@ -1834,6 +1370,7 @@ private:
     void openConfirmFile(const std::string& filename) {
         pendingFile_ = filename;
         state_ = State::ConfirmFile;
+        title_ = "SELECT CASSETTE";
         drawBox();
         drawConfirmText();
     }
@@ -1867,6 +1404,7 @@ private:
         }
         lifScroll_ = 0;
         state_ = State::LifInfo;
+        title_ = "CASSETTE CONTENTS";
         drawBox();
         drawLifInfo();
     }
@@ -1913,6 +1451,362 @@ private:
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // The menus. One kind of list for all of them (State::List): rows that
+    //  - open another menu or dialog ("Settings >"),
+    //  - do something ("Clear plotter"),
+    //  - show a setting with its value ("Plot view\tFit"): OK steps to
+    //    the next value, which is used and saved at once.
+    // The same order everywhere: where to go, what to do, settings, more.
+    //
+    // OK opens the menu of the view that's showing (its context menu); its
+    // last row, "More >", leads to the HIPI menu: Go to view, Settings,
+    // System. Every menu has its title in the frame's top band.
+    // ════════════════════════════════════════════════════════════════════
+    struct Item {
+        std::function<std::string()> label;
+        std::function<void()> ok;
+    };
+    std::vector<Item> items_;
+    std::function<void()> back_;             // X (nullptr: close the menu)
+    int itemScroll_ = 0;
+    std::string title_;                      // the frame's top band
+    std::uint16_t rowFg_ = 0xFFFF;           // text colour of the row being drawn (writeRowLabel())
+    const char* version_ = "";
+
+    static Item item(const std::string& text, std::function<void()> ok) {
+        return Item{ [text] { return text; }, std::move(ok) };
+    }
+    // A setting row: "name" left, the current value right-aligned
+    static Item value(const std::string& name, std::function<std::string()> val, std::function<void()> next) {
+        return Item{ [name, val] { return name + "\t" + val(); }, std::move(next) };
+    }
+
+    void openList(const std::string& title, std::vector<Item> items, std::function<void()> back, int sel = 0) {
+        menuOpening();
+        state_ = State::List;
+        title_ = title;
+        items_ = std::move(items);
+        back_ = std::move(back);
+        selected_ = std::max(0, std::min(sel, static_cast<int>(items_.size()) - 1));
+        itemScroll_ = 0;
+        keepItemVisible();
+        drawBox();
+        drawItems();
+    }
+    void keepItemVisible() {
+        if (selected_ < itemScroll_) itemScroll_ = selected_;
+        else if (selected_ >= itemScroll_ + kMaxFilesShown) itemScroll_ = selected_ - kMaxFilesShown + 1;
+    }
+    void moveItemSelection(int delta) {
+        const int n = static_cast<int>(items_.size());
+        if (n == 0) return;
+        selected_ = (selected_ + delta + n) % n;
+        keepItemVisible();
+        drawItems();
+    }
+    void drawItems() {
+        // A setting row's action may have changed the text screen behind the
+        // menu (Font size, Columns...): Screen then leaves the shared text
+        // registers (font, scale, active window) set for itself -- set them
+        // back for the menu, or its rows come out in the wrong font/clipped
+        d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+        d_->selectBuiltinFont();
+        d_->txtSize(MenuFrame::TextScale);
+        std::vector<std::string> labels;
+        for (const Item& it : items_) labels.push_back(it.label());
+        drawListRows(labels, itemScroll_);
+    }
+    // After a setting changed: the rows again (values), same place
+    void refreshItems() { drawItems(); }
+
+    // Things every menu needs when it opens from a closed state
+    void menuOpening() {
+        if (state_ != State::Closed) return;
+#ifndef DISPLAY_7INCH
+        screen_.suspend();          // (5") stops the text drawing over the menu
+#endif
+        d_->setTextCursorVisible(false, false);
+    }
+
+    // Runs a view/panel action on the main canvas, then closes the menu
+    template <typename F> void doAndClose(F&& fn) {
+        withMainCanvas(std::forward<F>(fn));
+        close();
+    }
+
+    void screendumpAction() {
+        // The menu is a PIP overlay (7"), not part of the panel's image.
+        // Saving takes a few seconds: say so at once, then the result.
+        doAndClose([&] {
+            plotterview_showMessage("Saving screendump...");
+            std::string msg;
+            const bool ok = screendump_save(d_, msg);
+            plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+        });
+    }
+
+    // ── Values of the settings ──────────────────────────────────────────
+    int colorIndex() const {
+        for (int i = 0; i < kColorCount; ++i) if (kColors[i] == config.textColor()) return i;
+        return 0;
+    }
+    int brightnessIndex() const {
+        int best = 0;
+        for (int i = 0; i < kBrightnessCount; ++i)
+            if (std::abs(kBrightnessLevels[i] - config.brightness()) < std::abs(kBrightnessLevels[best] - config.brightness())) best = i;
+        return best;
+    }
+    int columnsIndex() const {
+        for (int i = 0; i < kColumnsCount; ++i) if (kColumnsValues[i] == config.columns()) return i;
+        return 0;
+    }
+    int traceIndex() const { return bExtTrace ? 2 : (bTrace ? 1 : 0); }
+    Item fontSizeItem() {
+        return value("Font size", [] { return std::to_string(config.fontSize()); },
+                     [this] { applyFontSize((config.fontSize() + 1) % kFontSizeCount); refreshItems(); });
+    }
+    Item plotViewItem() {
+        return value("Plot view", [] { return std::string(plotterview_plotFit() ? "Fit" : "Page"); },
+                     [this] {
+                         const bool fit = !plotterview_plotFit();
+                         config.setPlotFit(fit);
+                         withMainCanvas([&] { plotterview_setPlotFit(fit); });
+                         refreshItems();
+                     });
+    }
+    // "Drive at start" as in CONFIG.TXT: OFF if the (first) drive is
+    // switched off at start (disabled_devices), else drive_standby
+    static const char* driveAtStartName() {
+        for (CDevice* dev : devices)
+            if (dev->type() == DRIVE && !config.isDeviceEnabled(dev->name())) return "OFF";
+        return config.driveStandby() ? "STANDBY" : "ON";
+    }
+        static const char* powerName(DrivePower p) {
+        return p == DrivePower::On ? "ON" : p == DrivePower::Standby ? "STANDBY" : "OFF";
+    }
+
+    // ── The context menu: the view that's showing ───────────────────────
+    // `sel`: the row to highlight (back from a submenu)
+    void openContextMenu(int sel = 0) {
+        const DisplayOutput out = plotterview_output();
+        std::vector<Item> m;
+        std::string title;
+        if (out == DisplayOutput::Plotter) {
+            title = "PLOTTER";
+            m.push_back(item("Clear plotter", [this] { doAndClose([] { plotterview_clearPlotter(); }); }));
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(plotViewItem());
+        } else if (out == DisplayOutput::Tape) {
+            CDrive* drv = plotterview_drive();
+            title = drv ? std::string("TAPE ") + drv->name() : std::string("TAPE");
+            m.push_back(item("Select cassette >", [this] {
+                pickerFromTape_ = true;
+                openFilePicker();
+            }));
+            if (drv) {
+                m.push_back(item("Rewind", [this, drv] { drv->manualRewind(); close(); }));
+                m.push_back(value("Power", [drv] { return std::string(powerName(drv->powerMode())); },
+                                  [this, drv] {
+                                      const DrivePower p = drv->powerMode();
+                                      drv->setPowerMode(p == DrivePower::Off ? DrivePower::Standby
+                                                      : p == DrivePower::Standby ? DrivePower::On : DrivePower::Off);
+                                      refreshItems();
+                                  }));
+            }
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+        } else if (out == DisplayOutput::Analyzer) {
+            title = "ANALYZER";
+            m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveAnalyzer(); }); }));
+            m.push_back(item("Clear", [this] { analyzer_clear(); close(); }));
+            m.push_back(Item{ [] { return std::string(analyzer_logging() ? "Logging (on) >" : "Logging >"); },
+                              [this] { openAnalyzerLogMenu(); } });
+            m.push_back(value("Mode", [] { return std::string(analyzer_mode() == AnalyzerMode::Overview ? "Overview" : "Detailed"); },
+                              [this] {
+                                  analyzer_setMode(analyzer_mode() == AnalyzerMode::Overview ? AnalyzerMode::Detailed
+                                                                                             : AnalyzerMode::Overview);
+                                  refreshItems();
+                              }));
+            m.push_back(value("Time", [] { return std::string(analyzer_relativeTime() ? "Relative" : "Since start"); },
+                              [this] { analyzer_setRelativeTime(!analyzer_relativeTime()); refreshItems(); }));
+            m.push_back(value("Idle frames", [] { return std::string(analyzer_showIdle() ? "Shown" : "Hidden"); },
+                              [this] { analyzer_setShowIdle(!analyzer_showIdle()); refreshItems(); }));
+        } else if (out == DisplayOutput::LoopMap || out == DisplayOutput::Signals) {
+            const bool map = out == DisplayOutput::LoopMap;
+            title = map ? "LOOP MAP" : "HP-IL SIGNALS";
+            m.push_back(item("Leave view", [this, map] {
+                doAndClose([map] { if (map) plotterview_leaveLoopMap(); else plotterview_leaveSignals(); });
+            }));
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+        } else {
+            title = "DISPLAY";
+            m.push_back(item("Clear screen", [this] { doAndClose([this] { screen_.clear(); }); }));
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(fontSizeItem());
+        }
+        m.push_back(item("More >", [this] { openHipiMenu(); }));
+        openList(title, std::move(m), nullptr, sel);
+    }
+
+    // ── More: the HIPI menu ─────────────────────────────────────────────
+    void openHipiMenu(int sel = 0) {
+        openList("HIPI", {
+            item("Go to view >", [this] { openViewsMenu(); }),
+            item("Settings >",   [this] { openSettingsMenu(); }),
+            item("System >",     [this] { openSystemMenu(); }),
+        }, [this] { openContextMenu(); }, sel);
+    }
+
+    void openViewsMenu() {
+        std::vector<Item> m;
+        int sel = 0;
+        for (CDevice* dev : plotterview_viewDevices()) {
+            if (dev == plotterview_viewDevice() && plotterview_output() != DisplayOutput::Analyzer &&
+                plotterview_output() != DisplayOutput::LoopMap && plotterview_output() != DisplayOutput::Signals)
+                sel = static_cast<int>(m.size());
+            m.push_back(item(plotterview_viewTitle(dev), [this, dev] { doAndClose([dev] { plotterview_showDevice(dev); }); }));
+        }
+        m.push_back(item("Analyzer",      [this] { doAndClose([] { plotterview_showAnalyzer(); }); }));
+        m.push_back(item("Loop map",      [this] { doAndClose([] { plotterview_showLoopMap(); }); }));
+        m.push_back(item("HP-IL signals", [this] { doAndClose([] { plotterview_showSignals(); }); }));
+        openList("GO TO VIEW", std::move(m), [this] { openHipiMenu(0); }, sel);
+    }
+
+    // ── Settings ────────────────────────────────────────────────────────
+    void openSettingsMenu(int sel = 0) {
+        openList("SETTINGS", {
+            item("Screen >",       [this] { openScreenSettings(); }),
+            item("Screen saver >", [this] { openSaverSettings(); }),
+            item("Devices >",      [this] { openDevicesMenu(); }),
+            item("PC link >",      [this] { openPcLinkSettings(); }),
+        }, [this] { openHipiMenu(1); }, sel);
+    }
+
+    void openScreenSettings() {
+        openList("SETTINGS / SCREEN", {
+            value("Text colour", [this] { return std::string(kColorLabels[colorIndex()]); },
+                  [this] { withMainCanvas([&] { applyColor((colorIndex() + 1) % kColorCount); }); refreshItems(); }),
+            fontSizeItem(),
+            value("Columns", [this] { return std::string(kColumnsLabels[columnsIndex()]); },
+                  [this] { applyColumns((columnsIndex() + 1) % kColumnsCount); refreshItems(); }),
+            value("Brightness", [this] { return std::string(kBrightnessLabels[brightnessIndex()]); },
+                  [this] { applyBrightness((brightnessIndex() + 1) % kBrightnessCount); refreshItems(); }),
+            plotViewItem(),
+        }, [this] { openSettingsMenu(0); });
+    }
+
+    void openSaverSettings() {
+        static const char* kModes[] = { "Dim", "Clock", "Off", "HP-IL rain", "Goose", "Random" };
+        auto name = [](std::uint8_t m) { return std::string(kModes[m < hipi::Config::kSaverModes ? m : 0]); };
+        openList("SETTINGS / SCREEN SAVER", {
+            value("Mode", [name] { return name(config.saverMode()); }, [this] {
+                // Dim -> Clock -> HP-IL rain -> Goose -> Random -> Off -> Dim
+                static const std::uint8_t kNext[] = { hipi::Config::SaverClock, hipi::Config::SaverRain,
+                                                      hipi::Config::SaverDim, hipi::Config::SaverGoose,
+                                                      hipi::Config::SaverRandom, hipi::Config::SaverOff };
+                const std::uint8_t m = config.saverMode();
+                config.setSaverMode(kNext[m < hipi::Config::kSaverModes ? m : 0]);
+                refreshItems();
+            }),
+            value("No clock", [name] { return name(config.clockFallback()); }, [this] {
+                const std::uint8_t f = config.clockFallback();
+                config.setClockFallback(f == hipi::Config::SaverRain   ? hipi::Config::SaverGoose
+                                      : f == hipi::Config::SaverGoose  ? hipi::Config::SaverRandom
+                                      : f == hipi::Config::SaverRandom ? hipi::Config::SaverDim
+                                                                       : hipi::Config::SaverRain);
+                refreshItems();
+            }),
+            value("Style", [] { return std::string(config.clockStyle() == 1 ? "LCD" : "Dark"); },
+                  [this] { config.setClockStyle(config.clockStyle() == 1 ? 0 : 1); refreshItems(); }),
+            value("Date", [] { return std::string(config.clockUs() ? "US" : "EU"); },
+                  [this] { config.setClockUs(!config.clockUs()); refreshItems(); }),
+            value("Time", [] { return std::string(config.clock12h() ? "12 h" : "24 h"); },
+                  [this] { config.setClock12h(!config.clock12h()); refreshItems(); }),
+            item("Show now", [this] { backlight_showClockNow(); close(); }),
+        }, [this] { openSettingsMenu(1); });
+    }
+
+    void openDevicesMenu(int sel = 0) {
+        openList("SETTINGS / DEVICES", {
+            item("Enable/disable >", [this] { openDeviceList(); }),
+            item("Change order >",   [this] { openDeviceOrder(); }),
+            // The cassette drives' power switch at the next start: ON ->
+            // STANDBY -> OFF (= switched off, like Enable/disable) -> ON
+            value("Drive at start", [this] { return std::string(driveAtStartName()); }, [this] {
+                const std::string now = driveAtStartName();
+                const bool on = now == "OFF";                // OFF -> ON
+                const bool standby = now == "ON";            // ON -> STANDBY
+                for (CDevice* dev : devices)
+                    if (dev->type() == DRIVE) config.setDeviceEnabled(dev->name(), now != "STANDBY");
+                config.setDriveStandby(standby && !on);
+                refreshItems();
+            }),
+        }, [this] { openSettingsMenu(2); }, sel);
+    }
+
+    void openPcLinkSettings() {
+        openList("SETTINGS / PC LINK", {
+            value("CON loop", [] { return std::string(config.conInternal() ? "Internal" : "Cable"); },
+                  [this] { config.setConInternal(!config.conInternal()); refreshItems(); }),
+            value("Trace", [this] { return std::string(kTraceLabels[traceIndex()]); },
+                  [this] { applyTrace((traceIndex() + 1) % kTraceCount); refreshItems(); }),
+        }, [this] { openSettingsMenu(3); });
+    }
+
+    // ── System ──────────────────────────────────────────────────────────
+    void openSystemMenu(int sel = 0) {
+        openList("SYSTEM", {
+            Item{ [this] { return std::string((usbMscModeActive() || devForceDisconnectLabel_) ? "Disconnect from PC" : "Connect to PC"); },
+                  [this] { toggleConnectToPc(); } },
+            item("Loopback test >", [this] { openLoopbackConfirm(); }),
+            item("Scan I2C >",      [this] { runI2CScan(); }),
+            item("Character table >", [this] { doAndClose([] { plotterview_showCharTable(); }); }),
+            item("About >",         [this] { openAbout(); }),
+            item("Bootsel mode",    [this] { enterBootselMode(); }),
+        }, [this] { openHipiMenu(2); }, sel);
+    }
+
+    void openAbout() {
+        char b[48];
+        std::vector<Item> m;
+        auto line = [&](const std::string& s) { m.push_back(item(s, [] {})); };
+        line(std::string("HIPI ") + version_);
+        line("HP-IL Pico Interface");
+#ifdef DISPLAY_7INCH
+        line("7\" display, Pico 2");
+#else
+        line("5\" display, Pico 2");
+#endif
+        std::snprintf(b, sizeof(b), "Built %s", __DATE__);
+        line(b);
+        openList("SYSTEM / ABOUT", std::move(m), [this] { openSystemMenu(4); });
+    }
+
+    // "Connect to PC" / "Disconnect from PC" -- the SD card as a USB drive
+    // (usb_msc.h). Shows the result for a moment, then the System menu again.
+    void toggleConnectToPc() {
+        const bool wasActive = usbMscModeActive();
+#if HIPI_DEV_SCREENDUMPS
+        if (!wasActive) devDumpConnectScreens();
+#endif
+        const bool nowActive = wasActive ? (exitUsbMscMode(), false) : enterUsbMscMode();
+        title_ = "SYSTEM";
+        drawBox();
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        if (wasActive) {
+            d_->txtWrite("Disconnected from PC.");
+            d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
+            d_->txtWrite("HP-IL drive access resumed.");
+        } else if (nowActive) {
+            drawConnectedText();
+        } else {
+            d_->txtWrite("Couldn't connect -- no SD card?");
+        }
+        sleep_ms(1500);
+        openSystemMenu(0);
+    }
+
     void close() {
         // Brightness live-preview (see handleButton()'s own
         // BrightnessMenu case) needs restoring here too, not just on
@@ -1920,7 +1814,6 @@ private:
         // global Shift+Ok "exit entirely" shortcut, which can fire
         // while BrightnessMenu is open and mid-preview, bypassing that
         // X handling entirely.
-        if (state_ == State::BrightnessMenu) screen_.setBrightness(brightnessBeforeMenu_);
         state_ = State::Closed;
         pickerFromTape_ = false;
         setMediaEjected(false);             // cassette back in (new or old file)
@@ -1952,7 +1845,8 @@ private:
         if (plotterview_output() == DisplayOutput::Plotter ||
             plotterview_output() == DisplayOutput::Analyzer ||
             plotterview_output() == DisplayOutput::LoopMap ||
-            plotterview_output() == DisplayOutput::Signals) {
+            plotterview_output() == DisplayOutput::Signals ||
+            plotterview_output() == DisplayOutput::CharTable) {
             // Screen stays suspended (it's not what's showing) -- just
             // erase the menu box by redrawing the plot underneath it,
             // instead of screen_.resume()'s HP-41 text redraw below.
@@ -2009,42 +1903,28 @@ private:
         if (targetDrive_) targetDrive_->setMediaFile(filename);
     }
 
-    // Draws every entry in kColorLabels using ITS OWN colour (kColors[i])
-    // as the text colour, rather than the generic white/black scheme
-    // drawRow() uses everywhere else -- makes each option visually show
-    // what picking it actually looks like, not just its name. Selection
-    // is shown via a neutral dark grey background instead of drawRow()'s
-    // own yellow -- a fixed highlight colour couldn't work here (e.g.
-    // yellow text would vanish against a yellow highlight), while the
-    // background/text colours staying independent works for all of them,
-    // including White and Yellow themselves.
-    // See drawColorList()'s own comment for why this differs from
-    // drawRow(). Single-row version so highlightRow() (redraws just the
-    // one row whose highlight changed, on Up/Down) doesn't need to
-    // redraw all of kColorLabels every time the way drawColorList()
-    // itself does for the initial, full draw.
-    void drawColorRow(int i) {
-        constexpr std::uint16_t kSelectedBg = 0x39E7;  // neutral dark grey
-        // Explicitly (re-)asserts the menu's own fixed text scale --
-        // see Screen::draw_letter()'s own comment for the full story on
-        // why neither side can rely on the shared hardware register
-        // still being whatever it last set it to. Needed here
-        // specifically because this (like drawRow()/drawFileList()) can
-        // be called on its own during Up/Down navigation within an
-        // already-open menu, without drawBox()/MenuFrame::draw() (the
-        // only other thing that sets this) running again first.
-        d_->txtSize(MenuFrame::TextScale);
-        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + i * MenuFrame::RowPitch);
-        d_->txtColor(kColors[i], i == selected_ ? kSelectedBg : 0x0000);
-        d_->txtWrite(kColorLabels[i]);
-    }
 
-    void drawColorList() {
-        for (int i = 0; i < kColorCount; ++i) drawColorRow(i);
-    }
 
+    // The frame, with the menu's title (title_) in its top band -- in the
+    // HP-41's display font (HIPI_MENU_TITLE_HP41FONT) or the built-in one
     void drawBox() {
-        MenuFrame::draw(d_);
+        using namespace MenuFrame;
+        MenuFrame::draw(d_, X, MenuTop, W, MenuH);
+        d_->fillRect(X + BorderThickness, MenuTop + BorderThickness, W - 2 * BorderThickness,
+                     TitleH - BorderThickness, Yellow);
+        std::string t = title_.empty() ? std::string("HIPI") : title_;
+        for (char& c : t) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+#if HIPI_MENU_TITLE_HP41FONT
+        drawGlyphText(d_, X + 16, MenuTop + (TitleH - kMenuTitleFont.height) / 2 + 1, kMenuTitleFont,
+                      t.c_str(), 0x0000, Yellow);
+        d_->selectBuiltinFont();
+#else
+        d_->txtSize(0);
+        d_->txtColor(0x0000, Yellow);
+        d_->txtSetCursor(X + 16, MenuTop + 8);
+        d_->txtWrite(t.c_str());
+#endif
+        d_->txtSize(TextScale);
     }
 
     // Clears the full width of one menu row's own slot to the given
@@ -2082,13 +1962,42 @@ private:
         d_->selectBuiltinFont();
         const bool isSelected = (index == selected_);
         _clearRowBackground(index, isSelected ? MenuFrame::Yellow : 0x0000);
-        d_->txtColor(isSelected ? 0x0000 : 0xFFFF, isSelected ? MenuFrame::Yellow : 0x0000);
+        rowFg_ = isSelected ? 0x0000 : 0xFFFF;
+        d_->txtColor(rowFg_, isSelected ? MenuFrame::Yellow : 0x0000);
         writeRowLabel(MenuFrame::Y + 20 + index * MenuFrame::RowPitch, label);
     }
 
     // A row's label. One ending in " >" (opens another menu or dialog) gets
     // its ">" right-aligned in the row, like a submenu arrow.
     void writeRowLabel(int y, const char* label) {
+        if (const char* tab = std::strchr(label, '\t')) {
+            // A setting: its name left, the value right-aligned between two
+            // filled arrows -- drawn, not text, so they don't look like the
+            // ">" of a submenu row
+            const std::string name(label, static_cast<std::size_t>(tab - label));
+            const std::string val(tab + 1);
+            d_->txtSetCursor(MenuFrame::X + 20, static_cast<std::uint16_t>(y));
+            d_->txtWrite(name.c_str());
+            constexpr int kArrowW = 10, kGap = 10;
+            const int valW = static_cast<int>(val.size()) * 16;
+            const int right = MenuFrame::X + MenuFrame::W - 48;           // right arrow's tip
+            int vx = right - kArrowW - kGap - valW;
+            vx = std::max(vx, MenuFrame::X + 20 + static_cast<int>(name.size() + 1) * 16 + kArrowW + kGap);
+            d_->txtSetCursor(static_cast<std::uint16_t>(vx), static_cast<std::uint16_t>(y));
+            d_->txtWrite(val.c_str());
+            // The arrows in the text colour of the row (white, or black when selected)
+            const std::uint16_t col = rowFg_;
+            const int cy = y + 16, h = 9;
+            const int lx = vx - kGap;                                      // left arrow's base
+            d_->fillTriangle(static_cast<std::int16_t>(lx - kArrowW), static_cast<std::int16_t>(cy),
+                             static_cast<std::int16_t>(lx), static_cast<std::int16_t>(cy - h),
+                             static_cast<std::int16_t>(lx), static_cast<std::int16_t>(cy + h), col);
+            const int rx = vx + valW + kGap;                               // right arrow's base
+            d_->fillTriangle(static_cast<std::int16_t>(rx + kArrowW), static_cast<std::int16_t>(cy),
+                             static_cast<std::int16_t>(rx), static_cast<std::int16_t>(cy - h),
+                             static_cast<std::int16_t>(rx), static_cast<std::int16_t>(cy + h), col);
+            return;
+        }
         const std::size_t len = std::strlen(label);
         const bool sub = len >= 2 && label[len - 1] == '>' && label[len - 2] == ' ';
         d_->txtSetCursor(MenuFrame::X + 20, static_cast<std::uint16_t>(y));
@@ -2106,79 +2015,22 @@ private:
         // drawRow already looks at selected_ to pick the color scheme,
         // so we only need to point it at the right label source for the active state.
         switch (state_) {
-            case State::MainMenu:
-                if (index >= 0 && index < kMainMenuCount)
-                    drawRow(index, kMainMenuLabels[index]);
-                break;
-            case State::ConfigMenu:
-                if (index == 2) drawRow(2, usbMscModeActive() ? "Disconnect from PC" : "Connect to PC");
-                else if (index >= 0 && index < kConfigMenuCount)
-                    drawRow(index, kConfigMenuLabels[index]);
-                break;
-            case State::SettingsMenu:
-                if (index >= 0 && index < kSettingsMenuCount)
-                    drawRow(index, settingsLabel(index));
-                break;
-            case State::ColorPicker:
-                if (index >= 0 && index < kColorCount)
-                    drawColorRow(index);
-                break;
-            case State::FontSizeMenu:
-                if (index >= 0 && index < kFontSizeCount)
-                    drawRow(index, kFontSizeLabels[index]);
-                break;
-            case State::BrightnessMenu:
-                if (index >= 0 && index < kBrightnessCount)
-                    drawRow(index, kBrightnessLabels[index]);
-                break;
-            case State::ColumnsMenu:
-                if (index >= 0 && index < kColumnsCount)
-                    drawRow(index, kColumnsLabels[index]);
+            case State::List:
+                (void)index;
+                drawItems();
                 break;
             case State::FilePicker:
                 if (index >= 0 && index < static_cast<int>(files_.size()))
                     drawRow(index, fileLabel(static_cast<std::size_t>(index)));
                 break;
-            case State::TraceMenu:
-                if (index >= 0 && index < kTraceCount)
-                    drawRow(index, kTraceLabels[index]);
-                break;
             case State::DeviceList:
                 if (index >= 0 && index < static_cast<int>(deviceLabels_.size()))
                     drawRow(index, deviceLabels_[static_cast<std::size_t>(index)].c_str());
                 break;
-            case State::DeviceOrder:
-                break;
-            case State::DevicesMenu:
-                if (index >= 0 && index < kDevicesMenuCount)
-                    drawRow(index, kDevicesMenuLabels[index]);
-                break;
-            case State::AnalyzerMenu:
-                drawListRows(analyzerLabels_, analyzerScroll_);
-                break;
             case State::AnalyzerLogMenu:
                 drawListRows(analyzerLogLabels_, analyzerLogScroll_);
                 break;
-            case State::SaverMenu:
-                drawListRows(saverLabels_, saverScroll_);
-                break;
-            case State::DisplayMenu:
-                (void)index;
-                drawDisplayMenuRows();
-                break;
-            case State::Closed:
-                break;
-            case State::ConfirmFile:
-                break;
-            case State::LifInfo:
-                break;
-            case State::LoopbackConfirm:
-                break;
-            case State::LoopbackResult:
-                break;
-            case State::I2CScanResult:
-                break;
-            case State::Warning:
+            default:
                 break;
         }
     }
@@ -2231,11 +2083,6 @@ private:
     std::function<void(std::uint8_t)> onColumnsChanged_;
     std::function<void(const std::string&, bool)> onDeviceToggled_;
     LoopbackTestFn onLoopbackTest_;
-    // Brightness live-previews as the cursor moves in BrightnessMenu
-    // (see handleButton()'s own BrightnessMenu case) -- this holds the
-    // level to restore if the user backs out with X instead of
-    // confirming with Ok. Set once, when the menu is opened.
-    std::uint8_t brightnessBeforeMenu_ = 0;
 };
 
 }  // namespace hipi

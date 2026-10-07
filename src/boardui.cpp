@@ -14,6 +14,7 @@
 #include "backlight.h"
 #include "loopmap.h"
 #include "plotterview.h"
+#include "plotterview.h"
 
 #include "boardui.h"
 
@@ -838,6 +839,7 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display) {
 }
 
 void boardui_init(Screen* screen, UiDialog* dialog, const char* version) {
+    if (dialog != nullptr) dialog->setVersion(version);     // System -> About
     screen_  = screen;
     dialog_  = dialog;
     version_ = version;
@@ -978,6 +980,8 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         if (!isInsideDeviceListBox(x, y)) {
             hideDeviceList();
         }
+    } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::CharTable) {
+        plotterview_leaveCharTable();         // the character table: any touch closes it
     } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::LoopMap &&
                loopmap_tap(x, y)) {
         // Loop map: a card -> its details; the details box -> closed

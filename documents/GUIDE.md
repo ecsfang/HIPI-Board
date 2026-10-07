@@ -232,7 +232,7 @@ Choose whichever is convenient:
 
 - **Button:** Hold the **BOOTSEL** button on the Pico, connect USB (or press
   reset), then release.
-- **Menu:** On a running board, open **Config → Bootsel mode**. The board
+- **Menu:** On a running board, open **More → System → Bootsel mode**. The board
   reboots straight into BOOTSEL — no need to reach the button inside a case.
 
 ### 3.2 Copy the firmware
@@ -302,7 +302,7 @@ scripts/bmp_to_rgb565.py resources/buttons.bmp src/buttons_image.cpp kButtonsIma
 ```
 
 Once the board is running you can also copy files to the SD card over USB —
-see **Config → Connect to PC** below.
+see **System → Connect to PC** below.
 
 ### 4.1 CONFIG.TXT
 
@@ -404,6 +404,24 @@ time; no return within 1 s, or a frame arriving with none of ours out,
 gives a log line and a warning box (`boardui_showWarning()`). SSRQ (0x49C)
 and CSRQ (0x49D) set/clear the SRQ bit HIPI puts in passing IDY frames in
 COFF (and switch COFI to COFF), as in the PIC firmware.
+
+**Menus.** `include/uidialog.hpp`: every menu is a `State::List` built by
+`openList(title, items, back, sel)` from `Item`s -- a label function and an
+OK action. `item()` makes a plain row (a trailing `" >"` draws the submenu
+arrow), `value(name, valueFn, nextFn)` a setting row (`"name\tvalue"`,
+drawn as `name ... < value >`; OK steps to the next value). OK with no menu
+open calls `openContextMenu()`, which builds the menu of the view showing;
+its "More >" leads to `openHipiMenu()` (Go to view / Settings / System).
+The title goes in the frame's top band (`MenuFrame::TitleH`; drawn with
+`kMenuTitleFont`, the HP-41 font, unless `HIPI_MENU_TITLE_HP41FONT` is 0).
+Order in every menu: where to go, what to do, settings, More.
+
+**Character table.** `src/chartable.cpp` draws the HP-41's codes 0..127 from
+`src/chartable_font.cpp`, which `scripts/hp41_charset.py` generates from the
+TrueType font **by HP-41 code**: the font is laid out like ASCII, with the
+HP-41's special characters at 128+ (code 0, the overbar, is the font's 134;
+code 1, x-bar, its 139 ...) -- the script's `KMAP` holds that mapping, and
+draws the "starburst" (all segments) for codes the HP-41 can't show.
 
 **Backlight dimming.** `src/backlight.cpp`: after `kDimAfterMs` (10 min,
 `include/backlight.h`) without activity the backlight goes to `kDimLevel`
@@ -778,7 +796,7 @@ CDevice(const char* name, IL_ADDR_t sai, IL_ADDR_t aau, IL_Type_e type);
    should appear with an address and your SAI. The Devices menu,
    enable/disable persistence and the boot-time device listing all work
    automatically.
-5. **Debug** with **Config → Trace → Extended** and the log on
+5. **Debug** with **Settings → PC link → Trace: Extended** and the log on
    `/dev/ttyACM0`. Implement `show()` to print your own state.
 
 ### 9.4 Skeleton — a simple talker/listener
@@ -884,7 +902,7 @@ This keeps the chip driver reusable and testable without HP-IL.
 **The shared bus.** All I2C devices share `i2c0` on GP16 (SDA) / GP17 (SCL)
 with the touch controller. `touchInit()` initialises the bus and
 `pico_main.cpp` then calls `CI2CBus::markInitialized(touch_i2c)`, so your
-driver's `initBus()` will not re-initialise it. Use **Config → Scan I2C** to
+driver's `initBus()` will not re-initialise it. Use **System → Scan I2C** to
 confirm the chip's address before writing any code.
 
 Chip driver skeleton (a BH1750 light sensor — an example only, not part of the project):
@@ -1010,10 +1028,10 @@ redrawn completely when the user switches back to it.
 |---------|-------|
 | The `.uf2` copies to the BOOTSEL drive but the Pico doesn't restart | Built for the wrong board -- see 1.4 (needs `pico2` / `pico2_w`), then rebuild from an empty `build/` |
 | "PANIC: f_mount error" in the log | SD card not inserted / not formatted / bad contact |
-| HP-IL doesn't respond | Run **Config → Loopback test** with a cable from OUT to IN. Check that the device isn't `[OFF]` in **Devices** |
+| HP-IL doesn't respond | Run **System → Loopback test** with a cable from OUT to IN. Check that the device isn't `[OFF]` in **Settings → Devices** |
 | A device has no address | It is disabled, or the controller has not run auto-addressing yet (e.g. power-cycle the HP-41 loop) |
 | Nothing on `/dev/ttyACM0` | Check the `dialout` group and the port number. Early boot messages are buffered (4 kB) and sent when the terminal opens the port |
-| New I2C device not found | **Config → Scan I2C**; check address, pull-ups and power |
+| New I2C device not found | **System → Scan I2C**; check address, pull-ups and power |
 | Files copied from the PC not visible | Select **Disconnect from PC** and eject on the PC before using the drive again |
 | Build fails after editing `CMakeLists.txt` | Delete `build/` and configure again |
 | `RP2350` drive does not appear | Use a USB cable that carries data, and hold BOOTSEL *while* connecting |

@@ -30,8 +30,8 @@
 
 ## 1. What is HIPI?
 
-HIPI is a small box with a touch screen that connects to your HP-41 through the
-HP-IL module. To the HP-41 it looks like a whole set of classic HP peripherals
+HIPI is a small box with a touch screen that connects to your HP-41, HP-71 or HP-75 through the
+HP-IL module. To the device it looks like a whole set of classic HP peripherals
 at once:
 
 | HIPI acts as…                 | Original HP device        | Shows up as |
@@ -41,7 +41,7 @@ at once:
 | Plotter                       | HP 7470A                  | `TFPLOT`    |
 | Temperature/pressure sensor   | —                         | `TFTEMP`    |
 | LEDs and colour pixels        | —                         | `TFLEDS`, `TFPIXEL` |
-| Link to a PC emulator         | PILBox                    | `PILBOX`    |
+| Link to a PC (e.g. pyIlPer)   | PILBox                    | `PILBOX`    |
 | Terminal over USB             | —                         | `TFTERM`    |
 
 Cassettes are simply files on a micro-SD card, so you never run out of tape.
@@ -58,7 +58,9 @@ Cassettes are simply files on a micro-SD card, so you never run out of tape.
 
 ## 2. What you need
 
-- An **HP-41** (C, CV or CX) with an **HP 82160A HP-IL module**
+- An **HP-IL Controller** device
+  - E.g. a **HP-41** (C, CV or CX) with an **HP 82160A HP-IL module**
+  - Or a **HP-71/75** with **HP-IL**
 - The **HIPI unit**
 - **HP-IL cables** — two, to make the loop with the HP-41
 - A **micro-SD card** (FAT32 recommended)
@@ -94,12 +96,12 @@ HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons, menus and 
 
 ### 3.2 Connect everything
 
-1. Turn the HP-41 **off**.
-2. Connect the HP-41's HP-IL **OUT** to HIPI's **IN**, and HIPI's **OUT** back
-   to the HP-41's **IN**. HP-IL always forms a closed loop.
-3. Insert the SD card.
+1. Turn the controller **off**.
+2. Connect the controller's HP-IL **OUT** to HIPI's **IN**, and HIPI's **OUT** back
+   to the controller's **IN**. HP-IL always forms a closed loop.
+3. Insert the SD card (if you have one).
 4. Connect USB power. HIPI starts.
-5. Turn the HP-41 on.
+5. Turn the controller on.
 
 ![HP-IL loop between HP-41 and HIPI](images/setup-loop.jpg)
 
@@ -120,7 +122,7 @@ On the right, the **DEVICES ON THE LOOP** are shown in loop order: yellow
 when switched on, grey when off.
 
 After a few seconds (or when you touch the screen) HIPI is ready. Anything
-the HP-41 prints now appears on the screen.
+the controller prints now appears on the screen.
 
 <a href="images/screen-startup.png"><img src="images/screen-startup.png" alt="The start-up screen while HIPI starts" width="512"></a>
 
@@ -167,7 +169,7 @@ Touches are ignored while it's showing.
 
 After 10 minutes without anything happening — no new text or drawing on the
 screen, no touch — HIPI starts its screen saver. Choose what it does in
-**Settings → Screen saver**:
+**More → Settings → Screen saver**:
 
 | Setting | Choices |
 |---------|---------|
@@ -224,22 +226,22 @@ own speed — the program is still running somewhere.
 
 ### 5.1 Display
 
-The HP 82163 video display: everything the HP-41 prints, like `PRA`, `PRX` or
+The HP 82163 video display: everything the controller prints, like `PRA`, `PRX` or
 program listings. Scroll back with ▲ and ▼.
 
 <a href="images/view-display.png"><img src="images/view-display.png" alt="Display view" width="512"></a>
 
 ### 5.2 Plotter
 
-Shows what the HP-41 draws on the plotter (`TFPLOT`). The drawing keeps growing
-while you look at other views. Clear it with **Display → Clear plotter**.
+Shows what the controller draws on the plotter (`TFPLOT`). The drawing keeps growing
+while you look at other views. Clear it with **Clear plotter** in its menu (OK).
 
-**Display → Plot view** chooses how the drawing is placed on the screen:
+**Plot view** in its menu (OK) — or **Settings → Screen** — chooses how the drawing is placed on the screen:
 
 - **Fit** (the default) — the drawing itself, with a small margin, as large
   as the screen allows and centred. It grows along as more is drawn.
-- **Page** — the plotter's whole drawing area, like the paper. The HP-41's
-  plots don't sit in the middle of it (the plotter module leaves room for
+- **Page** — the plotter's whole drawing area, like the paper. The
+  plots don't sit in the middle of it (e.g. the plotter module leaves room for
   the axis labels), so they look shifted up and to the right.
 
 Both keep the proportions: circles stay round and text undistorted.
@@ -258,9 +260,9 @@ thing.
 | **Cassette window** | Shows the cassette with the file name on its label. Touch it to pick another file |
 | **OPEN** button | Opens the lid and the file list |
 | **REWIND** button | Rewinds the tape (takes a few seconds; not while BUSY is lit) |
-| **OFF–STANDBY–ON** switch | Touch to move it one step. OFF takes the drive off the loop; ON keeps it on; in STANDBY the HP-41 can switch it off and on to save power |
+| **OFF–STANDBY–ON** switch | Touch to move it one step. OFF takes the drive off the loop; ON keeps it on; in STANDBY the controller can switch it off and on to save power |
 | **POWER** light | The drive is on |
-| **BUSY** light | The drive is working, or the HP-41 is talking to it |
+| **BUSY** light | The drive is working, or the controller is talking to it |
 | **Reels** | Spin while the tape is read, written or wound |
 
 <a href="images/view-tape-open.png"><img src="images/view-tape-open.png" alt="Lid open" width="512"></a>
@@ -270,55 +272,81 @@ thing.
 ## 6. The menus
 
 Press **OK** to open the menu. **▲/▼** to move, **OK** to choose, **X** to go
-back. **Shift + OK** closes the menu from anywhere. A **>** at the right of a
-row means it opens another menu or dialog.
+back. **Shift + OK** closes the menu from anywhere.
 
-<a href="images/menu-main.png"><img src="images/menu-main.png" alt="Main menu" width="512"></a>
+**The menu belongs to what you're looking at.** OK first opens the menu of
+the view on the screen — the things you'd want to do right there, like
+clearing the plotter in the Plotter view. Its last row, **More**, leads to
+HIPI's own menu: going to another view, the settings, and the system
+functions. The menu's name is always shown in the band at the top of its
+frame, e.g. *PLOTTER* or *SETTINGS / SCREEN*.
+
+Three kinds of rows:
+
+- **Settings >** — a row ending in **>** opens another menu or dialog.
+- **Clear plotter** — a row without one does it at once.
+- **Plot view  < Fit >** — a setting, with its value at the right: **OK**
+  changes it to the next value, at once and remembered.
+
+Every menu has the same order: where to go, what to do, settings, then
+**More**.
+
+<a href="images/menu-main.png"><img src="images/menu-main.png" alt="A menu" width="512"></a>
 
 ```
-Main menu
-├── Config
-│   ├── Select file        Choose the cassette (.dat file)
-│   ├── Trace              Log HP-IL traffic (for troubleshooting)
-│   ├── Connect to PC      Show the SD card on your computer
-│   ├── Loopback test      Test the HP-IL connection
-│   ├── Scan I2C           List connected I2C sensors
-│   └── Bootsel mode       Get ready for a software update
-├── Settings
-│   ├── Textcolor          White, yellow, green, cyan or red
-│   ├── Font size          0 – 3
-│   ├── Brightness         20 – 100 %
-│   ├── Columns            Characters per line
-│   ├── Screen saver       Dim, clock or off; clock style, date and time format
-│   └── CON loop           Cable / Internal: the loop in PILBox's CON mode
-├── Devices
-│   ├── Enable/disable     Turn HIPI's devices on or off
-│   └── Change order       Change the devices' order on the loop
-└── Display
-    ├── Display, Plotter, Tape…    Choose a view (one row per device)
-    ├── Analyzer           Watch what happens on the HP-IL loop
-    ├── Loop map           See every device on the loop
-    ├── HP-IL signals      Check the signals on HP-IL IN (troubleshooting)
-    ├── Plot view          Fit (the drawing fills the screen) / Page (like the paper)
-    ├── Clear plotter
-    ├── Clear screen
-    └── Screendump         Save the screen as a picture
+OK in a view — that view's menu
+├── DISPLAY          Clear screen · Screendump · Font size < 0 > · More >
+├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > · More >
+├── TAPE TFDRIVE     Select cassette > · Rewind · Power < ON > · Screendump · More >
+├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
+│                    Time < Relative > · Idle frames < Hidden > · More >
+└── LOOP MAP,        Leave view · Screendump · More >
+    HP-IL SIGNALS
+
+More > — HIPI's menu
+├── Go to view >     Display · Plotter · Tape (one row per device) ·
+│                    Analyzer · Loop map · HP-IL signals
+├── Settings >
+│   ├── Screen >         Text colour < White > · Font size < 0 > · Columns < Auto > ·
+│   │                    Brightness < 100% > · Plot view < Fit >
+│   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
+│   │                    Date < EU > · Time < 24 h > · Show now
+│   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
+│   └── PC link >        CON loop < Cable > · Trace < Off >
+└── System >
+    ├── Connect to PC    Show the SD card on your computer
+    ├── Loopback test >  Test the HP-IL connection
+    ├── Scan I2C >       List connected I2C sensors
+    ├── Character table > The HP-41's character codes 0-127
+    ├── About >          Version and hardware
+    └── Bootsel mode     Get ready for a software update
 ```
 
-All settings are remembered, also after power off.
+(Screendump is on the 7" panel only.) All settings are remembered, also
+after power off.
 
 ### A few worth knowing
 
-- **Devices → Enable/disable** — each of HIPI's devices can be switched off. A switched-off device
+- **Settings → Devices → Enable/disable** — each of HIPI's devices can be switched off. A switched-off device
   is gone from the loop, just as if it were unplugged. Handy if you have the
   real HP device connected too.
-- **Devices → Change order** — sets the order of HIPI's devices on the loop,
+- **System → Character table** — a help page: the HP-41's character codes
+  0–127 (decimal), each with the character as the HP-41's display shows it,
+  over the whole screen. (Codes the HP-41 can't show appear with all
+  segments on; for 102–125 the lower-case letters and `{|}` are shown
+  instead.) Handy with `XTOA`/`ATOX` or when sending text to HIPI's devices.
+  Touch the screen (or any button) to close it.
+- **Settings → Devices → Drive at start** — where the cassette drive's power
+  switch is when HIPI starts: **ON**, **STANDBY** or **OFF** (switched off,
+  like in *Enable/disable* — not on the loop). To switch the drive right now,
+  use **Power** in the Tape view's menu, or the switch on the picture.
+- **Settings → Devices → Change order** — sets the order of HIPI's devices on the loop,
   which also decides their addresses. Pick a device with ▲/▼ and **OK**, move
   it with ▲/▼, and press **OK** to keep the new place (or **X** to put it back).
-  The order is remembered; the HP-41 hands out the new addresses the next time
+  The order is remembered; the controller hands out the new addresses the next time
   it sets up the loop.
 - **Columns** — *Auto* fits the font size; *32* is the original HP 82163 width.
-- **Loopback test** — connect HIPI's IN and OUT with one HP-IL cable (no HP-41),
+- **System → Loopback test** — connect HIPI's IN and OUT with itself (no controller),
   then run it. "Loopback OK!" means the HP-IL side works.
 
 <a href="images/menu-devices.png"><img src="images/menu-devices.png" alt="Devices menu" width="512"></a>
@@ -339,7 +367,7 @@ card reader, or straight from HIPI with **Connect to PC** (see
 
 ### Choosing a cassette
 
-Use **Config → Select file**, or touch the cassette window in the Tape view.
+Use **Select cassette** in the Tape view's menu (OK), or touch the cassette window in the Tape view.
 
 <a href="images/menu-filelist.png"><img src="images/menu-filelist.png" alt="File list" width="512"></a>
 
@@ -362,7 +390,7 @@ Scroll with ▲/▼ (Shift for a page), **OK** to use the cassette, **X** to go 
 ## 8. HIPI's other devices
 
 Besides the display and the cassette drive, HIPI has a few more devices you can
-use from HP-41 programs. You talk to them like any HP-IL device: **select** it
+use from your controllers programs. You talk to them like any HP-IL device: **select** it
 with its address, then send text with `OUTA` or read with `INA`.
 
 **Finding the address:** touch the **bottom-left corner** of the screen. The list
@@ -371,7 +399,7 @@ use the address 3; replace it with the one shown on your screen.
 
 ### 8.1 Plotter — `TFPLOT`
 
-An HP 7470A pen plotter; the drawing appears in the Plotter view. It works with
+An HP 7470A pen plotter; the drawing appears in the Plotter view. It works e.g. with the
 HP-41 plotter software, and you can also send plotter commands (HP-GL) yourself:
 
 ```
@@ -508,7 +536,7 @@ program, for example PuTTY on Windows or `minicom` on Linux.
 ### 8.6 PC link — `PILBOX`
 
 Lets an HP-IL emulator on your computer, such as **pyILPER**, join the loop.
-The emulator's virtual drives and printers then work with the HP-41 as if they
+The emulator's virtual drives and printers then work with the controller as if they
 were connected with cables. In the emulator, choose the **second** serial port
 HIPI creates (on Linux usually `/dev/ttyACM1`) as its PILBox port.
 
@@ -520,18 +548,18 @@ corner) shows it on the PILBOX line:
 | Mode | Means |
 |------|-------|
 | `TDIS` | No PC program connected — PILBox just passes frames on |
-| `COFF` | Connected; the HP-41 is the loop's controller |
+| `COFF` | Connected; the controller is the loop's controller |
 | `COFI` | As `COFF`, and idle frames (IDY) are passed to the PC too |
 | `CON` | Connected; the PC program is the loop's controller (see below) |
 
 **CON — the PC as controller.** In CON there is no controller on the HP-IL
 loop: the PC program controls it, and HIPI starts every frame. HIPI's own
 devices are on that loop too: PILBOX's place in the device order
-(**Devices → Change order**) is where the loop begins and ends — the devices
+(**Settings → Devices → Change order**) is where the loop begins and ends — the devices
 after PILBOX come first, then the cable (HP-IL OUT → other devices → HP-IL
 IN), then the devices before PILBOX.
 
-**Settings → CON loop** chooses the loop:
+**Settings → PC link → CON loop** chooses the loop:
 
 - **Cable** (the default) — through the HP-IL cable, so a cable (or other
   devices) must go from HIPI's OUT back to its IN.
@@ -555,7 +583,7 @@ To copy cassette files or screen dumps, you can reach the SD card from your
 computer without taking it out:
 
 1. Connect HIPI to the computer with USB.
-2. Choose **Config → Connect to PC**. The SD card appears on the computer as a
+2. Choose **More → System → Connect to PC**. The SD card appears on the computer as a
    USB drive.
 3. Copy your files.
 4. **Eject** the drive on the computer. HIPI notices and goes back to normal
@@ -571,11 +599,11 @@ While connected, the cassette drive is paused and screen dumps are not possible.
 
 ## 10. Screen dumps
 
-**Display → Screendump** saves the screen as a picture in the `screenshots`
+**Screendump** in a view's menu (OK) saves the screen as a picture in the `screenshots`
 folder on the SD card: `screendump_0.bmp`, `screendump_1.bmp` and so on. It takes a few seconds; a
 yellow box tells you when it's done. The menu itself is not in the picture.
 
-You can also take one from an HP-41 program (with the display device selected):
+You can also take one from e.g. a HP-41 program (with the display device selected):
 
 | Keys | Saves |
 |------|-------|
@@ -592,7 +620,7 @@ has no address and never changes anything on the loop. It records all the
 time in the background, so you can open it *after* something went wrong
 and see what led up to it.
 
-Open it with **Display → Analyzer**. **▲/▼** scroll back and forth (Shift for
+Open it with **More → Go to view → Analyzer**. **▲/▼** scroll back and forth (Shift for
 a page, hold to keep scrolling), **X** jumps to the newest line, **Shift + X**
 clears it. **Touch the middle of the screen** to pause: the screen freezes
 with a red PAUSED banner while recording goes on; touch again to resume.
@@ -638,7 +666,7 @@ Press **OK** in the analyzer for its menu:
 
 ### 11.1 The loop map
 
-**Display → Loop map** draws the HP-IL loop as a ring: the controller (usually
+**More → Go to view → Loop map** draws the HP-IL loop as a ring: the controller (usually
 the HP-41) on the left, and every device in loop order around it with its
 address, name, device ID and type. Yellow cards are HIPI's own devices, blue
 ones the devices of a PC program connected through PILBOX (e.g. pyILPER),
@@ -653,16 +681,16 @@ map.
 <a href="images/loopmap.png"><img src="images/loopmap.png" alt="The loop map" width="512"></a>
 
 HIPI only listens, so the map fills in as the loop is used: the addresses
-come from the HP-41's auto-addressing, a device's type and ID once the
-HP-41 has asked for them (until then the card shows `?`), and devices that
-sit after HIPI on the loop appear the first time the HP-41 talks to them.
+come from the controller's auto-addressing, a device's type and ID once the
+controller has asked for them (until then the card shows `?`), and devices that
+sit after HIPI on the loop appear the first time the controller talks to them.
 
 ---
 
 ### 11.2 HP-IL signals (troubleshooting)
 
-If the HP-41 can't reach HIPI (TRANSMIT ERR) or if you experience other errors
-you could check the signal, **Display → HP-IL signals** shows what actually arrives on HIPI's HP-IL
+If the controller can't reach HIPI (TRANSMIT ERR) or if you experience other errors
+you could check the signal, **More → Go to view → HP-IL signals** shows what actually arrives on HIPI's HP-IL
 input, drawn like in the HP-IL specification: the first frame of a capture as
 one line — up for a positive pulse, down for a negative one — with each
 bit's value above it (the first one marked **sync**), the field names below
@@ -684,7 +712,7 @@ HIPI keeps its settings in `CONFIG.TXT` in the root of the SD card. It
 creates the file itself at the first start and writes it again whenever a
 setting is changed in the menus — so normally you never need to touch it.
 But it is a plain text file, and it can be edited on a computer: take the SD
-card out, or connect HIPI with USB (**Config → Connect to PC**) and open it
+card out, or connect HIPI with USB (**System → Connect to PC**) and open it
 on the SD card drive. The new settings are used at the next start.
 
 **The format:** one setting per line, `name=value`. Spaces around the name
@@ -703,14 +731,14 @@ value.
 | Setting | Values | Default | What it is |
 |---------|--------|---------|------------|
 | `media.<drive>` | a file name | — | The cassette in a drive: a LIF file in the `lif/` folder, e.g. `media.TFDRIVE=GAMES.DAT`. One line per drive. Empty = no cassette. (`filename=` from older versions still works for `TFDRIVE`.) |
-| `drive_standby` | `0` / `1` | `0` | The cassette drive's power switch at start: `0` = ON, `1` = STANDBY. (OFF = the drive switched off with `disabled_devices`.) |
+| `drive_standby` | `0` / `1` | `0` | The cassette drive's power switch at start: `0` = ON, `1` = STANDBY. OFF is the drive in `disabled_devices`. (**Settings → Devices → Drive at start** sets both.) |
 
 **Screen**
 
 | Setting | Values | Default | What it is |
 |---------|--------|---------|------------|
 | `textcolor` | `0`–`65535` | `65535` | Text colour of the display view, as an RGB565 number. The menu's colours: `65535` white, `65504` yellow, `2016` green, `2047` cyan, `63488` red — any other RGB565 value works too. |
-| `fontsize` | `0`–`3` | `0` | Text size of the display view (**Settings → Font size**). |
+| `fontsize` | `0`–`3` | `0` | Text size of the display view (**Settings → Screen → Font size**). |
 | `columns` | `0`, `1`–`100` | `0` | Characters per line; `0` = as many as fit. (The menu offers 25, 32 — the HP 82163's own — 33, 50 and 100.) |
 | `brightness` | `0`–`255` | `255` | Backlight. The menu's steps: `51`, `102`, `153`, `204`, `255` (20–100 %). |
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
@@ -729,9 +757,9 @@ value.
 
 | Setting | Values | Default | What it is |
 |---------|--------|---------|------------|
-| `disabled_devices` | device names, comma-separated | (empty) | Devices switched off — not on the HP-IL loop (**Devices → Enable/disable**). |
-| `device_order` | device names, comma-separated | (empty = the standard order) | The devices' order on the loop (**Devices → Change order**). Devices not in the list come after the listed ones; unknown names are ignored. |
-| `con_loop` | `cable` / `internal` | `cable` | PILBox CON mode: the loop through the HP-IL cable, or closed inside HIPI (**Settings → CON loop**). |
+| `disabled_devices` | device names, comma-separated | (empty) | Devices switched off — not on the HP-IL loop (**Settings → Devices → Enable/disable**). |
+| `device_order` | device names, comma-separated | (empty = the standard order) | The devices' order on the loop (**Settings → Devices → Change order**). Devices not in the list come after the listed ones; unknown names are ignored. |
+| `con_loop` | `cable` / `internal` | `cable` | PILBox CON mode: the loop through the HP-IL cable, or closed inside HIPI (**Settings → PC link → CON loop**). |
 
 The device names: `TFDISPLAY`, `TFDRIVE`, `TFLEDS`, `TFPIXEL`, `TFTEMP`,
 `PILBOX`, `TFPLOT`, `TFTERM` — in capitals, and no spaces in the lists.
@@ -740,8 +768,8 @@ The device names: `TFDISPLAY`, `TFDRIVE`, `TFLEDS`, `TFPIXEL`, `TFTEMP`,
 
 | Setting | Values | Default | What it is |
 |---------|--------|---------|------------|
-| `trace` | `0` / `1` | `0` | Log every HP-IL frame on the USB debug port (**Config → Trace → On**). |
-| `debug` | `0` / `1` | `0` | Extended trace: more detail, e.g. the PC link (**Config → Trace → Extended** sets both). |
+| `trace` | `0` / `1` | `0` | Log every HP-IL frame on the USB debug port (**Settings → PC link → Trace: On**). |
+| `debug` | `0` / `1` | `0` | Extended trace: more detail, e.g. the PC link (**Trace: Extended** sets both). |
 | `screendump_next` | a number | `0` | The number the next screen dump gets: `screenshots/screendump_<n>.bmp`. |
 
 ### An example
@@ -781,7 +809,7 @@ screendump_next=12
 A new version comes as a `.uf2` file, `hipi_7_pico.uf2`, in the HIPI download.
 
 1. Connect HIPI to your computer with USB.
-2. Choose **Config → Bootsel mode**. The screen goes dark, and a drive called
+2. Choose **More → System → Bootsel mode**. The screen goes dark, and a drive called
    **RP2350** appears on the computer.
 3. Copy the `.uf2` file onto that drive.
 4. HIPI restarts with the new version — the version number is shown at start-up.
@@ -808,17 +836,17 @@ card files, they are in the SD card zip of that download.
 | Files copied from the PC don't show | Eject the drive on the computer first |
 | Screen dump fails | Not possible while **Connect to PC** is on |
 
-Still stuck? Choose **Config → Trace → On** and connect HIPI to a computer: the
+Still stuck? Choose **Settings → PC link → Trace: On** and connect HIPI to a computer: the
 log helps whoever looks at the problem.
 
 ---
 
 ## 15. Words you may meet
 
-- **HP-IL** — HP's cable system that connects the HP-41 to its peripherals.
+- **HP-IL** — HP's cable system that connects the controller to its peripherals.
 - **Loop** — HP-IL devices are connected in a ring, from OUT to IN, back to the
   calculator.
-- **Address** — the number the HP-41 uses to reach each device. It hands them
+- **Address** — the number the controller uses to reach each device. It hands them
   out by itself.
 - **LIF** — the file system used on HP cassettes; `.dat` files contain it.
 - **SD card** — the small memory card holding HIPI's cassettes, pictures and

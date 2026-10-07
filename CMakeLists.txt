@@ -227,6 +227,8 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/bootscreen.cpp
         src/analyzer.cpp
         src/loopmap.cpp
+        src/chartable.cpp
+        src/chartable_font.cpp      # generated, see scripts/ttf_to_glyphs.py
         src/hpil_diag.cpp
         src/backlight.cpp
         src/clock.cpp
@@ -234,6 +236,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/glyph_font.cpp
         src/clock_font_big.cpp      # generated, see scripts/ttf_to_glyphs.py
         src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py
+        src/menu_font_title.cpp     # generated, see scripts/ttf_to_glyphs.py
         src/saver_anim.cpp
         src/saver_font_rain.cpp     # generated, see scripts/ttf_to_glyphs.py
         src/saver_font_goose40.cpp  # generated (5 goose sizes), see scripts/ttf_to_glyphs.py

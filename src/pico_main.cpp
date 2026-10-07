@@ -80,6 +80,7 @@ extern void init_spi(void);
 #include "backlight.h"
 #include "clock.h"
 #include "loopmap.h"
+#include "chartable.h"
 #include "hpil_diag.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
@@ -491,6 +492,7 @@ int main() {
     hipi::plotterview_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
     hipi::loopmap_init(display);             // HP-IL loop map (Display -> Loop map)
+    hipi::chartable_init(display);           // System -> Character table
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
     hipi::clock_init(display);               // DS3231 clock, clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
