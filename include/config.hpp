@@ -106,8 +106,13 @@ public:
                            static_cast<unsigned>(columns_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
-        n = std::snprintf(line, sizeof(line), "con_loop=%s\nplot_fit=%d\n", conInternal_ ? "internal" : "cable",
-                          plotFit_ ? 1 : 0);
+        n = std::snprintf(line, sizeof(line), "con_loop=%s\nplot_fit=%d\nplot_paper=%s\n",
+                          conInternal_ ? "internal" : "cable", plotFit_ ? 1 : 0,
+                          plotPaperBlack_ ? "black" : "white");
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        static const char* kCells[] = { "bands", "lines", "none" };
+        n = std::snprintf(line, sizeof(line), "signal_cells=%s\n", kCells[signalCells_ < 3 ? signalCells_ : 0]);
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
         n = std::snprintf(line, sizeof(line), "saver=%u\nclock_style=%u\nclock_us=%d\nclock_12h=%d\nclock_fallback=%u\n",
@@ -186,6 +191,11 @@ public:
     // Plotter view: fit the plot to the screen (else: the whole page)
     bool plotFit() const { return plotFit_; }
     void setPlotFit(bool f) { plotFit_ = f; save(); }
+    bool plotPaperBlack() const { return plotPaperBlack_; }
+    void setPlotPaperBlack(bool b) { plotPaperBlack_ = b; save(); }
+    // HP-IL signals view, bit cells: 0 bands, 1 lines, 2 none (hpil_diag.h)
+    std::uint8_t signalCells() const { return signalCells_; }
+    void setSignalCells(std::uint8_t c) { signalCells_ = c; save(); }
     // PILBox CON mode: the loop closed inside HIPI (no cable needed)
     bool conInternal() const { return conInternal_; }
     void setConInternal(bool in) { conInternal_ = in; save(); }
@@ -300,6 +310,11 @@ private:
                     clockUs_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "plot_fit") == 0) {
                     plotFit_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "plot_paper") == 0) {
+                    plotPaperBlack_ = std::strcmp(value, "black") == 0;
+                } else if (std::strcmp(key, "signal_cells") == 0) {
+                    signalCells_ = std::strcmp(value, "lines") == 0 ? 1
+                                 : std::strcmp(value, "none") == 0  ? 2 : 0;
                 } else if (std::strcmp(key, "con_loop") == 0) {
                     conInternal_ = std::strcmp(value, "internal") == 0;
                 } else if (std::strcmp(key, "clock_12h") == 0) {
@@ -342,6 +357,8 @@ private:
     bool          clock12h_   = false;
     bool          conInternal_ = false;   // con_loop=cable|internal
     bool          plotFit_     = true;    // plot_fit=1|0
+    bool          plotPaperBlack_ = false; // plot_paper=white|black
+    std::uint8_t  signalCells_ = 0;        // signal_cells=bands|lines|none
     std::uint8_t  clockFallback_ = 3;  // SaverRain
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).

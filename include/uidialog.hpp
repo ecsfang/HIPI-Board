@@ -7,6 +7,7 @@
 #include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
 #include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
+#include "hpil_diag.h"    // BitCells, for the HP-IL signals "Bit cells" setting
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
@@ -239,6 +240,24 @@ public:
 #ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
 #endif
+        drawItems();
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+#endif
+    }
+
+    // A message box (plotterview_showMessage()) was drawn over the open
+    // menu in the shared PIP layer and has now timed out: put the menu back.
+    // Lists are redrawn; any other dialog state can't be, so it's closed.
+    void restoreAfterMessage() {
+        if (state_ == State::Closed) return;
+        if (state_ != State::List) { close(); return; }
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        drawBox();
         drawItems();
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
@@ -1537,13 +1556,12 @@ private:
 
     void screendumpAction() {
         // The menu is a PIP overlay (7"), not part of the panel's image.
-        // Saving takes a few seconds: say so at once, then the result.
-        doAndClose([&] {
-            plotterview_showMessage("Saving screendump...");
-            std::string msg;
-            const bool ok = screendump_save(d_, msg);
-            plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
-        });
+        // Saving takes a few seconds and shows its own messages, so it is
+        // not done here, inside the menu's button handling: close the menu
+        // first, then let boardui_poll() take the dump from the main loop
+        // (the same path as the HP-41 escape sequence), with the menu gone
+        // and the PIP overlay free for the "Saving" / "Saved <file>" box.
+        doAndClose([] { screendump_request(false); });
     }
 
     // ── Values of the settings ──────────────────────────────────────────
@@ -1575,6 +1593,15 @@ private:
                          refreshItems();
                      });
     }
+    Item paperItem() {
+        return value("Paper", [] { return std::string(plotterview_paperBlack() ? "Black" : "White"); },
+                     [this] {
+                         const bool black = !plotterview_paperBlack();
+                         config.setPlotPaperBlack(black);
+                         withMainCanvas([&] { plotterview_setPaperBlack(black); });
+                         refreshItems();
+                     });
+    }
     // "Drive at start" as in CONFIG.TXT: OFF if the (first) drive is
     // switched off at start (disabled_devices), else drive_standby
     static const char* driveAtStartName() {
@@ -1597,6 +1624,7 @@ private:
             m.push_back(item("Clear plotter", [this] { doAndClose([] { plotterview_clearPlotter(); }); }));
             if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
             m.push_back(plotViewItem());
+            m.push_back(paperItem());
         } else if (out == DisplayOutput::Tape) {
             CDrive* drv = plotterview_drive();
             title = drv ? std::string("TAPE ") + drv->name() : std::string("TAPE");
@@ -1638,6 +1666,16 @@ private:
                 doAndClose([map] { if (map) plotterview_leaveLoopMap(); else plotterview_leaveSignals(); });
             }));
             if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            if (!map) {
+                m.push_back(value("Bit cells", [] { return std::string(hpil_diag_bitCellsName(hpil_diag_bitCells())); },
+                                  [this] {
+                                      const auto next = static_cast<BitCells>(
+                                          (static_cast<int>(hpil_diag_bitCells()) + 1) % 3);
+                                      config.setSignalCells(static_cast<std::uint8_t>(next));
+                                      withMainCanvas([&] { hpil_diag_setBitCells(next); });
+                                      refreshItems();
+                                  }));
+            }
         } else {
             title = "DISPLAY";
             m.push_back(item("Clear screen", [this] { doAndClose([this] { screen_.clear(); }); }));
@@ -1692,6 +1730,7 @@ private:
             value("Brightness", [this] { return std::string(kBrightnessLabels[brightnessIndex()]); },
                   [this] { applyBrightness((brightnessIndex() + 1) % kBrightnessCount); refreshItems(); }),
             plotViewItem(),
+            paperItem(),
         }, [this] { openSettingsMenu(0); });
     }
 

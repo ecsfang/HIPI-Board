@@ -703,8 +703,17 @@ void Screen::pr_char(std::uint8_t c) {
     if (flag_) {
         flag_ = false;
         if (n_ == kExtCmdState) {       // ESC # <c> -- see setExtCommandCallback()
+            if (c != 0 && std::strchr(extArgCmds_, static_cast<char>(c)) != nullptr) {
+                extCmd_ = c;            // ESC # <c> <arg>: wait for the argument
+                n_ = kExtArgState;
+                flag_ = true;
+            } else {
+                n_ = -1;
+                if (extCommand_) extCommand_(c, 0);
+            }
+        } else if (n_ == kExtArgState) { // ESC # <c> <arg>
             n_ = -1;
-            if (extCommand_) extCommand_(c);
+            if (extCommand_) extCommand_(extCmd_, c);
         } else if (n_ == 0) {
             pos_[0] = c;
             n_ = 1;

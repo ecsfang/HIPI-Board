@@ -490,20 +490,27 @@ int main() {
     // plotter all exist (plotter is set inside hipi_init() above).
     hipi::plotterview_init(display, screen, plotter);
     hipi::plotterview_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
+    hipi::plotterview_setPaperBlack(config.plotPaperBlack());  // Plotter -> Paper (saved)
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
     hipi::loopmap_init(display);             // HP-IL loop map (Display -> Loop map)
     hipi::chartable_init(display);           // System -> Character table
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
+    hipi::hpil_diag_setBitCells(static_cast<hipi::BitCells>(config.signalCells()));   // saved
     hipi::clock_init(display);               // DS3231 clock, clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
-    // "ESC # D" / "ESC # M" from the HP-41: screen dump without / with the
-    // menus and other overlays (see Screen::setExtCommandCallback()) --
-    // only recorded here, taken from the main loop by boardui_poll()
-    screen->setExtCommandCallback([](std::uint8_t c) {
+    // Project escape sequences from the HP-41 (see
+    // Screen::setExtCommandCallback()) -- only recorded here, carried out
+    // from the main loop by boardui_poll():
+    //   "ESC # D" / "ESC # M"  screen dump without / with the menus and
+    //                          other overlays
+    //   "ESC # V <addr>"       show the view of the HIPI device at HP-IL
+    //                          address <addr> (one byte, 1..30)
+    screen->setExtCommandCallback([](std::uint8_t c, std::uint8_t arg) {
         if (c == 'D') hipi::screendump_request(false);
         else if (c == 'M') hipi::screendump_request(true);
-    });
+        else if (c == 'V') hipi::plotterview_requestViewByAddress(arg);
+    }, "V");
 
 #ifdef DISPLAY_7INCH
     bootRowsDevices();

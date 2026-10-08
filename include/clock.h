@@ -17,7 +17,7 @@
 // time and counts with the Pico's timer ("time ..." still sets it, until
 // the next restart). Set to 0 once the RTC module is connected.
 #ifndef HIPI_FAKE_RTC
-#define HIPI_FAKE_RTC 1
+#define HIPI_FAKE_RTC 0
 #endif
 #include "display_config.h"
 #include <string>

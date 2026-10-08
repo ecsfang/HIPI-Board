@@ -25,6 +25,21 @@ int GlyphFont::textWidth(const char* s) const {
     return w;
 }
 
+void GlyphFont::textExtent(const char* s, int& minX, int& maxX) const {
+    int pen = 0;
+    minX = 0;
+    maxX = 0;
+    for (; *s; ++s) {
+        const Glyph* g = find(*s);
+        if (g == nullptr) continue;
+        const int gx = pen + g->left;
+        minX = std::min(minX, gx);
+        maxX = std::max(maxX, gx + static_cast<int>(g->width));
+        pen += g->advance;
+    }
+    maxX = std::max(maxX, pen);
+}
+
 namespace {
 // RGB565 colour between bg (a = 0) and fg (a = 15)
 std::uint16_t blend(std::uint16_t bg, std::uint16_t fg, int a) {

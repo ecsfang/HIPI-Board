@@ -104,27 +104,41 @@ std::int16_t mapY(std::int16_t py) {
     return static_cast<std::int16_t>(std::lround(mapDY_ + mapH_ - (static_cast<double>(py) - mapOY_) * mapScale_));
 }
 
-// The plot is drawn like on real plotter paper: dark pens on white.
-constexpr std::uint16_t kPaperColor = 0xFFFF;
+// The plot is drawn like on real plotter paper: dark pens on white
+// (default), or inverted -- light pens on black (Plotter -> Paper,
+// config plot_paper=white|black).
+bool paperBlack_ = false;
+
+std::uint16_t paperColor() { return paperBlack_ ? 0x0000 : 0xFFFF; }
 
 // Pen colours (RGB565) for SP 1, 2, 3, ... -- HP-GL only selects a pen
 // NUMBER; which colour sits in that pen stall is up to the user, so this
 // table is the "pen carousel". Pens beyond the table cycle through it.
-// Tones are chosen to show up well on white (a plain yellow wouldn't).
-constexpr std::uint16_t kPenColors[] = {
+// Two sets: tones that show up well on white paper (a plain yellow
+// wouldn't), and brighter tones for black paper (pen 1 becomes white).
+constexpr std::uint16_t kPenColorsWhite[] = {
     0x0000,   // 1: black
     0xE000,   // 2: red
     0x001A,   // 3: blue
     0x0460,   // 4: green
     0xCD00,   // 5: yellow (dark gold, readable on white)
 };
-constexpr int kPenColorCount = static_cast<int>(sizeof(kPenColors) / sizeof(kPenColors[0]));
+constexpr std::uint16_t kPenColorsBlack[] = {
+    0xFFFF,   // 1: white
+    0xFA08,   // 2: red (slightly light, readable on black)
+    0x4C1F,   // 3: blue (light, plain blue is too dark on black)
+    0x07E8,   // 4: green
+    0xFFE0,   // 5: yellow
+};
+constexpr int kPenColorCount = static_cast<int>(sizeof(kPenColorsWhite) / sizeof(kPenColorsWhite[0]));
+static_assert(sizeof(kPenColorsBlack) == sizeof(kPenColorsWhite), "pen tables must match");
 
 std::uint16_t penColor(std::uint8_t pen) {
-    // Pen 0 = no pen selected (after IN, before any SP): draw in black
+    const std::uint16_t* pens = paperBlack_ ? kPenColorsBlack : kPenColorsWhite;
+    // Pen 0 = no pen selected (after IN, before any SP): draw with pen 1
     // anyway, the most useful default for programs that never select one
-    if (pen == 0) return kPenColors[0];
-    return kPenColors[(pen - 1) % kPenColorCount];
+    if (pen == 0) return pens[0];
+    return pens[(pen - 1) % kPenColorCount];
 }
 
 // Draws one plotter-space segment, mapped to screen pixels. If the
@@ -213,7 +227,7 @@ void onPlotterClear() {
 #ifndef DISPLAY_7INCH
     if (boardui_isMenuOpen()) return;  // see onPlotterDraw()'s own comment
 #endif
-    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kPaperColor);
+    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     screen_->refreshCursor();
 }
 
@@ -804,7 +818,7 @@ void plotterview_redraw() {
         }
         setFitMapping(x0, y0, x1, y1, 0.05);
     }
-    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kPaperColor);
+    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     for (const PlotSegment& seg : plotter_->segments()) {
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
     }
@@ -826,7 +840,7 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
     display_->setActiveWindow(static_cast<std::uint16_t>(x0), static_cast<std::uint16_t>(y0),
                               static_cast<std::uint16_t>(x0 + w - 1),
                               static_cast<std::uint16_t>(y0 + h - 1));
-    display_->fillRect(x0, y0, w, h, kPaperColor);
+    display_->fillRect(x0, y0, w, h, paperColor());
     // BTE (memory-copy) doesn't apply here: this region's own pixels
     // were never drawn in the first place (the content area is
     // NARROWER than the full panel for as long as the button strip is
@@ -926,6 +940,43 @@ void plotterview_showDevice(CDevice* dev) {
 }
 
 CDevice* plotterview_viewDevice() { return viewDevice_; }
+
+// ── View chosen from the HP-41 ("ESC # V <addr>") ───────────────────────
+// -1 = no request. Written from HP-IL frame handling, read from the main
+// loop -- same core, so a plain volatile is enough; a newer request
+// simply replaces one not yet taken.
+static volatile int viewRequest_ = -1;
+
+void plotterview_requestViewByAddress(std::uint8_t addr) { viewRequest_ = addr; }
+
+bool plotterview_takeViewRequest(std::uint8_t& addr) {
+    const int r = viewRequest_;
+    if (r < 0) return false;
+    viewRequest_ = -1;
+    addr = static_cast<std::uint8_t>(r);
+    return true;
+}
+
+bool plotterview_showAddress(std::uint8_t addr) {
+    // HP-IL device addresses are 1..30 (31 = not addressed)
+    if (addr < 1 || addr > 30) {
+        LOGF("\r\n * ESC # V %u: not a device address (1..30) -- ignored", addr);
+        return false;
+    }
+    for (CDevice* dev : devices) {
+        // A disabled device has no address (31), so it never matches here
+        if (dev == nullptr || !dev->enabled() || dev->addr() != addr) continue;
+        if (!deviceHasView(dev)) {
+            LOGF("\r\n * ESC # V %u: %s has no view -- ignored", addr, dev->name());
+            return false;
+        }
+        LOGF("\r\n * ESC # V %u: showing %s", addr, plotterview_viewTitle(dev).c_str());
+        switchView(outputFor(dev->viewKind()), dev);
+        return true;
+    }
+    LOGF("\r\n * ESC # V %u: no HIPI device at that address -- ignored", addr);
+    return false;
+}
 
 // The view to go back to when leaving the Analyzer
 static CDevice* beforeAnalyzer_ = nullptr;
@@ -1146,6 +1197,12 @@ void plotterview_setPlotFit(bool fit) {
     if (output_ == DisplayOutput::Plotter) plotterview_redraw();
 }
 bool plotterview_plotFit() { return plotFit_; }
+
+void plotterview_setPaperBlack(bool black) {
+    paperBlack_ = black;
+    if (output_ == DisplayOutput::Plotter) plotterview_redraw();
+}
+bool plotterview_paperBlack() { return paperBlack_; }
 
 void plotterview_clearPlotter() {
     plotter_->clear();   // resets state + segments_; fires onPlotterClear() above

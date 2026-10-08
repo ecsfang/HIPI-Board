@@ -621,6 +621,26 @@ documentation). Send it to `TFDISPLAY`, e.g.:
 
 The dump is taken right after, from the main loop.
 
+**Choosing the view from the HP-41.** `ESC # V <addr>` (sent to
+`TFDISPLAY`; `<addr>` is one byte, the HP-IL address 1..30) shows the view
+of the HIPI device that currently has that address -- looked up in the
+live device list at the time, so it follows auto-addressing, the device
+order and the enabled/disabled state. If no enabled HIPI device has that
+address, or the device has no view (`CDevice::viewKind()` is `None`, or
+the view isn't available on this panel), nothing happens apart from a
+warning on the debug log. E.g. the device at address 3:
+
+```
+27 ACCHR  35 ACCHR  86 ACCHR  3 ACCHR    ; ESC # V 3
+```
+
+Like the dump, the request is only recorded during HP-IL frame handling
+(`plotterview_requestViewByAddress()`) and carried out from
+`boardui_poll()` (`plotterview_showAddress()`) -- deferred while a menu is
+open, and it ends the screen saver first. In `Screen`, commands that take
+an argument byte are listed in the second parameter of
+`setExtCommandCallback()` (currently `"V"`).
+
 **Tape view.** Shows a picture of an HP82161A cassette drive. It is loaded
 from `hp82161a.bmp` once at boot into a spare display layer, so switching to it
 is instant. Tap the **cassette window** or the **OPEN** button to go

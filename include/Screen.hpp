@@ -134,10 +134,17 @@ public:
     // callback and not displayed. "ESC ~ <c>" works too, but the HP-41
     // can't send '~': its character 126 is Sigma, which the HP-IL module
     // sends as 0x1C -- so '#' (35, identical in both character sets) is
-    // the one to use from the HP-41. Used for screen dumps from the HP-41
-    // (see pico_main.cpp). The callback runs inside HP-IL frame handling,
-    // so it must only record a request, never do slow work itself.
-    void setExtCommandCallback(std::function<void(std::uint8_t)> cb) { extCommand_ = std::move(cb); }
+    // the one to use from the HP-41. Used for screen dumps and for choosing
+    // the view from the HP-41 (see pico_main.cpp). The callback runs inside
+    // HP-IL frame handling, so it must only record a request, never do
+    // slow work itself.
+    // `argCmds`: the command characters that take one argument byte
+    // ("ESC # <c> <arg>"), e.g. "V". For the others `arg` is 0.
+    void setExtCommandCallback(std::function<void(std::uint8_t cmd, std::uint8_t arg)> cb,
+                               const char* argCmds = "") {
+        extCommand_ = std::move(cb);
+        extArgCmds_ = argCmds != nullptr ? argCmds : "";
+    }
 
     void reassertRenderState() {
         txt_size(size_);
@@ -348,8 +355,12 @@ private:
     bool cv_;       // cursor-visible toggle
     int  n_;        // ESC % sequence state: -1=just ESC, 0=awaiting row, 1=awaiting col,
                     // kExtCmdState = ESC # seen, awaiting the command character
+                    // kExtArgState = ESC # <c> seen, awaiting its argument byte
     static constexpr int kExtCmdState = 10;
-    std::function<void(std::uint8_t)> extCommand_;
+    static constexpr int kExtArgState = 11;
+    std::function<void(std::uint8_t, std::uint8_t)> extCommand_;
+    const char* extArgCmds_ = "";   // commands with an argument byte
+    std::uint8_t extCmd_ = 0;       // the command waiting for its argument
     std::uint8_t pos_[2];  // ESC % row/col coordinates
 
     // Line buffer for scroll-back -- a SINGLE, FIXED-SIZE flat allocation

@@ -163,6 +163,11 @@ void widths(uint gpio, int& n, float& mn, float& mx) {
 DisplayDriver* d_ = nullptr;
 constexpr std::uint16_t kYellow = 0xEDC0, kCyan = 0x563C, kBlack = 0x0000, kWhite = 0xFFFF;
 constexpr std::uint16_t kGrey = 0x7BEF, kDark = 0x2104, kRed = 0xF800, kGreen = 0x07E0;
+// Bit-cell bands: dark, but clearly lighter than the black background so
+// they read as intended shading (the earlier 0x0841 was too close to
+// black and looked like a drawing fault)
+constexpr std::uint16_t kBand = 0x2965;
+BitCells bitCells_ = BitCells::Bands;
 
 bool visible() {
     return d_ != nullptr && plotterview_output() == DisplayOutput::Signals && !plotterview_isSplashVisible();
@@ -257,12 +262,39 @@ void renderFull() {
     const int X = 20, W = SCREEN_MAX_X - 40, Y0 = 170, AMP = 44;
     auto px = [&](int s) { return X + static_cast<int>(static_cast<long>(s - from) * W / (to - from)); };
     d_->fillRect(X, Y0, W, 1, kDark);                       // zero line
-    // Bit cells: alternating background bands, the value on top, the field name below
+    // Bit cells: the value on top, the field name below. The cells are
+    // marked as chosen in the menu (bitCells_): shaded bands behind every
+    // other cell, thin lines between them, or not at all. Drawn before
+    // the waveform, so the trace stays on top.
     static const char* kField[11] = { "C2", "C1", "C0", "D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0" };
-    for (std::size_t k = 0; k < f.bits.size(); ++k) {
+    // Cell borders lie midway between the last edge of one bit's pulses and
+    // the first edge of the next, so every cell covers its share of the
+    // quiet time too -- a "1" and a "0" get (about) the same width. The
+    // outer borders mirror the half gap next to them.
+    const std::size_t nBits = f.bits.size();
+    std::vector<int> edge(nBits + 1, 0);
+    for (std::size_t k = 1; k < nBits; ++k)
+        edge[k] = (px(f.bits[k - 1].to) + px(f.bits[k].from)) / 2;
+    if (nBits == 1) {
+        edge[0] = px(f.bits[0].from) - 3;
+        edge[1] = px(f.bits[0].to) + 3;
+    } else if (nBits > 1) {
+        edge[0] = px(f.bits[0].from) - (edge[1] - px(f.bits[0].to));
+        edge[nBits] = px(f.bits[nBits - 1].to) + (px(f.bits[nBits - 1].from) - edge[nBits - 1]);
+    }
+    // ... but never outside the trace's own area
+    if (nBits > 0) {
+        edge[0] = std::max(edge[0], X);
+        edge[nBits] = std::min(edge[nBits], X + W);
+    }
+    for (std::size_t k = 0; k < nBits; ++k) {
         const BitDec& bit = f.bits[k];
         const int x0 = px(bit.from) - 3, x1 = px(bit.to) + 3;
-        if (k % 2 == 0) d_->fillRect(x0, Y0 - AMP - 14, x1 - x0, 2 * AMP + 28, 0x0841);
+        if (bitCells_ == BitCells::Bands && k % 2 == 0) {
+            d_->fillRect(edge[k], Y0 - AMP - 14, edge[k + 1] - edge[k], 2 * AMP + 28, kBand);
+        } else if (bitCells_ == BitCells::Lines && k > 0) {
+            d_->fillRect(edge[k], Y0 - AMP - 14, 1, 2 * AMP + 28, kDark);
+        }
         const int cx = (x0 + x1) / 2;
         centred(cx, Y0 - AMP - 40, std::to_string(bit.value), kWhite);
         if (k == 0) centred(cx, Y0 - AMP - 60, "sync", kCyan);
@@ -411,6 +443,26 @@ void hpil_diag_drawAll() {
 #else
     renderFull();
 #endif
+}
+
+void hpil_diag_setBitCells(BitCells style) {
+    if (static_cast<std::uint8_t>(style) > static_cast<std::uint8_t>(BitCells::None)) style = BitCells::Bands;
+    bitCells_ = style;
+#ifdef DISPLAY_7INCH
+    // Off-screen and copied under the menu's PIP overlay: safe to redraw
+    // now. (5": the next capture, or closing the menu, redraws the view.)
+    if (visible()) hpil_diag_drawAll();
+#endif
+}
+
+BitCells hpil_diag_bitCells() { return bitCells_; }
+
+const char* hpil_diag_bitCellsName(BitCells style) {
+    switch (style) {
+        case BitCells::Lines: return "Lines";
+        case BitCells::None:  return "None";
+        default:              return "Bands";
+    }
 }
 
 }  // namespace hipi

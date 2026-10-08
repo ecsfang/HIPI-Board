@@ -85,6 +85,17 @@ void plotterview_showDevice(CDevice* dev);
 // The device whose view is showing (nullptr if none)
 CDevice* plotterview_viewDevice();
 
+// The view chosen from the HP-41 with "ESC # V <addr>" (sent to the
+// display device): shows the view of the HIPI device at HP-IL address
+// `addr`. requestViewByAddress() only records it (called from HP-IL frame
+// handling); boardui_poll() picks it up with takeViewRequest() and runs
+// showAddress() from the main loop. If there's no HIPI device at that
+// address, or it has no view (or is disabled), nothing happens apart
+// from a warning in the log. Returns true if the view was shown.
+void plotterview_requestViewByAddress(std::uint8_t addr);
+bool plotterview_takeViewRequest(std::uint8_t& addr);
+bool plotterview_showAddress(std::uint8_t addr);
+
 // The HP-IL analyzer's view (analyzer.h) -- not a device, so not in the
 // swipe order. Leaving it returns to the view shown before.
 void plotterview_showAnalyzer();
@@ -128,6 +139,11 @@ void plotterview_clearPlotter();
 // (the whole P1..P2 area, like the paper). Display -> Plot view.
 void plotterview_setPlotFit(bool fit);
 bool plotterview_plotFit();
+
+// Paper colour: false = white paper with dark pens (default), true =
+// black paper with light pens (inverted). Plotter -> Paper.
+void plotterview_setPaperBlack(bool black);
+bool plotterview_paperBlack();
 
 // Redraws the current full-screen view from scratch: the plotter output
 // (segments() replayed in full) or the Tape image. Called internally when

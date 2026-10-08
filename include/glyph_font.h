@@ -21,6 +21,10 @@ struct GlyphFont {
 
     const Glyph* find(char c) const;
     int textWidth(const char* s) const;
+    // Horizontal extent of the pixels drawGlyphText() paints for `s`,
+    // relative to the pen start: [minX, maxX) (minX <= 0). Can exceed
+    // 0..textWidth() where glyphs overhang their advance.
+    void textExtent(const char* s, int& minX, int& maxX) const;
 };
 
 // Draws `s` with the pen starting at (x, y) (top of the glyphs), blending fg

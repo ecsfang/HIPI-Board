@@ -891,18 +891,41 @@ void boardui_poll() {
         drive->servicePowerUp();        // STANDBY wake-up completes here if the loop is quiet
     }
 
-    // Screen dump requested from the HP-41 ("ESC # D" / "ESC # M") --
-    // taken here, outside HP-IL frame handling. The result message box
-    // uses the same PIP window as the menu, so it's only shown (and only
-    // logged otherwise) when no menu is open.
+    // View chosen from the HP-41 ("ESC # V <addr>"). Waits while a menu is
+    // open (the user is busy there; the menu belongs to the view under
+    // it) and is carried out once it closes. Wakes the screen saver first,
+    // so the new view is what shows -- not the view the saver goes back to.
+    if (!dialog_->isOpen()) {
+        std::uint8_t addr = 0;
+        if (plotterview_takeViewRequest(addr)) {
+            backlight_activity();
+            plotterview_showAddress(addr);
+        }
+    }
+
+    // Screen dump requested from the HP-41 ("ESC # D" / "ESC # M") or the
+    // Screendump menu item -- taken here, outside HP-IL frame handling.
+    // "Saving screendump..." is shown for a plain dump (not for "M", which
+    // is meant to be taken without anything extra on screen); "Saved <file>"
+    // always, so the file name is known. The boxes use the menu's PIP layer,
+    // so with a menu open they cover it; the menu is put back once the
+    // message has timed out (see menuCoveredByMessage below).
+    static bool menuCoveredByMessage = false;
     bool withOverlays = false;
     if (screendump_takePending(withOverlays)) {
         std::string msg;
+        if (!withOverlays) {
+            plotterview_showMessage("Saving screendump...");
+            if (dialog_->isOpen()) menuCoveredByMessage = true;
+        }
         const bool ok = screendump_save(display_, msg, withOverlays);
         if (!ok) LOGF("\r\n * Screendump failed: %s", msg.c_str());
-        if (!dialog_->isOpen()) {
-            plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
-        }
+        plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+        if (dialog_->isOpen()) menuCoveredByMessage = true;
+    }
+    if (menuCoveredByMessage && !plotterview_isSplashVisible()) {
+        menuCoveredByMessage = false;
+        if (dialog_->isOpen()) dialog_->restoreAfterMessage();
     }
 
     // PC ejected the SD card while in "Connect to PC" mode -- back to

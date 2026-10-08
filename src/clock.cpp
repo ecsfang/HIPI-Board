@@ -1,6 +1,7 @@
 #define MODULE "CLOCK"
 #include "clock.h"
 #include "rtc.h"
+#include <algorithm>
 #include "glyph_font.h"
 #include "saver_anim.h"
 #include "config.hpp"
@@ -28,7 +29,7 @@ CRtc* rtc_ = nullptr;
 #endif
 
 #if HIPI_FAKE_RTC
-// ── Stand-in clock (no DS3231 yet) ──────────────────────────────────────
+// ── Stand-in clock (no RTC yet) ──────────────────────────────────────
 // Starts at the firmware's build time and counts with the Pico's timer;
 // "time ..." on the console sets it. Lost at every restart.
 std::int64_t fakeBase_ = 0;              // seconds since 2000-01-01 at fakeBaseUs_
@@ -129,10 +130,60 @@ bool visible() {
     return d_ != nullptr && plotterview_output() == DisplayOutput::Clock && !plotterview_isSplashVisible();
 }
 
-void draw(const DateTime* t) {
+// What is on screen, row by row, so an update only repaints what changed
+// (no full-screen clear, which made the screen flash every minute)
+struct Row {
+    bool valid = false;
+    int x0 = 0, x1 = 0;          // painted pixels [x0, x1)
+    std::string key;             // the text(s) shown
+};
+Row rowTime_, rowDate_, rowName_;
+Style rowStyle_{ 0, 0 };
+
+void invalidateRows() {
+    rowTime_ = rowDate_ = rowName_ = Row();
+}
+
+// Painted extent of `text` drawn with its pen at `x`
+void extentOf(const GlyphFont& f, const char* text, int x, int& x0, int& x1) {
+    int mn = 0, mx = 0;
+    f.textExtent(text, mn, mx);
+    x0 = x + mn;
+    x1 = x + mx;
+}
+
+// Repaints a row if its content or position changed. Drawing the text
+// paints its own background over the new extent, so only the part of the
+// old extent that the new text doesn't cover needs clearing -- the screen
+// is never blanked in between. `y`/`h`: the row's band; `nx0`/`nx1`: the
+// new text's extent; `draw`: paints it.
+template <typename F>
+void paintRow(Row& row, const std::string& key, int y, int h, int nx0, int nx1,
+              std::uint16_t bg, F draw) {
+    if (row.valid && row.key == key && row.x0 == nx0 && row.x1 == nx1) return;
+    if (row.valid) {
+        if (row.x0 < nx0)
+            d_->fillRect(row.x0, y, std::min(row.x1, nx0) - 1, y + h - 1, bg);
+        if (row.x1 > nx1)
+            d_->fillRect(std::max(row.x0, nx1), y, row.x1 - 1, y + h - 1, bg);
+    }
+    draw();
+    row.valid = true;
+    row.key = key;
+    row.x0 = nx0;
+    row.x1 = nx1;
+}
+
+// full: clear the whole screen first and repaint everything (entering the
+// view, style changed); otherwise only the rows that changed are repainted
+void draw(const DateTime* t, bool full) {
     const Style s = style();
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
-    d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, s.bg);
+    if (full || s.fg != rowStyle_.fg || s.bg != rowStyle_.bg) {
+        d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, s.bg);
+        invalidateRows();
+        rowStyle_ = s;
+    }
 
     // Time, 24 h "14:05" or 12 h " 2:05" + "PM" (small, beside it)
     char timeText[8] = "--:--";
@@ -156,8 +207,21 @@ void draw(const DateTime* t) {
     // Everything centred vertically: time, gap, date, gap, names
     const int blockH = big.height + 50 + small.height + 24 + small.height;
     const int timeY = (SCREEN_MAX_Y - blockH) / 2;
-    drawGlyphText(d_, x0, timeY, big, timeText, s.fg, s.bg);
-    if (ampm) drawGlyphText(d_, x0 + timeW + 16, timeY + 8, small, ampm, s.fg, s.bg);
+    {
+        int a0, a1;
+        extentOf(big, timeText, x0, a0, a1);
+        if (ampm) {
+            int b0, b1;
+            extentOf(small, ampm, x0 + timeW + 16, b0, b1);
+            a0 = std::min(a0, b0);
+            a1 = std::max(a1, b1);
+        }
+        const std::string key = std::string(timeText) + "|" + (ampm ? ampm : "");
+        paintRow(rowTime_, key, timeY, big.height, a0, a1, s.bg, [&] {
+            drawGlyphText(d_, x0, timeY, big, timeText, s.fg, s.bg);
+            if (ampm) drawGlyphText(d_, x0 + timeW + 16, timeY + 8, small, ampm, s.fg, s.bg);
+        });
+    }
 
     // Date, then weekday and month
     char dateText[16] = "";
@@ -171,9 +235,16 @@ void draw(const DateTime* t) {
                       kMonths[(t->month + 11) % 12]);
     }
     const int dateY = timeY + big.height + 50;
-    drawGlyphText(d_, (SCREEN_MAX_X - small.textWidth(dateText)) / 2, dateY, small, dateText, s.fg, s.bg);
-    drawGlyphText(d_, (SCREEN_MAX_X - small.textWidth(nameText)) / 2, dateY + small.height + 24,
-                  small, nameText, s.fg, s.bg);
+    const int dateX = (SCREEN_MAX_X - small.textWidth(dateText)) / 2;
+    const int nameY = dateY + small.height + 24;
+    const int nameX = (SCREEN_MAX_X - small.textWidth(nameText)) / 2;
+    int d0, d1, n0, n1;
+    extentOf(small, dateText, dateX, d0, d1);
+    extentOf(small, nameText, nameX, n0, n1);
+    paintRow(rowDate_, dateText, dateY, small.height, d0, d1, s.bg,
+             [&] { drawGlyphText(d_, dateX, dateY, small, dateText, s.fg, s.bg); });
+    paintRow(rowName_, nameText, nameY, small.height, n0, n1, s.bg,
+             [&] { drawGlyphText(d_, nameX, nameY, small, nameText, s.fg, s.bg); });
 }
 
 // "time 2026-10-03 14:05[:30]"
@@ -187,7 +258,7 @@ bool parseAndSet(const char* arg, std::string& msg) {
         msg = "use: time YYYY-MM-DD HH:MM[:SS]";
         return false;
     }
-    if (!rtcPresent()) { msg = "no clock chip (DS3231) found"; return false; }
+    if (!rtcPresent()) { msg = "no clock chip (DS3231/DS1307) found"; return false; }
     if (!rtcSet(t)) { msg = "writing the clock failed"; return false; }
     shownValid_ = false;                     // redraw with the new time
     msg = "clock set: " + clock_nowText();
@@ -204,7 +275,7 @@ void handleConsoleLine() {
     std::string msg;
     if (*s == '\0') {
         msg = rtcPresent() ? (rtcValid() ? clock_nowText() : "clock not set")
-                           : "no clock chip (DS3231) found";
+                           : "no clock chip (DS3231/DS1307) found";
     } else {
         parseAndSet(s, msg);
     }
@@ -234,9 +305,10 @@ void clock_init(DisplayDriver* display) {
 #else
     rtc_ = new CRtc(touch_i2c);
     if (rtc_->begin(TOUCH_SDA, TOUCH_SCL)) {
-        LOGF("\r\n * Clock: DS3231 found, %s", rtc_->valid() ? clock_nowText().c_str() : "time not set");
+        LOGF("\r\n * Clock: %s found, %s", rtc_->chipName(),
+             rtc_->valid() ? clock_nowText().c_str() : "time not set");
     } else {
-        LOGF("\r\n * Clock: no DS3231 found -- the clock screen saver isn't available");
+        LOGF("\r\n * Clock: no DS3231/DS1307 found -- the clock screen saver isn't available");
     }
 #endif
 }
@@ -268,7 +340,7 @@ void clock_drawAll() {
     }
     DateTime t;
     const bool ok = clock_available() && rtcRead(t);
-    draw(ok ? &t : nullptr);
+    draw(ok ? &t : nullptr, true);           // the view was (re)entered: full repaint
     shown_ = t;
     shownValid_ = ok;
 }
@@ -284,7 +356,7 @@ void clock_poll() {
     DateTime t;
     if (!clock_available() || !rtcRead(t)) return;
     if (!shownValid_ || t.minute != shown_.minute || t.hour != shown_.hour || t.day != shown_.day) {
-        draw(&t);
+        draw(&t, false);                     // only what changed: no flashing
         shown_ = t;
         shownValid_ = true;
     }

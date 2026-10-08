@@ -246,6 +246,16 @@ while you look at other views. Clear it with **Clear plotter** in its menu (OK).
 
 Both keep the proportions: circles stay round and text undistorted.
 
+**Paper** in the same menus chooses the paper colour:
+
+- **White** (the default) — like real plotter paper: dark pens on white.
+  Pen 1 is black, then red, blue, green and dark yellow.
+- **Black** — inverted: light pens on black, easier on the eyes in a dark
+  room. Pen 1 becomes white, and the other pens get brighter tones
+  that show up well on black.
+
+The drawing is redrawn at once in the new colours; nothing is lost.
+
 <a href="images/view-plotter.png"><img src="images/view-plotter.png" alt="Plotter view" width="512"></a>
 
 ### 5.3 Tape
@@ -266,6 +276,31 @@ thing.
 | **Reels** | Spin while the tape is read, written or wound |
 
 <a href="images/view-tape-open.png"><img src="images/view-tape-open.png" alt="Lid open" width="512"></a>
+
+### 5.4 Choosing the view from the HP-41
+
+A program can choose which view the screen shows, just like a swipe or
+**Go to view** would. Send the escape sequence `ESC # V` followed by the
+**HP-IL address** of the device whose view you want, with the display
+device selected:
+
+| Keys | Shows |
+|------|-------|
+| `27 ACCHR  35 ACCHR  86 ACCHR  3 ACCHR` | The view of the device at address 3 |
+
+The last byte is the address itself (1–30) as a character code, not as
+digits — `3 ACCHR`, not `51 ACCHR`. You find the addresses in the device list
+(bottom-left corner), or with `FINDID` (Extended I/O module) in the program.
+
+It follows what is actually on the loop: whichever HIPI device has that
+address gets its view shown — today the display, the plotter and the
+cassette drive(s). If the address belongs to a device without a view
+(e.g. `TFLEDS`), to a device that's switched off, to a device that isn't
+part of HIPI, or to no device at all, **nothing happens** — no error, just a
+warning in the log.
+
+The yellow name box appears as usual. If a menu is open, the switch waits
+until it's closed. A screen saver ends, and the chosen view is shown.
 
 ---
 
@@ -291,24 +326,25 @@ Three kinds of rows:
 Every menu has the same order: where to go, what to do, settings, then
 **More**.
 
-<a href="images/menu-main.png"><img src="images/menu-main.png" alt="A menu" width="512"></a>
+<a href="images/menu-display.png"><img src="images/menu-display.png" alt="A menu" width="512"></a>
 
 ```
 OK in a view — that view's menu
 ├── DISPLAY          Clear screen · Screendump · Font size < 0 > · More >
-├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > · More >
+├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > ·
+│                    Paper < White > · More >
 ├── TAPE TFDRIVE     Select cassette > · Rewind · Power < ON > · Screendump · More >
 ├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
 │                    Time < Relative > · Idle frames < Hidden > · More >
-└── LOOP MAP,        Leave view · Screendump · More >
-    HP-IL SIGNALS
+├── LOOP MAP         Leave view · Screendump · More >
+└── HP-IL SIGNALS    Leave view · Screendump · Bit cells < Bands > · More >
 
 More > — HIPI's menu
 ├── Go to view >     Display · Plotter · Tape (one row per device) ·
 │                    Analyzer · Loop map · HP-IL signals
 ├── Settings >
 │   ├── Screen >         Text colour < White > · Font size < 0 > · Columns < Auto > ·
-│   │                    Brightness < 100% > · Plot view < Fit >
+│   │                    Brightness < 100% > · Plot view < Fit > · Paper < White >
 │   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
 │   │                    Date < EU > · Time < 24 h > · Show now
 │   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
@@ -610,6 +646,9 @@ You can also take one from e.g. a HP-41 program (with the display device selecte
 | `27 ACCHR  35 ACCHR  68 ACCHR` | Just the screen |
 | `27 ACCHR  35 ACCHR  77 ACCHR` | The screen **with** menus and buttons, exactly as you see it |
 
+To choose which view is in the picture first, see
+[5.4 Choosing the view from the HP-41](#54-choosing-the-view-from-the-hp-41).
+
 ---
 
 ## 11. The HP-IL analyzer
@@ -702,6 +741,12 @@ view says after how many bits it gave up.
 
 A new capture every half second while traffic comes in. **X** leaves.
 
+**Bit cells** in the view's menu (OK) chooses how the bits are told apart:
+
+- **Bands** (the default) — a dark grey band behind every other bit.
+- **Lines** — a thin line between the bits.
+- **None** — nothing; the background is black all over.
+
 <a href="images/signal-overview.png"><img src="images/signal-overview.png" alt="The signal viewer" width="512"></a>
 
 ---
@@ -742,6 +787,8 @@ value.
 | `columns` | `0`, `1`–`100` | `0` | Characters per line; `0` = as many as fit. (The menu offers 25, 32 — the HP 82163's own — 33, 50 and 100.) |
 | `brightness` | `0`–`255` | `255` | Backlight. The menu's steps: `51`, `102`, `153`, `204`, `255` (20–100 %). |
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
+| `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
+| `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
 
 **Screen saver** (see [4.3](#43-screen-saver-and-clock))
 
@@ -775,7 +822,8 @@ The device names: `TFDISPLAY`, `TFDRIVE`, `TFLEDS`, `TFPIXEL`, `TFTEMP`,
 ### An example
 
 A HIPI with the text in green and a little larger, 32 characters per line
-like the original video interface, the backlight at 80 %, the clock as
+like the original video interface, the backlight at 80 %, the plotter on
+black paper, the clock as
 screen saver in LCD style with US date and 12-hour time (the geese if the
 clock chip is missing), a cassette, the LEDs and the terminal switched off,
 and PILBOX first on the loop:
@@ -789,6 +837,7 @@ fontsize=1
 columns=32
 brightness=204
 plot_fit=1
+plot_paper=black
 saver=1
 clock_fallback=4
 clock_style=1
