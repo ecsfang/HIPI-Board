@@ -30,7 +30,7 @@
 // TEST_DISPLAY too (runs first, see the call site below).
 //#define TEST_FONT
 
-#define HIPI_VERSION_TEXT "3.2beta"
+#define HIPI_VERSION_TEXT "1.0.0"
 
 #include <stdlib.h>
 #include <cstring>
