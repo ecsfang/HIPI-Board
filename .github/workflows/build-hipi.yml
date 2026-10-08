@@ -25,7 +25,11 @@ permissions:
 jobs:
   build:
     name: Build HIPI Panel 7
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-24.04: the ubuntu-latest label migrates to Ubuntu 26 in October 2026,
+    # and pinning keeps the toolchain packages predictable.
+    runs-on: ubuntu-24.04
+    # The toolchain install adds a few minutes and the pico-sdk clone is large.
+    timeout-minutes: 30
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}  # manually entered tag, or the name of the pushed tag
 
@@ -49,8 +53,6 @@ jobs:
             git tag -l || true
             exit 1
           fi
-        env:
-          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         # A manual run with a non-existent tag would otherwise fail later with a cryptic "fatal: reference is not a tree".
 
       # 3. Diagnostics - submodule status
@@ -98,35 +100,59 @@ jobs:
           submodules: recursive
         # The SDK is a large clone whose submodules hold hardware support needed by the build.
 
-      # 6. Configure CMake
+      # 6. Install ARM toolchain and build tools
+      # The GitHub runner image ships no ARM cross-compiler and no make by default.
+      # This is what pico_setup.sh does on a local machine: the SDK needs arm-none-eabi-gcc
+      # together with newlib and the arm-none-eabi libstdc++.
+      # apt places arm-none-eabi-gcc on PATH, so PICO_TOOLCHAIN_PATH is not required.
+      # If a newer toolchain is ever needed than the Ubuntu 24.04 package, download the
+      # official ARM GNU toolchain tarball and point PICO_TOOLCHAIN_PATH at it.
+      - name: Install ARM toolchain and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib \
+            build-essential \
+            ninja-build \
+            cmake
+          echo "=== toolchain versions ==="
+          arm-none-eabi-gcc --version
+          cmake --version
+          ninja --version
+          make --version
+
+      # 7. Configure CMake
       - name: Configure CMake
         run: |
           export PICO_SDK_PATH="${{ github.workspace }}/pico-sdk"
           rm -rf build
           cmake \
+            -G Ninja \
             -DPICO_BOARD=pico2 \
             -DHIPI_BUILD_PANELS=7 \
             -B build
+        # Ninja is used instead of the default Unix Makefiles generator, which CMake could not find
+        # on the runner. ninja-build is installed in the step above.
 
-      # 7. Build HIPI Panel 7
+      # 8. Build HIPI Panel 7
       - name: Build HIPI Panel 7
         run: cmake --build build --parallel
 
-      # 8. List build output
+      # 9. List build output
       - name: List build output
         run: find build -type f \( -name '*.uf2' -o -name '*.elf' -o -name '*.bin' -o -name '*.hex' -o -name '*.map' \)
 
-      # 9. Prepare release files
+      # 10. Prepare release files
       - name: Prepare release files
         run: |
           mkdir -p release
           cp build/hipi_7_pico.uf2 release/hipi_7_pico-${RELEASE_TAG}.uf2
           cp build/hipi_7_pico.elf release/hipi_7_pico-${RELEASE_TAG}.elf
           ls -lh release/
-        env:
-          RELEASE_TAG: ${{ env.RELEASE_TAG }}
 
-      # 10. Create GitHub Release
+      # 11. Create GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
