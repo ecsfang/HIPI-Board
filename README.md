@@ -1,346 +1,269 @@
-# HIPI-board - HP-IL Pico Interface — Raspberry Pico 2
+# HIPI Board — HP-IL Pico Interface
 
-Port of J. Chilla's MicroPython project `JCILD` (HP82163 / HP-41 video
-display and HP82161 drive emulator) to C++17, including a port of the
-RA8875 driver, plus a touch-screen on-device menu, persistent
-configuration, and several HP-IL devices (display, drive, LEDs, PILBox).
+HIPI is a small touch-screen box on a Raspberry Pi Pico 2 (RP2350) that sits
+on the HP-IL loop of an HP-41, HP-71 or HP-75 and acts as a whole set of
+classic HP peripherals at once:
 
-> **New here?** See the **[User & Developer Guide](documents/GUIDE.md)** for
-> cloning and building the project, flashing the Pico, using the on-screen
-> menus, and adding your own HP-IL devices.
->
-> **Hardware:** [pcb/README.md](pcb/README.md) describes the circuit board
-> and choice of display, and [pcb/HIPI-BOM.pdf](pcb/HIPI-BOM.pdf) contains the
-> bill of materials.
+| HIPI acts as…               | Original HP device               | Loop name           |
+|-----------------------------|----------------------------------|---------------------|
+| Video display               | HP 82163 Video Interface         | `TFDISPLAY`         |
+| Cassette drive              | HP 82161A Digital Cassette Drive | `TFDRIVE`           |
+| Plotter                     | HP 7470A                         | `TFPLOT`            |
+| Temperature/pressure sensor | —                                | `TFTEMP`            |
+| LEDs and colour pixels      | —                                | `TFLEDS`, `TFPIXEL` |
+| Link to a PC (e.g. pyILPER) | PIL-Box                          | `PILBOX`            |
+| Terminal over USB           | —                                | `TFTERM`            |
 
-## Quick start in VS Code (Raspberry Pi Pico extension)
+Cassettes are LIF image files on a micro-SD card. Besides the device views
+(display, plotter, tape drive) there is an HP-IL analyzer, a loop map, an
+HP-IL signal view, screen savers, screen dumps, and — on the 7" panel — a
+mirror of the screen to a PC for recording videos.
 
-### 1. Install the extension
-Extensions panel → search **"Raspberry Pi Pico"** → install.
+The project started as a C++17 port of J. Chilla's MicroPython project
+`JCILD` (HP 82163 video display and HP 82161 drive emulator), including its
+RA8875 display driver.
 
-### 2. pico-sdk
-If you don't already have it via pico-setup:
-```bash
-git clone -b master https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
-cd ~/pico-sdk && git submodule update --init
-```
-The extension finds it via `PICO_SDK_PATH`. If your SDK is under
-`~/.pico-sdk/sdk/2.2.0/` (default after pico-setup), export:
-```bash
-export PICO_SDK_PATH=$HOME/.pico-sdk/sdk/2.2.0
-```
+## Documentation
 
-### 3. Import the project
-Do **not** open the folder via `File → Open Folder`. Instead run:
-
-**Command Palette** (`Ctrl+Shift+P`) →
-```
-Raspberry Pi Pico: Import Project
-```
-
-Point to the folder containing `CMakeLists.txt`, select board **pico2** (Pico 2) or **pico2_w** (Pico 2 W)
-(Pico 2 / RP2350).
-
-### 4. Build
-- **Build** button in the status bar at the bottom, or `Ctrl+Shift+B`
-- First build takes ~1–2 min
-- Builds **both** panel variants every time: `build/hipi_5_pico.uf2` (5",
-  RA8875) and `build/hipi_7_pico.uf2` (7", LT7683) -- flash whichever
-  matches the board on your desk
-
-### 5. Flash
-Hold **BOOTSEL** on the Pico 2, release after reset, drag-and-drop the
-UF2 onto the new drive.
-
-### 6. SD card
-Format a micro-SD card (FAT32 recommended; exFAT also works) and lay it out
-like this (folder names in `include/sd_paths.h`):
-```
-CONFIG.TXT        settings -- created with defaults on first boot
-resources/        Tape view bitmaps from this repo's resources/ folder:
-                  hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
-lif/              cassette images (*.dat, LIF) -- listed by Select file
-screenshots/      screen dumps -- created on the first Screendump
-logs/             analyzer logs -- created on the first Log to file
-```
-The button strip and the logo are built into the firmware
-(`src/buttons_image.cpp`, `src/logo_image.cpp`), so buttons, menus and the
-start-up screen work without an SD card. See `documents/USER_MANUAL.md` for
-the user's view and `documents/GUIDE.md` for the details.
+| Document | For | Contents |
+|----------|-----|----------|
+| [User Manual](documents/USER_MANUAL.md) | Users | Getting started, views, menus, devices, settings, troubleshooting |
+| [User & Developer Guide](documents/GUIDE.md) | Developers | Setting up, building, flashing, USB interfaces, adding your own HP-IL device |
+| [pcb/README.md](pcb/README.md) | Builders | The circuit board and choice of display; [BOM](pcb/HIPI-BOM.pdf), [schematics](pcb/HIPI-Schematics.pdf) |
+| [tools/hipiview](tools/hipiview/README.md) | Users | Showing and recording the 7" screen on a PC |
+| [tools/ilctrl](tools/ilctrl/README.md) | Users | A command-line HP-IL controller for the PC (PIL-Box CON mode) |
 
 ---
 
-## Project structure
-```
-├── CMakeLists.txt                 ← top-level build (one target chain per panel --
-│                                     core lib, Pico transport lib, pico executable --
-│                                     built as hipi_5_pico / hipi_7_pico, see
-│                                     hipi_add_pico_targets() inside)
-├── README.md
-├── documents/                     ← USER_MANUAL.md (users), GUIDE.md (users + developers)
-├── pcb/                           ← hardware: README, BOM, pictures
-├── scripts/                       ← build/flash helpers, bmp_to_rgb565.py (embeds BMPs)
-├── resources/                     ← artwork: Tape view BMPs (go on the SD card),
-│                                     buttons.bmp/.png + logo.bmp (built into the firmware)
-├── include/
-│   ├── LT7683.hpp / RA8875.hpp / *Transport.hpp  ← display drivers (7" / 5") + SPI transports
-│   ├── Screen.hpp                 ← HP82163 video-stream emulator (text buffer, scroll-back)
-│   ├── hp82163_font.hpp           ← custom 8x16 CGRAM font (ASCII 32-126 + Swedish å/ä/ö)
-│   ├── bmp_loader.hpp             ← 24-bit BMP loader (Tape view bitmaps)
-│   ├── uidialog.hpp               ← on-device touch menus (UiDialog)
-│   ├── boardui.h / ui_buttons.hpp ← button strip, info box, device list, touch dispatch
-│   ├── bootscreen.h               ← start-up screen (7")
-│   ├── plotterview.h              ← device views: Display / Plotter / Tape, swiping
-│   ├── screendump.h               ← screen dumps to screenshots/ (+ HIPI_DEV_SCREENDUMPS)
-│   ├── lif_info.hpp               ← LIF volume/directory reader (cassette contents view)
-│   ├── config.hpp                 ← persistent settings (CONFIG.TXT)
-│   ├── sd_paths.h                 ← SD card folder names
-│   ├── hpil.h                     ← CDevice: shared HP-IL protocol base class (+ ViewKind)
-│   ├── drive.h / tape.h           ← CDrive (HP82161A emulation) / CTape + CTapeSD (LIF file)
-│   ├── display.h                  ← CDisplay: HP-IL device feeding bytes into Screen
-│   ├── plotter.h                  ← CPlotter: HP7470A (HP-GL) plotter device
-│   ├── illeds.h / ilpixels.h / iltemp.h / terminal.h / pilbox.h  ← the other HP-IL devices
-│   ├── leds.h / pixels.h / bmp280.h / i2c_device.h  ← LED, NeoPixel and sensor drivers
-│   ├── touch.h / gslX680fw.h      ← GSL1680 touch controller + its firmware blob
-│   ├── usb_serial.h / usb_msc.h / tusb_config.h  ← USB: CDC consoles, SD card as USB drive
-│   ├── display_mirror.h / mirror_*.h(pp)  ← 7" display mirrored to a PC (tools/hipiview)
-│   ├── hpil_pio.hpp               ← generated PIO header (from src/hpil.pio)
-│   ├── display_test.hpp / display_boot_test.hpp  ← optional display diagnostics (opt-in)
-│   └── (no-OS-FatFS SD library lives under lib/, vendored, unmodified)
-└── src/
-    ├── pico_main.cpp               ← entry point: boot sequence, main loop
-    ├── hipi.cpp                    ← creates the HP-IL devices, loop dispatch, trace
-    ├── hpil.cpp / hpil.pio / device.cpp  ← HP-IL frames, PIO physical layer, CDevice
-    ├── drive.cpp / display.cpp / plotter.cpp / pilbox.cpp / ...  ← the HP-IL devices
-    ├── boardui.cpp / bootscreen.cpp / plotterview.cpp / screendump.cpp  ← UI
-    ├── buttons_image.cpp / logo_image.cpp  ← built-in bitmaps (generated, see scripts/)
-    ├── LT7683.cpp / RA8875.cpp / Screen.cpp / touch.cpp / leds.cpp / pixels.cpp
-    ├── usb_msc.cpp / my_descriptors.c / hw_config.cpp  ← USB drive, descriptors, SD config
-    ├── display_mirror.cpp          ← display mirror port (CDC 3), see tools/hipiview
-    ├── PicoSpiTransport.cpp / LinuxSpiDevTransport.cpp
-    └── linux_main.cpp               ← optional Linux demo (HIPI_BUILD_LINUX_EXAMPLE, off by default)
-```
+## Hardware at a glance
 
-No local `pico_sdk_import.cmake` needed — the extension sets up the SDK
-via its toolchain file and `CMakeLists.txt` only includes
-`${PICO_SDK_PATH}/pico_sdk_init.cmake`.
+| Part | |
+|------|---|
+| MCU | Raspberry Pi Pico 2 / Pico 2 W (RP2350) |
+| 5" panel | 800 × 480, RA8875, GSL1680 touch — `build/hipi_5_pico.uf2` |
+| 7" panel | 1024 × 600, LT7683, FT5316 touch — `build/hipi_7_pico.uf2` |
+| Storage | micro-SD card (FAT32 recommended, exFAT works) |
+| USB | 4 serial ports (console, PILBOX, terminal, display mirror) and the SD card as a USB drive — see [GUIDE § 7](documents/GUIDE.md#7-usb-interfaces) |
 
-## Pinout on Pico 2 (same as `share.py`)
-| Function      | GPIO     |
-|---------------|----------|
-| SPI0 SCK      | GP2      |
-| SPI0 MOSI     | GP3      |
-| SPI0 MISO     | GP0      |
-| CS (active L) | GP1      |
-| RST (active L)| GP4      |
+Display SPI wiring (same as the original `share.py`):
 
-## Building from the command line
+| Function   | GPIO |
+|------------|------|
+| SPI0 SCK   | GP2  |
+| SPI0 MOSI  | GP3  |
+| SPI0 MISO  | GP0  |
+| CS (low)   | GP1  |
+| RST        | not wired — the module has its own power-on reset |
+
+---
+
+## Building
+
+Both panel variants are built every time: `build/hipi_5_pico.uf2` (5") and
+`build/hipi_7_pico.uf2` (7"). Flash the one that matches your board. The
+details, including the PicoLED library, are in
+[GUIDE.md § 1–3](documents/GUIDE.md#1-setting-up-the-project).
+
+### In VS Code (Raspberry Pi Pico extension)
+
+1. **Install** the *Raspberry Pi Pico* extension.
+2. **pico-sdk 2.2.0:** if the extension hasn't installed it, clone it and
+   point `PICO_SDK_PATH` at it:
+   ```bash
+   git clone -b master https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+   cd ~/pico-sdk && git submodule update --init
+   export PICO_SDK_PATH=$HOME/pico-sdk        # or $HOME/.pico-sdk/sdk/2.2.0
+   ```
+3. **Import** the project — not *File → Open Folder*, but
+   `Ctrl+Shift+P` → **Raspberry Pi Pico: Import Project**, pick the folder
+   with `CMakeLists.txt`, and board **pico2** (or **pico2_w**).
+4. **Build** with the *Build* button in the status bar or `Ctrl+Shift+B`.
+   The first build takes a minute or two.
+
+### From the command line
+
 ```bash
 export PICO_SDK_PATH=$HOME/.pico-sdk/sdk/2.2.0   # or ~/pico-sdk
 cmake -G Ninja -B build -S .
 cmake --build build
-# Builds both panel variants every time -- flash whichever matches your board:
-picotool load -f build/hipi_5_pico.uf2   # 5" panel (RA8875)
-picotool load -f build/hipi_7_pico.uf2   # 7" panel (LT7683)
 ```
 
-## Using in your own code
-```cpp
-#include "PicoSpiTransport.hpp"
-#include "RA8875.hpp"
-#include "Screen.hpp"
+### Flashing
 
-hipi::PicoSpiTransport t(spi0, 6'000'000, /*cs=*/1, /*rst=*/4);
-hipi::RA8875 display(t, 800, 480);
-display.begin();   // configures genuine 16bpp/RGB565 by default (SYSR_16BPP)
+Hold **BOOTSEL** while plugging in (or resetting) the Pico 2 and drop the
+`.uf2` onto the drive that appears — or use picotool:
 
-hipi::Screen screen(display, /*color=*/0xFFFF, /*size=*/0, /*brightness=*/255, /*textWidth=*/680);
-for (uint8_t b : hp41_stream) screen.pr_char(b);
+```bash
+picotool load -f build/hipi_7_pico.uf2      # or hipi_5_pico.uf2
 ```
-The display runs in real 16bpp/RGB565 throughout (which also fixed several
-subtle color-quantization issues 8bpp had). `set2LayerConfig()` is unused on
-Pico; it's only exercised in the optional Linux demo
-(`linux_main.cpp`).
+
+Later updates can be started from the menu: **More → System → Bootsel mode**.
+
+### SD card
+
+Format a micro-SD card (FAT32) and lay it out like this (folder names are in
+`include/sd_paths.h`):
+
+```
+CONFIG.TXT      settings — created with defaults on first boot
+resources/      Tape view pictures, from this repo's resources/ folder:
+                hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+lif/            cassette images (*.dat, LIF)
+screenshots/    screen dumps — created by the first Screendump
+logs/           analyzer logs — created by the first "Log to file"
+```
+
+The button strip and the logo are built into the firmware, so HIPI starts
+and its menus work without an SD card.
 
 ---
 
-## On-device touch menu (`UiDialog`)
+## Using HIPI — in brief
 
-A five-button touch strip (`Shift`, `OK`, up arrow, down arrow, "back")
-drives an on-screen menu, drawn with a rounded yellow frame matching the
-button artwork's style. Press **Shift+OK** ("EXIT") from anywhere in the
-menu to close it entirely; the "back" button goes up one level at a time.
+The [User Manual](documents/USER_MANUAL.md) has the full story; these are
+the essentials.
+
+**Buttons.** Touch the right edge of the screen to slide in the button
+strip (it hides again after 5 s):
+
+| Button | Menu closed | In the menu | After **Shift** |
+|--------|-------------|-------------|-----------------|
+| **OK** | Opens the menu | Chooses | EXIT — closes the menu |
+| **▲ / ▼** | Scrolls the text back / forward one line | Moves up / down | One page |
+| **X** | Back to the live text | Back one level | CLR — clears the screen |
+
+**Touch.** Top-left corner: info box. Bottom-left corner: the devices on
+the loop and their addresses. Swipe left/right: next/previous device view.
+
+**Menus.** OK opens the menu of the view on the screen (e.g. *Clear
+plotter* in the Plotter view). Its last row, **More**, leads to HIPI's own
+menu:
 
 ```
-Config
-├── Select file     (the cassette for the Tape view's drive; LIF contents view)
-├── Trace           (Off / On / Extended)
-├── Connect to PC   (SD card as a USB drive)
-├── Loopback test
-├── Scan I2C
-└── Bootsel mode    (reboot for a firmware update)
-Settings
-├── Textcolor       (White / Yellow / Green / Cyan / Red)
-├── Font size       (0-3)
-├── Brightness      (20% / 40% / 60% / 80% / 100%)
-└── Columns         (Auto / 21 / 28 / 32 / 42 / 85 -- 32 reproduces the
-                      original HP82163's column wrap width regardless of
-                      font size; the rest are the natural max per font size)
-Devices
-├── Enable/disable
-└── Change order    (order on the loop)
-Display
-├── <one row per device view, loop order>
-├── Clear plotter / Clear screen
-└── Screendump      (7")
-```
-The full description is in `documents/GUIDE.md`.
+More >
+├── Go to view >   Display · Plotter · Tape · Analyzer · Loop map · HP-IL signals
+├── Settings >     Screen · Screen saver · Devices · PC link
+└── System >       Connect to PC · Loopback test · Scan I2C · Character table ·
+                   About · Bootsel mode
 ```
 
-While the menu is open, `Screen` output is suspended (incoming HP-41 stream
-bytes still update the internal text buffer, just not the visible display)
-so the menu can't be drawn over — closing the menu triggers a full redraw
-that catches up on anything received while it was open.
+**While a menu is open** HIPI keeps working: nothing the HP-41 sends is
+lost, and the view underneath is up to date when the menu closes.
 
-Outside the menu (`Screen` closed/idle), the physical arrow buttons scroll
-the HP-41 text buffer's scroll-back history instead: up/down move one line
-at a time (older/newer), Shift+up/down move a whole page, "back" jumps back
-to the live view, and Shift+"back" clears the screen. This is independent
-of the HP82163 stream's own `ESC S`/`ESC T` "roll" commands.
+**Settings** are saved at once to `CONFIG.TXT` on the SD card as
+`key=value` lines; unknown keys are ignored, so old files keep working. All
+keys are listed in the
+[User Manual § 12](documents/USER_MANUAL.md#12-the-settings-file-configtxt).
 
-Touching a button also gives brief visual feedback: the button's own
-bitmap region is redrawn shifted a few pixels (see `kPressDx`/`kPressDy` in
-`boardui.cpp`), then restored on release.
-
-## Configuration
-
-`Config` (`config.hpp`) persists settings as human-readable `key=value`
-lines in `CONFIG.TXT` on the SD card, for example:
-```
-media.TFDRIVE=GAMES.DAT
-textcolor=65535
-trace=0
-debug=0
-fontsize=0
-brightness=255
-drive_standby=0
-screendump_next=3
-columns=0
-disabled_devices=
-device_order=TFDISPLAY,TFDRIVE,TFLEDS,TFPIXEL,TFTEMP,PILBOX,TFPLOT,TFTERM
-```
-Every setter rewrites the whole file immediately, so it's always in sync
-with what's shown in the menu. If `CONFIG.TXT` doesn't exist yet (or can't
-be opened), it's created with default values on first boot. Unknown keys
-are ignored when parsing, so older config files stay loadable as new
-settings get added (an old single `filename=` line is still read, for
-`TFDRIVE`).
-
-## Character set
-
-The display uses a custom 8x16 CGRAM font (`hp82163_font.hpp`), not the
-RA8875's built-in font — ASCII 32-126, plus Å/Ä/Ö/å/ä/ö at their standard
-Latin-1 code points (0xC4/0xC5/0xD6/0xE4/0xE5/0xF6). `RA8875::txtWrite()`
-transparently decodes 2-byte UTF-8 sequences in the U+00C0-U+00FF range
-into those single-byte codes, so a literal `"Fänge"` in a UTF-8-saved
-source file renders correctly — no escaping needed. Note this only applies
-to `txtWrite()` (whole C-strings); `txtWriteChar()` takes one raw byte at a
-time and can't look ahead, so pass the Latin-1 byte value directly there.
+**Characters.** The display font (`hp82163_font.hpp`) is an 8×16 font with
+the HP-41 characters plus Å Ä Ö å ä ö. `txtWrite()` decodes UTF-8, so a
+string like `"Fänge"` in the source code shows correctly.
 
 ---
 
-## Differences from MicroPython
-- Global state in `share.py` → constructor arguments
-- `RA8875Transport` = virtual SPI/GPIO interface (easy to swap platform)
-- `delayMs()` replaces `time.sleep()`
-- `_write_reg` / `_write_reg16` → public `writeReg` / `writeReg16`
-- Runs in genuine 16bpp/RGB565 rather than 8bpp/RGB332
-- Adds the touch menu, persistent configuration, and Swedish character
-  support described above — none of which exist in the original
-  MicroPython project
+## Project structure
+
+```
+CMakeLists.txt   build: one target chain per panel (hipi_5_pico, hipi_7_pico)
+include/, src/   the firmware (below)
+lib/             no-OS-FatFS (SD card), vendored, unmodified
+PicoLED/         WS2812 library for TFPIXEL, vendored
+resources/       artwork: Tape view pictures (SD card), buttons and logo (built in)
+scripts/         build/flash helpers, bmp_to_rgb565.py (turns BMPs into C++)
+tools/           PC programs: hipiview (display mirror), ilctrl (HP-IL controller)
+documents/       USER_MANUAL.md, GUIDE.md, images
+pcb/             hardware: README, BOM, schematics, PCB
+```
+
+The firmware, by area (`.h`/`.hpp` in `include/`, `.cpp` in `src/`):
+
+| Area | Files | |
+|------|-------|-|
+| **Start-up** | `pico_main`, `hipi`, `boot_service`, `hipi_features.h` | Boot sequence and main loop; creates the HP-IL devices; build switches |
+| **HP-IL** | `hpil`, `hpil.pio`, `device` | Frames, the PIO physical layer, the `CDevice` base class |
+| **HP-IL devices** | `display`, `drive` + `tape`, `plotter`, `illeds`, `ilpixels`, `iltemp`, `terminal`, `pilbox` | `TFDISPLAY`, `TFDRIVE` (LIF on SD), `TFPLOT` (HP-GL), `TFLEDS`, `TFPIXEL`, `TFTEMP`, `TFTERM`, `PILBOX` |
+| **Display drivers** | `LT7683`, `RA8875`, `*Transport`, `display_config.h` | 7" and 5" controllers; SPI on the Pico (or spidev on Linux) |
+| **Text display** | `Screen`, `hp82163_font.hpp` | HP 82163 emulation: text buffer, escape codes, scroll-back |
+| **Views** | `plotterview`, `analyzer`, `loopmap`, `hpil_diag` (+ `.pio`), `chartable` | Display / Plotter / Tape views and switching; analyzer, loop map, HP-IL signals, character table |
+| **User interface** | `boardui`, `uidialog.hpp`, `ui_buttons.hpp`, `touch`, `bootscreen` | Button strip, menus, info box, device list, touch, start-up screen |
+| **Screen extras** | `backlight`, `clock`, `rtc`, `saver_anim`, `screendump` | Backlight and screen savers, DS3231 clock, screen dumps |
+| **Display mirror** | `display_mirror`, `mirror_*.h(pp)` | 7" screen mirrored to a PC (`tools/hipiview`) |
+| **Settings & files** | `config.hpp`, `sd_paths.h`, `bmp_loader.hpp`, `lif_info.hpp`, `hw_config` | `CONFIG.TXT`, SD folders, BMP loading, LIF directories, SD card wiring |
+| **USB** | `usb_serial.h`, `usb_msc`, `my_descriptors.c`, `tusb_config.h` | Serial ports, the SD card as a USB drive, descriptors |
+| **Hardware drivers** | `leds`, `pixels`, `bmp280`, `i2c_device` | LEDs, NeoPixels, pressure sensor, I2C |
+| **Fonts & pictures** | `*_font*.cpp`, `glyph_font`, `buttons_image.cpp`, `logo_image.cpp` | Generated data (see `scripts/`) |
+| **Other** | `display_test.hpp`, `display_boot_test.hpp`, `linux_main` | Optional diagnostics; a Linux demo (off by default) |
 
 ---
 
-## LED control — `CLedParser` syntax (To be updated - works for 5" panel)
+## Port notes (vs. the MicroPython original)
 
-LEDs are controlled by sending compact command strings over CDC/UART,
-one character at a time. Commands are grouped as `<leds><command>[<params>]`
-and groups are separated by spaces.
+- Global state from `share.py` became constructor arguments.
+- `RA8875Transport` is a virtual SPI/GPIO interface, so the platform is easy
+  to swap (`PicoSpiTransport`, `LinuxSpiDevTransport`).
+- `delayMs()` replaces `time.sleep()`; `_write_reg`/`_write_reg16` became
+  the public `writeReg`/`writeReg16`.
+- The display runs in 16-bit RGB565 instead of 8-bit RGB332.
+- New: the touch UI, persistent settings, the extra HP-IL devices and views,
+  the LT7683 (7") driver, and the Swedish characters.
 
-### LED selection
+---
 
-| Selector | Meaning |
-|----------|---------|
-| `1`–`5`  | Individual LEDs (combinable: `"135"` selects 1, 3 and 5) |
-| `0`      | All LEDs |
+## Reference: LED commands (`TFLEDS`)
 
-### Commands
+The HP-41 sends compact command strings to `TFLEDS`, for example
+`"1B0:100:900"` (LED 1 blinks forever, 100 ms on, 900 ms off). A command is
+`<leds><command>[<parameters>]`; several commands are separated by spaces.
+
+**LEDs:** `1`–`5` select single LEDs and can be combined (`135` = LEDs 1, 3
+and 5); `0` selects all.
 
 | Command | Parameters | Meaning | Example |
 |---------|------------|---------|---------|
-| `O` | — | Turn on | `12O` |
-| `C` | — | Turn off | `345C` |
-| `B` | none or `n` | Blink n times (`0` or omitted = infinite) | `15B5` |
-| `B` | `n:ms` | Blink n times, `ms` on and off each | `3B10:150` |
-| `B` | `n:on:off` | Blink n times, `on` ms on / `off` ms off | `3B10:100:400` |
-| `S` | `n` | Set brightness to n % (0–100) | `1S75` |
-| `F+` | `t` | Fade on over t ms | `2F+800` |
-| `F-` | `t` | Fade off over t ms | `2F-500` |
-| `F` | `n:t` | Fade to n % over t ms | `4F30:600` |
-
-### HP-41 Example
-This example starts to blink led 1 forever, on 100ms and off 900ms
+| `O`  | —                | On                                          | `12O` |
+| `C`  | —                | Off                                         | `345C` |
+| `B`  | none, or `n`     | Blink n times, 200 ms on/off (none or `0` = forever) | `15B5` |
+| `B`  | `n:ms`           | Blink n times, `ms` on and off              | `3B10:150` |
+| `B`  | `n:on:off`       | Blink n times, `on` ms on, `off` ms off     | `3B10:100:400` |
+| `S`  | `n`              | Brightness n % (0–100)                      | `1S75` |
+| `F+` | `t`              | Fade on over t ms                           | `2F+800` |
+| `F-` | `t`              | Fade off over t ms                          | `2F-500` |
+| `F`  | `n:t`            | Fade to n % over t ms                       | `4F30:600` |
 
 ```
-01 LBL 'TEST'
+01 LBL "TEST"
 02 3
 03 SELECT
-04 '1B0:100:900'
+04 "1B0:100:900"
 05 OUTA
 ```
-> **Note:** `S`, `F+`, `F-`, and `F` require PWM support (`CLED_NO_PWM`
-> must not be defined). In non-PWM mode, brightness has no visible effect
-> and fade commands snap to on/off immediately.
 
-### Examples
+More examples:
 
 ```
-"12O"              LEDs 1 and 2 on
-"345C"             LEDs 3, 4 and 5 off
-"0C"               All LEDs off
-"0O"               All LEDs on
-"15B5"             LEDs 1 and 5 blink 5 times (200 ms on / 200 ms off)
-"3B"               LED 3 blinks forever
-"3B10:150"         LED 3 blinks 10 times, 150 ms on / 150 ms off
-"3B10:100:400"     LED 3 blinks 10 times, 100 ms on / 400 ms off
-"1S75"             LED 1 brightness → 75 %
-"0S30"             All LEDs brightness → 30 %
-"2F+800"           LED 2 fades on over 800 ms
-"2F-500"           LED 2 fades off over 500 ms
-"4F30:600"         LED 4 fades to 30 % over 600 ms
-"12O 345C"         LEDs 1, 2 on — LEDs 3, 4, 5 off
-"0S50 0F+2000"     All LEDs: set brightness to 50 %, then fade on over 2 s
-"1B3:100:200 2F+500"  LED 1 blinks 3 times; LED 2 fades on over 500 ms
+"0C"                  all LEDs off
+"12O 345C"            LEDs 1 and 2 on, LEDs 3, 4 and 5 off
+"0S50 0F+2000"        all LEDs: brightness 50 %, then fade on over 2 s
+"1B3:100:200 2F+500"  LED 1 blinks 3 times; LED 2 fades on over 0.5 s
 ```
 
-### Notes
-
-- Groups must be separated by a **space** when a numeric parameter is
-  immediately followed by a new LED digit, to avoid ambiguity.
-  Write `"1B5 23C"` not `"1B523C"` (which would be parsed as
-  LED 1 blinking 523 times).
-- Sending `\n`, `;`, or calling `flush()` also terminates the last group.
-- `B` with no number or `B0` both produce infinite blinking.
+- Put a **space** between commands when a number is followed by the next
+  LED digit: `"1B5 23C"`, not `"1B523C"` (that is LED 1 blinking 523 times).
+- `\n`, `;` or `flush()` also end the last command.
+- `S` and the `F` commands need PWM (`CLED_NO_PWM` not defined, see
+  `leds.h`); without it, brightness does nothing and fades switch at once.
+- Tested on the 5" board.
 
 ---
 
 ## References
+
 - MicroPython `share.py` + `RA8875.py`: J. Chilla, March 2026
-- HP82163 protocol: HP82163A video display for HP-41
-- RA8875: <https://github.com/adafruit/Adafruit_CircuitPython_RA8875>
-- 5" panel (RA8875, `DISPLAY_5INCH`): <https://www.buydisplay.com/5-inch-tft-lcd-module-800x480-display-controller-i2c-serial-spi>
-- 7" panel (LT7683, `DISPLAY_7INCH`): <https://www.buydisplay.com/spi-7-inch-tft-lcd-dislay-module-1024x600-ra8876-optl-touch-screen-panel>
+- HP 82163A video interface for the HP-41
+- HP-IL interface specification: <https://literature.hpcalc.org/community/hp82166-is-en.pdf>
+- *Control the world with HP-IL*: <https://literature.hpcalc.org/community/control-with-hp-il.pdf>
+- RA8875 (CircuitPython driver): <https://github.com/adafruit/Adafruit_CircuitPython_RA8875>
+- 5" panel (RA8875): <https://www.buydisplay.com/5-inch-tft-lcd-module-800x480-display-controller-i2c-serial-spi>
+- 7" panel (LT7683): <https://www.buydisplay.com/spi-7-inch-tft-lcd-dislay-module-1024x600-ra8876-optl-touch-screen-panel>
 - pico-sdk: <https://github.com/raspberrypi/pico-sdk>
 - Pico VS Code extension: <https://github.com/raspberrypi/pico-vscode>
-- HP-IL interface Specification: <https://literature.hpcalc.org/community/hp82166-is-en.pdf>
-- Control the world with HPIL: <https://literature.hpcalc.org/community/control-with-hp-il.pdf>
