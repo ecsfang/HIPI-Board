@@ -338,3 +338,41 @@ if(HIPI_BUILD_LINUX_EXAMPLE)
         target_link_libraries(hipi_linux_demo PRIVATE hipi_core_5)
     endif()
 endif()
+
+# ----------------------------------------------------------------------
+# The SD card: HIPI-SD-card.zip in the project folder, with everything a
+# new SD card needs -- unzip it onto the card and HIPI is ready. Made by
+# sdcard/make_sd_card.py (which can also copy straight onto a card):
+#
+#   README.txt   from sdcard/
+#   resources/   the Tape view pictures, from resources/
+#   lif/         the example cassette(s), from sdcard/lif/
+#
+# Remade by the build whenever one of these files changes. The zip is kept
+# in the project folder, not in build/, so it's there for anyone who
+# downloads the project without building it. It is reproducible (fixed
+# time stamps), so it only changes when its contents do.
+# ----------------------------------------------------------------------
+find_package(Python3 COMPONENTS Interpreter)
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/sdcard/make_sd_card.py)
+    message(STATUS "hipi: sdcard/make_sd_card.py is missing -- HIPI-SD-card.zip is not remade")
+elseif(Python3_Interpreter_FOUND)
+    file(GLOB HIPI_SD_CASSETTES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/sdcard/lif/*)
+    set(HIPI_SD_ZIP ${CMAKE_SOURCE_DIR}/HIPI-SD-card.zip)
+    add_custom_command(
+        OUTPUT ${HIPI_SD_ZIP}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/sdcard/make_sd_card.py --zip ${HIPI_SD_ZIP}
+        DEPENDS ${CMAKE_SOURCE_DIR}/sdcard/make_sd_card.py
+                ${CMAKE_SOURCE_DIR}/sdcard/README.txt
+                ${HIPI_SD_CASSETTES}
+                ${CMAKE_SOURCE_DIR}/resources/hp82161a.bmp
+                ${CMAKE_SOURCE_DIR}/resources/tape-in.bmp
+                ${CMAKE_SOURCE_DIR}/resources/open.bmp
+                ${CMAKE_SOURCE_DIR}/resources/leds.bmp
+                ${CMAKE_SOURCE_DIR}/resources/reels.bmp
+        COMMENT "Packing the SD card: HIPI-SD-card.zip"
+        VERBATIM)
+    add_custom_target(hipi_sd_card ALL DEPENDS ${HIPI_SD_ZIP})
+else()
+    message(STATUS "hipi: no Python 3 -- HIPI-SD-card.zip is not remade")
+endif()

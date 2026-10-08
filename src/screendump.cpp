@@ -48,7 +48,7 @@ constexpr unsigned kMaxTries = 10000;   // give up searching for a free name
 // set for the live panel again.
 void overlayPipRow(DisplayDriver* d, int pip, int y, std::uint16_t* px) {
     const LT7683::PipState& s = d->pipState(pip);
-    if (!s.on || y < s.dstY || y >= s.dstY + s.h) return;
+    if (!s.on || d->pipsBlanked() || y < s.dstY || y >= s.dstY + s.h) return;   // (blanked: a screen saver)
     const int x0 = std::max<int>(0, s.dstX);
     const int x1 = std::min<int>(SCREEN_MAX_X, s.dstX + s.w);
     if (x1 <= x0) return;

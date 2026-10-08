@@ -98,4 +98,11 @@ void boardui_onMenuClosed();
 // this instead.
 bool boardui_isMenuOpen();
 
+// A drawn screen saver (clock, rain, goose) takes over the whole panel:
+// Begin puts the menu, info box, device list and button strip out of the
+// way (nothing is closed), End brings them back as they were. Called by
+// backlight.cpp around plotterview_showClock()/plotterview_leaveClock().
+void boardui_saverBegin();
+void boardui_saverEnd();
+
 }  // namespace hipi

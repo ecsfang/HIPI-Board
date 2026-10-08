@@ -73,17 +73,18 @@ Cassettes are simply files on a micro-SD card, so you never run out of tape.
 ### 3.1 Prepare the SD card
 
 The HIPI download contains two things: the software (a `.uf2` file, see
-[chapter 13](#13-updating-the-software)) and a **zip file with everything the SD
-card needs**.
+[chapter 13](#13-updating-the-software)) and **`HIPI-SD-card.zip`**, with
+everything the SD card needs. (In the HIPI project it's in the main folder.)
 
-1. Unzip the SD card zip.
-2. Copy its contents to the SD card, keeping the folders.
+1. Use a micro-SD card formatted as FAT32 (exFAT works too).
+2. Unzip `HIPI-SD-card.zip` onto the card, keeping the folders.
 3. Put your own cassettes (`.dat` files) in the `lif` folder — see
-   [chapter 7](#7-cassette-files).
+   [chapter 7](#7-cassette-files). There's one example cassette to start with.
 
 The SD card then looks like this:
 
 ```
+README.txt        a short note on what's what
 CONFIG.TXT        HIPI's settings (created by HIPI itself)
 resources/        the cassette drive's pictures: hp82161a.bmp,
                   tape-in.bmp, open.bmp, leds.bmp, reels.bmp
@@ -183,9 +184,12 @@ screen, no touch — HIPI starts its screen saver. Choose what it does in
 With the clock, the rain and the goose the backlight also slowly dims to
 10 %.
 
+The clock, the rain and the geese get the whole screen: an open menu, the
+button strip or a box in a corner goes out of the way while they run.
+
 Anything new on the screen ends the screen saver at once and brings back
-what was shown before. A touch also ends it; that first touch only wakes
-the screen and doesn't press anything.
+what was shown before, menu and button strip included. A touch also ends
+it; that first touch only wakes the screen and doesn't press anything.
 
 <a href="images/screen-clock.png"><img src="images/screen-clock.png" alt="The clock screen saver" width="512"></a>
 

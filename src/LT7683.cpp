@@ -834,8 +834,10 @@ void LT7683::showPipOverlay(std::int16_t x, std::int16_t y,
 
     // Enable PIP-1 (bit7) -- read-modify-write to leave PIP-2's own
     // enable bit (6) and the unrelated bits below it untouched.
-    const std::uint8_t mpwctrEnable = readReg(MPWCTR);
-    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | 0x80));
+    if (!pipsBlanked_) {
+        const std::uint8_t mpwctrEnable = readReg(MPWCTR);
+        writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | 0x80));
+    }
 
     pip_[0] = PipState{ true, kMenuLayerAddr, width_, alignedX, y, alignedX, y, alignedW, h };
 }
@@ -867,9 +869,11 @@ void LT7683::showPipWindow(int pip, std::uint32_t layerAddr, std::uint16_t strid
     writeReg(PIPCDEP, pip2 ? static_cast<std::uint8_t>((pipcdep & ~0x03) | 0x01)
                            : static_cast<std::uint8_t>((pipcdep & ~0x0C) | 0x04));
 
-    // Enable: bit7 = PIP-1, bit6 = PIP-2
-    const std::uint8_t mpwctrEnable = readReg(MPWCTR);
-    writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | (pip2 ? 0x40 : 0x80)));
+    // Enable: bit7 = PIP-1, bit6 = PIP-2 (not while blanked: setPipsBlanked())
+    if (!pipsBlanked_) {
+        const std::uint8_t mpwctrEnable = readReg(MPWCTR);
+        writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctrEnable | (pip2 ? 0x40 : 0x80)));
+    }
 
     pip_[pip2 ? 1 : 0] = PipState{ true, layerAddr,
         static_cast<std::uint16_t>(stride & ~0x3),
@@ -882,6 +886,18 @@ void LT7683::hidePipWindow(int pip) {
     const std::uint8_t mpwctr = readReg(MPWCTR);
     writeReg(MPWCTR, static_cast<std::uint8_t>(mpwctr & ~(pip == 2 ? 0x40 : 0x80)));
     pip_[pip == 2 ? 1 : 0].on = false;
+}
+
+void LT7683::setPipsBlanked(bool blanked) {
+    if (blanked == pipsBlanked_) return;
+    pipsBlanked_ = blanked;
+    // The window registers stay as they are; only the enable bits change
+    std::uint8_t mpwctr = static_cast<std::uint8_t>(readReg(MPWCTR) & ~0xC0);
+    if (!blanked) {
+        if (pip_[0].on) mpwctr |= 0x80;
+        if (pip_[1].on) mpwctr |= 0x40;
+    }
+    writeReg(MPWCTR, mpwctr);
 }
 
 void LT7683::hidePipOverlay() {

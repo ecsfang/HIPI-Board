@@ -150,6 +150,7 @@ jobs:
           mkdir -p release
           cp build/hipi_7_pico.uf2 release/hipi_7_pico-${RELEASE_TAG}.uf2
           cp build/hipi_7_pico.elf release/hipi_7_pico-${RELEASE_TAG}.elf
+          cp HIPI-SD-card.zip release/HIPI-SD-card-${RELEASE_TAG}.zip    # made by the build (sdcard/make_sd_card.py)
           ls -lh release/
 
       # 11. Create GitHub Release
@@ -162,3 +163,4 @@ jobs:
           files: |
             release/hipi_7_pico-${{ env.RELEASE_TAG }}.uf2
             release/hipi_7_pico-${{ env.RELEASE_TAG }}.elf
+            release/HIPI-SD-card-${{ env.RELEASE_TAG }}.zip

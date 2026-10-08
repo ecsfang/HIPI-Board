@@ -58,6 +58,7 @@ compile_commands.json
 *.bak
 *.swp
 /*.zip
+!/HIPI-SD-card.zip
 
 # vcpkg
 vcpkg_installed/
@@ -69,8 +70,8 @@ vcpkg_installed/
 Testing/
 .cache/
 
-lif/
-logs/
+/lif/
+/logs/
 
 documents/*.pdf
 documents/images/*.bmp

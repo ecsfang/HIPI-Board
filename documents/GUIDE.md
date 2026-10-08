@@ -261,8 +261,20 @@ mode, font, columns) and the device list.
 
 ## 4. Preparing the SD card
 
-Format a micro-SD card as **FAT32** or **exFAT** and copy these files to
-the root. Both work; cards larger than 32 GB are normally delivered as exFAT.
+Everything a new card needs is in **`HIPI-SD-card.zip`** in the project
+folder: format the card, unzip it onto the card's root, done. The zip is
+made by `sdcard/make_sd_card.py` from `sdcard/` (README.txt, example
+cassettes in `sdcard/lif/`) and the Tape view pictures in `resources/`. The
+build (target `hipi_sd_card`, part of every build) remakes it whenever one
+of those files changes, and the release workflow attaches it to every
+release. The zip is reproducible, so git only sees a change when its
+contents change. To write a mounted card directly:
+
+```bash
+sdcard/make_sd_card.py --to /media/$USER/HIPI
+```
+
+Format the card as **FAT32** or **exFAT**. Both work; cards larger than 32 GB are normally delivered as exFAT.
 To reformat on Ubuntu (this erases the card):
 
 ```bash
@@ -275,6 +287,7 @@ SD card layout (folder names in `include/sd_paths.h`):
 
 ```
 CONFIG.TXT        settings -- created with defaults on first boot
+README.txt        from sdcard/ -- what's what, for users
 resources/        Tape view bitmaps, copied from the repo's resources/ folder
 lif/              cassette images (*.dat, LIF), listed by Select file
 screenshots/      screen dumps -- created on the first Screendump

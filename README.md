@@ -101,17 +101,29 @@ Later updates can be started from the menu: **More → System → Bootsel mode**
 
 ### SD card
 
-Format a micro-SD card (FAT32) and lay it out like this (folder names are in
-`include/sd_paths.h`):
+Everything the SD card needs is in **`HIPI-SD-card.zip`** in the project
+folder (and with every release):
+
+1. Format a micro-SD card as FAT32 (exFAT works too).
+2. Unzip `HIPI-SD-card.zip` onto it, keeping the folders.
+3. Put your own cassettes (`.dat` files) in `lif/`.
+
+The card then holds:
 
 ```
-CONFIG.TXT      settings — created with defaults on first boot
-resources/      Tape view pictures, from this repo's resources/ folder:
-                hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
-lif/            cassette images (*.dat, LIF)
+README.txt      what's what
+resources/      Tape view pictures: hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+lif/            cassettes (*.dat, LIF) — one example to start with
+CONFIG.TXT      settings — created by HIPI on first start
 screenshots/    screen dumps — created by the first Screendump
 logs/           analyzer logs — created by the first "Log to file"
 ```
+
+The zip is made by `sdcard/make_sd_card.py` and remade by the build
+whenever one of its files changes. The script can also copy straight onto
+a mounted card: `sdcard/make_sd_card.py --to /media/$USER/HIPI`. To change
+what's on the card, edit `sdcard/` (README, example cassettes) or the
+pictures in `resources/`.
 
 The button strip and the logo are built into the firmware, so HIPI starts
 and its menus work without an SD card.
@@ -169,6 +181,8 @@ include/, src/   the firmware (below)
 lib/             no-OS-FatFS (SD card), vendored, unmodified
 PicoLED/         WS2812 library for TFPIXEL, vendored
 resources/       artwork: Tape view pictures (SD card), buttons and logo (built in)
+sdcard/          the SD card: README.txt, example cassette in lif/, make_sd_card.py
+HIPI-SD-card.zip everything for a new SD card (made by the build)
 scripts/         build/flash helpers, bmp_to_rgb565.py (turns BMPs into C++)
 tools/           PC programs: hipiview (display mirror), ilctrl (HP-IL controller)
 documents/       USER_MANUAL.md, GUIDE.md, images

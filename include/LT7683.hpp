@@ -523,6 +523,13 @@ public:
         std::uint16_t w = 0, h = 0;
     };
     const PipState& pipState(int pip) const { return pip_[pip == 2 ? 1 : 0]; }
+    // Hides both PIP windows (menu, info box, button strip...) without
+    // forgetting them, e.g. while a screen saver has the whole panel;
+    // false shows again whichever were on. While hidden, the show/hide
+    // calls above keep working on the recorded state and the window
+    // registers, they just don't switch a window on.
+    void setPipsBlanked(bool blanked);
+    bool pipsBlanked() const { return pipsBlanked_; }
 
     // Waits for REG[90h] bit4 (BTE Function Enable/Status) to read back
     // 0 ("BTE function is idle") -- per the datasheet's own note that
@@ -939,6 +946,7 @@ private:
     // Current canvas -- see canvasAddr()/canvasStride()
     std::uint32_t canvasAddr_ = 0;
     PipState pip_[2];                          // [0] = PIP-1, [1] = PIP-2
+    bool pipsBlanked_ = false;                 // setPipsBlanked()
     std::uint16_t canvasStride_ = 1024;
     std::uint8_t  txtScale_ = 0;
     bool          pwmInitialized_ = false;

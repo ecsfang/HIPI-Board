@@ -82,6 +82,7 @@ std::uint16_t buttonStripWidth = 0, buttonStripHeight = 0, buttonStripScreenX0 =
 
 bool buttonStripVisible = false;
 absolute_time_t buttonStripHideDeadline;
+bool saverActive = false;   // a screen saver has the panel (boardui_saverBegin())
 constexpr std::uint32_t kButtonStripHideMs = 5000;
 // Used only right when the menu explicitly closes (see
 // boardui_onMenuClosed() below) -- much shorter than the normal
@@ -876,7 +877,7 @@ void boardui_poll() {
     }
     // Auto-hide the info box after kInfoBoxShowMs, same idea as the button
     // strip's own countdown below.
-    if (infoBoxVisible && time_reached(infoBoxHideDeadline)) {
+    if (infoBoxVisible && !saverActive && time_reached(infoBoxHideDeadline)) {
         hideInfoBox();
     }
 
@@ -964,7 +965,7 @@ void boardui_poll() {
     // Auto-hide the strip after kButtonStripHideMs of inactivity -- but
     // never while the menu is open; you need the buttons visible to
     // navigate it.
-    if (buttonStripVisible && !dialog_->isOpen() &&
+    if (buttonStripVisible && !dialog_->isOpen() && !saverActive &&
         time_reached(buttonStripHideDeadline)) {
         hideButtonStrip();
     }
@@ -1215,6 +1216,54 @@ void boardui_onMenuClosed() {
     if (buttonStripVisible) {
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripQuickHideMs);
     }
+}
+
+// ── Screen saver ────────────────────────────────────────────────────────
+// A drawn screen saver (clock, HP-IL rain, goose) gets the whole panel:
+// whatever is on top of the view -- menu, info box, device list, button
+// strip -- goes out of the way while it runs and comes back as it was when
+// it ends. Nothing is closed; the boxes' and the strip's own timers wait.
+//   7": they are PIP windows over the panel, so they are only switched
+//       off and on again (LT7683::setPipsBlanked()).
+//   5": they are drawn on the panel itself, under the saver. The info box
+//       and device list just close (they're short-lived anyway); the
+//       button strip and an open menu are drawn again afterwards.
+#ifndef DISPLAY_7INCH
+namespace {
+bool stripBeforeSaver = false;
+}
+#endif
+
+void boardui_saverBegin() {
+    if (saverActive) return;
+    saverActive = true;
+#ifdef DISPLAY_7INCH
+    display_->setPipsBlanked(true);
+#else
+    hideInfoBox();
+    hideDeviceList();
+    // The saver draws over the strip: just forget it's there (no slide-out
+    // animation), it's drawn again in boardui_saverEnd()
+    stripBeforeSaver = buttonStripVisible;
+    buttonStripVisible = false;
+#endif
+}
+
+void boardui_saverEnd() {
+    if (!saverActive) return;
+    saverActive = false;
+#ifdef DISPLAY_7INCH
+    display_->setPipsBlanked(false);
+#else
+    if (stripBeforeSaver) showButtonStrip();
+    if (dialog_->isOpen()) {
+        screen_->suspend();                // as while the menu is open (menuOpening())
+        dialog_->restoreAfterMessage();    // the menu's box and rows again
+    }
+#endif
+    // The timers start again, as if just used
+    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+    infoBoxHideDeadline = make_timeout_time_ms(kInfoBoxShowMs);
 }
 
 bool boardui_isMenuOpen() {
