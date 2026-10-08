@@ -739,6 +739,22 @@ public:
     // order drawBitmap565Cropped() writes them. w is capped at 1024.
     void readRow565(std::int16_t x, std::int16_t y, std::uint16_t w, std::uint16_t* out);
 
+    // Reads `len` bytes of SDRAM from `addr` (linear addressing), e.g. a
+    // whole layer piece by piece -- used by the display mirror (see
+    // display_mirror.h) to give a newly connected viewer the current SDRAM
+    // contents. Same mechanism as readSdramByte(), for many bytes at once.
+    // Leaves the canvas, the Active Window and the mode as they were.
+    void readSdram(std::uint32_t addr, std::uint8_t* buf, std::size_t len);
+
+    // Captures the chip's built-in 8x16 font (CGROM, ISO 8859-1): draws
+    // all 256 characters into the off-screen kBteLayer2Addr layer (never
+    // shown) and reads them back. out[c][row]: MSB = leftmost pixel.
+    // Every register it changes (canvas, Active Window, colours, font
+    // select, scale, spacing, text cursor) is put back afterwards. Used by
+    // the display mirror, so the PC viewer draws menu text exactly like
+    // the chip.
+    void captureBuiltinFont(std::uint8_t out[256][16]);
+
     // Per the datasheet's own note under REG[5Fh-60h] (CURH, Graphic
     // Read/Write X-Coordinate): "Host should program proper active
     // window related parameters before configure this register." None

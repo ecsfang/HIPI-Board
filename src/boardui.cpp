@@ -12,6 +12,7 @@
 #include "sd_paths.h"
 #include "analyzer.h"
 #include "backlight.h"
+#include "display_mirror.h"   // layers a PC viewer needs
 #include "loopmap.h"
 #include "plotterview.h"
 #include "plotterview.h"
@@ -782,8 +783,13 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display) {
     buttonStripWidth = kButtonsImageWidth;
     buttonStripHeight = kButtonsImageHeight;
     buttonStripScreenX0 = static_cast<std::uint16_t>(SCREEN_MAX_X - buttonStripWidth);
-    buttonStripPixels.assign(kButtonsImage,
-                             kButtonsImage + static_cast<std::size_t>(kButtonsImageWidth) * kButtonsImageHeight);
+    // Built straight from the image in flash, already scaled to the panel's
+    // height -- ONE heap buffer of the final size. (This used to copy the
+    // image first, then scale into a second buffer, then build a third,
+    // padded copy for the PIP layer: three large blocks of 115-144 kB, and
+    // with the heap fragmented between them the start-up could run out of
+    // memory and stop right here.)
+    //
     // Scale vertically to fill this panel's real height -- buttons.bmp
     // was made for the 5" board's 480px-tall panel; this board's is
     // 600px (SCREEN_MAX_Y). Nearest-neighbor, not interpolated -- keeps
@@ -798,40 +804,40 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display) {
     // pixel coordinates (already flagged as a known, separate issue
     // needing its own fix) and won't line up with where the now-taller
     // buttons actually appear until they're updated too.
-    if (buttonStripHeight != SCREEN_MAX_Y && buttonStripHeight > 0) {
-        std::vector<std::uint16_t> scaled(
-            static_cast<std::size_t>(buttonStripWidth) * SCREEN_MAX_Y);
-        for (std::uint16_t y = 0; y < SCREEN_MAX_Y; ++y) {
-            const std::uint16_t srcY = static_cast<std::uint16_t>(
-                (static_cast<std::uint32_t>(y) * buttonStripHeight) / SCREEN_MAX_Y);
-            std::memcpy(scaled.data() + static_cast<std::size_t>(y) * buttonStripWidth,
-                       buttonStripPixels.data() + static_cast<std::size_t>(srcY) * buttonStripWidth,
-                       static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
-        }
-        buttonStripPixels = std::move(scaled);
-        LOGF("(scaled %u -> %u tall) ", buttonStripHeight, SCREEN_MAX_Y);
-        buttonStripHeight = SCREEN_MAX_Y;
+    const std::uint16_t srcHeight = buttonStripHeight;
+    if (buttonStripHeight != SCREEN_MAX_Y && buttonStripHeight > 0) buttonStripHeight = SCREEN_MAX_Y;
+    buttonStripPixels.assign(static_cast<std::size_t>(buttonStripWidth) * buttonStripHeight, 0);
+    for (std::uint16_t y = 0; y < buttonStripHeight; ++y) {
+        const std::uint16_t srcY = static_cast<std::uint16_t>(
+            (static_cast<std::uint32_t>(y) * srcHeight) / buttonStripHeight);
+        std::memcpy(buttonStripPixels.data() + static_cast<std::size_t>(y) * buttonStripWidth,
+                    kButtonsImage + static_cast<std::size_t>(srcY) * buttonStripWidth,
+                    static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
     }
+    if (srcHeight != buttonStripHeight) LOGF("(scaled %u -> %u tall) ", srcHeight, buttonStripHeight);
 
 #ifdef DISPLAY_7INCH
     // Copy the strip into its own PIP-2 layer once. The layer's stride
     // must be a multiple of 4 pixels (PIP requirement), so any extra
     // columns go on the LEFT and repeat the strip's first column -- the
-    // strip's right edge stays flush with the panel's right edge.
+    // strip's right edge stays flush with the panel's right edge. Drawn
+    // row by row through one small row buffer (no full padded copy).
     stripStride = static_cast<std::uint16_t>((buttonStripWidth + 3) & ~3);
     stripPad = static_cast<std::uint16_t>(stripStride - buttonStripWidth);
-    std::vector<std::uint16_t> padded(static_cast<std::size_t>(stripStride) * buttonStripHeight);
-    for (std::uint16_t y = 0; y < buttonStripHeight; ++y) {
-        const std::uint16_t* src = buttonStripPixels.data() + static_cast<std::size_t>(y) * buttonStripWidth;
-        std::uint16_t* dst = padded.data() + static_cast<std::size_t>(y) * stripStride;
-        std::fill(dst, dst + stripPad, src[0]);
-        std::memcpy(dst + stripPad, src, static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
-    }
+    std::vector<std::uint16_t> row(stripStride);
     drawOnStrip([&](std::uint16_t x0) {
-        display_->drawBitmap565(0, 0, stripStride, buttonStripHeight, padded.data());
+        for (std::uint16_t y = 0; y < buttonStripHeight; ++y) {
+            const std::uint16_t* src = buttonStripPixels.data() + static_cast<std::size_t>(y) * buttonStripWidth;
+            std::fill(row.begin(), row.begin() + stripPad, src[0]);
+            std::memcpy(row.data() + stripPad, src, static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
+            display_->drawBitmap565(0, static_cast<std::int16_t>(y), stripStride, 1, row.data());
+        }
         setStatusLed(display_, StatusLed::Usb, usbLedOn, x0, buttonStripHeight);
         setStatusLed(display_, StatusLed::Pil, pilLedOn, x0, buttonStripHeight);
     });
+    // A PC viewer needs this layer too (its status LEDs change at run time)
+    displayMirror_addLayer(LT7683::kStripLayerAddr, static_cast<std::uint32_t>(stripStride) * 2UL * buttonStripHeight,
+                           0, 1, 0);
     LOGF("(PIP layer, stride %u) ", stripStride);
 #endif
 

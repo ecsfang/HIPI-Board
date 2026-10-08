@@ -115,6 +115,9 @@ public:
         n = std::snprintf(line, sizeof(line), "signal_cells=%s\n", kCells[signalCells_ < 3 ? signalCells_ : 0]);
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "display_mirror=%s\n", displayMirror_ ? "on" : "off");
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         n = std::snprintf(line, sizeof(line), "saver=%u\nclock_style=%u\nclock_us=%d\nclock_12h=%d\nclock_fallback=%u\n",
                           static_cast<unsigned>(saverMode_), static_cast<unsigned>(clockStyle_),
                           clockUs_ ? 1 : 0, clock12h_ ? 1 : 0, static_cast<unsigned>(clockFallback_));
@@ -193,6 +196,8 @@ public:
     void setPlotFit(bool f) { plotFit_ = f; save(); }
     bool plotPaperBlack() const { return plotPaperBlack_; }
     void setPlotPaperBlack(bool b) { plotPaperBlack_ = b; save(); }
+    bool displayMirror() const { return displayMirror_; }
+    void setDisplayMirror(bool b) { displayMirror_ = b; save(); }
     // HP-IL signals view, bit cells: 0 bands, 1 lines, 2 none (hpil_diag.h)
     std::uint8_t signalCells() const { return signalCells_; }
     void setSignalCells(std::uint8_t c) { signalCells_ = c; save(); }
@@ -315,6 +320,8 @@ private:
                 } else if (std::strcmp(key, "signal_cells") == 0) {
                     signalCells_ = std::strcmp(value, "lines") == 0 ? 1
                                  : std::strcmp(value, "none") == 0  ? 2 : 0;
+                } else if (std::strcmp(key, "display_mirror") == 0) {
+                    displayMirror_ = std::strcmp(value, "on") == 0;
                 } else if (std::strcmp(key, "con_loop") == 0) {
                     conInternal_ = std::strcmp(value, "internal") == 0;
                 } else if (std::strcmp(key, "clock_12h") == 0) {
@@ -358,6 +365,7 @@ private:
     bool          conInternal_ = false;   // con_loop=cable|internal
     bool          plotFit_     = true;    // plot_fit=1|0
     bool          plotPaperBlack_ = false; // plot_paper=white|black
+    bool          displayMirror_ = false;  // display_mirror=on|off (USB CDC3, tools/hipiview)
     std::uint8_t  signalCells_ = 0;        // signal_cells=bands|lines|none
     std::uint8_t  clockFallback_ = 3;  // SaverRain
     // Comma-separated device names (matched against CDevice::name()) that

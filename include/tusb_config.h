@@ -1,22 +1,42 @@
 #pragma once
 #include "tusb_option.h"   // for OPT_MODE_DEVICE etc.
+#include "hipi_features.h" // HIPI_MIRROR_PORT
 
 // Default mode: device
 #ifndef CFG_TUSB_RHPORT0_MODE
 #define CFG_TUSB_RHPORT0_MODE   OPT_MODE_DEVICE
 #endif
 
-// Three CDC interfaces for hipi (0 = debug, 1 = data, 2 = terminal)
+// Four CDC interfaces for hipi (0 = debug, 1 = data, 2 = terminal,
+// 3 = display mirror, see display_mirror.h)
 #ifndef CFG_TUD_CDC
+#if HIPI_MIRROR_PORT
+#define CFG_TUD_CDC             4
+#else
 #define CFG_TUD_CDC             3
 #endif
+#endif
 
+// RX FIFO >= CFG_TUD_CDC_EP_BUFSIZE: TinyUSB only arms a port's receive
+// endpoint when the RX FIFO has room for a whole EP buffer.
 #ifndef CFG_TUD_CDC_RX_BUFSIZE
-#define CFG_TUD_CDC_RX_BUFSIZE  256
+#define CFG_TUD_CDC_RX_BUFSIZE  1024
 #endif
 
 #ifndef CFG_TUD_CDC_TX_BUFSIZE
-#define CFG_TUD_CDC_TX_BUFSIZE  256
+#define CFG_TUD_CDC_TX_BUFSIZE  1024
+#endif
+
+// CFG_TUD_CDC_EP_BUFSIZE is left at TinyUSB's default: 64 at full speed,
+// one USB packet per transfer. Tried 512 (several packets per transfer)
+// for the display mirror's throughput: on the RP2350 the stream then lost
+// and repeated bytes at transfer boundaries, now and then. Two rules if
+// it's ever changed: it must not exceed CFG_TUD_CDC_RX_BUFSIZE (TinyUSB
+// only arms a port's receive endpoint when the RX FIFO has room for a
+// whole EP buffer -- else no CDC port can receive at all), and the mirror
+// stream must be checked for damage (hipiview counts CRC errors).
+#if defined(CFG_TUD_CDC_EP_BUFSIZE) && CFG_TUD_CDC_EP_BUFSIZE > CFG_TUD_CDC_RX_BUFSIZE
+#error "CFG_TUD_CDC_EP_BUFSIZE must not exceed CFG_TUD_CDC_RX_BUFSIZE"
 #endif
 
 // MSC (USB Mass Storage) -- exposes the SD card as a raw USB drive to

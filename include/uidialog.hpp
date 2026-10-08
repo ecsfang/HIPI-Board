@@ -8,6 +8,8 @@
 #include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "hpil_diag.h"    // BitCells, for the HP-IL signals "Bit cells" setting
+#include "hipi_features.h"  // HIPI_MIRROR_PORT/TRANSPORT, for Settings -> Screen -> Mirror
+#include "display_mirror.h" // displayMirror_setEnabled(), Settings -> Screen -> Mirror
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
@@ -1731,6 +1733,16 @@ private:
                   [this] { applyBrightness((brightnessIndex() + 1) % kBrightnessCount); refreshItems(); }),
             plotViewItem(),
             paperItem(),
+#if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+            // The display mirror for tools/hipiview (USB CDC3)
+            value("Mirror to PC", [] { return std::string(displayMirror_enabled() ? "On" : "Off"); },
+                  [this] {
+                      const bool on = !displayMirror_enabled();
+                      config.setDisplayMirror(on);
+                      displayMirror_setEnabled(on);
+                      refreshItems();
+                  }),
+#endif
         }, [this] { openSettingsMenu(0); });
     }
 

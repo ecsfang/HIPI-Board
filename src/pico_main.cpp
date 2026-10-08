@@ -30,7 +30,7 @@
 // TEST_DISPLAY too (runs first, see the call site below).
 //#define TEST_FONT
 
-#define HIPI_VERSION_TEXT "v3.1beta"
+#define HIPI_VERSION_TEXT "3.2beta"
 
 #include <stdlib.h>
 #include <cstring>
@@ -84,6 +84,7 @@ extern void init_spi(void);
 #include "hpil_diag.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
+#include "display_mirror.h"   // the display mirrored to a PC (tools/hipiview)
 #include "config.hpp"
 #include "drive.h"
 extern std::vector<CDevice*> devices;   // hipi.cpp -- the HP-IL devices, loop order
@@ -168,9 +169,17 @@ void initDisplay()
                                               /*baudrate=*/30'000'000,
                                               /*cs_gpio=*/1,
                                               /*rst_gpio=*/hipi::PicoSpiTransport::NO_RESET_PIN);
+#if defined(DISPLAY_7INCH) && HIPI_MIRROR_TRANSPORT
+    // Everything sent to the display also goes to the display mirror port
+    // while a PC viewer has it open (display_mirror.h)
+    static hipi::MirrorTransport mirror(*transport);
+    display = new hipi::DisplayDriver(mirror, SCREEN_MAX_X, SCREEN_MAX_Y);
+#else
     display = new hipi::DisplayDriver(*transport, SCREEN_MAX_X, SCREEN_MAX_Y);
+#endif
 
     display->begin();
+    hipi::displayMirror_init(display);
 }
 
 FRESULT initSD()
@@ -496,6 +505,7 @@ int main() {
     hipi::chartable_init(display);           // System -> Character table
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
     hipi::hpil_diag_setBitCells(static_cast<hipi::BitCells>(config.signalCells()));   // saved
+    hipi::displayMirror_setEnabled(config.displayMirror());   // Settings -> Screen -> Mirror to PC (saved)
     hipi::clock_init(display);               // DS3231 clock, clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
@@ -621,6 +631,7 @@ int main() {
         hipi::boardui_poll();        // auto-hide timers + status LED poll
         hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
         hipi::backlight_poll();      // screen saver (dim / clock) after a while without use
+        hipi::displayMirror_poll();  // the display mirrored to a PC viewer (display_mirror.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw

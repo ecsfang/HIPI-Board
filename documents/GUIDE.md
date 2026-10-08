@@ -688,6 +688,7 @@ With USB connected, the board enumerates as a composite device:
 | CDC 1     | `/dev/ttyACM1`    | PILBox link to a PC emulator (e.g. pyILPER) |
 | CDC 2     | `/dev/ttyACM2`    | `TFTERM` terminal bridge (e.g. HP-71B `DISPLAY IS`/`KEYBOARD IS`) |
 | MSC       | USB drive         | SD card, only while **Connect to PC** is active |
+| CDC 3     | `/dev/ttyACM3`    | Display mirror for `tools/hipiview` (7" panel only) |
 
 Device numbering may differ if other CDC devices are connected. To read the
 debug log:
@@ -698,6 +699,68 @@ minicom -D /dev/ttyACM0     # or: screen /dev/ttyACM0
 
 If your user cannot open the ports, add yourself to the `dialout` group
 (`sudo usermod -aG dialout $USER`, then log in again).
+
+### 7.1 Display mirror (CDC 3)
+
+CDC 3 ("HIPI Display Mirror") carries a copy of everything the firmware
+sends to the LT7683, so `tools/hipiview` can show and record the 7" display
+on a PC (see its [README](../tools/hipiview/README.md)). It works at the
+register level, so new drawing code needs nothing extra to be mirrored.
+
+- `MirrorTransport` (`display_mirror.h`) wraps `PicoSpiTransport`: every SPI
+  transaction is passed on unchanged and fed to `mirror::Encoder`
+  (`mirror_encoder.hpp`). The encoder always keeps a shadow copy of the
+  registers. Only while the port is open does it produce packets
+  (`mirror_protocol.h`): register selects, data writes, and the data of
+  MRWDP (memory) reads. Status reads and other register reads are not sent.
+- USB loses a packet now and then, so the link is reliable. Packets go in
+  numbered frames of at most 512 bytes (`0xA5 0x5A sid len pos crc`) into
+  a 32 kB ring buffer. A frame stays there until hipiview acknowledges it
+  ('K'). hipiview asks for a resend from where something went missing
+  ('N'). With no acknowledgement for 300 ms, HIPI sends again from the last
+  acknowledged frame, which covers a lost last frame.
+- The ring is drained to the USB port from the main loop by
+  `displayMirror_poll()`. `tools/hipiview` `make link_sim` tests the real
+  `display_mirror.cpp` against hipiview over a USB that loses packets. If the ring is full, drawing waits
+  for USB: at most 1 s, and at most 0.5 s without a word from the viewer.
+- A viewer that stops reading with the port still open (hipiview suspended
+  or hung, the PC asleep) ends the session: the ring stayed full, or
+  nothing was acknowledged and nothing heard for 3 s. HIPI then stops
+  mirroring and waits for a new request; it never starts over by itself,
+  which would stall its main loop against a port nobody reads
+  (`./link_sim 0.01 20 stall` tests this). When idle, HIPI sends an empty
+  frame every second; hipiview acknowledges it, and asks for a new session
+  if it hears nothing for 3.5 s.
+- The setting **Settings → Screen → Mirror to PC** (`display_mirror=on|off`,
+  off by default, `displayMirror_setEnabled()`) gates it all: off, requests
+  are ignored (one log line) and a running session ends at once, freeing its
+  buffers. Switched on again while the viewer is still connected, a session
+  starts by itself with the picture ids from the viewer's last request.
+- A session starts when the viewer sends `HIPIVIEW` plus the ids of the
+  pictures in its cache. Just opening the port (ModemManager, terminals)
+  starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a
+  greeting, the register snapshot (plus the live cursor positions), and
+  the chip's built-in font. `LT7683::captureBuiltinFont()` draws it
+  off-screen and reads it back, once per boot.
+- Then it reads back, 8 kB per main-loop pass, with `LT7683::readSdram()`
+  (the encoder suspended, the data sent as `kMem` packets, the changed
+  registers resent afterwards), in this order:
+  1. the panel;
+  2. what the PIP windows show;
+  3. the run-time layers;
+  4. the assets the viewer doesn't have yet.
+- Off-screen layers are registered where they're loaded, with
+  `displayMirror_addLayer()`. The Tape pictures are *assets*, with an id from
+  `displayMirror_fileAssetId()` (file name, size, date, position). The button
+  strip and the cassette label change at run time and are always read back.
+  A new layer that a viewer needs must be registered the same way.
+- Drawing in between is mirrored as usual, so the order is always right.
+- `CFG_TUD_CDC_EP_BUFSIZE` (512) must not exceed `CFG_TUD_CDC_RX_BUFSIZE`
+  (`tusb_config.h` checks it), or TinyUSB never arms the receive endpoints
+  and no CDC port can receive.
+- `tools/hipiview/test` runs the real driver, `Screen`, encoder and session
+  against an emulated chip and checks that the viewer ends up identical
+  (`make test`).
 
 ---
 

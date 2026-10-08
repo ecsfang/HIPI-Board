@@ -1,4 +1,5 @@
 #include "tusb.h"
+#include "hipi_features.h"   // HIPI_MIRROR_PORT
 #include "device/usbd.h"
 
 // Bosch/serial-style strings. Replace 0x2E8A if you have your own VID/PID.
@@ -24,7 +25,7 @@ static const tusb_desc_device_t desc_device = {
     .bNumConfigurations = 1,
 };
 
-// ─── Configuration descriptor: 3 × CDC + 1 × MSC ────────────────────────
+// ─── Configuration descriptor: 4 × CDC + 1 × MSC ────────────────────────
 #define EPNUM_CDC0_NOTIF   0x81
 #define EPNUM_CDC0_OUT     0x02
 #define EPNUM_CDC0_IN      0x82
@@ -34,6 +35,9 @@ static const tusb_desc_device_t desc_device = {
 #define EPNUM_CDC2_NOTIF   0x85
 #define EPNUM_CDC2_OUT     0x06
 #define EPNUM_CDC2_IN      0x86
+#define EPNUM_CDC3_NOTIF   0x88
+#define EPNUM_CDC3_OUT     0x09
+#define EPNUM_CDC3_IN      0x89
 // MSC (USB Mass Storage) -- exposes the SD card as a raw USB drive; see
 // usb_msc.hpp for the mode-switching this needs (only actually readable/
 // writable once explicitly put into "Connect to PC" mode via the menu,
@@ -42,8 +46,8 @@ static const tusb_desc_device_t desc_device = {
 #define EPNUM_MSC_IN       0x87
 
 static const uint8_t desc_configuration[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 7, 0,
-        (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN * 3 + TUD_MSC_DESC_LEN),
+    TUD_CONFIG_DESCRIPTOR(1, HIPI_MIRROR_PORT ? 9 : 7, 0,
+        (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN * (HIPI_MIRROR_PORT ? 4 : 3) + TUD_MSC_DESC_LEN),
         TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
 
     TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC0_NOTIF, 8,           // CDC0: itf 0+1
@@ -57,6 +61,11 @@ static const uint8_t desc_configuration[] = {
 
     TUD_MSC_DESCRIPTOR(6, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN,   // MSC: itf 6 ← the SD card
                        64),
+
+#if HIPI_MIRROR_PORT
+    TUD_CDC_DESCRIPTOR(7, 8, EPNUM_CDC3_NOTIF, 8,           // CDC3: itf 7+8 ← display mirror
+                       EPNUM_CDC3_OUT, EPNUM_CDC3_IN, 64),
+#endif
 };
 
 // ─── String descriptors ──────────────────────────────────────────────────
@@ -69,6 +78,7 @@ static const char *string_desc_arr[] = {
     "HP-IL Data",                    // 5: CDC1
     "HP-IL Terminal",                // 6: CDC2
     "HP-IL SD Card",                 // 7: MSC
+    "HIPI Display Mirror",           // 8: CDC3 (display_mirror.h)
 };
 
 // ─── TinyUSB hooks ───────────────────────────────────────────────────────

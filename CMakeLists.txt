@@ -238,6 +238,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py
         src/menu_font_title.cpp     # generated, see scripts/ttf_to_glyphs.py
         src/saver_anim.cpp
+        src/display_mirror.cpp      # display mirrored to a PC, see tools/hipiview
         src/saver_font_rain.cpp     # generated, see scripts/ttf_to_glyphs.py
         src/saver_font_goose40.cpp  # generated (5 goose sizes), see scripts/ttf_to_glyphs.py
         src/saver_font_goose56.cpp

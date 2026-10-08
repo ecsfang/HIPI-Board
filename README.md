@@ -103,6 +103,7 @@ the user's view and `documents/GUIDE.md` for the details.
 │   ├── leds.h / pixels.h / bmp280.h / i2c_device.h  ← LED, NeoPixel and sensor drivers
 │   ├── touch.h / gslX680fw.h      ← GSL1680 touch controller + its firmware blob
 │   ├── usb_serial.h / usb_msc.h / tusb_config.h  ← USB: CDC consoles, SD card as USB drive
+│   ├── display_mirror.h / mirror_*.h(pp)  ← 7" display mirrored to a PC (tools/hipiview)
 │   ├── hpil_pio.hpp               ← generated PIO header (from src/hpil.pio)
 │   ├── display_test.hpp / display_boot_test.hpp  ← optional display diagnostics (opt-in)
 │   └── (no-OS-FatFS SD library lives under lib/, vendored, unmodified)
@@ -115,6 +116,7 @@ the user's view and `documents/GUIDE.md` for the details.
     ├── buttons_image.cpp / logo_image.cpp  ← built-in bitmaps (generated, see scripts/)
     ├── LT7683.cpp / RA8875.cpp / Screen.cpp / touch.cpp / leds.cpp / pixels.cpp
     ├── usb_msc.cpp / my_descriptors.c / hw_config.cpp  ← USB drive, descriptors, SD config
+    ├── display_mirror.cpp          ← display mirror port (CDC 3), see tools/hipiview
     ├── PicoSpiTransport.cpp / LinuxSpiDevTransport.cpp
     └── linux_main.cpp               ← optional Linux demo (HIPI_BUILD_LINUX_EXAMPLE, off by default)
 ```

@@ -344,7 +344,8 @@ More > — HIPI's menu
 │                    Analyzer · Loop map · HP-IL signals
 ├── Settings >
 │   ├── Screen >         Text colour < White > · Font size < 0 > · Columns < Auto > ·
-│   │                    Brightness < 100% > · Plot view < Fit > · Paper < White >
+│   │                    Brightness < 100% > · Plot view < Fit > · Paper < White > ·
+│   │                    Mirror to PC < Off >  (7" only)
 │   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
 │   │                    Date < EU > · Time < 24 h > · Show now
 │   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
@@ -649,6 +650,31 @@ You can also take one from e.g. a HP-41 program (with the display device selecte
 To choose which view is in the picture first, see
 [5.4 Choosing the view from the HP-41](#54-choosing-the-view-from-the-hp-41).
 
+### Recording the screen on a PC (7" panel)
+
+To make a video of HIPI, you don't need a camera. The PC program
+**hipiview** (in `tools/hipiview`) shows HIPI's screen in a window,
+exactly as on the panel (text, plots, menus, the screen saver, everything),
+and records it straight to a video file.
+
+First switch it on in HIPI: **More → Settings → Screen → Mirror to PC
+< On >** (it's saved, and off from the start). Then connect HIPI with USB
+and start `hipiview`. It finds HIPI's fourth serial
+port, **HIPI Display Mirror**, by itself. The first few seconds it reads
+what's already on the screen (the title bar shows how far it has come);
+after that it follows along live. Press **R** to start and stop recording,
+and **S** for a screenshot. HIPI works as usual meanwhile.
+
+HIPI only sends anything while hipiview is running and has asked for the
+screen; with hipiview closed, the mirror costs practically nothing. While
+it is running, though, every drawing goes to USB as well, which makes the
+heavier screens (the Tape view, the screen saver animations) a little
+slower. With **Mirror to PC < Off >** HIPI ignores hipiview completely and
+stops a running session at once; switching it **On** again while hipiview
+is open starts sending again by itself.
+
+How to build and use it: see `tools/hipiview/README.md`.
+
 ---
 
 ## 11. The HP-IL analyzer
@@ -789,6 +815,7 @@ value.
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
 | `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
+| `display_mirror` | `on` / `off` | `off` | 7" panel: send the screen to **hipiview** on a PC (**Settings → Screen → Mirror to PC**). See [Recording the screen on a PC](#recording-the-screen-on-a-pc-7-panel). |
 
 **Screen saver** (see [4.3](#43-screen-saver-and-clock))
 

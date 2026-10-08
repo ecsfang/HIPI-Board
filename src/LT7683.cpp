@@ -1275,6 +1275,89 @@ std::uint8_t LT7683::readSdramByte(std::uint32_t addr) {
     return v;
 }
 
+void LT7683::readSdram(std::uint32_t addr, std::uint8_t* buf, std::size_t len) {
+    if (len == 0) return;
+    // Same addressing as readSdramByte() (see its comment), but many bytes
+    // in one go, and the canvas put back as it was -- not just reset to
+    // the main window like endOverlayDraw() -- since this may run while a
+    // layer is selected.
+    const std::uint32_t savedCanvas = canvasAddr_;
+    const std::uint16_t savedStride = canvasStride_;
+    std::uint16_t savedX0, savedY0, savedW, savedH;
+    widenActiveWindowForLinearAccess(&savedX0, &savedY0, &savedW, &savedH);
+
+    gfxMode();
+    writeReg32(CVSSA0, addr);
+    writeReg(AW_COLOR, 0x04);           // linear addressing
+    writeReg32(CURH0, addr);
+    readMrwdpBytes(buf, len);
+    writeReg(AW_COLOR, 0x01);           // back to 16bpp block mode
+
+    if (savedCanvas == 0 && savedStride == width_) endOverlayDraw();
+    else beginLayerDraw(savedCanvas, savedStride);
+    restoreActiveWindow(savedX0, savedY0, savedW, savedH);
+}
+
+void LT7683::captureBuiltinFont(std::uint8_t out[256][16]) {
+    // Everything this changes, to put back afterwards
+    const std::uint32_t savedCanvas = canvasAddr_;
+    const std::uint16_t savedStride = canvasStride_;
+    const std::uint16_t awX0 = activeWindowX0Cached_, awY0 = activeWindowY0Cached_;
+    const std::uint16_t awW = activeWindowWCached_, awH = activeWindowHCached_;
+    const GfxTxtMode savedMode = currentGfxTxtMode_;
+    const bool savedCustom = usingCustomFont_;
+    static constexpr std::uint8_t kSaveRegs[] = {
+        FGCR, FGCG, FGCB, BGCR, BGCG, BGCB, CCR0_TEXT, CCR1_TEXT, FLDR, F2FSSR,
+        0x3C,                                   // GTCCR: text cursor on/blink
+        F_CURX0, F_CURX0 + 1, F_CURY0, F_CURY0 + 1,
+    };
+    std::uint8_t saved[sizeof(kSaveRegs)];
+    waitStatus(STSR_CORE_BUSY);
+    for (std::size_t i = 0; i < sizeof(kSaveRegs); ++i) saved[i] = readReg(kSaveRegs[i]);
+
+    // Draw all 256 characters in a 32 x 8 grid of 8x16 cells
+    beginLayerDraw(kBteLayer2Addr);
+    setActiveWindow(0, 0, static_cast<std::uint16_t>(width_ - 1), static_cast<std::uint16_t>(height_ - 1));
+    writeReg(0x3C, 0x00);                       // no blinking cursor meanwhile
+    selectBuiltinFont();
+    writeReg(CCR1_TEXT, static_cast<std::uint8_t>(saved[7] & ~0x4F));   // opaque, scale x1
+    setCharSpacing(0);
+    setLineSpacing(0);
+    setColor(0xFFFF);
+    setBgColor(0x0000);
+    for (int c = 0; c < 256; ++c) {
+        txtSetCursor(static_cast<std::uint16_t>((c % 32) * 8), static_cast<std::uint16_t>((c / 32) * 16));
+        txtWriteChar(static_cast<std::uint8_t>(c));
+    }
+    // Read them back: one row of 256 pixels covers 32 characters
+    static std::uint16_t row[256];
+    for (int y = 0; y < 128; ++y) {
+        readRow565(0, static_cast<std::int16_t>(y), 256, row);
+        for (int col = 0; col < 32; ++col) {
+            std::uint8_t bits = 0;
+            for (int px = 0; px < 8; ++px)
+                if (row[col * 8 + px] != 0) bits = static_cast<std::uint8_t>(bits | (0x80 >> px));
+            out[(y / 16) * 32 + col][y % 16] = bits;
+        }
+    }
+
+    // Put everything back
+    txtMode();                                  // text registers: change only while not busy
+    for (std::size_t i = 0; i < sizeof(kSaveRegs); ++i) writeReg(kSaveRegs[i], saved[i]);
+    usingCustomFont_ = savedCustom;
+    if (savedMode == GfxTxtMode::Graphic) gfxMode();
+    if (savedCanvas == 0 && savedStride == width_) endOverlayDraw();
+    else beginLayerDraw(savedCanvas, savedStride);
+    if (awW != 0 && awH != 0) {
+        writeReg16(AWUL_X0, awX0);
+        writeReg16(AWUL_Y0, awY0);
+        writeReg16(AW_WTH0, awW);
+        writeReg16(AW_HT0, awH);
+        activeWindowX0Cached_ = awX0; activeWindowY0Cached_ = awY0;
+        activeWindowWCached_ = awW;   activeWindowHCached_ = awH;
+    }
+}
+
 // -----------------------------------------------------------------------
 // Primitives -- geometric drawing engine, REG[67h]-[7Eh]
 // -----------------------------------------------------------------------

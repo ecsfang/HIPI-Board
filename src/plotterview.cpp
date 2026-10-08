@@ -3,6 +3,7 @@
 #include "boardui.h"
 #include "usb_serial.h"
 #include "bmp_loader.hpp"
+#include "display_mirror.h"   // layers a PC viewer needs (tools/hipiview)
 #include "drive.h"
 #include "analyzer.h"
 #include "clock.h"
@@ -163,6 +164,20 @@ void drawMappedSegment(std::int16_t x0, std::int16_t y0,
     }
 }
 
+// The plot always covers the whole panel. On the 7" panel the button strip
+// is a PIP overlay, so the panel underneath belongs to the plot too -- but
+// showing the strip (or updating a LED on it) leaves the active window
+// narrowed to the area left of it, which would clip the plot there: fills
+// and lines under the strip were left out, and showed once the strip went
+// away (e.g. still the old paper colour after a Paper change). So widen it
+// before drawing. (5": the strip really covers that area; hiding it
+// redraws the region -- plotterview_redrawRegion().)
+void plotWindow() {
+#ifdef DISPLAY_7INCH
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+#endif
+}
+
 // Live per-segment draw, called from CPlotter's onDraw_ callback as HP-GL
 // commands stream in. No-ops entirely (segments() still records it for a
 // later redraw) unless Plotter output is what's actually showing right now.
@@ -212,6 +227,7 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
     // text does elsewhere (see uidialog.hpp's PIP work).
     if (boardui_isMenuOpen()) return;
 #endif
+    plotWindow();
     drawMappedSegment(x0, y0, x1, y1, penColor(pen));
     // line()/pixel() go through gfxMode(), which blindly zeros MWCR0 (the
     // same text-mode/cursor-visible register Screen owns) -- same fix
@@ -227,6 +243,7 @@ void onPlotterClear() {
 #ifndef DISPLAY_7INCH
     if (boardui_isMenuOpen()) return;  // see onPlotterDraw()'s own comment
 #endif
+    plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     screen_->refreshCursor();
 }
@@ -377,6 +394,9 @@ void loadTapeLayer() {
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
     tapeLoaded_ = drawBmpAt(display_, kTapeBmpPath, tapeX_, tapeY_);
     display_->endOverlayDraw();          // canvas back to the live panel
+    if (tapeLoaded_)                     // a fixed picture: cached by the viewer
+        displayMirror_addLayer(LT7683::kTapeLayerAddr, SCREEN_MAX_X * 2UL * SCREEN_MAX_Y, 0, 1,
+                               displayMirror_fileAssetId(kTapeBmpPath, static_cast<std::uint32_t>(tapeX_) | (static_cast<std::uint32_t>(tapeY_) << 16)));
     screen_->reassertRenderState();      // same as UiDialog after overlay drawing
     LOGF("\r\n\t* Tape view %s", tapeLoaded_ ? "ready" : "disabled (bad BMP)");
 }
@@ -500,6 +520,13 @@ void loadCassette() {
     screen_->reassertRenderState();
     cassetteW_ = w;
     cassetteH_ = h;
+    if (cassetteLoaded_) {
+        // The picture is fixed (cached by a PC viewer); its copy with the
+        // file name on the label changes at run time
+        displayMirror_addLayer(LT7683::kCassetteAddr, w * 2UL, SCREEN_MAX_X * 2UL, h,
+                               displayMirror_fileAssetId(kCassetteBmpPath, 1));
+        displayMirror_addLayer(LT7683::kCassetteLabelAddr, w * 2UL, SCREEN_MAX_X * 2UL, h, 0);
+    }
 }
 
 void loadLidOpen() {
@@ -526,6 +553,9 @@ void loadLidOpen() {
     lidOpenW_ = w;
     lidOpenH_ = h;
     lidOpenStride_ = stride;
+    if (lidOpenLoaded_)
+        displayMirror_addLayer(LT7683::kTapeOpenAddr, stride * 2UL * h, 0, 1,
+                               displayMirror_fileAssetId(kTapeOpenBmpPath, stride));
 }
 
 // Copies the part of a pre-rendered patch (layer srcAddr, own stride,
@@ -567,6 +597,9 @@ void loadLeds() {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     screen_->reassertRenderState();
     ledsStride_ = stride;
+    if (ledsLoaded_)
+        displayMirror_addLayer(LT7683::kLedsAddr, stride * 2UL * h, 0, 1,
+                               displayMirror_fileAssetId(kLedsBmpPath, stride));
     switchSpriteLoaded_ = ledsLoaded_ && w >= kSwitchOn.srcX + kSwitchOn.w && h >= kSwitchOn.h;
     standbySpriteLoaded_ = ledsLoaded_ && w >= kSwitchStandby.srcX + kSwitchStandby.w &&
                            h >= kSwitchStandby.h;
@@ -597,6 +630,9 @@ void loadReels() {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     screen_->reassertRenderState();
     reelsStride_ = stride;
+    if (reelsLoaded_)
+        displayMirror_addLayer(LT7683::kReelsAddr, stride * 2UL * h, 0, 1,
+                               displayMirror_fileAssetId(kReelsBmpPath, stride));
 }
 
 // Rebuilds the shown cassette: fresh copy of the picture + file name
@@ -818,6 +854,7 @@ void plotterview_redraw() {
         }
         setFitMapping(x0, y0, x1, y1, 0.05);
     }
+    plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     for (const PlotSegment& seg : plotter_->segments()) {
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
