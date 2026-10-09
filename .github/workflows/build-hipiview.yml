@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -66,7 +66,7 @@ jobs:
         run: bash tools/hipiview/ci/build-windows.sh "${{ steps.version.outputs.name }}"
 
       - name: Keep
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hipiview-windows
           path: tools/hipiview/hipiview-windows-${{ steps.version.outputs.name }}.zip
@@ -79,7 +79,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -130,7 +130,7 @@ jobs:
           tar czf "$NAME.tar.gz" "$NAME"
 
       - name: Keep
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hipiview-linux
           path: tools/hipiview/hipiview-linux-x64-${{ steps.version.outputs.name }}.tar.gz
@@ -146,7 +146,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Fetch the builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

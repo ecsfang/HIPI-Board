@@ -36,7 +36,7 @@ jobs:
     steps:
       # 1. Check out HIPI (without submodules)
       - name: Check out HIPI (without submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           submodules: false
@@ -92,7 +92,7 @@ jobs:
 
       # 5. Check out pico-sdk (v2.2.0)
       - name: Check out pico-sdk (v2.2.0)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: raspberrypi/pico-sdk
           ref: 2.2.0
@@ -155,7 +155,7 @@ jobs:
 
       # 11. Create GitHub Release
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: "HIPI Panel 7 - ${{ env.RELEASE_TAG }}"
