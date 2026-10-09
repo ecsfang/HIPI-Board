@@ -116,6 +116,21 @@ it, run CMake again from an empty `build/` folder.
 Because the strip is a global object, a wrong PIO block makes the firmware
 stop before `main()` -- the Pico then seems not to start at all.
 
+**Effects.** `TFPIXEL`'s effects (`E` commands, see the User Manual § 8.4)
+are PicoLED's own effect classes -- `Comet`, `Marquee`, `Stars`, `Bounce`,
+`Particles` (fire), `Fade` -- plus a rainbow written in `src/pixels.cpp`.
+Each runs on a `slice()` of the strip (a `VirtualStrip` over just its
+pixels), so several can run side by side; `CPixelStrip::poll()` in the main
+loop animates them, at most every `PIXEL_FRAME_MS`. How many pixels are
+connected (`N`) can't be detected: the controller says it, and it's kept in
+`CONFIG.TXT` (`pixel_count`). `CPixelStrip::show()` limits the current
+(`PIXEL_POWER_LIMIT_MA`) by lowering the brightness for a bright frame.
+`tools/pixeltest` (`make test`) runs `src/pixels.cpp` with the real PicoLED
+on the PC and checks all of it. Two PicoLED details: `PicoLedController::
+getPixelColor()` is declared but not defined (pixels.cpp reads the colour
+from the controller's target instead), and `Particles` frees its buffer with
+`delete` instead of `delete[]` (harmless here).
+
 **Colour order.** `PIXEL_COLOR_ORDER` in `include/pixels.h` sets the order the
 strip takes its colour bytes in: `PicoLed::FORMAT_RGB` (HIPI's default, what
 the strip on the board needs) or `PicoLed::FORMAT_GRB` (classic WS2812B). If
@@ -744,11 +759,27 @@ register level, so new drawing code needs nothing extra to be mirrored.
   (`./link_sim 0.01 20 stall` tests this). When idle, HIPI sends an empty
   frame every second; hipiview acknowledges it, and asks for a new session
   if it hears nothing for 3.5 s.
-- The setting **Settings → Screen → Mirror to PC** (`display_mirror=on|off`,
-  off by default, `displayMirror_setEnabled()`) gates it all: off, requests
+- The setting **Settings → Screen → Mirror to PC** (`display_mirror=off|view|control`,
+  off by default, `displayMirror_setMode()`) gates it all: off, requests
   are ignored (one log line) and a running session ends at once, freeing its
   buffers. Switched on again while the viewer is still connected, a session
   starts by itself with the picture ids from the viewer's last request.
+- **Control:** the viewer also sends input -- `'T' sid x y state` (the mouse
+  as a finger, panel pixels) and `'B' sid code state` (a button; see
+  `mirror_protocol.h`). `display_mirror.cpp` passes them, only in Control and
+  only from the running session, to the handlers set with
+  `displayMirror_setInputHandlers()`: `touch_remote()` (`touch.cpp`), a
+  second finger that goes through the same debouncing and gesture detection
+  as the real one, and `boardui_remoteButton()`, which presses the strip's
+  buttons (sliding it in first). The viewer repeats a held touch or button
+  every 200 ms; without news for 1 s HIPI lets go by itself, and the end of
+  the session lets go of everything. hipiview holds a click at least
+  100 ms, so the 60 ms debouncing sees it. The input is queued and handed
+  to the handlers only from the top of `displayMirror_poll()`: the viewer is
+  also read while the ring is full, from inside a drawing
+  (`RingSink::put()`), and a handler that draws (a button opening a menu)
+  must not run there -- it did once, and HIPI crashed.
+  `./link_sim 0.01 18 input` tests the whole chain, that too.
 - A session starts when the viewer sends `HIPIVIEW` plus the ids of the
   pictures in its cache. Just opening the port (ModemManager, terminals)
   starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a
@@ -758,10 +789,18 @@ register level, so new drawing code needs nothing extra to be mirrored.
 - Then it reads back, 8 kB per main-loop pass, with `LT7683::readSdram()`
   (the encoder suspended, the data sent as `kMem` packets, the changed
   registers resent afterwards), in this order:
-  1. the panel;
-  2. what the PIP windows show;
-  3. the run-time layers;
-  4. the assets the viewer doesn't have yet.
+  1. the assets the viewer doesn't have yet;
+  2. the run-time layers and the CGRAM font;
+  3. what the PIP windows show;
+  4. the panel, bottom row first.
+
+  HIPI keeps drawing meanwhile, and block transfers copy from SDRAM -- from
+  a picture to the cassette label, from the layers onto the panel, within
+  the panel when text scrolls. A copy from an area the viewer doesn't have
+  yet would give it garbage (it once left the cassette black in the Tape
+  view), so sources come before what is copied to, the panel comes last,
+  and it goes bottom up (a scroll up then only copies rows the viewer
+  already has). `make test` draws, copies and scrolls during the read-back.
 - Off-screen layers are registered where they're loaded, with
   `displayMirror_addLayer()`. The Tape pictures are *assets*, with an id from
   `displayMirror_fileAssetId()` (file name, size, date, position). The button

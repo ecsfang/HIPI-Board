@@ -25,6 +25,7 @@
 #include "RA8875Transport.hpp"
 #include "hipi_features.h"      // HIPI_MIRROR_PORT / HIPI_MIRROR_TRANSPORT
 #include <cstdint>
+#include <functional>
 
 namespace hipi {
 
@@ -51,11 +52,30 @@ void displayMirror_init(DisplayDriver* display);
 void displayMirror_poll();
 // A PC viewer is connected and being fed
 bool displayMirror_active();
-// The setting (Settings > Screen > Mirror, config display_mirror): off,
-// the port stays silent and a running session ends at once. Off by
-// default -- feeding a viewer costs the display some speed.
-void displayMirror_setEnabled(bool on);
-bool displayMirror_enabled();
+// The setting (Settings > Screen > Mirror to PC, config display_mirror):
+//   Off      the port stays silent and a running session ends at once
+//            (the default -- feeding a viewer costs the display some speed)
+//   View     the viewer shows the screen
+//   Control  ... and can also work the touch screen and the buttons
+enum class MirrorMode : std::uint8_t { Off = 0, View = 1, Control = 2 };
+void displayMirror_setMode(MirrorMode m);
+MirrorMode displayMirror_mode();
+const char* displayMirror_modeName(MirrorMode m);    // "Off", "View", "Control"
+
+// Input from the viewer (Control): where it goes. touch(down, x, y) is the
+// mouse as a finger on the panel; button(code, down) a button, code as in
+// mirror_protocol.h (1 Shift .. 5 X, 6/7 next/previous view). When the
+// session ends or Control is switched off: touch(false, 0, 0) and
+// button(0, false) ("let go of everything").
+using MirrorTouchHandler  = std::function<void(bool down, std::uint16_t x, std::uint16_t y)>;
+using MirrorButtonHandler = std::function<void(std::uint8_t code, bool down)>;
+void displayMirror_setInputHandlers(MirrorTouchHandler touch, MirrorButtonHandler button);
+
+// HIPI is about to restart (Bootsel mode): tells the viewer (kBye) and
+// keeps the mirror going for `ms` instead of a plain sleep, so the viewer
+// gets the last picture (the "Entering Bootsel mode" box). Input from the
+// viewer is not acted on meanwhile.
+void displayMirror_goodbye(std::uint32_t ms);
 
 // Tells the mirror about an off-screen layer a newly connected viewer
 // needs: rows x rowBytes from addr, rowStep bytes apart (0: one block).

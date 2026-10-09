@@ -83,6 +83,11 @@ std::uint16_t buttonStripWidth = 0, buttonStripHeight = 0, buttonStripScreenX0 =
 bool buttonStripVisible = false;
 absolute_time_t buttonStripHideDeadline;
 bool saverActive = false;   // a screen saver has the panel (boardui_saverBegin())
+// A button held from the PC (boardui_remoteButton())
+Button remoteButton = Button::None;
+absolute_time_t remoteButtonHeard;
+constexpr std::uint32_t kRemoteButtonTimeoutMs = 1000;
+void releaseRemoteButton();
 constexpr std::uint32_t kButtonStripHideMs = 5000;
 // Used only right when the menu explicitly closes (see
 // boardui_onMenuClosed() below) -- much shorter than the normal
@@ -965,11 +970,81 @@ void boardui_poll() {
     // Auto-hide the strip after kButtonStripHideMs of inactivity -- but
     // never while the menu is open; you need the buttons visible to
     // navigate it.
+    // A button held from the PC that it stopped telling us about
+    if (remoteButton != Button::None &&
+        absolute_time_diff_us(remoteButtonHeard, get_absolute_time()) > kRemoteButtonTimeoutMs * 1000) {
+        releaseRemoteButton();
+    }
+    if (remoteButton != Button::None) buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+
     if (buttonStripVisible && !dialog_->isOpen() && !saverActive &&
         time_reached(buttonStripHideDeadline)) {
         hideButtonStrip();
     }
 }
+
+// A button on the strip pressed (a touch on it, or a key in hipiview):
+// the pressed look, the action, and auto-repeat for ▲/▼. The strip must be
+// showing. boardui_handleRelease() lets go of it.
+namespace {
+void pressStripButton(Button b) {
+    pressedButton = b;
+    // 5": the active window must be reset to the full panel before
+    // drawing (drawOnStrip() does it) -- confirmed necessary on real
+    // hardware: showButtonStrip()
+    // narrows the active window (to exclude the strip's own area)
+    // once it finishes, so a later redraw INTO that excluded area
+    // (exactly what the press-feedback shift below does) landed
+    // at the wrong screen position entirely -- reported as
+    // appearing on the left side of the panel -- without this.
+    // Visual feedback: redraw just this button's bitmap region
+    // shifted, so it looks pressed in. The baseline/restore
+    // redraws use a margin larger than the shift, sourced from the
+    // same strip cache, so any overflow outside the button's own
+    // rect (e.g. a shift toward the top-right sticks out past the
+    // rect's top and right edges) gets cleaned up too -- not just
+    // the tight rect itself.
+    // drawOnStrip() also handles the active window (5") -- see its
+    // comment and the one below.
+    drawOnStrip([&](std::uint16_t x0) {
+        redrawButtonRegion(
+            display_, buttonStripPixels.data(),
+            buttonStripWidth, buttonStripHeight,
+            x0, /*stripScreenY0=*/0, b, 0, 0,
+            kPressMargin);
+        redrawButtonRegion(
+            display_, buttonStripPixels.data(),
+            buttonStripWidth, buttonStripHeight,
+            x0, /*stripScreenY0=*/0, b,
+            kPressDx, kPressDy);
+    });
+    // Restore the narrowed active window (excluding the strip's
+    // own area) that showButtonStrip() originally set -- the
+    // reset above was only meant to be temporary, for these two
+    // redraws. Left at "full panel" (as it was before this fix),
+    // Screen::full()'s own clearActiveWindow() -- called when the
+    // menu closes just below, via dialog_->handleButton() ->
+    // close() -> screen_.resume() -- would wipe the ENTIRE
+    // screen instead of just its own text area, which is exactly
+    // what full()'s own comment says clearActiveWindow() must
+    // NOT do (confirmed on real hardware: the whole display went
+    // black for several seconds on menu close, until the button
+    // strip reappeared and re-hid itself). drawOnStrip() restores it.
+    // The redraws above went through RA8875::drawBitmap565(), which
+    // switches to graphics mode (gfxMode()) and blindly zeros
+    // MWCR0 -- the same register that holds the cursor-visible
+    // bit. Screen never sees this happen (these calls bypass it
+    // entirely), so the blinking cursor would otherwise vanish on
+    // every single button touch.
+    screen_->refreshCursor();
+    dialog_->handleButton(b);
+    if (b == Button::Up || b == Button::Down) {
+        repeatButton = b;                       // see boardui_poll()
+        repeatNext = make_timeout_time_ms(kRepeatDelayMs);
+    }
+}
+
+}  // namespace
 
 void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     // A dimmed screen: this touch only wakes it (backlight.h)
@@ -1096,62 +1171,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // The touch that just woke the strip up is consumed by the reveal
         // itself -- don't also act on it as a press, since the user
         // couldn't see what they were touching.
-        if (!wasHidden && b != Button::None) {
-            pressedButton = b;
-            // 5": the active window must be reset to the full panel before
-            // drawing (drawOnStrip() does it) -- confirmed necessary on real
-            // hardware: showButtonStrip()
-            // narrows the active window (to exclude the strip's own area)
-            // once it finishes, so a later redraw INTO that excluded area
-            // (exactly what the press-feedback shift below does) landed
-            // at the wrong screen position entirely -- reported as
-            // appearing on the left side of the panel -- without this.
-            // Visual feedback: redraw just this button's bitmap region
-            // shifted, so it looks pressed in. The baseline/restore
-            // redraws use a margin larger than the shift, sourced from the
-            // same strip cache, so any overflow outside the button's own
-            // rect (e.g. a shift toward the top-right sticks out past the
-            // rect's top and right edges) gets cleaned up too -- not just
-            // the tight rect itself.
-            // drawOnStrip() also handles the active window (5") -- see its
-            // comment and the one below.
-            drawOnStrip([&](std::uint16_t x0) {
-                redrawButtonRegion(
-                    display_, buttonStripPixels.data(),
-                    buttonStripWidth, buttonStripHeight,
-                    x0, /*stripScreenY0=*/0, b, 0, 0,
-                    kPressMargin);
-                redrawButtonRegion(
-                    display_, buttonStripPixels.data(),
-                    buttonStripWidth, buttonStripHeight,
-                    x0, /*stripScreenY0=*/0, b,
-                    kPressDx, kPressDy);
-            });
-            // Restore the narrowed active window (excluding the strip's
-            // own area) that showButtonStrip() originally set -- the
-            // reset above was only meant to be temporary, for these two
-            // redraws. Left at "full panel" (as it was before this fix),
-            // Screen::full()'s own clearActiveWindow() -- called when the
-            // menu closes just below, via dialog_->handleButton() ->
-            // close() -> screen_.resume() -- would wipe the ENTIRE
-            // screen instead of just its own text area, which is exactly
-            // what full()'s own comment says clearActiveWindow() must
-            // NOT do (confirmed on real hardware: the whole display went
-            // black for several seconds on menu close, until the button
-            // strip reappeared and re-hid itself). drawOnStrip() restores it.
-            // The redraws above went through RA8875::drawBitmap565(), which
-            // switches to graphics mode (gfxMode()) and blindly zeros
-            // MWCR0 -- the same register that holds the cursor-visible
-            // bit. Screen never sees this happen (these calls bypass it
-            // entirely), so the blinking cursor would otherwise vanish on
-            // every single button touch.
-            screen_->refreshCursor();
-            dialog_->handleButton(b);
-            if (b == Button::Up || b == Button::Down) {
-                repeatButton = b;                       // see boardui_poll()
-                repeatNext = make_timeout_time_ms(kRepeatDelayMs);
-            }
-        }
+        if (!wasHidden && b != Button::None) pressStripButton(b);
     }
 }
 
@@ -1264,6 +1284,47 @@ void boardui_saverEnd() {
     // The timers start again, as if just used
     buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
     infoBoxHideDeadline = make_timeout_time_ms(kInfoBoxShowMs);
+}
+
+// ── Buttons from the PC (hipiview's keys, Mirror to PC < Control >) ─────
+// Work like pressing the strip's buttons, except that the strip doesn't
+// need to be showing first: it slides in (so the press can be seen) and
+// the key acts at once. A held key is repeated by the PC; without news for
+// kRemoteButtonTimeoutMs it counts as released.
+namespace {
+void releaseRemoteButton() {
+    if (remoteButton == Button::None) return;
+    remoteButton = Button::None;
+    boardui_handleRelease();
+}
+}  // namespace
+
+void boardui_remoteButton(std::uint8_t code, bool down) {
+    // 0: let go of everything (the session ended)
+    if (code == 0) { releaseRemoteButton(); return; }
+    // 6/7: next/previous view -- like a swipe to the left/right
+    if (code == 6 || code == 7) {
+        if (down) boardui_handleSwipe(/*forward (left-to-right)=*/code == 7);
+        return;
+    }
+    if (code > 5) return;
+    const Button b = static_cast<Button>(code);      // 1 Shift .. 5 X (ui_buttons.hpp)
+    if (!down) {
+        if (remoteButton == b) releaseRemoteButton();
+        return;
+    }
+    if (remoteButton == b) {                          // still held: the PC repeats it
+        remoteButtonHeard = get_absolute_time();
+        return;
+    }
+    releaseRemoteButton();                            // another one: let go of the first
+    if (pressedButton != Button::None) return;        // a finger is on a button
+    remoteButtonHeard = get_absolute_time();
+    if (backlight_wakeByTouch()) return;              // only wakes the screen, like a touch
+    if (!buttonStripVisible) showButtonStrip();
+    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+    remoteButton = b;
+    pressStripButton(b);
 }
 
 bool boardui_isMenuOpen() {

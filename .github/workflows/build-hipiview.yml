@@ -1,0 +1,172 @@
+# Builds hipiview -- HIPI's display on the PC (tools/hipiview) -- for
+# Windows and Linux, and runs its tests.
+#
+#   - On a v* tag: builds, and adds hipiview-windows-<tag>.zip and
+#     hipiview-linux-x64-<tag>.tar.gz to that tag's release (the release
+#     itself is made by "Build HIPI Panel 7", build-hipi.yml; this waits
+#     for it).
+#   - When hipiview or the mirror code changes on a branch: builds and
+#     tests, no release.
+#   - By hand (Actions tab -> "Build hipiview" -> Run workflow): builds the
+#     chosen branch; the files are under "Artifacts" on the run's page.
+#     With a tag filled in, it builds that tag and adds the files to its
+#     release (e.g. for a release made before this workflow existed).
+
+name: Build hipiview
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - '**'
+    paths:
+      - 'tools/hipiview/**'
+      - 'include/mirror_*.h*'
+      - 'include/display_mirror.h'
+      - 'src/display_mirror.cpp'
+      - '.github/workflows/build-hipiview.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and add to its release (empty: just build the chosen branch)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write  # adding files to a release
+
+env:
+  # The tag to release, if any (a pushed tag, or one given by hand)
+  RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+
+jobs:
+  windows:
+    name: hipiview for Windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Version
+        id: version
+        run: echo "name=${RELEASE_TAG:-dev-${GITHUB_SHA::7}}" >> "$GITHUB_OUTPUT"
+
+      # MinGW-w64 cross-compiler; build-windows.sh fetches SDL2 and zlib
+      # and makes one hipiview.exe with both built in
+      - name: Install MinGW-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64-posix zip
+
+      - name: Build
+        run: bash tools/hipiview/ci/build-windows.sh "${{ steps.version.outputs.name }}"
+
+      - name: Keep
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipiview-windows
+          path: tools/hipiview/hipiview-windows-${{ steps.version.outputs.name }}.zip
+          if-no-files-found: error
+
+  linux:
+    name: hipiview for Linux, and the tests
+    # 22.04: the binary then also runs on older distributions (glibc 2.35)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Version
+        id: version
+        run: echo "name=${RELEASE_TAG:-dev-${GITHUB_SHA::7}}" >> "$GITHUB_OUTPUT"
+
+      - name: Install SDL2 and zlib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsdl2-dev zlib1g-dev
+
+      - name: Build
+        working-directory: tools/hipiview
+        run: make hipiview
+
+      # HIPI's real display driver and mirror code against an emulated chip
+      - name: Test (host_test)
+        working-directory: tools/hipiview
+        run: make test
+
+      # The whole chain over a USB that loses 2 % of its packets, then the
+      # mouse and keys -- with the real hipiview, on a pseudo-terminal
+      - name: Test (link_sim)
+        working-directory: tools/hipiview
+        run: |
+          make link_sim
+          ./link_sim 0.02 10
+          ./link_sim 0.01 18 input
+
+      - name: Package
+        working-directory: tools/hipiview
+        run: |
+          NAME="hipiview-linux-x64-${{ steps.version.outputs.name }}"
+          mkdir -p "$NAME"
+          cp hipiview "$NAME/"
+          cat > "$NAME/README.txt" <<'NOTE'
+          hipiview -- HIPI's 7" display on a Linux PC
+
+          Needs SDL2 and zlib:  sudo apt install libsdl2-2.0-0 zlib1g
+          (and ffmpeg for recording). Your user must be in the dialout group.
+
+            ./hipiview              finds HIPI's mirror port by itself
+            ./hipiview --help       all options and keys
+
+          More: tools/hipiview/README.md in the HIPI project.
+          NOTE
+          tar czf "$NAME.tar.gz" "$NAME"
+
+      - name: Keep
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipiview-linux
+          path: tools/hipiview/hipiview-linux-x64-${{ steps.version.outputs.name }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Add to the release
+    if: ${{ inputs.tag != '' || startsWith(github.ref, 'refs/tags/') }}
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Fetch the builds
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The release is made by "Build HIPI Panel 7" (build-hipi.yml), which
+      # takes longer (pico-sdk, ARM toolchain): wait for it. If it never
+      # comes (that build failed), make the release here.
+      - name: Wait for the release
+        run: |
+          for i in $(seq 1 60); do
+            if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $RELEASE_TAG is there"
+              exit 0
+            fi
+            echo "waiting for release $RELEASE_TAG ($i/60)"
+            sleep 30
+          done
+          echo "no release after 30 minutes -- making it"
+          gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "HIPI Panel 7 - $RELEASE_TAG"
+
+      - name: Add the files
+        run: gh release upload "$RELEASE_TAG" dist/* -R "$GITHUB_REPOSITORY" --clobber

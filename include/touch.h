@@ -70,3 +70,12 @@ void touch_set_vertical_swipe_callback(TouchVerticalSwipeCallback cb);
 // (also used to track ongoing position for swipe detection) --
 // invoking whichever callbacks are registered.
 void touch_poll();
+
+// A second "finger" from outside the touch controller -- the mouse in
+// tools/hipiview (display_mirror.h, Mirror to PC < Control >). down with a
+// position presses (or moves) it, !down lifts it. It goes through exactly
+// the same debouncing and gesture detection as a real finger, so taps,
+// swipes, holds and the button strip work just the same. While one of the
+// two is down, the other is ignored. Lifted by itself after 1 s without a
+// call (the PC repeats "down" while the mouse button is held).
+void touch_remote(bool down, std::uint16_t x, std::uint16_t y);

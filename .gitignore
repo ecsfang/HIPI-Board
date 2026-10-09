@@ -48,7 +48,8 @@ build-*/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
-Makefile
+# (only CMake's own, in the project folder -- tools/*/Makefile are ours)
+/Makefile
 install_manifest.txt
 compile_commands.json
 
@@ -76,3 +77,8 @@ Testing/
 documents/*.pdf
 documents/images/*.bmp
 
+
+# hipiview builds (tools/hipiview/ci/build-windows.sh)
+tools/hipiview/build-win/
+tools/hipiview/hipiview-*.zip
+tools/hipiview/hipiview-*.tar.gz

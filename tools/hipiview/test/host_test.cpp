@@ -156,6 +156,23 @@ int main() {
     d.fillRect(0, 0, 1024, 600, 0x4208);
     d.fillEllipse(512, 300, 300, 150, 0xFD20);
     d.endOverlayDraw();
+    // The cassette, as the Tape view has it: the picture (an asset) and its
+    // copy with the file name on the label (changes at run time) -- both
+    // 200 x 100 in layers with the panel's stride
+    d.beginLayerDraw(hipi::LT7683::kCassetteAddr);
+    d.fillRect(0, 0, 200, 100, 0x8410);
+    d.fillCircle(50, 50, 30, 0x07E0);
+    d.fillCircle(150, 50, 30, 0xF81F);
+    d.endOverlayDraw();
+    d.copyLayerRegion(hipi::LT7683::kCassetteAddr, 1024, 0, 0, hipi::LT7683::kCassetteLabelAddr, 1024, 0, 0, 200, 100);
+    d.beginLayerDraw(hipi::LT7683::kCassetteLabelAddr);
+    d.selectBuiltinFont();
+    d.txtSize(0);
+    d.txtTrans(0x0000);
+    d.txtSetCursor(20, 5);
+    d.txtWrite("HDRIVE");
+    d.endOverlayDraw();
+    d.selectCustomFont();
     // An open "menu" in the PIP-1 layer, with the built-in font
     d.beginOverlayDraw();
     d.fillRoundRect(300, 150, 400, 260, 12, 0x2104);
@@ -191,13 +208,28 @@ int main() {
         tape.addr = hipi::LT7683::kTapeLayerAddr; tape.rowBytes = 1024 * 600 * 2; tape.rows = 1;
         tape.assetId = 0x7A9E0001;
         session.addLayer(tape);
+        hipi::mirror::Layer cassette;
+        cassette.addr = hipi::LT7683::kCassetteAddr; cassette.rowBytes = 200 * 2; cassette.rowStep = 2048; cassette.rows = 100;
+        cassette.assetId = 0x7A9E0002;
+        session.addLayer(cassette);
         hipi::mirror::Layer label;
         label.addr = hipi::LT7683::kCassetteLabelAddr; label.rowBytes = 200 * 2; label.rowStep = 2048; label.rows = 100;
         session.addLayer(label);
     }
     session.start(d);
     int steps = 0;
-    while (!session.step(d, 4096)) { encoder.flush(); ++steps; }
+    while (!session.step(d, 4096)) {
+        encoder.flush();
+        ++steps;
+        // HIPI keeps working during the read-back: the Tape view shows up
+        // (the cassette label made again, copied onto the panel) and text
+        // scrolls -- block transfers from SDRAM the viewer may not have yet
+        if (steps == 3 || steps == 400) {
+            d.copyLayerRegion(hipi::LT7683::kCassetteAddr, 1024, 0, 0, hipi::LT7683::kCassetteLabelAddr, 1024, 0, 0, 200, 100);
+            d.copyLayerRegion(hipi::LT7683::kCassetteLabelAddr, 1024, 0, 0, 0, 1024, 600, 120, 200, 100);
+            for (int i = 0; i < 3; ++i) screen.pr_str("Scrolling while the viewer catches up\r\n");
+        }
+    }
     encoder.flush();
     std::printf("sync: %d steps, %zu bytes on the wire, font known: %s, errors %llu\n",
                 steps, sink.total, viewer.fontKnown() ? "yes" : "no",
@@ -206,6 +238,8 @@ int main() {
     compareMemory("panel memory", 0, 1024 * 600 * 2);
     compareMemory("tape layer", hipi::LT7683::kTapeLayerAddr, 1024 * 600 * 2);
     compareMemory("cgram", hipi::LT7683::kCgramAddr, 4096);
+    compareMemory("cassette picture", hipi::LT7683::kCassetteAddr, 100 * 2048);
+    compareMemory("cassette with label", hipi::LT7683::kCassetteLabelAddr, 100 * 2048);
 
     // ── Live drawing after the sync ─────────────────────────────────────
     if (std::getenv("HV_DAMAGE")) sink.damageAt = sink.ms + 2;
@@ -217,6 +251,8 @@ int main() {
 
     d.hidePipOverlay();
     d.copyLayerToPanel(hipi::LT7683::kTapeLayerAddr, 0, 300, 1024, 300);
+    // The Tape view puts the cassette in the lid window
+    d.copyLayerRegion(hipi::LT7683::kCassetteLabelAddr, 1024, 0, 0, 0, 1024, 600, 320, 200, 100);
     encoder.flush();
     compare("menu closed + layer copy", "t3_copy");
 
@@ -249,6 +285,8 @@ int main() {
     std::printf("second session: %zu bytes on the wire\n", sink.total - before2);
     compare("second session (cached)", "t5_resync");
     compareMemory("tape layer from the cache", hipi::LT7683::kTapeLayerAddr, 1024 * 600 * 2);
+    compareMemory("cassette from the cache", hipi::LT7683::kCassetteAddr, 100 * 2048);
+    compareMemory("cassette with label, again", hipi::LT7683::kCassetteLabelAddr, 100 * 2048);
 
     if (sink.log) std::fclose(sink.log);
     std::printf("%s\n", failures ? "SOME TESTS FAILED" : "ALL TESTS PASSED");

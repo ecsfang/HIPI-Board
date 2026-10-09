@@ -355,7 +355,7 @@ More > — HIPI's menu
 ├── Settings >
 │   ├── Screen >         Text colour < White > · Font size < 0 > · Columns < Auto > ·
 │   │                    Brightness < 100% > · Plot view < Fit > · Paper < White > ·
-│   │                    Mirror to PC < Off >  (7" only)
+│   │                    Mirror to PC < Off >  (7" only: Off / View / Control)
 │   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
 │   │                    Date < EU > · Time < 24 h > · Show now
 │   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
@@ -566,6 +566,68 @@ Full red is 7 × 32 = 224:
 
 A few colours: red 224, green 28, blue 3, yellow 252, white 255.
 
+**How many pixels?** HIPI can't see how many pixels are connected, so tell it
+once with `N`, e.g. `0N10` for a strip of ten. HIPI remembers it (also after
+power off). `0` ("all") then means these 10, and higher pixel numbers are
+ignored. Until told otherwise HIPI assumes 5, the pixels on the board; at
+most 32.
+
+The pixels on the board and a strip get the same signal: the board's pixels
+show exactly what the strip's first pixels show (pixel 1 on the board is
+pixel 1 on the strip, and so on). So the number to give is the larger of the
+two — with 5 on the board and a strip of 10, it's `0N10`, and pixels 1–5
+light up both on the board and on the strip.
+
+**Effects.** HIPI can also animate the pixels by itself — the HP-41 only
+starts the effect. `E` and a letter start an effect on the pixels chosen
+(nothing or `0` = all); several can run at once on different pixels (up to
+four). Setting pixels with `C`, `O` or `X` stops an effect on them, and `E`
+on its own stops the effects on the pixels chosen (`0E` stops them all).
+
+| Send | Effect | Settings, in order (all can be left out) |
+|------|--------|------------------------------------------|
+| `0EC` | A comet running back and forth | colour : speed (pixels a second) : length : fade (higher = shorter tail) |
+| `0EM` | Coloured bands rolling along | colours : band length : speed (negative = the other way) : space between bands |
+| `0ES` | Twinkling stars | colours : stars a second : fade |
+| `0EB` | Bouncing balls | number of balls : colours : gravity : fade |
+| `0EF` | Fire (3 pixels or more) | intensity : spread : cooling |
+| `0EO` | Fade out to black | how fast |
+| `0ER` | A rolling rainbow | speed : colour step between pixels |
+| `0E` | Stop the effects | — |
+
+The settings are numbers after the letter: a `:` between settings, a `,`
+between colours, and an empty one keeps its default — `0EC:20` is the comet
+in its default colour at 20 pixels a second. Colours are the same numbers as
+above (red 224 and so on), here written as digits. A few examples:
+
+| Send | Means |
+|------|-------|
+| `0ER` | A rainbow over all pixels |
+| `1-5ES255,252:4` | Stars on pixels 1–5 (also the board's), white and yellow, 4 a second |
+| `6-10EC224:12:3` | A red comet, 12 pixels a second, 3 long, on pixels 6–10 |
+| `0EM224,28,3:2:6` | Red, green and blue bands, 2 long, 6 pixels a second |
+| `0EB3:224,28,3` | Three balls: red, green and blue |
+
+```
+01 LBL "XMAS"
+02 3
+03 SELECT
+04 "0N10"
+05 OUTA
+06 "1-5ES255,252:4"
+07 OUTA
+08 "6-10EC224:12:3"
+09 OUTA
+10 END
+```
+
+Leave a space between two commands in one string: `"0N10 0ER"`.
+
+**Power.** The pixels get their power from HIPI's USB. To keep within what
+USB can give, HIPI turns the brightness down by itself when many pixels
+would be bright at once (about 400 mA in all) — so 32 pixels in full white
+come out dimmer than 5.
+
 <a href="images/example-pixels.jpg"><img src="images/example-pixels.jpg" alt="A pixel strip lit up by HIPI" width="512"></a>
 
 ### 8.5 Terminal — `TFTERM`
@@ -670,7 +732,7 @@ exactly as on the panel (text, plots, menus, the screen saver, everything),
 and records it straight to a video file.
 
 First switch it on in HIPI: **More → Settings → Screen → Mirror to PC
-< On >** (it's saved, and off from the start). Then connect HIPI with USB
+< View >** (it's saved, and off from the start). Then connect HIPI with USB
 and start `hipiview`. It finds HIPI's fourth serial
 port, **HIPI Display Mirror**, by itself. The first few seconds it reads
 what's already on the screen (the title bar shows how far it has come);
@@ -682,8 +744,14 @@ screen; with hipiview closed, the mirror costs practically nothing. While
 it is running, though, every drawing goes to USB as well, which makes the
 heavier screens (the Tape view, the screen saver animations) a little
 slower. With **Mirror to PC < Off >** HIPI ignores hipiview completely and
-stops a running session at once; switching it **On** again while hipiview
+stops a running session at once; switching it on again while hipiview
 is open starts sending again by itself.
+
+**Using HIPI from the PC.** With **Mirror to PC < Control >**, the mouse
+and keyboard in hipiview work HIPI as well: a click is a tap on the screen,
+dragging is a swipe, **Enter** is OK, the arrow keys are ▲/▼ and the views,
+**Backspace** is X and **Tab** is Shift. HIPI can then be used from its own
+screen and from the PC alike. In a video, a ring shows where was clicked.
 
 How to build and use it: see `tools/hipiview/README.md`.
 
@@ -827,7 +895,8 @@ value.
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
 | `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
-| `display_mirror` | `on` / `off` | `off` | 7" panel: send the screen to **hipiview** on a PC (**Settings → Screen → Mirror to PC**). See [Recording the screen on a PC](#recording-the-screen-on-a-pc-7-panel). |
+| `pixel_count` | `1`–`32` | `5` | `TFPIXEL`: how many colour pixels are connected — set by the HP-41 with `0N<n>` (see [8.4](#84-colour-pixels--tfpixel)). |
+| `display_mirror` | `off` / `view` / `control` | `off` | 7" panel: send the screen to **hipiview** on a PC; `control`: the PC's mouse and keys work HIPI too (**Settings → Screen → Mirror to PC**). See [Recording the screen on a PC](#recording-the-screen-on-a-pc-7-panel). |
 
 **Screen saver** (see [4.3](#43-screen-saver-and-clock))
 

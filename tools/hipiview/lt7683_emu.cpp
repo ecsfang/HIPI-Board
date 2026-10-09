@@ -219,6 +219,8 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
         if (width_ <= 0 || width_ > 2048) width_ = 1024;
         if (height_ <= 0 || height_ > 2048) height_ = 600;
         hello_ = true;
+        mirrorMode_ = -1;                  // (the session says it again)
+        bye_ = false;
         syncing_ = false;
         assetsBegun_.clear();
         return 14;
@@ -248,6 +250,13 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
         return 5;
     case mp::kSyncDone:
         syncing_ = false;
+        return 1;
+    case mp::kMode:
+        if (n < 2) return 0;
+        mirrorMode_ = p[1];
+        return 2;
+    case mp::kBye:
+        bye_ = true;
         return 1;
     default:
         ++errors_;

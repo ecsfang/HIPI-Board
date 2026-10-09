@@ -3,15 +3,22 @@
 // register snapshot, built-in font, then the SDRAM read-back in small
 // steps (see display_mirror.h for the whole picture).
 //
-// What is read back, in this order (what's visible first):
-//   1. the panel itself
-//   2. what the PIP windows show right now (an open menu, the buttons)
-//   3. the registered layers that change at run time (button strip,
-//      cassette label, ...), and the CGRAM font
-//   4. the registered assets -- layers filled once from a fixed source,
+// What is read back, in this order:
+//   1. the registered assets -- layers filled once from a fixed source,
 //      e.g. the Tape view pictures. The viewer caches these; those it
 //      already has (it lists them in its request) are not read back at
 //      all, just named (kAssetUse).
+//   2. the registered layers that change at run time (button strip,
+//      cassette label, ...), and the CGRAM font
+//   3. what the PIP windows show right now (an open menu, the buttons)
+//   4. the panel itself, from the bottom up
+// HIPI keeps drawing while this goes on, and the viewer follows it live.
+// A block transfer that copies from SDRAM the viewer doesn't have yet
+// would copy garbage there -- so the sources come before what is copied
+// to: pictures before the cassette label, layers before the panel (the
+// Tape view copies them onto it), and the panel last. The panel goes
+// bottom up because text scrolls up: a scroll during the read-back copies
+// rows that are already there to rows that come later anyway.
 //
 // Header-only and free of Pico SDK dependencies, so tools/hipiview's host
 // test runs exactly this code against an emulated chip.
@@ -128,7 +135,8 @@ public:
             if (row_ == 0 && offset_ == 0 && r.assetId != 0) emitAsset(kAssetBegin, r);
             const std::uint32_t left = r.rowBytes - offset_;
             const std::size_t n = std::min<std::size_t>(std::min<std::size_t>(left, kChunk), budget);
-            const std::uint32_t addr = r.addr + static_cast<std::uint32_t>(row_) * r.rowStep + offset_;
+            const std::uint32_t row = it.bottomUp ? static_cast<std::uint32_t>(r.rows - 1 - row_) : row_;
+            const std::uint32_t addr = r.addr + row * r.rowStep + offset_;
             enc_.suspend();
             d.readSdram(addr, buf, n);
             enc_.resume();
@@ -162,14 +170,14 @@ private:
     static constexpr std::size_t kChunk = 2048;
     static constexpr int kMaxLayers = 12;
     static constexpr int kMaxItems = kMaxLayers + 6;
-    struct Item { Layer layer; };
+    struct Item { Layer layer; bool bottomUp = false; };
 
     bool viewerHas(std::uint32_t id) const {
         for (int i = 0; i < viewerAssetCount_; ++i) if (viewerAssets_[i] == id) return true;
         return false;
     }
-    void addItem(const Layer& l) {
-        if (itemCount_ < kMaxItems && l.rowBytes > 0 && l.rows > 0) items_[itemCount_++] = Item{ l };
+    void addItem(const Layer& l, bool bottomUp = false) {
+        if (itemCount_ < kMaxItems && l.rowBytes > 0 && l.rows > 0) items_[itemCount_++] = Item{ l, bottomUp };
     }
     void emitAsset(std::uint8_t op, const Layer& l) {
         const std::uint8_t p[19] = { op,
@@ -190,11 +198,19 @@ private:
     void planDump() {
         const std::uint32_t row = 1024UL * 2UL;
         itemCount_ = 0;
-        // 1. The panel
-        Layer panel;
-        panel.addr = 0; panel.rowBytes = row * 600; panel.rowStep = 0; panel.rows = 1;
-        addItem(panel);
-        // 2. What the PIP windows show right now
+        // 1. Assets: named if the viewer has them, else read back (once)
+        for (int i = 0; i < layerCount_; ++i) {
+            const Layer& l = layers_[i];
+            if (l.assetId == 0) continue;
+            if (viewerHas(l.assetId)) emitAsset(kAssetUse, l);
+            else addItem(l);
+        }
+        // 2. Layers that change at run time, and the CGRAM font
+        for (int i = 0; i < layerCount_; ++i) if (layers_[i].assetId == 0) addItem(layers_[i]);
+        Layer cgram;
+        cgram.addr = LT7683::kCgramAddr; cgram.rowBytes = 256 * 16; cgram.rows = 1;
+        addItem(cgram);
+        // 3. What the PIP windows show right now
         const std::uint8_t mpwctr = enc_.reg(kRegMpwctr);
         for (int set = 0; set < 2; ++set) {
             if (!(mpwctr & (set == 0 ? 0x80 : 0x40))) continue;
@@ -208,18 +224,10 @@ private:
             l.rows = pipWord(set, 16);
             addItem(l);
         }
-        // 3. Layers that change at run time, and the CGRAM font
-        for (int i = 0; i < layerCount_; ++i) if (layers_[i].assetId == 0) addItem(layers_[i]);
-        Layer cgram;
-        cgram.addr = LT7683::kCgramAddr; cgram.rowBytes = 256 * 16; cgram.rows = 1;
-        addItem(cgram);
-        // 4. Assets: named if the viewer has them, else read back (once)
-        for (int i = 0; i < layerCount_; ++i) {
-            const Layer& l = layers_[i];
-            if (l.assetId == 0) continue;
-            if (viewerHas(l.assetId)) emitAsset(kAssetUse, l);
-            else addItem(l);
-        }
+        // 4. The panel, row by row from the bottom
+        Layer panel;
+        panel.addr = 0; panel.rowBytes = row; panel.rowStep = row; panel.rows = 600;
+        addItem(panel, /*bottomUp=*/true);
         item_ = 0;
         row_ = 0;
         offset_ = 0;

@@ -90,6 +90,7 @@ public:
     // session (e.g. we were suspended and it gave up on us)
     bool silent(double now) const { return sid_ >= 0 && heartbeat_ && now - lastFrame_ > 3.5; }
     bool inSession() const { return sid_ >= 0; }
+    int sid() const { return sid_; }
     unsigned long long recovered() const { return recovered_; }
     unsigned long long sessions() const { return sessions_; }
 

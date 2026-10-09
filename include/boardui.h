@@ -103,6 +103,9 @@ bool boardui_isMenuOpen();
 // way (nothing is closed), End brings them back as they were. Called by
 // backlight.cpp around plotterview_showClock()/plotterview_leaveClock().
 void boardui_saverBegin();
+// A button from the PC (hipiview, Mirror to PC < Control >): code 1 Shift,
+// 2 OK, 3 Up, 4 Down, 5 X, 6 next view, 7 previous view; 0 = release all.
+void boardui_remoteButton(std::uint8_t code, bool down);
 void boardui_saverEnd();
 
 }  // namespace hipi

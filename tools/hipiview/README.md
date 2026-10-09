@@ -9,9 +9,14 @@ It works with the **7" panel** (LT7683) only.
 
 ## How it works
 
-First switch the mirror on in HIPI: **Settings → Screen → Mirror to PC
-< On >** (saved; off from the start). With it off, HIPI ignores hipiview
-and the title bar says "no answer from HIPI".
+First switch the mirror on in HIPI: **Settings → Screen → Mirror to PC**
+(saved; **Off** from the start):
+
+| Setting | hipiview |
+|---------|----------|
+| **Off** | gets nothing; the title bar says "no answer from HIPI" |
+| **View** | shows (and records) the screen |
+| **Control** | ... and the mouse and keyboard work HIPI too (see [Controlling HIPI from the PC](#controlling-hipi-from-the-pc)) |
 
 HIPI has a fourth USB serial port, **HIPI Display Mirror** (CDC 3). Once
 hipiview has opened it and asked for the screen, HIPI sends everything it
@@ -23,8 +28,9 @@ anything added to the firmware later is mirrored too.
 
 When hipiview connects, HIPI first sends its current state: the register
 values, the chip's built-in font, and the contents of the panel and the
-off-screen layers. What is visible comes first (the panel, an open menu, the
-button strip), then the rest. The title bar shows the progress, and HIPI
+off-screen layers. The pictures and layers come first and the panel last
+(HIPI may copy from them onto the panel while this goes on, so they must be
+there first). The title bar shows the progress, and HIPI
 keeps working normally meanwhile. When hipiview closes the port, mirroring
 stops and HIPI no longer spends any time on it.
 
@@ -36,7 +42,9 @@ name, size and date. Every cached picture carries a checksum: a damaged
 one (or one from an older hipiview) is thrown away and simply sent again.
 You can delete the folder at any time; it just fills up again.
 
-## Building (Ubuntu)
+## Building
+
+### Linux (Ubuntu)
 
 ```bash
 sudo apt install build-essential libsdl2-dev zlib1g-dev ffmpeg
@@ -45,6 +53,59 @@ make
 ```
 
 `ffmpeg` is only needed for recording.
+
+### Windows
+
+**Ready-made:** every HIPI release on GitHub has
+`hipiview-windows-<version>.zip`: one `hipiview.exe`, with SDL2 and zlib
+built in (and `hipiview-linux-x64-<version>.tar.gz` for Linux). The
+workflow *Build hipiview* (`.github/workflows/build-hipiview.yml`) makes
+them; it can also be run by hand from the Actions tab, and then the files
+are under *Artifacts* on the run's page. Unpack it and run it from a
+command prompt (`cmd` or PowerShell), so its messages can be seen:
+
+```
+hipiview.exe                       finds HIPI's mirror port by itself
+hipiview.exe COM7                  or name it
+```
+
+**Built on Windows**, with [MSYS2](https://www.msys2.org) (UCRT64 shell):
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
+          mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-zlib
+cd tools/hipiview
+cmake -B build -S . && cmake --build build
+```
+
+`build/hipiview.exe` then needs `SDL2.dll` and `zlib1.dll` next to it (from
+MSYS2's `ucrt64/bin`), or run it from the UCRT64 shell. With Visual Studio:
+the same `cmake` lines, with SDL2 and zlib from vcpkg
+(`-DCMAKE_TOOLCHAIN_FILE=.../vcpkg/scripts/buildsystems/vcpkg.cmake`).
+
+**Cross-compiling** on Linux (gives the single `hipiview.exe`, the same
+way the workflow does):
+
+```bash
+sudo apt install g++-mingw-w64-x86-64-posix curl zip
+tools/hipiview/ci/build-windows.sh          # fetches SDL2 and zlib into build-win/
+```
+
+It leaves `tools/hipiview/hipiview-windows.zip`. By hand instead:
+`make windows SDL2_MINGW=<SDL2 mingw package>/x86_64-w64-mingw32 ZLIB_MINGW=<folder with
+include/zlib.h, include/zconf.h, lib/libz.a>`.
+
+**On Windows, good to know:**
+
+- **The port** is found by HIPI's USB ids (interface 7 of VID 2E8A / PID
+  000B) or by its name, "HIPI Display Mirror". Windows 10 and 11 have the
+  driver built in: each of HIPI's four serial ports gets a COM number
+  (Device Manager → Ports). hipiview turns DTR on itself, as HIPI wants.
+- **Recording** needs `ffmpeg.exe` in the PATH (or in the same folder as
+  hipiview.exe), e.g. from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/).
+- **The picture cache** is in `%LOCALAPPDATA%\hipiview`.
+- Screenshots, videos and `--log` files go to the folder hipiview is run
+  from.
 
 ## Use
 
@@ -58,11 +119,45 @@ make
 |-----|------|
 | **R** | Start/stop recording (`hipiview-<date>-<time>.mp4`) |
 | **S** | Screenshot (`hipiview-<date>-<time>.png`) |
-| **F** | Full screen on/off |
+| **F** | Full screen on/off (**Esc** leaves it too) |
 | **B** | Backlight dimming on/off (see below) |
-| **Q**, **Esc** | Quit (a recording in progress is saved) |
+| **T** | Touch rings on/off (see below) |
+| **Q** | Quit (a recording in progress is saved) |
 
 The window can be resized; the picture keeps its proportions.
+
+### Controlling HIPI from the PC
+
+With **Mirror to PC < Control >** on HIPI, hipiview works HIPI's touch
+screen and buttons, so HIPI can be used from the PC as well as on its own
+screen:
+
+| On the PC | On HIPI |
+|-----------|---------|
+| Click | A tap, where you click |
+| Drag and let go | A swipe (left/right: another view, up/down: scroll a list) |
+| Click and hold | A touch held (e.g. ▲/▼ on the button strip repeat) |
+| **Enter** | OK |
+| **↑** / **↓** (held: repeated) | ▲ / ▼ |
+| Mouse wheel | ▲ / ▼ |
+| **Backspace** | X |
+| **Tab**, or holding **Shift** with Enter/↑/↓/Backspace | Shift (Shift+Enter = EXIT, Shift+Backspace = CLR, ...) |
+| **←** / **→** | The previous / next view |
+
+A key slides the button strip in, so the press can be seen, and acts at
+once. Everything works exactly as with a finger on the screen: the first
+touch only wakes a sleeping screen, menus, swipes, the Tape view's
+buttons. If you touch HIPI's screen and click in hipiview at the same time,
+the one that came first wins until it's let go of.
+
+**Touch rings:** where you click, a ring shows for a moment — in the window
+and in the video, so whoever watches can see where was touched. They're
+also kept in a `--log` file, so `--render` draws them too. **T** turns them
+off (and on).
+
+With **View** the mouse and keys do nothing on HIPI (the window keys above
+still work): the title bar then says "VIEW ONLY" for a moment when you click
+or press a key, and with **Control** it shows "control".
 
 ### Options
 
@@ -76,6 +171,7 @@ The window can be resized; the picture keeps its proportions.
 | `--render FILE` | With `--replay`: turn the saved stream into a video, as fast as possible, with no window |
 | `--scale X` | Window size factor, e.g. `0.75` or `1.5` |
 | `--backlight` | Dim the picture like the real backlight |
+| `--test-input FILE` | For tests: play mouse and key events from FILE (see `test/link_sim.cpp`) |
 
 **The cleanest recordings** come from saving the stream and rendering it
 afterwards:
@@ -94,8 +190,8 @@ is dimmed like the real panel, e.g. when the screen saver dims it.
 
 ## The port
 
-The mirror port is the fourth serial port HIPI creates, usually
-`/dev/ttyACM3`. hipiview finds it by its interface name, so you normally
+(Windows: see [Windows](#windows) above.) On Linux, the mirror port is the
+fourth serial port HIPI creates, usually `/dev/ttyACM3`. hipiview finds it by its interface name, so you normally
 don't need to give it. If HIPI is restarted or unplugged, hipiview waits and
 connects again by itself.
 
@@ -124,6 +220,11 @@ sudo udevadm control --reload-rules
   packet only costs a resend, which the title bar counts ("resent: n").
   Only if that doesn't help within two seconds does hipiview ask for the
   whole screen again ("restarts: n").
+- **HIPI restarting.** When HIPI goes into **Bootsel mode** (for a firmware
+  update), it first lets hipiview get the last picture, and the title bar
+  says so. While HIPI is gone, the last picture stays. When HIPI comes back
+  (new firmware, a reset, the cable plugged in again), hipiview starts
+  afresh from a black screen and reads everything again.
 - **hipiview suspended or hung.** If hipiview stops reading but keeps the
   port open (Ctrl+Z in the terminal, say), HIPI notices within a few
   seconds and stops sending, so it doesn't slow down. When hipiview runs
@@ -159,7 +260,9 @@ stood in by the test, talks to the real hipiview through a
 pseudo-terminal. Afterwards it checks that the picture came out exactly
 right. It does up to about 5 % loss. `./link_sim 0.01 20 stall` freezes hipiview
 for a while midway and checks that HIPI keeps running smoothly and that
-the picture comes back afterwards.
+the picture comes back afterwards. `./link_sim 0.01 18 input` has hipiview
+click, swipe and press keys (`--test-input`) and checks that HIPI gets them
+as touches and buttons with **Control** — and nothing with **View**.
 
 ## Files
 
@@ -169,6 +272,10 @@ the picture comes back afterwards.
 | `deframer.hpp` | The viewer's end of the link: frames, CRC, acknowledgements, resends |
 | `lt7683_emu.hpp/.cpp` | The emulated LT7683 |
 | `png.hpp` | Screenshots |
+| `input.hpp` | Mouse and keys to HIPI; the touch rings |
+| `serial_port.hpp/.cpp` | The serial port and finding it: POSIX (Linux, macOS) and Win32 |
+| `CMakeLists.txt` | Building with CMake (Windows, Linux, macOS); the `Makefile` does Linux and the tests |
+| `ci/build-windows.sh` | The Windows build, as GitHub (and you) run it |
 | `test/host_test.cpp` | The test (`make test`) |
 | `test/link_sim.cpp`, `test/stubs/` | The lossy-USB test (`make link_sim`) |
 | `../../include/mirror_protocol.h` | The stream format, shared with the firmware |

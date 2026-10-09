@@ -9,7 +9,7 @@
 #include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
 #include "hpil_diag.h"    // BitCells, for the HP-IL signals "Bit cells" setting
 #include "hipi_features.h"  // HIPI_MIRROR_PORT/TRANSPORT, for Settings -> Screen -> Mirror
-#include "display_mirror.h" // displayMirror_setEnabled(), Settings -> Screen -> Mirror
+#include "display_mirror.h" // displayMirror_setMode(), Settings -> Screen -> Mirror to PC
 #include "ff.h"
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
@@ -1049,7 +1049,9 @@ private:
 #if HIPI_DEV_SCREENDUMPS
         devScreendump("Bootsel message");      // last chance -- we reboot next
 #endif
-        sleep_ms(1500);  // long enough to actually read before reboot
+        // Long enough to actually read before reboot -- with the display
+        // mirror kept going, so a PC viewer (hipiview) shows it too
+        displayMirror_goodbye(1500);
         reset_usb_boot(0, 0);
     }
 
@@ -1735,11 +1737,12 @@ private:
             paperItem(),
 #if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
             // The display mirror for tools/hipiview (USB CDC3)
-            value("Mirror to PC", [] { return std::string(displayMirror_enabled() ? "On" : "Off"); },
+            // Off -> View -> Control -> Off
+            value("Mirror to PC", [] { return std::string(displayMirror_modeName(displayMirror_mode())); },
                   [this] {
-                      const bool on = !displayMirror_enabled();
-                      config.setDisplayMirror(on);
-                      displayMirror_setEnabled(on);
+                      const auto next = static_cast<MirrorMode>((static_cast<int>(displayMirror_mode()) + 1) % 3);
+                      config.setDisplayMirror(static_cast<std::uint8_t>(next));
+                      displayMirror_setMode(next);
                       refreshItems();
                   }),
 #endif

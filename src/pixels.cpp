@@ -2,7 +2,16 @@
 
 #include "pixels.h"
 #include "usb_serial.h"
+#include "Effects/Comet.hpp"
+#include "Effects/Marquee.hpp"
+#include "Effects/Stars.hpp"
+#include "Effects/Bounce.hpp"
+#include "Effects/Particles.hpp"
+#include "Effects/Fade.hpp"
+#include "pico/time.h"
 #include <algorithm>
+#include <cstdlib>
+#include <initializer_list>
 #include <string>
 
 
@@ -20,11 +29,51 @@ static void rgb332ToRgb888(std::uint8_t colorByte, std::uint8_t& r, std::uint8_t
     b = static_cast<std::uint8_t>((b2 * 255) / 3);
 }
 
+static PicoLed::Color rgb332Color(double v) {
+    std::uint8_t r, g, b;
+    const int c = static_cast<int>(v);
+    rgb332ToRgb888(static_cast<std::uint8_t>(c < 0 ? 0 : c > 255 ? 255 : c), r, g, b);
+    return PicoLed::RGB(r, g, b);
+}
+
+// A pixel's colour as it's in the strip's buffer. PicoLedController
+// declares getPixelColor() but the library never defines it; its target
+// (protected) has a working one -- reached through a derived class.
+namespace {
+struct ControllerAccess : PicoLed::PicoLedController {
+    static PicoLed::Color pixel(PicoLed::PicoLedController& c, uint index) {
+        return (c.*(&ControllerAccess::target))->getPixelColor(index);
+    }
+};
+}  // namespace
+
+// ─── Rainbow effect ─────────────────────────────────────────────────────────
+// Not one of PicoLED's own effects: the whole range in rainbow colours,
+// rolling along. speed: hue steps (of 256) a second; step: hue difference
+// between neighbouring pixels.
+namespace {
+class RainbowEffect : public PicoLed::PicoLedEffect {
+public:
+    RainbowEffect(PicoLed::PicoLedController& c, double speed, double step)
+        : PicoLed::PicoLedEffect(c), speed_(speed), step_(step) {}
+protected:
+    bool update(uint32_t timeGone, uint32_t) override {
+        hue_ += speed_ * static_cast<double>(timeGone) / 1000.0;
+        while (hue_ >= 256.0) hue_ -= 256.0;
+        controller.fillRainbow(static_cast<std::uint8_t>(hue_), static_cast<std::uint8_t>(step_));
+        return true;
+    }
+private:
+    double speed_, step_, hue_ = 0.0;
+};
+}  // namespace
+
 // ─── CPixelStrip ────────────────────────────────────────────────────────────
 
 CPixelStrip::CPixelStrip(uint pin, uint count, PIO pio, uint sm)
     : strip_(PicoLed::addLeds<PicoLed::WS2812B>(pio, sm, pin, count, PIXEL_COLOR_ORDER)),
       count_(count),
+      active_(std::min<uint32_t>(PIXEL_COUNT_INITIAL, count)),
       lastR_(count, 0), lastG_(count, 0), lastB_(count, 0),
       currentR_(count, 0), currentG_(count, 0), currentB_(count, 0) {
     strip_.setBrightness(255);  // full brightness by default -- the "S" ASCII
@@ -97,7 +146,7 @@ void CPixelStrip::on(uint32_t index) {
 
 void CPixelStrip::setBrightness(std::uint8_t pct) {
     const std::uint8_t clamped = pct > 100 ? 100 : pct;
-    strip_.setBrightness(static_cast<std::uint8_t>((static_cast<uint16_t>(clamped) * 255) / 100));
+    brightness_ = static_cast<std::uint8_t>((static_cast<uint16_t>(clamped) * 255) / 100);
 }
 
 void CPixelStrip::clear() {
@@ -108,7 +157,152 @@ void CPixelStrip::clear() {
 }
 
 void CPixelStrip::show() {
+    // Current limit (PIXEL_POWER_LIMIT_MA): the sum of all channel levels
+    // times the brightness, against what the limit allows
+    std::uint32_t sum = 0;
+    for (uint32_t i = 0; i < count_; ++i) {
+        const PicoLed::Color c = ControllerAccess::pixel(strip_, i);
+        sum += static_cast<std::uint32_t>(c.red) + c.green + c.blue;
+    }
+    constexpr std::uint32_t kLimit = static_cast<std::uint32_t>(PIXEL_POWER_LIMIT_MA) * 255u * 255u /
+                                     PIXEL_MA_PER_CHANNEL;
+    std::uint32_t level = brightness_;
+    if (sum > 0 && sum * level > kLimit) {
+        // In steps of 8, so an effect doesn't change it every frame
+        level = std::max<std::uint32_t>(1, (kLimit / sum) & ~7u);
+    }
+    // (PicoLED logs every brightness change: only when it changes)
+    if (level != applied_) {
+        strip_.setBrightness(static_cast<std::uint8_t>(level));
+        applied_ = static_cast<std::uint8_t>(level);
+    }
     strip_.show();
+}
+
+void CPixelStrip::_blank(uint32_t first, uint32_t last) {
+    for (uint32_t i = first; i <= last && i < count_; ++i) {
+        strip_.setPixelColor(i, PicoLed::RGB(0, 0, 0));
+        _setCurrent(i, 0, 0, 0);
+    }
+}
+
+void CPixelStrip::setActiveCount(uint32_t n, bool notify) {
+    n = std::max<uint32_t>(1, std::min(n, count_));
+    if (n == active_) return;
+    if (n < active_) {
+        stopEffects(n, count_ - 1);         // effects reaching beyond the new end
+        _blank(n, count_ - 1);
+        show();
+    }
+    MTRC_LOGF("%lu pixel(s) connected", static_cast<unsigned long>(n));
+    active_ = n;
+    if (notify && countChanged_) countChanged_(n);
+}
+
+bool CPixelStrip::stopEffects(uint32_t first, uint32_t last) {
+    bool any = false;
+    for (auto it = effects_.begin(); it != effects_.end(); ) {
+        if (it->first <= last && first <= it->last) {
+            MTRC_LOGF("effect on %lu-%lu stopped", static_cast<unsigned long>(it->first + 1),
+                      static_cast<unsigned long>(it->last + 1));
+            _blank(it->first, it->last);
+            it = effects_.erase(it);
+            any = true;
+        } else {
+            ++it;
+        }
+    }
+    return any;
+}
+
+bool CPixelStrip::startEffect(uint32_t first, uint32_t last, char type,
+                              const std::vector<std::vector<double>>& params) {
+    if (first > last || last >= active_) return false;
+    const uint32_t n = last - first + 1;
+    // Parameter k (single number) or its default, clamped to lo..hi
+    auto num = [&](std::size_t k, double def, double lo, double hi) {
+        double v = (k < params.size() && !params[k].empty()) ? params[k][0] : def;
+        return v < lo ? lo : v > hi ? hi : v;
+    };
+    // Parameter k as a palette (RGB332 numbers), or the default colours
+    auto palette = [&](std::size_t k, std::initializer_list<int> def) {
+        std::vector<PicoLed::Color> pal;
+        if (k < params.size() && !params[k].empty()) {
+            for (double v : params[k]) pal.push_back(rgb332Color(v));
+        } else {
+            for (int v : def) pal.push_back(rgb332Color(v));
+        }
+        return pal;
+    };
+
+    if (type == 'F' && n < 3) {
+        MLOGF("effect F (fire) needs at least 3 pixels -- ignored");
+        return false;
+    }
+    stopEffects(first, last);                     // what ran there before
+    // The effect sees only its own pixels (a VirtualStrip over them)
+    PicoLed::PicoLedController part = strip_.slice(first, last + 1);
+    std::unique_ptr<PicoLed::PicoLedEffect> fx;
+    switch (type) {
+    case 'C':   // colour : speed (pixels/s) : length : fade
+        fx.reset(new PicoLed::Comet(part, palette(0, { 255 })[0], num(1, 8, 0.1, 500),
+                                    num(2, 2, 0.5, n), num(3, 2, 0.05, 50)));
+        break;
+    case 'M':   // palette : length : speed : spacing
+        fx.reset(new PicoLed::Marquee(part, palette(0, { 224, 28, 3 }), num(1, 2, 0.5, n),
+                                      num(2, 4, -500, 500), num(3, 1, 0, n)));
+        break;
+    case 'S':   // palette : stars a second : fade
+        fx.reset(new PicoLed::Stars(part, palette(0, { 255 }), num(1, 3, 0.1, 100), num(2, 1, 0.05, 50)));
+        break;
+    case 'B': { // balls : palette : gravity : fade
+        auto* b = new PicoLed::Bounce(part, num(3, 3, 0.05, 50), num(2, 20, 1, 500));
+        const auto pal = palette(1, { 224, 28, 3 });
+        const int balls = static_cast<int>(num(0, 3, 1, 8));
+        for (int i = 0; i < balls; ++i) b->addBall(pal[static_cast<std::size_t>(i) % pal.size()], 1.0);
+        fx.reset(b);
+        break;
+    }
+    case 'F': { // intensity : spread : cooling
+        static const int kFire[][3] = { { 0, 0, 0 }, { 160, 0, 0 }, { 255, 80, 0 },
+                                        { 255, 200, 0 }, { 255, 255, 160 } };
+        std::vector<PicoLed::Color> pal;
+        for (const auto& c : kFire) pal.push_back(PicoLed::RGB(c[0], c[1], c[2]));
+        auto* f = new PicoLed::Particles(part, pal, num(1, 1, 0.1, 10), num(2, 1, 0.05, 20));
+        f->addSource(0, num(0, 2, 0.1, 50));
+        fx.reset(f);
+        break;
+    }
+    case 'O':   // rate
+        fx.reset(new PicoLed::Fade(part, PicoLed::RGB(0, 0, 0), num(0, 1, 0.05, 50)));
+        break;
+    case 'R':   // speed : step
+        fx.reset(new RainbowEffect(part, num(0, 40, -1000, 1000), num(1, std::max(1.0, 256.0 / n), 0, 255)));
+        break;
+    default:
+        MLOGF("unknown effect '%c' -- ignored", type);
+        return false;
+    }
+    // Room for it: the oldest one goes
+    if (effects_.size() >= PIXEL_MAX_EFFECTS) {
+        _blank(effects_.front().first, effects_.front().last);
+        effects_.erase(effects_.begin());
+    }
+    effects_.push_back(Effect{ first, last, std::move(fx) });
+    MTRC_LOGF("effect %c on %lu-%lu started", type, static_cast<unsigned long>(first + 1),
+              static_cast<unsigned long>(last + 1));
+    nextFrameMs_ = 0;                             // first frame at once
+    return true;
+}
+
+void CPixelStrip::poll() {
+    if (effects_.empty()) return;
+    const uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (static_cast<std::int32_t>(now - nextFrameMs_) < 0) return;
+    nextFrameMs_ = now + PIXEL_FRAME_MS;
+    bool changed = false;
+    for (Effect& e : effects_) changed |= e.fx->animate();
+    if (changed) show();
 }
 
 // The project's single, global pixel strip -- mirrors leds.cpp's own
@@ -130,6 +324,63 @@ void CPixelParser::_reset() {
     _runCount = _runStart = _runIndex = 0;
     _run332 = false;
     _runR = _runG = 0;
+    _effectType = 0;
+    _effectParams.clear();
+}
+
+// ─── Selections, effects ────────────────────────────────────────────────────
+
+bool CPixelParser::_selectionRange(uint32_t& first, uint32_t& last) const {
+    const uint32_t n = _strip.count();
+    if (_selectAll || _selectFrom < 0) {          // "0", or nothing: all
+        first = 0;
+        last = n - 1;
+        return true;
+    }
+    const int32_t from = std::max<int32_t>(1, _selectFrom);
+    const int32_t to = (_selectTo >= 0) ? _selectTo : _selectFrom;
+    if (to < from || static_cast<uint32_t>(from) > n) return false;
+    first = static_cast<uint32_t>(from - 1);
+    last = std::min<uint32_t>(static_cast<uint32_t>(to), n) - 1;
+    return true;
+}
+
+void CPixelParser::_claimSelection() {
+    // (no selection at all: the command does nothing, so nothing to stop)
+    if (!_selectAll && _selectFrom < 0) return;
+    uint32_t first, last;
+    if (_selectionRange(first, last)) _strip.stopEffects(first, last);
+}
+
+void CPixelParser::_stopEffectsInSelection() {
+    uint32_t first, last;
+    if (!_selectionRange(first, last)) return;
+    if (_strip.stopEffects(first, last)) _strip.show();
+}
+
+// The collected "E<t><params>": parameters are numbers, ':' between them
+// and ',' between the colours of a palette (see pixels.h)
+void CPixelParser::_startEffect() {
+    std::vector<std::vector<double>> params(1);
+    const char* p = _effectParams.c_str();
+    while (*p != '\0') {
+        if (*p == ':') { params.emplace_back(); ++p; continue; }
+        if (*p == ',') { ++p; continue; }
+        char* end = nullptr;
+        const double v = std::strtod(p, &end);
+        if (end == p) { ++p; continue; }          // not a number: skip it
+        params.back().push_back(v);
+        p = end;
+    }
+    uint32_t first, last;
+    if (!_selectionRange(first, last)) {
+        MLOGF("effect %c: pixels %s aren't connected (%lu) -- ignored", _effectType,
+              _selectionDesc().c_str(), static_cast<unsigned long>(_strip.count()));
+        return;
+    }
+    MTRC_LOGF("effect %c on %s, parameters \"%s\"", _effectType, _selectionDesc().c_str(),
+              _effectParams.c_str());
+    if (_strip.startEffect(first, last, _effectType, params)) _strip.show();
 }
 
 std::string CPixelParser::_selectionDesc() const {
@@ -147,6 +398,9 @@ const char* CPixelParser::_stateName(State s) {
     switch (s) {
         case State::Idle:            return "Idle";
         case State::AwaitBrightness: return "AwaitBrightness";
+        case State::AwaitCount:      return "AwaitCount";
+        case State::AwaitEffectType: return "AwaitEffectType";
+        case State::AwaitEffectParams: return "AwaitEffectParams";
         case State::AwaitX:          return "AwaitX";
         case State::AwaitY1:         return "AwaitY1";
         case State::AwaitY2:         return "AwaitY2";
@@ -196,6 +450,9 @@ void CPixelParser::feed(std::uint8_t c) {
             }  // count=0: nothing to apply
             MTRC_LOGF("run(%s): count=%u start=%u",
                              _run332 ? "RGB332" : "RGB24", _runCount, _runStart);
+            // The pixels it sets: no effect there any more
+            if (_runStart == 0) _strip.stopAllEffects();
+            else _strip.stopEffects(_runStart - 1u, _runStart - 1u + _runCount - 1u);
             _state = _run332 ? State::AwaitRun332 : State::AwaitRunR;
             return;
 
@@ -237,6 +494,7 @@ void CPixelParser::feed(std::uint8_t c) {
         // never interpreted as digits/separators. ──────────────────────
         case State::AwaitX:
             MTRC_LOGF("set %s = RGB332 0x%02X", _selectionDesc().c_str(), c);
+            _claimSelection();
             _applyToSelection332(c);
             _strip.show();
             _reset();
@@ -257,9 +515,45 @@ void CPixelParser::feed(std::uint8_t c) {
                 MLOGF("set %s = RGB(%u,%u,%u)",
                      _selectionDesc().c_str(), _runR, _runG, c);
             }
+            _claimSelection();
             _applyToSelection(_runR, _runG, c);
             _strip.show();
             _reset();
+            return;
+
+        // ── Pixel count digits ('N' seen) ────────────────────────────────
+        case State::AwaitCount:
+            if (c >= '0' && c <= '9') {
+                _paramVal = std::min<int32_t>(_paramVal * 10 + (int32_t)(c - '0'), 1000);
+                _hasDigit = true;
+                return;
+            }
+            if (_hasDigit) _strip.setActiveCount(static_cast<uint32_t>(_paramVal));
+            _reset();
+            feed(c);                       // the byte that ended it, from Idle
+            return;
+
+        // ── Effect ('E' seen): its letter, then its parameters ───────────
+        case State::AwaitEffectType:
+            if (c == ' ' || c == '\n' || c == '\r' || c == ';' || c == '\0') {
+                MTRC_LOGF("effects stopped: %s", _selectionDesc().c_str());
+                _stopEffectsInSelection();     // "E" alone: stop
+                _reset();
+                return;
+            }
+            _effectType = static_cast<char>((c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c);
+            _effectParams.clear();
+            _state = State::AwaitEffectParams;
+            return;
+
+        case State::AwaitEffectParams:
+            if ((c >= '0' && c <= '9') || c == '.' || c == ',' || c == ':' || c == '-') {
+                if (_effectParams.size() < 64) _effectParams.push_back(static_cast<char>(c));
+                return;
+            }
+            _startEffect();
+            _reset();
+            feed(c);                       // the byte that ended it, from Idle
             return;
 
         // ── Brightness digits ('S' seen) ─────────────────────────────────
@@ -285,7 +579,7 @@ void CPixelParser::feed(std::uint8_t c) {
         // ── Idle: pixel selection digits, '-' range separator, or a
         // command letter. ────────────────────────────────────────────────
         case State::Idle:
-            if (c == ' ' || c == '\n' || c == ';' || c == '\0') {
+            if (c == ' ' || c == '\n' || c == '\r' || c == ';' || c == '\0') {
                 _reset();  // no active command -- nothing to finalize
                 return;
             }
@@ -317,10 +611,14 @@ void CPixelParser::feed(std::uint8_t c) {
             switch (c) {
                 case 'C':
                     MTRC_LOGF("off: %s", _selectionDesc().c_str());
+                    _claimSelection();
                     _onOff(); _strip.show(); _reset(); return;
                 case 'O':
                     MTRC_LOGF("on: %s", _selectionDesc().c_str());
+                    _claimSelection();
                     _onOn();  _strip.show(); _reset(); return;
+                case 'N': _paramVal = 0; _hasDigit = false; _state = State::AwaitCount; return;
+                case 'E': _state = State::AwaitEffectType; return;
                 case 'S': _state = State::AwaitBrightness; return;
                 case 'X': _state = State::AwaitX; return;
                 case 'Y': _state = State::AwaitY1; return;
@@ -356,6 +654,12 @@ void CPixelParser::flush() {
         MTRC_LOGF("brightness -> %ld%% (at flush)", static_cast<long>(pct));
         _strip.setBrightness(static_cast<std::uint8_t>(pct));
         _strip.show();
+    } else if (_state == State::AwaitCount) {
+        if (_hasDigit) _strip.setActiveCount(static_cast<uint32_t>(_paramVal));
+    } else if (_state == State::AwaitEffectType) {
+        _stopEffectsInSelection();
+    } else if (_state == State::AwaitEffectParams) {
+        _startEffect();
     } else {
         // Any other pending state at flush() means the transmission ended
         // mid-command -- e.g. '#'/'@' cut off before its run finished, or

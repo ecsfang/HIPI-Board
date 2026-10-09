@@ -25,6 +25,23 @@
 // pos(4): send again from pos. HIPI keeps every frame until it is
 // acknowledged. The packets below are the frames' payloads, one after
 // another (a packet may span frames).
+//
+// INPUT: with the setting Mirror to PC < Control >, the viewer can also
+// work HIPI's touch screen and buttons (otherwise these are ignored):
+//   'T' sid x(2) y(2) state   the mouse as a finger on the panel, in panel
+//                              pixels; state 1 = down (or moved while
+//                              down), 0 = lifted. Repeated every 200 ms
+//                              while down: HIPI lifts the finger by itself
+//                              after 1 s without news (a lost "lifted").
+//   'B' sid code state        a button: code 1 Shift, 2 OK, 3 Up, 4 Down,
+//                              5 X, 6 next view, 7 previous view; state
+//                              1 = pressed, 0 = released. Repeated every
+//                              200 ms while held, like 'T'.
+// HIPI tells the viewer the setting -- kMode 0x1A mode(1), 1 = View,
+// 2 = Control -- at the start of a session and whenever it changes, so the
+// viewer can say when its clicks are going nowhere.
+// The viewer holds a press at least 100 ms, so HIPI's touch debouncing
+// (about 60 ms) sees it.
 // With nothing to send, HIPI sends an empty frame (len 0) every second. A
 // viewer that hears nothing for a few seconds knows the session has ended
 // and asks for a new one; a viewer that has everything acknowledges a
@@ -118,9 +135,17 @@ constexpr std::uint8_t kSyncDone  = 0x16;
 constexpr std::uint8_t kAssetUse  = 0x17;
 constexpr std::uint8_t kAssetBegin = 0x18;
 constexpr std::uint8_t kAssetEnd  = 0x19;
+constexpr std::uint8_t kMode      = 0x1A;   // mode(1): the Mirror to PC setting (see below)
+constexpr std::uint8_t kBye       = 0x1B;   // HIPI restarts now (Bootsel mode): the
+                                            // picture is final, a new HIPI comes later
 constexpr int kMaxViewerAssets = 32;     // ids a request may list
 
-constexpr std::uint8_t kVersion   = 4;
+constexpr std::uint8_t kVersion   = 5;
+// Input from the viewer (see INPUT above)
+constexpr std::uint8_t kMsgTouch  = 'T';
+constexpr std::uint8_t kMsgButton = 'B';
+constexpr std::size_t  kMsgTouchLen  = 7;
+constexpr std::size_t  kMsgButtonLen = 4;
 constexpr std::uint8_t kFrame0    = 0xA5;
 constexpr std::uint8_t kFrame1    = 0x5A;
 constexpr std::size_t  kFrameHeader = 11;

@@ -5,8 +5,11 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <memory>
+#include <functional>
 #include "hardware/pio.h"
 #include "../PicoLED/PicoLed.hpp"
+#include "../PicoLED/PicoLedEffect.hpp"
 
 // ─── Pin/PIO configuration (edit here) ───────────────────────────────────────
 // PIXEL_PIO is pio1, to stay clear of pio0, which the HP-IL loop owns (see
@@ -36,6 +39,25 @@
 // go as high as 256 without changing the protocol at all).
 #define PIXEL_COUNT_DEFAULT 32
 
+// How many of them are really connected is told by the controller ("0N8",
+// see CPixelParser) -- HIPI can't detect it -- and kept in CONFIG.TXT
+// (pixel_count). Until then: the five on the board (D12-D16). The board's
+// pixels and a strip on the connector get the same data, so the board's
+// show what the strip's first five show: n is the larger of the two.
+#define PIXEL_COUNT_INITIAL 5
+
+// Current limit: the strip has no supply of its own, it runs off the
+// board's 5 V (USB). show() lowers the brightness for a frame that would
+// draw more than this (e.g. many pixels at full white). A WS2812 draws
+// about 20 mA per colour channel at full level.
+#define PIXEL_POWER_LIMIT_MA  400
+#define PIXEL_MA_PER_CHANNEL  20
+
+// Effects running at the same time (each on its own range of pixels)
+#define PIXEL_MAX_EFFECTS     4
+// Effects are animated at most this often
+#define PIXEL_FRAME_MS        20
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  CPixelStrip -- thin wrapper around PicoLED's own strip object
 //
@@ -49,7 +71,30 @@ class CPixelStrip {
 public:
     CPixelStrip(uint pin, uint count, PIO pio = PIXEL_PIO, uint sm = PIXEL_SM);
 
-    uint32_t count() const { return count_; }
+    // The pixels really connected (1..capacity()): "all" means these, and
+    // higher pixel numbers are ignored. The buffer itself always holds
+    // capacity() pixels.
+    uint32_t count() const { return active_; }
+    uint32_t capacity() const { return count_; }
+    // Sets count(); pixels above a lower count are switched off (and any
+    // effect running there stops). Calls the count-changed callback (to
+    // save it) unless notify is false.
+    void setActiveCount(uint32_t n, bool notify = true);
+    void setCountChangedCallback(std::function<void(uint32_t)> cb) { countChanged_ = std::move(cb); }
+
+    // ── Effects (PicoLED's effect classes, see CPixelParser's 'E') ──────
+    // Starts effect `type` (a letter: C M S B F O R) on pixels first..last
+    // (0-based, inclusive) with the given parameters: groups (':') of
+    // numbers (','); an empty group means "default". Replaces effects it
+    // overlaps. Returns false (and logs why) if it can't.
+    bool startEffect(uint32_t first, uint32_t last, char type,
+                     const std::vector<std::vector<double>>& params);
+    // Stops the effects overlapping first..last and switches their pixels
+    // off. True if there was one.
+    bool stopEffects(uint32_t first, uint32_t last);
+    void stopAllEffects() { stopEffects(0, count_ - 1); }
+    // Main loop: animates the running effects
+    void poll();
 
     // colorByte: RGB332 -- bits [7:5]=R (3 bits), [4:2]=G (3 bits), [1:0]=B
     // (2 bits) -- scaled up to 8 bits per channel; see pixels.cpp's own
@@ -76,7 +121,8 @@ public:
     void on(uint32_t index);
 
     // Whole-strip brightness, 0-100% -- scaled to PicoLED's own 0-255
-    // range. Does NOT itself call show() -- see that method's own note.
+    // range. Takes effect at the next show() (which may lower it further,
+    // see PIXEL_POWER_LIMIT_MA).
     void setBrightness(std::uint8_t pct);
 
     // All pixels off (black). Not visible until show() is also called.
@@ -97,7 +143,19 @@ private:
     void _traceOutOfRange(uint32_t index, const char* what) const;
 
     PicoLed::PicoLedController strip_;
-    uint32_t count_;  // cached at construction -- see count()'s own comment
+    uint32_t count_;   // the buffer size (capacity())
+    uint32_t active_;  // pixels really connected (count())
+    std::function<void(uint32_t)> countChanged_;
+    std::uint8_t brightness_ = 255;   // set with setBrightness() (0-255)
+    std::uint8_t applied_ = 255;      // last given to PicoLED (after the current limit)
+
+    struct Effect {
+        uint32_t first, last;                         // 0-based, inclusive
+        std::unique_ptr<PicoLed::PicoLedEffect> fx;
+    };
+    std::vector<Effect> effects_;
+    uint32_t nextFrameMs_ = 0;
+    void _blank(uint32_t first, uint32_t last);
     // Per-pixel "last non-off color" cache -- on() restores from here (see
     // its own comment above); PicoLED's own getPixelColor() can't serve
     // this purpose since off() and clear() both actually zero the real
@@ -137,6 +195,23 @@ extern CPixelStrip pixelStrip;
 //                      digits; the literal byte value right after 'X'
 //         Y<r><g><b>   set color, THREE raw bytes (24-bit RGB) -- again
 //                      literal byte values, not ASCII digits
+//         Nn           how many pixels are connected (1-32) -- ignores
+//                      any selection; saved in CONFIG.TXT. "All" (0) means
+//                      these n, higher pixel numbers are ignored.
+//         E<t><params> start effect t on the selection (no selection or
+//                      0 = all); "E" alone stops the effects there.
+//                      Parameters are decimal numbers: ':' between
+//                      parameters, ',' between the colours of a palette,
+//                      an empty one is the default. Colours are RGB332
+//                      numbers (224 red, 28 green, 3 blue, 255 white).
+//           EC col:speed:length:fade         comet bouncing back and forth
+//           EM pal:length:speed:spacing      marquee (rolling colour bands)
+//           ES pal:rate:fade                 stars twinkling
+//           EB balls:pal:gravity:fade        bouncing balls
+//           EF intensity:spread:cooling      fire (needs 3+ pixels)
+//           EO rate                          fade out to black
+//           ER speed:step                    rolling rainbow
+//         Setting pixels with C/O/X/Y/#/@ stops an effect running on them.
 //
 //       Examples:
 //         "0C"             all pixels off
@@ -144,6 +219,10 @@ extern CPixelStrip pixelStrip;
 //         "1X<byte>"       the first pixel to an RGB332 color
 //         "3-10X<byte>"    pixels 3..10 to the same RGB332 color
 //         "0Y<r><g><b>"    all pixels to the same 24-bit color
+//         "0N10"           10 pixels are connected
+//         "1-5ES255,252:4" stars on pixels 1..5, white and yellow, 4 a second
+//         "6-10EC224:12"   a red comet on pixels 6..10, 12 pixels a second
+//         "0E"             stop all effects
 //
 //  2) Binary "run" mode for detailed, sequential per-pixel colors -- one
 //     command byte selects the format, then an explicit count (so the
@@ -183,6 +262,9 @@ private:
     enum class State {
         Idle,             // awaiting pixel-selector digits or a command letter
         AwaitBrightness,  // 'S' seen, awaiting decimal digits
+        AwaitCount,       // 'N' seen, awaiting decimal digits
+        AwaitEffectType,  // 'E' seen, awaiting the effect letter (or the end: stop)
+        AwaitEffectParams,// effect letter seen, collecting its parameters
         AwaitX,           // 'X' seen, awaiting exactly 1 raw color byte
         AwaitY1, AwaitY2, AwaitY3,  // 'Y' seen, awaiting 3 raw color bytes
         AwaitRunCount,    // '#' or '@' seen, awaiting the 1-byte count
@@ -209,6 +291,17 @@ private:
     std::vector<std::array<std::uint8_t, 3>> _runPattern;   // start 0: colors to repeat
     void _runPixel(std::uint8_t a, std::uint8_t g, std::uint8_t b, bool is332);
     void _runFinish();
+
+    // Effect being given ('E')
+    char        _effectType;
+    std::string _effectParams;
+    void _startEffect();              // the collected 'E' command
+    void _stopEffectsInSelection();
+    // The current selection as 0-based first..last within count() --
+    // false if there is none (or it's beyond count())
+    bool _selectionRange(uint32_t& first, uint32_t& last) const;
+    // Before a command sets pixels: stops the effects running there
+    void _claimSelection();
 
     void _reset();
     void _finalize();                 // apply the current ASCII group

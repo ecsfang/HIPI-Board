@@ -84,6 +84,7 @@ extern void init_spi(void);
 #include "hpil_diag.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
+#include "pixels.h"      // pixelStrip: pixel count (saved), effects (main loop)
 #include "display_mirror.h"   // the display mirrored to a PC (tools/hipiview)
 #include "config.hpp"
 #include "drive.h"
@@ -505,7 +506,14 @@ int main() {
     hipi::chartable_init(display);           // System -> Character table
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
     hipi::hpil_diag_setBitCells(static_cast<hipi::BitCells>(config.signalCells()));   // saved
-    hipi::displayMirror_setEnabled(config.displayMirror());   // Settings -> Screen -> Mirror to PC (saved)
+    // TFPIXEL: the number of pixels connected, as the controller last said
+    pixelStrip.setActiveCount(config.pixelCount(), /*notify=*/false);
+    pixelStrip.setCountChangedCallback([](uint32_t n) { config.setPixelCount(static_cast<std::uint8_t>(n)); });
+    hipi::displayMirror_setMode(static_cast<hipi::MirrorMode>(config.displayMirror()));   // Settings -> Screen -> Mirror to PC (saved)
+    // Mirror to PC < Control >: the mouse and keys in hipiview
+    hipi::displayMirror_setInputHandlers(
+        [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },
+        [](std::uint8_t code, bool down) { hipi::boardui_remoteButton(code, down); });
     hipi::clock_init(display);               // DS3231 clock, clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
@@ -633,6 +641,7 @@ int main() {
         hipi::backlight_poll();      // screen saver (dim / clock) after a while without use
         hipi::displayMirror_poll();  // the display mirrored to a PC viewer (display_mirror.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
+        pixelStrip.poll();           // TFPIXEL effects (pixels.h)
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
         hipi::loopmap_poll();        // HP-IL loop map: learn from the traffic, redraw

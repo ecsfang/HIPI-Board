@@ -117,7 +117,7 @@ void ringWrite(const std::uint8_t* data, std::size_t n) {
 // programs) never set off a session.
 constexpr char kRequest[] = "HIPIVIEW";
 std::size_t requestMatch_ = 0;
-enum class Req { Magic, Count, Ids, Ack };
+enum class Req { Magic, Count, Ids, Ack, Input };
 Req req_ = Req::Magic;
 int idsWanted_ = 0, idBytes_ = 0;
 std::uint32_t ids_[mirror::kMaxViewerAssets];
@@ -125,6 +125,85 @@ absolute_time_t reqDeadline_;
 bool requestPending_ = false;      // a complete request arrived
 std::uint8_t ackMsg_[6];
 int ackLen_ = 0;
+std::uint8_t inMsg_[8];               // 'T' / 'B' from the viewer
+std::size_t inLen_ = 0, inWant_ = 0;
+
+MirrorMode mode_ = MirrorMode::Off;   // the setting (config display_mirror)
+MirrorTouchHandler touchHandler_;
+MirrorButtonHandler buttonHandler_;
+bool inputHeld_ = false;              // the viewer has a finger/button down
+bool inputSaid_ = false;              // input logged once for this session
+
+// Input is queued here and handed to the handlers only from the top of
+// displayMirror_poll() (deliverInput()). serviceRx() also runs while the
+// ring is full -- from RingSink::put(), i.e. in the middle of some drawing
+// -- and a handler that draws (a button press opens a menu...) must never
+// run in there: it would draw into a half-done drawing and, through
+// put() again, nest without end. (It did: HIPI crashed.)
+struct QueuedInput { char kind; std::uint8_t code, down; std::uint16_t x, y; };   // kind 'T', 'B', 'R' (release all)
+constexpr int kInputQueue = 16;
+QueuedInput inQueue_[kInputQueue];
+int inQueueHead_ = 0, inQueueCount_ = 0;
+
+void queueInput(const QueuedInput& q) {
+    if (inQueueCount_ == kInputQueue) {           // full: the oldest goes (repeats come anyway)
+        inQueueHead_ = (inQueueHead_ + 1) % kInputQueue;
+        --inQueueCount_;
+    }
+    inQueue_[(inQueueHead_ + inQueueCount_) % kInputQueue] = q;
+    ++inQueueCount_;
+}
+
+void deliverInput() {
+    while (inQueueCount_ > 0) {
+        const QueuedInput q = inQueue_[inQueueHead_];
+        inQueueHead_ = (inQueueHead_ + 1) % kInputQueue;
+        --inQueueCount_;
+        if (q.kind == 'T') {
+            if (touchHandler_) touchHandler_(q.down != 0, q.x, q.y);
+        } else if (q.kind == 'B') {
+            if (buttonHandler_) buttonHandler_(q.code, q.down != 0);
+        } else {
+            if (touchHandler_) touchHandler_(false, 0, 0);
+            if (buttonHandler_) buttonHandler_(0, false);
+        }
+    }
+}
+
+// Lets go of whatever the viewer holds (session over, Control off)
+void releaseInput() {
+    if (!inputHeld_) return;
+    inputHeld_ = false;
+    inQueueCount_ = 0;                            // what's still waiting doesn't count any more
+    queueInput({ 'R', 0, 0, 0, 0 });
+}
+
+void handleInput(const std::uint8_t* m) {
+    // Only in Control, and only from the viewer of the running session
+    if (ring_ == nullptr || m[1] != sid_) return;
+    if (mode_ != MirrorMode::Control) {
+        if (!inputSaid_) {
+            LOGF("\r\n * Display mirror: mouse/keys from the viewer ignored -- "
+                 "Mirror to PC is %s (Control lets them through)", displayMirror_modeName(mode_));
+            inputSaid_ = true;
+        }
+        return;
+    }
+    if (!inputSaid_) {
+        LOGF("\r\n * Display mirror: the viewer is using the mouse/keys");
+        inputSaid_ = true;
+    }
+    if (m[0] == mirror::kMsgTouch) {
+        const bool down = m[6] != 0;
+        const std::uint16_t x = static_cast<std::uint16_t>(m[2] | (m[3] << 8));
+        const std::uint16_t y = static_cast<std::uint16_t>(m[4] | (m[5] << 8));
+        if (down) inputHeld_ = true;
+        queueInput({ 'T', 0, static_cast<std::uint8_t>(down), x, y });
+    } else {
+        if (m[3] != 0) inputHeld_ = true;
+        queueInput({ 'B', m[2], m[3], 0, 0 });
+    }
+}
 
 void handleAck(const std::uint8_t* m) {
     if (ring_ == nullptr || m[1] != sid_) return;          // another session's
@@ -158,6 +237,11 @@ void serviceRx() {
                     ackMsg_[0] = b;
                     ackLen_ = 1;
                     req_ = Req::Ack;
+                } else if (requestMatch_ == 0 && (b == mirror::kMsgTouch || b == mirror::kMsgButton)) {
+                    inMsg_[0] = b;
+                    inLen_ = 1;
+                    inWant_ = b == mirror::kMsgTouch ? mirror::kMsgTouchLen : mirror::kMsgButtonLen;
+                    req_ = Req::Input;
                 } else if (b == static_cast<std::uint8_t>(kRequest[requestMatch_])) {
                     if (++requestMatch_ == sizeof(kRequest) - 1) {
                         requestMatch_ = 0;
@@ -171,6 +255,10 @@ void serviceRx() {
             case Req::Ack:
                 ackMsg_[ackLen_++] = b;
                 if (ackLen_ == 6) { handleAck(ackMsg_); req_ = Req::Magic; }
+                break;
+            case Req::Input:
+                inMsg_[inLen_++] = b;
+                if (inLen_ == inWant_) { handleInput(inMsg_); req_ = Req::Magic; }
                 break;
             case Req::Count:
                 idsWanted_ = std::min<int>(b, mirror::kMaxViewerAssets);
@@ -238,7 +326,6 @@ DisplayDriver* display_ = nullptr;
 
 enum class State { Off, Dump, Live };
 State state_ = State::Off;
-bool mirrorOn_ = false;     // the setting (config display_mirror)
 [[maybe_unused]] bool toldOff_ = false;      // "mirror is off" already logged for this viewer
 [[maybe_unused]] bool viewerSeen_ = false;   // hipiview has asked on this connection
 
@@ -285,15 +372,66 @@ std::uint32_t displayMirror_fileAssetId(const char* path, std::uint32_t salt) {
 
 bool displayMirror_active() { return state_ != State::Off; }
 
-void displayMirror_setEnabled(bool on) { mirrorOn_ = on; }
-bool displayMirror_enabled() { return mirrorOn_; }
+// Tells the viewer the setting (mirror_protocol.h, kMode)
+static void sendMode() {
+    if (state_ == State::Off || !encoder_.enabled()) return;
+    const std::uint8_t p[2] = { mirror::kMode, static_cast<std::uint8_t>(mode_) };
+    encoder_.emit(p, sizeof p);
+}
+
+void displayMirror_setMode(MirrorMode m) {
+    if (m == mode_) return;
+    mode_ = m;
+    inputSaid_ = false;
+    if (m != MirrorMode::Control) releaseInput();
+    sendMode();
+}
+MirrorMode displayMirror_mode() { return mode_; }
+const char* displayMirror_modeName(MirrorMode m) {
+    switch (m) {
+    case MirrorMode::View:    return "View";
+    case MirrorMode::Control: return "Control";
+    default:                  return "Off";
+    }
+}
+void displayMirror_setInputHandlers(MirrorTouchHandler touch, MirrorButtonHandler button) {
+    touchHandler_ = std::move(touch);
+    buttonHandler_ = std::move(button);
+}
+
+void displayMirror_goodbye(std::uint32_t ms) {
+    const absolute_time_t until = make_timeout_time_ms(ms);
+#if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+    if (state_ != State::Off && encoder_.enabled()) {
+        const std::uint8_t bye = mirror::kBye;
+        encoder_.emit(&bye, 1);
+    }
+    while (!time_reached(until)) {
+        tud_task();
+        if (state_ == State::Off || ring_ == nullptr || !tud_cdc_n_connected(kItf)) continue;
+        encoder_.flush();
+        serviceRx();              // acknowledgements (input is only queued)
+        pumpUsb();
+    }
+#else
+    while (!time_reached(until)) tud_task();
+#endif
+}
+
+static void pollMirror();
 
 void displayMirror_poll() {
+    pollMirror();
+    deliverInput();          // here, at the top level -- see queueInput()
+}
+
+static void pollMirror() {
 #if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
     if (display_ == nullptr) return;
     // Ends a running session: no more mirroring, the buffers go back
     auto endSession = [](const char* why) {
         if (state_ == State::Off) return;
+        releaseInput();                      // nobody's finger on the panel any more
         encoder_.setEnabled(false);
         ringFree_();
         tud_cdc_n_write_clear(kItf);         // nothing stale for the next viewer
@@ -314,7 +452,7 @@ void displayMirror_poll() {
     bool requested = requestPending_;
     requestPending_ = false;
     if (requested) viewerSeen_ = true;
-    if (!mirrorOn_) {
+    if (mode_ == MirrorMode::Off) {
         // Switched off in the settings: the port stays silent. Switching it
         // on again with hipiview still connected starts a session by itself
         // (below).
@@ -359,6 +497,8 @@ void displayMirror_poll() {
         }
         session_.setViewerAssets(ids_, idsWanted_);
         session_.start(*display_);
+        inputSaid_ = false;
+        sendMode();
         pumpUsb();
         state_ = State::Dump;
     }

@@ -184,7 +184,7 @@ resources/       artwork: Tape view pictures (SD card), buttons and logo (built 
 sdcard/          the SD card: README.txt, example cassette in lif/, make_sd_card.py
 HIPI-SD-card.zip everything for a new SD card (made by the build)
 scripts/         build/flash helpers, bmp_to_rgb565.py (turns BMPs into C++)
-tools/           PC programs: hipiview (display mirror), ilctrl (HP-IL controller)
+tools/           PC programs: hipiview (display mirror), ilctrl (HP-IL controller), pixeltest
 documents/       USER_MANUAL.md, GUIDE.md, images
 pcb/             hardware: README, BOM, schematics, PCB
 ```

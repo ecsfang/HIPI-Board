@@ -498,6 +498,46 @@ constexpr int kSwipeMinDy = 150;      // minimum vertical travel, in pixels -- s
                                        // "Devices" list's scroll gesture instead
 uint16_t lastTx = 0, lastTy = 0;
 
+// The remote finger (touch_remote()): its state as last told, and whether
+// the touch being tracked right now is the remote one rather than the
+// controller's
+bool remoteDown = false;
+bool remotePress = false;           // a new press waiting for touch_poll()
+uint16_t remoteX = 0, remoteY = 0;
+absolute_time_t remoteHeard;
+bool remoteOwns = false;
+constexpr uint32_t kRemoteTimeoutMs = 1000;
+// A remote press is held at least this long, even if its "lifted" came
+// sooner (a quick click, or a press that waited on the way): the
+// confirmation below re-checks after kTouchConfirmMs (60 ms)
+constexpr uint32_t kRemoteMinHoldMs = 100;
+absolute_time_t remoteDownAt;
+bool remoteUpPending = false;
+
+// No news from the PC for a while: its finger is lifted (a lost "lifted")
+void remoteTimeout() {
+    if (remoteUpPending && absolute_time_diff_us(remoteDownAt, get_absolute_time()) >= kRemoteMinHoldMs * 1000) {
+        remoteUpPending = false;
+        remoteDown = false;                 // the delayed "lifted"
+    }
+    if (remoteDown && absolute_time_diff_us(remoteHeard, get_absolute_time()) > kRemoteTimeoutMs * 1000) {
+        remoteDown = false;
+        remotePress = false;
+        remoteUpPending = false;
+        MTRC_LOGF("remote finger: no news for %u ms -- lifted", kRemoteTimeoutMs);
+    }
+}
+
+// The position of whichever finger the current touch belongs to
+bool pointNow(uint16_t& x, uint16_t& y) {
+    if (!remoteOwns) return touch_get_point(x, y);
+    remoteTimeout();
+    if (!remoteDown) return false;
+    x = remoteX;
+    y = remoteY;
+    return true;
+}
+
 TouchTapCallback     tapCallback;
 TouchReleaseCallback releaseCallback;
 TouchSwipeCallback   swipeCallback;
@@ -520,14 +560,43 @@ void touch_set_vertical_swipe_callback(TouchVerticalSwipeCallback cb) {
     verticalSwipeCallback = std::move(cb);
 }
 
+void touch_remote(bool down, uint16_t x, uint16_t y) {
+    remoteHeard = get_absolute_time();
+    if (!down) {
+        // Lifted too soon after the press: later (remoteTimeout())
+        if (remoteDown && absolute_time_diff_us(remoteDownAt, remoteHeard) < kRemoteMinHoldMs * 1000) {
+            remoteUpPending = true;
+            return;
+        }
+        remoteDown = false;
+        remotePress = false;
+        return;
+    }
+    if (!remoteDown || remoteUpPending) {
+        if (!remoteDown) { remotePress = true; remoteDownAt = remoteHeard; }
+        remoteUpPending = false;
+    }
+    remoteDown = true;
+    remoteX = x;
+    remoteY = y;
+}
+
 void touch_poll() {
-    // Fast reaction to a NEW press (the interrupt flag is set by IRQ_PIN).
-    // Only records the press and arms the confirmation timer here -- the
-    // tap callback only fires once the touch has been debounced below.
-    if (g_dataReadyFlag.exchange(false, std::memory_order_relaxed)) {
+    // Fast reaction to a NEW press (the interrupt flag is set by IRQ_PIN,
+    // or the remote finger went down). Only records the press and arms the
+    // confirmation timer here -- the tap callback only fires once the
+    // touch has been debounced below.
+    remoteTimeout();
+    const bool chipPress = g_dataReadyFlag.exchange(false, std::memory_order_relaxed);
+    const bool remoteNew = remotePress && remoteDown;
+    if (chipPress || remoteNew) {
         if (!touchActive) {
+            // The controller's finger first; the remote one if it's the
+            // one that pressed (and stays pending while the real one is down)
+            remoteOwns = !chipPress;
+            if (remoteOwns) remotePress = false;
             uint16_t tx, ty;
-            if (touch_get_point(tx, ty)) {
+            if (pointNow(tx, ty)) {
                 touchActive     = true;
                 touchConfirmed  = false;
                 confirmChecked  = false;
@@ -550,7 +619,7 @@ void touch_poll() {
     if (touchActive && !confirmChecked && time_reached(confirmDeadline)) {
         confirmChecked = true;
         uint16_t tx, ty;
-        if (touch_get_point(tx, ty)) {
+        if (pointNow(tx, ty)) {
             const int dx = static_cast<int>(tx) - static_cast<int>(pendingTx);
             const int dy = static_cast<int>(ty) - static_cast<int>(pendingTy);
             if (dx * dx + dy * dy <= kTouchConfirmToleranceSq) {
@@ -581,13 +650,14 @@ void touch_poll() {
         absolute_time_diff_us(lastReleasePoll, get_absolute_time()) > 30'000) {
         lastReleasePoll = get_absolute_time();
         uint16_t tx, ty;
-        if (touch_get_point(tx, ty)) {
+        if (pointNow(tx, ty)) {
             lastTx = tx;
             lastTy = ty;
             MTRC_LOGF("still down @ (%u,%u)", tx, ty);
         } else {
             touchActive = false;
             touchConfirmed = false;
+            remoteOwns = false;
 
             // Swipe check: total travel from the very first sample to the
             // last known position before lift-off. Requires enough

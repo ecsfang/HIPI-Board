@@ -141,8 +141,12 @@ status indicators or for effects controlled by the HP-IL controller.
 - A small 3-pin connector is provided for an external NeoPixel bar or strip.
 - Only short bars are supported, since there is no separate power supply for
   the bar.
-- If both a bar and on-board NeoPixels are used, the first pixel on the bar
-  always mirrors the ones on the board.
+- If both a bar and on-board NeoPixels are used, they get the same signal:
+  the pixels on the board always show the same as the first pixels on the
+  bar (D12 = the bar's first pixel, D13 = its second, and so on). With 5 on
+  the board and a bar of 10 there are 10 pixels to control, not 15 — the
+  number the controller gives HIPI (`N`, see the User Manual § 8.4) is the
+  larger of the two.
 
 **Ordinary LEDs (D7–D11)**
 

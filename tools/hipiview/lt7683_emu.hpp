@@ -29,6 +29,16 @@ public:
     void feed(const std::uint8_t* data, std::size_t n);
     // The stream was damaged: ignore everything until the next greeting
     void desync() { hello_ = false; syncing_ = false; pending_.clear(); }
+    // A new HIPI (restarted, e.g. after a firmware update): forget
+    // everything -- a black panel until its greeting
+    void powerOff() {
+        desync();
+        reset();
+        std::fill(mem_.begin(), mem_.end(), 0);
+        assetsBegun_.clear();
+        mirrorMode_ = -1;
+        bye_ = false;
+    }
 
     // The asset cache (layer pictures sent only once, see mirror_protocol.h):
     // load(id, bytes) fills `bytes` and returns true if the asset is cached;
@@ -53,6 +63,11 @@ public:
     // ── Status ──────────────────────────────────────────────────────────
     bool connected() const { return hello_; }       // a session has started
     bool syncing() const { return syncing_; }
+    // HIPI's Mirror to PC setting (1 View, 2 Control), -1 = not told
+    // (older firmware)
+    int mirrorMode() const { return mirrorMode_; }
+    // HIPI said it restarts now (kBye, Bootsel mode)
+    bool saidBye() const { return bye_; }
     int syncPercent() const;
     bool fontKnown() const { return fontKnown_; }
     std::uint64_t streamErrors() const { return errors_; }
@@ -111,6 +126,8 @@ private:
 
     bool hello_ = false;
     bool syncing_ = false;
+    int mirrorMode_ = -1;
+    bool bye_ = false;
     std::uint32_t syncTotal_ = 0, syncDone_ = 0;
     struct AssetArea { std::uint32_t id, addr, rowBytes, rowStep; std::uint16_t rows; };
     std::vector<AssetArea> assetsBegun_;

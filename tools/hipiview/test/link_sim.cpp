@@ -6,7 +6,11 @@
 // viewer's own link code and emulator, and compared with the emulated
 // chip: the picture must be identical, losses or not.
 //
-//   make link_sim && ./link_sim [loss-probability] [seconds] [stall]
+//   make link_sim && ./link_sim [loss-probability] [seconds] [stall|input]
+//
+// "input": hipiview plays mouse and key events (--test-input) as with
+// Mirror to PC < Control >; checks that HIPI gets them as touches and
+// buttons -- and none while the setting is View.
 //
 // "stall": hipiview is frozen (SIGSTOP) for a while midway -- the port
 // stays open but nobody reads it, as when hipiview is suspended. HIPI
@@ -125,6 +129,19 @@ int main(int argc, char** argv) {
     if (argc > 1) lossRate = std::atof(argv[1]);
     const double seconds = argc > 2 ? std::atof(argv[2]) : 8.0;
     const bool stall = argc > 3 && std::strcmp(argv[3], "stall") == 0;
+    const bool inputTest = argc > 3 && std::strcmp(argv[3], "input") == 0;
+    if (inputTest) {
+        // Times in seconds from when hipiview's picture is in step
+        std::FILE* f = std::fopen("link_sim_input.txt", "w");
+        std::fputs("0.5 down 100 200\n0.52 up\n"                       // a quick click
+                   "1.0 down 800 300\n1.05 move 700 300\n1.1 move 600 300\n1.15 move 500 300\n"
+                   "1.2 move 400 300\n1.25 move 300 300\n1.3 up\n"     // a swipe
+                   "1.6 key Return\n1.65 keyup Return\n"
+                   "2.0 key Up\n3.0 keyup Up\n"                         // held a second
+                   "3.3 wheel 1\n3.4 wheel -1\n3.5 key Tab\n3.55 keyup Tab\n3.6 key Right\n3.7 key Left\n"
+                   "8.0 down 50 50\n8.2 up\n8.3 key Return\n8.35 keyup Return\n", f);   // (View: ignored)
+        std::fclose(f);
+    }
     std::uint8_t font[256][16];
     for (int c = 0; c < 256; ++c) for (int r = 0; r < 16; ++r) font[c][r] = static_cast<std::uint8_t>((c * 7 + r * 13) | 0x81);
     chip.setBuiltinFont(font);
@@ -142,7 +159,11 @@ int main(int argc, char** argv) {
     if (pid == 0) {
         setenv("SDL_VIDEODRIVER", "dummy", 1);
         setenv("HOME", "/tmp", 1);
-        execl("./hipiview", "hipiview", name, "--log", "link_sim.hvlog", static_cast<char*>(nullptr));
+        if (inputTest)
+            execl("./hipiview", "hipiview", name, "--log", "link_sim.hvlog", "--test-input", "link_sim_input.txt",
+                  static_cast<char*>(nullptr));
+        else
+            execl("./hipiview", "hipiview", name, "--log", "link_sim.hvlog", static_cast<char*>(nullptr));
         std::_Exit(127);
     }
 
@@ -151,7 +172,21 @@ int main(int argc, char** argv) {
     hipi::LT7683 d(mirror, SCREEN_MAX_X, SCREEN_MAX_Y);
     d.begin();
     hipi::displayMirror_init(&d);
-    hipi::displayMirror_setEnabled(true);    // Settings -> Screen -> Mirror to PC
+    hipi::displayMirror_setMode(inputTest ? hipi::MirrorMode::Control : hipi::MirrorMode::View);
+    // What arrives from the viewer's mouse and keys
+    struct InputEvent { double t; char kind; int a, b, c; };
+    std::vector<InputEvent> inputs;
+    // Input must only arrive from the top of displayMirror_poll() -- never
+    // in the middle of a drawing (when the ring is full, the mirror reads
+    // the viewer from inside RingSink::put(); a handler that draws must
+    // not run there)
+    bool drawing = false;
+    int nestedInput = 0;
+    hipi::displayMirror_setInputHandlers(
+        [&](bool down, std::uint16_t x, std::uint16_t y) { nestedInput += drawing; inputs.push_back({ now(), 'T', down, x, y }); },
+        [&](std::uint8_t code, bool down) { nestedInput += drawing; inputs.push_back({ now(), 'B', code, down, 0 }); });
+    std::vector<std::uint16_t> bigPicture(320 * 240);
+    for (std::size_t k = 0; k < bigPicture.size(); ++k) bigPicture[k] = static_cast<std::uint16_t>(k * 2654435761u >> 16);
     // A "picture" layer, as HIPI registers the Tape view
     d.beginLayerDraw(hipi::LT7683::kTapeLayerAddr);
     d.fillRect(0, 0, 1024, 600, 0x18E3);
@@ -170,8 +205,16 @@ int main(int argc, char** argv) {
         tud_task();                      // like HIPI's main loop
         // The setting switched off and on again midway: the session must
         // stop, and start again by itself (hipiview is still connected)
-        if (!stall && now() > seconds * 0.5 && now() < seconds * 0.6) hipi::displayMirror_setEnabled(false);
-        else hipi::displayMirror_setEnabled(true);
+        if (inputTest) {
+            // After "previous view" (the last key before the View part): View
+            static bool viewOnly = false;
+            if (!viewOnly) for (const auto& e : inputs) if (e.kind == 'B' && e.a == 7) viewOnly = true;
+            if (viewOnly) hipi::displayMirror_setMode(hipi::MirrorMode::View);
+        } else if (!stall && now() > seconds * 0.5 && now() < seconds * 0.6) {
+            hipi::displayMirror_setMode(hipi::MirrorMode::Off);
+        } else {
+            hipi::displayMirror_setMode(hipi::MirrorMode::View);
+        }
         if (stall && !frozen && now() > seconds * 0.3 && now() < seconds * 0.4) { kill(pid, SIGSTOP); frozen = true; frozenAt = now(); }
         if (stall && frozen && now() > seconds * 0.7) { kill(pid, SIGCONT); frozen = false; }
         const double t = now();
@@ -183,7 +226,10 @@ int main(int argc, char** argv) {
         lastLoop = t;
         hipi::displayMirror_poll();
         if (now() > nextDraw) {
+            drawing = true;
             nextDraw = now() + 0.03;
+            // (input test: big pictures too, so the ring fills up while drawing)
+            if (inputTest && line % 20 == 0) d.drawBitmap565(40, 40, 320, 240, bigPicture.data());
             char buf[64];
             std::snprintf(buf, sizeof buf, "Line %d, time %.2f s", line++, now());
             screen.pr_str(buf);
@@ -195,11 +241,14 @@ int main(int argc, char** argv) {
                 d.showPipOverlay(300, 150, 400, 260);
             }
             if (line % 40 == 20) d.hidePipOverlay();
+            drawing = false;
         }
         usleep(100);
     }
-    // Let everything drain
-    const double end = now() + 2.0;
+    // Let everything drain -- the way HIPI says goodbye before Bootsel
+    // mode, then a little more
+    hipi::displayMirror_goodbye(1500);
+    const double end = now() + 0.5;
     while (now() < end) { tud_task(); hipi::displayMirror_poll(); usleep(100); }
     kill(pid, SIGINT);
     int st = 0;
@@ -231,8 +280,10 @@ int main(int argc, char** argv) {
     Link link;
     std::uint32_t hdr[2];
     while (std::fread(hdr, sizeof hdr, 1, f) == 1) {
-        std::vector<std::uint8_t> b(hdr[1]);
+        // (bit 31 of the length: a touch from the viewer's mouse, not HIPI's stream)
+        std::vector<std::uint8_t> b(hdr[1] & 0x7FFFFFFFu);
         if (std::fread(b.data(), 1, b.size(), f) != b.size()) break;
+        if (hdr[1] & 0x80000000u) continue;
         link.feed(b.data(), b.size(), hdr[0] / 1000.0, [&](const std::uint8_t* p, std::size_t n) { viewer.feed(p, n); }, nullptr);
     }
     std::fclose(f);
@@ -242,12 +293,65 @@ int main(int argc, char** argv) {
     viewer.render(b.data(), 0.0);
     long diff = 0;
     for (std::size_t i = 0; i < a.size(); ++i) diff += a[i] != b[i];
+    if (!viewer.saidBye()) { std::printf("FAIL the goodbye (Bootsel mode) didn't reach the viewer\n"); return 1; }
     std::printf("USB packets: %zu sent, %zu lost (%.1f %%); link: %llu gaps recovered, %llu sessions\n",
                 sentPackets, lostPackets, 100.0 * lostPackets / std::max<std::size_t>(1, sentPackets),
                 link.recovered(), link.sessions());
     writePng("link_sim_viewer.png", b.data(), 1024, 600);
     std::printf("main loop: longest pause %.0f ms, %d pauses over 100 ms (%d of them > 3 s into the freeze)\n",
                 maxLoopGap * 1000, longStalls, lateStalls);
+    if (inputTest) {
+        int fails = 0;
+        auto fail = [&](const char* what) { std::printf("FAIL input: %s\n", what); ++fails; };
+        auto find = [&](std::size_t from, char kind, int a, int b) -> std::size_t {
+            for (std::size_t i = from; i < inputs.size(); ++i)
+                if (inputs[i].kind == kind && inputs[i].a == a && (b < 0 || inputs[i].b == b)) return i;
+            return inputs.size();
+        };
+        // The quick click: down at (100,200), lifted no sooner than 0.1 s later
+        std::size_t i = find(0, 'T', 1, 100);
+        if (i == inputs.size() || inputs[i].c != 200) fail("click: no press at (100,200)");
+        else {
+            const std::size_t u = find(i, 'T', 0, -1);
+            if (u == inputs.size()) fail("click: never lifted");
+            // (hipiview holds a click 100 ms; on the way, HIPI busy drawing
+            // can take some of that away -- touch.cpp holds it 100 ms
+            // again, from when the press arrives)
+            else if (inputs[u].t - inputs[i].t < 0.03) fail("click: lifted at once (not held)");
+        }
+        // The swipe: from (800,300) to about (300,300), then lifted
+        i = find(0, 'T', 1, 800);
+        if (i == inputs.size()) fail("swipe: no press at (800,300)");
+        else {
+            std::size_t last = i;
+            for (std::size_t k = i; k < inputs.size() && !(inputs[k].kind == 'T' && inputs[k].a == 0); ++k)
+                if (inputs[k].kind == 'T') last = k;
+            if (inputs[last].b > 320 || inputs[last].c != 300) fail("swipe: didn't get to (300,300)");
+            if (find(last, 'T', 0, -1) == inputs.size()) fail("swipe: never lifted");
+        }
+        // Buttons
+        if (find(0, 'B', 2, 1) == inputs.size() || find(0, 'B', 2, 0) == inputs.size()) fail("Return: no OK");
+        int upRepeats = 0;
+        const std::size_t up0 = find(0, 'B', 3, 1);
+        for (std::size_t k = up0; k < inputs.size() && !(inputs[k].kind == 'B' && inputs[k].a == 3 && inputs[k].b == 0); ++k)
+            if (inputs[k].kind == 'B' && inputs[k].a == 3 && inputs[k].b == 1) ++upRepeats;
+        if (upRepeats < 4) fail("Up held 1 s: not repeated while held");
+        if (find(up0, 'B', 3, 0) == inputs.size()) fail("Up: never released");
+        if (find(0, 'B', 4, 1) == inputs.size()) fail("wheel: no Down");
+        if (find(0, 'B', 6, 1) == inputs.size()) fail("Right: no next view");
+        if (find(0, 'B', 7, 1) == inputs.size()) fail("Left: no previous view");
+        if (find(0, 'B', 1, 1) == inputs.size()) fail("Tab: no Shift");
+        // View: nothing gets through
+        if (find(0, 'T', 1, 50) != inputs.size()) fail("View: a touch got through");
+        if (nestedInput > 0) fail("input handed over in the middle of a drawing");
+        const std::size_t v = find(0, 'B', 7, 1);
+        if (v < inputs.size() && find(v + 1, 'B', 2, 1) != inputs.size()) fail("View: a button got through");
+        std::printf("input: %zu events from the viewer%s\n", inputs.size(), fails ? "" : ", all as expected");
+        if (fails) {
+            for (const auto& e : inputs) std::printf("  %.3f %c %d %d %d\n", e.t, e.kind, e.a, e.b, e.c);
+            return 1;
+        }
+    }
     if (stall && lateStalls > 0) {
         std::printf("FAIL HIPI kept stalling while nobody read the port\n");
         return 1;
