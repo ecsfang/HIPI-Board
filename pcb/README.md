@@ -23,6 +23,7 @@ main [README](../README.md) and the
 3. [Assembly](#3-assembly)
 4. [NeoPixels and LEDs](#4-neopixels-and-leds)
 5. [Connectors](#5-connectors)
+   - [Connecting the HP-IL cables (JP5)](#51-connecting-the-hp-il-cables-jp5)
 6. [Testing the board](#6-testing-the-board)
 
 ---
@@ -164,7 +165,7 @@ status indicators or for effects controlled by the HP-IL controller.
 |-----------|----------|---------|
 | JP1       | **Yes**  | Display and touch interface |
 | JP2       | **Yes**  | SD-card interface on the display panel |
-| JP5       | No       | HP-IL wires. A screw terminal is suggested, but any connection method works. |
+| JP5       | No       | HP-IL wires (see [5.1](#51-connecting-the-hp-il-cables-jp5)). A screw terminal is suggested, but any connection method works. |
 | J1, J3, J6| No       | Measurement points, RX/TX, and extra GPIOs for external devices |
 | J4        | No       | Qwiic connector for external I2C devices |
 
@@ -180,6 +181,44 @@ parallel display interface.
 ![The two 2×4-pin headers fitted at each end of JP1](images/jp1-headers.jpg) -->
 > 📷 **Image placeholder:** The two 2×4-pin headers fitted at each end of JP1 (`images/jp1-headers.jpg`)
 
+### 5.1 Connecting the HP-IL cables (JP5)
+
+HIPI is wired to the loop through two HP-IL cables cut in half: one end
+with its plug becomes HIPI's **IN**, the other HIPI's **OUT**. Each cable
+has two wires, which go to the four HP-IL pads on the board, marked
+**+IN−** and **−OUT+** next to the transformers T1 and T2.
+
+<a href="images/hpil-cable-wiring.jpg"><img src="images/hpil-cable-wiring.jpg" alt="Connecting the HP-IL cables to the HIPI board" width="640"></a>
+
+| Plug | Pin / hole | Goes to |
+|------|------------|---------|
+| The plug with **pins** (top in the picture) | the **ref line** pin | **IN+** |
+| | the other pin | **IN−** |
+| The plug with **holes** (bottom in the picture) | the **ref line** hole | **OUT+** |
+| | the other hole | **OUT−** |
+
+The **ref line** is a particular pin (or hole) in the plug, marked with
+arrows in the picture. It always goes to **+**.
+
+> [!IMPORTANT]
+> **Go by the pin in the plug, not by the cable.** Many HP-IL cables have a
+> marking on the cable itself (a stripe or a rib on the ref line wire), but
+> it isn't always right. What matters is that the wire from the plug's ref
+> line pin (or hole) ends up on **+**. Check each wire with a multimeter
+> (continuity from the pin in the plug to the end of the wire) before
+> soldering or screwing it down.
+
+**IN** is the cable towards the device before HIPI on the loop (it plugs into
+that device's OUT); **OUT** goes on to the next device's IN — for a loop with
+only an HP-41, IN comes from the HP-IL module's OUT and OUT goes back to its
+IN.
+
+With **+** and **−** swapped on one of the cables, the loop doesn't work.
+Note that the loopback test ([section 6](#6-testing-the-board)) only checks
+the two cables against each other: if *both* are swapped the same way, it
+still passes, but HIPI won't work with other HP-IL devices. So check the
+wiring as described above, also when the loopback test passes.
+
 ---
 
 ## 6. Testing the board
@@ -191,12 +230,13 @@ parallel display interface.
    strip, then press **OK** to open the menu.
 4. **HP-IL:** connect the HP-IL cables to JP5 and connect the OUT cable
    directly to the IN cable, so the loop is closed through the board only.
-   Then run **Config → Loopback test**. It checks that the HP-IL interface
-   and the cables work.
+   Then run **More → System → Loopback test**. It checks that the HP-IL
+   interface and the cables work — but not whether + and − are the right way
+   round on both cables, see [5.1](#51-connecting-the-hp-il-cables-jp5).
 
    <!-- TODO image: replace the placeholder below with:
    ![HP-IL cables connected OUT to IN for the loopback test](images/loopback-test.jpg) -->
    > 📷 **Image placeholder:** HP-IL cables connected OUT to IN for the loopback test (`images/loopback-test.jpg`)
 
 5. **I2C (optional):** if you have connected something to J4, run
-   **Config → Scan I2C** to check that its address shows up.
+   **More → System → Scan I2C** to check that its address shows up.

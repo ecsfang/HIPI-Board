@@ -106,6 +106,12 @@ HIPI creates its settings file, `CONFIG.TXT`, by itself. The buttons, menus and 
 
 ![HP-IL loop between HP-41 and HIPI](images/setup-loop.jpg)
 
+**Building HIPI yourself?** The HP-IL cables are soldered or screwed to the
+board, and each wire must go to the right place (+ or −). How to tell which
+is which — by the pin in the plug, not by the marking on the cable — is
+described, with a picture, in
+[Connecting the HP-IL cables](../pcb/README.md#51-connecting-the-hp-il-cables-jp5).
+
 ### 3.3 First start
 
 HIPI shows its start-up screen: the version, and a **STATUS** list that fills
@@ -388,7 +394,9 @@ after power off.
   it sets up the loop.
 - **Columns** — *Auto* fits the font size; *32* is the original HP 82163 width.
 - **System → Loopback test** — connect HIPI's IN and OUT with itself (no controller),
-  then run it. "Loopback OK!" means the HP-IL side works.
+  then run it. "Loopback OK!" means the HP-IL side works. (It can't tell if
+  both cables have + and − swapped — see
+  [Connecting the HP-IL cables](../pcb/README.md#51-connecting-the-hp-il-cables-jp5).)
 
 <a href="images/menu-devices.png"><img src="images/menu-devices.png" alt="Devices menu" width="512"></a>
 
@@ -915,6 +923,7 @@ card files, they are in the SD card zip of that download.
 | Tape view is missing | The tape pictures are missing from the `resources` folder — copy the files from the SD card zip |
 | Files copied from the PC don't show | Eject the drive on the computer first |
 | Screen dump fails | Not possible while **Connect to PC** is on |
+| The controller doesn't find HIPI at all, although the loopback test passes | The HP-IL wires may have + and − swapped on both cables — see [Connecting the HP-IL cables](../pcb/README.md#51-connecting-the-hp-il-cables-jp5) |
 
 Still stuck? Choose **Settings → PC link → Trace: On** and connect HIPI to a computer: the
 log helps whoever looks at the problem.
