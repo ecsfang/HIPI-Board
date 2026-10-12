@@ -2,7 +2,8 @@
 // with the touch controller and the BMP280; both chips use address 0x68).
 // Battery-backed, so the time survives power-off once it has been set.
 //
-// Which chip is fitted is detected at startup (CRtc::begin()). To skip the
+// Which chip is fitted is detected by CRtc::begin() -- at startup, and again
+// by clock.cpp while none answers (a chip plugged in later). To skip the
 // detection and force a chip, build with -DHIPI_RTC_CHIP=1 (DS3231) or
 // -DHIPI_RTC_CHIP=2 (DS1307); the default 0 means auto-detect.
 #pragma once

@@ -1,11 +1,16 @@
 #ifndef __LEDS_H__
 #define __LEDS_H__
 
-// PWM re-enabled: LED_PIN_4/5 moved off GPIO21/22, which aliased the exact
-// same PWM slice+channel as LED_PIN_2 (GPIO5) and LED_PIN_3 (GPIO6) on the
-// RP2040/RP2350 (slice = (gpio/2) % 8, channel = gpio % 2 -- GPIO n and
-// GPIO n+16 always collide). GPIO26/27 land on their own free slice (5),
-// so all five LEDs now have independent PWM channels.
+// The five LEDs on the HIPI board (LED 1 and 2 are swapped on the board,
+// hence 5/4): LED 1 GPIO5, LED 2 GPIO4, LED 3 GPIO6, LED 4 (D8) GPIO27,
+// LED 5 (D7) GPIO26 -- the same pin as the pixel strip's data line
+// (PIXEL_PIN), so LED 5 only works when no pixels are fitted
+// (pixels_setFitted(), pixels.h). Every LED has its own PWM channel
+// (slice = (gpio/2) % 8, channel = gpio % 2): GPIO5 2B, GPIO4 2A, GPIO6 3A,
+// GPIO27 5B, GPIO26 5A. LED 4 and 5 share slice 5 -- fine, since only the
+// per-channel level is changed at run time and every LED uses the same
+// wrap. (GPIO21/22, used before, were wrong for the board and collided
+// with GPIO5/6: GPIO n and GPIO n+16 share a channel.)
 //#define CLED_NO_PWM     // Due to HW conflict - now PWM right now!
 
 #include <stdlib.h>
@@ -27,14 +32,14 @@
 #include <cstdio>
 
 // ─── Pin definitions (edit here) ─────────────────────────────────────────────
-#define LED_PIN_1 4
-#define LED_PIN_2 5
+#define LED_PIN_1 5
+#define LED_PIN_2 4
 #define LED_PIN_3 6
-#define LED_PIN_4 21 //26
-#define LED_PIN_5 22 //27
+#define LED_PIN_4 27   // D8
+#define LED_PIN_5 26   // D7 -- shared with the pixel strip (PIXEL_PIN)
 
-#define HPIL_ACT_LED    LED_PIN_2   // Indicate HP-IL active
-#define HPIL_IDY_LED    LED_PIN_3   // Indicate HP-IL idle
+#define HPIL_ACT_LED    LED_PIN_3   // Indicate HP-IL active
+#define HPIL_IDY_LED    LED_PIN_4   // Indicate HP-IL idle
 
 class PicoPwmBaseException : public std::exception {
    protected:

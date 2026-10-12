@@ -56,7 +56,10 @@ void setHpilLeds(bool on) {
 bool ledsFitted() { return config.ledsFitted(); }
 void setLedsFitted(bool f) { config.setLedsFitted(f); }
 bool pixelsFitted() { return config.pixelsFitted(); }
-void setPixelsFitted(bool f) { config.setPixelsFitted(f); }
+void setPixelsFitted(bool f) {
+    config.setPixelsFitted(f);
+    pixels_setFitted(f);                             // GPIO26: strip or LED 5
+}
 
 int scanI2c(I2cFound* out, int max, bool found[128]) { return i2c_identify(out, max, found); }
 std::string loadI2cChips() { return i2c_loadChips(); }

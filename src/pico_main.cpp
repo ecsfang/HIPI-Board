@@ -547,6 +547,7 @@ int main() {
     // TFPIXEL: the number of pixels connected, as the controller last said
     pixelStrip.setActiveCount(config.pixelCount(), /*notify=*/false);
     pixelStrip.setColorOrder(pixelOrderIndex(config.pixelOrder().c_str()));   // its colour byte order (saved)
+    pixels_setFitted(config.pixelsFitted());  // GPIO26: the pixel strip, or LED 5 (saved)
     hpil_leds_setEnabled(config.hpilLeds());  // HP-IL activity on LED 3/4 (Hardware test page, saved)
     pixelStrip.setCountChangedCallback([](uint32_t n) { config.setPixelCount(static_cast<std::uint8_t>(n)); });
     hipi::displayMirror_setMode(static_cast<hipi::MirrorMode>(config.displayMirror()));   // Settings -> Screen -> Mirror to PC (saved)

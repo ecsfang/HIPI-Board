@@ -207,7 +207,12 @@ bool isLed(Id id) { return id >= Id::Led1 && id <= Id::Led5; }
 bool inLeds(Id id) { return isLed(id) || id == Id::Chase || id == Id::LedOff; }
 bool inPixels(Id id) { return id >= Id::Minus && id <= Id::Order5; }
 
+// LED 5 shares GPIO26 with the pixel strip: no LED 5 while pixels are fitted
+bool led5Usable() { return !hwio::pixelsFitted(); }
+int ledCount() { return led5Usable() ? 5 : 4; }
+
 bool enabled(Id id) {
+    if (id == Id::Led5 && !led5Usable()) return false;
     if (inLeds(id)) return hwio::ledsFitted();
     if (inPixels(id)) {
         if (!hwio::pixelsFitted()) return false;
@@ -542,11 +547,13 @@ void hwtest_showScan() {
 
 void hwtest_poll() {
     if (!active_) return;
-    // LED chase: 1 -> 5
+    // LED chase: 1 -> 5 (1 -> 4 while pixels are fitted)
     if (chase_ && time_reached(nextChase_)) {
         nextChase_ = make_timeout_time_ms(kChaseMs);
-        for (int i = 0; i < 5; ++i) { ledOn_[i] = i == chaseStep_; hwio::setLed(i, ledOn_[i]); }
-        chaseStep_ = (chaseStep_ + 1) % 5;
+        const int n = ledCount();
+        if (chaseStep_ >= n) chaseStep_ = 0;
+        for (int i = 0; i < n; ++i) { ledOn_[i] = i == chaseStep_; hwio::setLed(i, ledOn_[i]); }
+        chaseStep_ = (chaseStep_ + 1) % n;
         part([] { drawButtons(isLed); });
     }
     // Pixel run: one pixel along the strip, a new colour every round
@@ -607,9 +614,13 @@ bool hwtest_tap(int x, int y) {
             part([] { drawButtons(inLeds); });
             break;
         case Id::PixFitted:
-            hwio::setPixelsFitted(!hwio::pixelsFitted());
+            hwio::setPixelsFitted(!hwio::pixelsFitted());   // (also hands GPIO26 to the strip or LED 5)
             pixelsOff();
-            part([] { drawButton(*find(Id::PixFitted)); drawButtons(inPixels); drawCount(); drawDots(true); drawHint(); });
+            ledOn_[4] = false;                    // LED 5 starts off either way
+            part([] {
+                drawButton(*find(Id::PixFitted)); drawButtons(inPixels); drawCount(); drawDots(true); drawHint();
+                drawButtons(isLed);
+            });
             break;
         case Id::Minus:
         case Id::Plus: {

@@ -181,6 +181,12 @@ extern const char* const kPixelOrders[kPixelOrderCount];   // "RGB", "GRB", ...
 // The index of an order's name (case doesn't matter), -1 if there's none
 int pixelOrderIndex(const char* name);
 
+// GPIO26 is both the pixel strip's data line and LED 5 (D7, leds.h): who
+// gets it follows pixels_fitted (the Hardware test page, saved). Fitted:
+// the strip's PIO drives the pin and LED 5 is off; not fitted: LED 5's
+// PWM drives it (and the strip goes nowhere).
+void pixels_setFitted(bool fitted);
+
 // The project's single, global pixel strip instance (mirrors leds.cpp's
 // own ledPower/ledStatus/etc. globals) -- defined in pixels.cpp.
 extern CPixelStrip pixelStrip;

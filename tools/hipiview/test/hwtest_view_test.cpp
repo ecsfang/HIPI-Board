@@ -187,8 +187,21 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 5; ++i) { if (hwstub::led[i]) { ++on; was[i] = true; } }
         if (on == 1) ++seen;
     }
-    check(seen >= 8 && was[0] && was[4], "Chase: one LED at a time, 1 to 5");
+    check(seen >= 8 && was[0] && was[3] && !was[4], "Chase (pixels fitted): one LED at a time, 1 to 4");
     tap(kLedOff);
+    check(tap(ledButton(4)) && !hwstub::led[4], "pixels fitted: LED 5 (GPIO26, the strip's pin) does nothing");
+    hwstub::pixelsFitted = false;
+    tap(kChase);
+    bool was5[5] = {};
+    for (int k = 0; k < 10; ++k) {
+        run(150);
+        for (int i = 0; i < 5; ++i) if (hwstub::led[i]) was5[i] = true;
+    }
+    check(was5[0] && was5[4], "Chase (no pixels): 1 to 5");
+    tap(kLedOff);
+    check(tap(ledButton(4)) && hwstub::led[4], "no pixels: LED 5 works");
+    tap(ledButton(4));
+    hwstub::pixelsFitted = true;
     check(!hwstub::led[0] && !hwstub::led[1] && !hwstub::led[2] && !hwstub::led[3] && !hwstub::led[4], "Off: all off");
     tap(kLedFitted);
     check(!hwstub::ledsFitted && tap(ledButton(2)) && !hwstub::led[2], "Fitted: NO -- the LED buttons do nothing");

@@ -554,6 +554,10 @@ The following is the result from the example on page 13 in the Plotter Module (8
 Controls the LEDs on the HIPI board. A command is the LED number(s) followed by
 what to do; several commands can be separated by spaces.
 
+LED 5 (D7) shares its pin (GPIO26) with the colour pixels' data line, so it
+only works when no pixels are fitted (**Hardware test → PIXELS → Fitted:
+NO**); with pixels fitted, commands for LED 5 do nothing.
+
 | Send | Means |
 |------|-------|
 | `1O` | LED 1 on (`0` = all LEDs, `135` = LEDs 1, 3 and 5) |
@@ -1099,11 +1103,14 @@ LEDs and pixels itself — what the HP-41 had set on them is switched off
   is lit while the loop is quiet. *OFF*: the two are free, for `TFLEDS` or
   whatever else you wire to those pins. Remembered.
 - **1** – **5** switch each LED on and off. **Chase** runs a light from 1
-  to 5 over and over; **Off** switches them all off.
+  to 5 over and over; **Off** switches them all off. LED 5 shares its pin
+  with the pixels: while **PIXELS → Fitted** is *YES* its button is greyed
+  out and the chase stops at LED 4.
 
 **PIXELS**
 
-- **Fitted** — are colour pixels connected? With *NO* the buttons do nothing.
+- **Fitted** — are colour pixels connected? With *NO* the buttons do nothing,
+  and the pin (GPIO26) goes to LED 5 instead.
 - **Count** − / + — how many are connected, 1–16. This is the same number
   the HP-41 sets with `0N<n>` (`pixel_count`), so it is remembered.
 - **Order** — the order the pixels take their colours in: *RGB*, *GRB*,
@@ -1247,7 +1254,7 @@ value.
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
 | `hpil_leds` | `0` / `1` | `1` | HP-IL traffic on LED 3 and 4 (**Hardware test → HP-IL on LED 3+4**). `0` leaves them to `TFLEDS`. |
 | `leds_fitted` | `0` / `1` | `1` | **Hardware test**: the LEDs are fitted. (Only the test page uses it, for now.) |
-| `pixels_fitted` | `0` / `1` | `1` | **Hardware test**: colour pixels are connected. (Only the test page uses it, for now.) |
+| `pixels_fitted` | `0` / `1` | `1` | **Hardware test**: colour pixels are connected. GPIO26 drives the pixels with `1`, LED 5 with `0`. |
 | `pixel_count` | `1`–`32` | `5` | `TFPIXEL`: how many colour pixels are connected — set by the HP-41 with `0N<n>` (see [8.3](#83-colour-pixels--tfpixel)). |
 | `pixel_order` | `RGB` `GRB` `BRG` `RBG` `GBR` `BGR` | `RGB` | The order the colour pixels take their colours in (**Hardware test → Order**). |
 | `printer_mode` | `man` / `trace` / `norm` | `man` | `TFPRINT`: the MODE switch in the Printer view. |

@@ -1,6 +1,8 @@
 #define MODULE "PIXEL"
 
 #include "pixels.h"
+#include "leds.h"
+#include "hardware/gpio.h"
 #include "usb_serial.h"
 #include "Effects/Comet.hpp"
 #include "Effects/Marquee.hpp"
@@ -64,6 +66,20 @@ struct ControllerTarget : PicoLed::PicoLedController {
 }  // namespace
 
 const char* const kPixelOrders[kPixelOrderCount] = { "RGB", "GRB", "BRG", "RBG", "GBR", "BGR" };
+
+static_assert(LED_PIN_5 == PIXEL_PIN, "LED 5 and the pixel strip share GPIO26 (pixels_setFitted)");
+
+void pixels_setFitted(bool fitted) {
+    leds[4]->off();                                  // LED 5: nothing left half-lit
+    if (fitted) {
+        pio_gpio_init(PIXEL_PIO, PIXEL_PIN);          // the strip's PIO drives the pin
+    } else {
+        pixelStrip.clear();
+        pixelStrip.show();
+        gpio_set_function(LED_PIN_5, GPIO_FUNC_PWM);  // LED 5's PWM drives it
+    }
+    LOGF("\r\n * GPIO%d: %s", PIXEL_PIN, fitted ? "pixel strip (LED 5 off)" : "LED 5 (no pixels fitted)");
+}
 
 int pixelOrderIndex(const char* name) {
     if (name == nullptr) return -1;

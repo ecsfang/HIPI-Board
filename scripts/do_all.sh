@@ -76,20 +76,74 @@ bootsel_ready() {
 }
 
 # ------------------------------------------------------------
-# Lista filer med samma filändelse i Downloads
+# Lista filer som liknar det angivna filnamnet
 # ------------------------------------------------------------
 
-list_files_with_extension() {
-    local ext="$1"
-    local found=0
+list_similar_files() {
+    local wanted="$1"
+    local ext="${wanted##*.}"
+    local stem="${wanted%.*}"
+    local normalized_wanted
+    local prefix
     local file
+    local name
+    local candidate_stem
+    local found=0
+    local exact_found=0
+
+    # Normalisera: "_" och "-" behandlas lika.
+    normalized_wanted="${stem,,}"
+    normalized_wanted="${normalized_wanted//_/-}"
+
+    # Första sökningen: exakt matchning efter normalisering.
+    while IFS= read -r -d '' file; do
+        name=$(basename "$file")
+        candidate_stem="${name%.*}"
+        candidate_stem="${candidate_stem,,}"
+        candidate_stem="${candidate_stem//_/-}"
+
+        if [[ "$candidate_stem" == "$normalized_wanted" ]]; then
+            exact_found=1
+            break
+        fi
+    done < <(
+        find "$DOWNLOAD_DIR" \
+            -maxdepth 1 \
+            -type f \
+            -iname "*.$ext" \
+            -print0
+    )
+
+    # Om ingen exakt matchning finns, välj ett prefix.
+    if [ "$exact_found" -eq 0 ]; then
+        if [[ "$normalized_wanted" == *-* ]]; then
+            prefix="${normalized_wanted%-*}"
+        else
+            prefix="$normalized_wanted"
+        fi
+    fi
 
     echo
-    echo "Filer med filändelsen .$ext i $DOWNLOAD_DIR:"
+    echo "Liknande filer i $DOWNLOAD_DIR:"
 
     while IFS= read -r -d '' file; do
-        printf '  %s\n' "$(basename "$file")"
-        found=1
+        name=$(basename "$file")
+        candidate_stem="${name%.*}"
+        candidate_stem="${candidate_stem,,}"
+        candidate_stem="${candidate_stem//_/-}"
+
+        if [ "$exact_found" -eq 1 ]; then
+            if [[ "$candidate_stem" == "$normalized_wanted" ]]; then
+                printf '  %s\n' "$(basename "$file")"
+                found=1
+            fi
+        else
+            if [[ "$candidate_stem" == "$prefix"* ]]; then
+                printf '  %s\n' "$(basename "$file")"
+                found=1
+            fi
+        fi
+
     done < <(
         find "$DOWNLOAD_DIR" \
             -maxdepth 1 \
@@ -100,7 +154,7 @@ list_files_with_extension() {
     )
 
     if [ "$found" -eq 0 ]; then
-        echo "  (Inga filer hittades.)"
+        echo "  Inga liknande filer hittades."
     fi
 
     echo
@@ -243,9 +297,8 @@ if [ "${#FILES[@]}" -gt 0 ]; then
                 echo "FEL: Filen finns inte:"
                 echo "  $DOWNLOAD_DIR/$NAME"
 
-                # Lista tillgängliga filer med samma filändelse
-                EXT="${NAME##*.}"
-                list_files_with_extension "$EXT"
+                # Lista tillgängliga liknande filer
+                list_similar_files "$NAME"
 
                 echo "Avbryter."
                 echo

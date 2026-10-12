@@ -72,11 +72,34 @@ void fakeStartAtBuildTime() {
 }
 #endif
 
+#if !HIPI_FAKE_RTC
+// The RTC may be plugged in (or pulled out) while HIPI runs: while none is
+// known, look for one again now and then; `force` looks at once (the
+// "time" command). Logs when the chip appears or disappears.
+absolute_time_t nextProbe_ = nil_time;
+constexpr int kProbeIntervalMs = 2000;
+
+void rtcProbe(bool force) {
+    if (rtc_ == nullptr) return;
+    if (!force && !time_reached(nextProbe_)) return;
+    nextProbe_ = make_timeout_time_ms(kProbeIntervalMs);
+    const bool was = rtc_->present();
+    const bool now = rtc_->begin(TOUCH_SDA, TOUCH_SCL);
+    if (now && !was) {
+        LOGF("\r\n * Clock: %s found, %s", rtc_->chipName(),
+             rtc_->valid() ? clock_nowText().c_str() : "time not set");
+    } else if (!now && was) {
+        LOGF("\r\n * Clock: the clock chip stopped answering");
+    }
+}
+#endif
+
 // The time source: the DS3231, or the stand-in above (HIPI_FAKE_RTC)
 bool rtcPresent() {
 #if HIPI_FAKE_RTC
     return true;
 #else
+    if (rtc_ != nullptr && !rtc_->present()) rtcProbe(false);
     return rtc_ != nullptr && rtc_->present();
 #endif
 }
@@ -84,7 +107,10 @@ bool rtcValid() {
 #if HIPI_FAKE_RTC
     return true;
 #else
-    return rtcPresent() && rtc_->valid();
+    if (!rtcPresent()) return false;
+    if (rtc_->valid()) return true;
+    rtcProbe(false);                         // not set, or pulled out? (throttled)
+    return false;
 #endif
 }
 bool rtcRead(DateTime& t) {
@@ -98,7 +124,10 @@ bool rtcRead(DateTime& t) {
     t.weekday = weekdayOf(t.year, t.month, t.day);
     return true;
 #else
-    return rtcPresent() && rtc_->read(t);
+    if (!rtcPresent()) return false;
+    if (rtc_->read(t)) return true;
+    rtcProbe(false);                         // pulled out? (throttled)
+    return false;
 #endif
 }
 bool rtcSet(const DateTime& t) {
@@ -273,6 +302,9 @@ void handleConsoleLine() {
     s += 4;
     while (*s == ' ') ++s;
     std::string msg;
+#if !HIPI_FAKE_RTC
+    rtcProbe(true);                          // plugged in since the last look?
+#endif
     if (*s == '\0') {
         msg = rtcPresent() ? (rtcValid() ? clock_nowText() : "clock not set")
                            : "no clock chip (DS3231/DS1307) found";
@@ -304,11 +336,12 @@ void clock_init(DisplayDriver* display) {
          clock_nowText().c_str());
 #else
     rtc_ = new CRtc(touch_i2c);
+    nextProbe_ = make_timeout_time_ms(kProbeIntervalMs);
     if (rtc_->begin(TOUCH_SDA, TOUCH_SCL)) {
         LOGF("\r\n * Clock: %s found, %s", rtc_->chipName(),
              rtc_->valid() ? clock_nowText().c_str() : "time not set");
     } else {
-        LOGF("\r\n * Clock: no DS3231/DS1307 found -- the clock screen saver isn't available");
+        LOGF("\r\n * Clock: no DS3231/DS1307 found (yet) -- looked for again every few seconds");
     }
 #endif
 }
