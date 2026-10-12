@@ -131,10 +131,17 @@ getPixelColor()` is declared but not defined (pixels.cpp reads the colour
 from the controller's target instead), and `Particles` frees its buffer with
 `delete` instead of `delete[]` (harmless here).
 
-**Colour order.** `PIXEL_COLOR_ORDER` in `include/pixels.h` sets the order the
-strip takes its colour bytes in: `PicoLed::FORMAT_RGB` (HIPI's default, what
-the strip on the board needs) or `PicoLed::FORMAT_GRB` (classic WS2812B). If
-red and green come out swapped, switch it.
+**Colour order.** Strips take their colour bytes in different orders
+(the board's: RGB; classic WS2812B: GRB; some WS2811: BRG ...), so it's a
+setting: `pixel_order` in CONFIG.TXT, chosen on the Hardware test page
+(**Order**), any of the six orders of R, G and B. `CPixelStrip::
+setColorOrder()` changes the byte order in PicoLED's target at run time
+(its `bytes[]`, protected: reached through a derived class, as the
+controller's target for `getPixelColor()`) and writes what's in the buffer
+again in the new order -- PicoLED itself is unchanged, and its effects
+use the new order too. `PIXEL_COLOR_ORDER` in `include/pixels.h` is only
+what the strip starts with. RGBW strips (SK6812 RGBW: 32 bits a pixel)
+would need the PIO program set up for 32 bits; not supported.
 
 **Updating** to a newer PicoLED:
 
@@ -221,6 +228,34 @@ cmake -DHIPI_BUILD_PANELS="5;7" -B build  # both (default)
 If you change the *structure* of `CMakeLists.txt` (new targets, new
 libraries), delete `build/` and configure again.
 
+### 2.3.1 The version
+
+The version is never typed in: every build takes it from git, from the
+latest tag named `v<version>` (`cmake/hipi_version.cmake`, which writes
+`build/hipi_generated/hipi_version.h`; only `src/version.cpp` includes it).
+
+| The source is | The version shown |
+|---|---|
+| exactly on the tag `v1.2.0` | `1.2.0` |
+| 5 commits after it | `1.2.0-beta.5` |
+| on the tag, with uncommitted changes | `1.2.0-beta` |
+| after a pre-release tag `v1.3.0-rc1` | `1.3.0-rc1`, then `1.3.0-rc1-beta.N` |
+| without git and without a filled-in `VERSION` | `unknown` |
+
+The splash screen, the boot screen and System → About show the short
+form; the USB log adds the commit and the build date
+(`HIPI Board v1.2.0-beta.5 (abc1234, 2026-10-12)`). hipiview gets its
+version the same way (`hipiview --version`, the window title).
+
+A release: `git tag v1.2.0 && git push --tags` -- the workflow builds that
+tag, so the release's firmware says `1.2.0`. Everything built after it says
+`1.2.0-beta.N` until the next tag. `HIPI-SD-card.zip`, which the build
+remakes itself, doesn't count as an uncommitted change.
+
+GitHub's *Source code* downloads have no git: there `git archive` writes
+the version into the file `VERSION` (`.gitattributes`: `export-subst`),
+which the build uses instead.
+
 ### 2.4 Helper scripts
 
 | Script                  | Purpose |
@@ -303,7 +338,7 @@ SD card layout (folder names in `include/sd_paths.h`):
 ```
 CONFIG.TXT        settings -- created with defaults on first boot
 README.txt        from sdcard/ -- what's what, for users
-resources/        Tape view bitmaps, copied from the repo's resources/ folder
+resources/        Tape and Printer view bitmaps, copied from the repo's resources/ folder
 lif/              cassette images (*.dat, LIF), listed by Select file
 screenshots/      screen dumps -- created on the first Screendump
 logs/             analyzer logs -- created on the first Log to file
@@ -316,6 +351,8 @@ logs/             analyzer logs -- created on the first Log to file
 | `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open. |
 | `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions. |
 | `reels.bmp`     | No       | 7" panel only: rotated frames of the cassette's reel hubs, for the spinning-reel animation. |
+| `hp82162a.bmp`  | No       | 7" panel only: picture for the **Printer** view. The view is left out if missing. |
+| `prtparts.bmp`  | No       | 7" panel only: the Printer view's moving parts -- POWER lit, the switches in each position, the keys pressed. |
 
 (`buttons.bmp` and `logo.bmp` stay in the repo's `resources/` only -- they're
 built into the firmware as `src/buttons_image.cpp` and `src/logo_image.cpp`,
@@ -554,13 +591,15 @@ Main menu
 │   ├── Trace              Off / On / Extended
 │   ├── Connect to PC      Expose the SD card as a USB drive (toggles to "Disconnect from PC")
 │   ├── Loopback test      Physical HP-IL loop test (needs a loop cable)
-│   ├── Scan I2C           Scan the I2C bus and show found addresses
+│   ├── Hardware test      LEDs, pixels and the I2C bus (System -> Hardware test)
+│   ├── Demo               HIPI shows what it can do (7" only)
 │   └── Bootsel mode       Reboot into BOOTSEL for firmware update
 ├── Settings
+│   ├── Emulate            HP 82163 / HP 92198
 │   ├── Textcolor          White / Yellow / Green / Cyan / Red
-│   ├── Font size          0 – 3
+│   ├── Font size          0 – 3  (HP 92198: 12x24 / 8x16)
 │   ├── Brightness         20 % / 40 % / 60 % / 80 % / 100 %  (live preview)
-│   └── Columns            Auto / 25 / 32 / 33 / 50 / 100
+│   └── Columns            Auto / 25 / 32 / 33 / 50 / 100  (HP 92198: 80 / 40)
 ├── Devices
 │   ├── Enable/disable     Each HP-IL device on/off (OK toggles [ON]/[OFF])
 │   └── Change order       Order of the devices on the loop
@@ -568,6 +607,7 @@ Main menu
     ├── Display            Show the text display
     ├── Plotter            Show the plotter canvas
     ├── Tape               Show the HP82161A tape drive (7" panel only)
+    ├── Printer            Show the HP82162A printer (7" panel only)
     ├── Clear plotter      Erase the plotter drawing
     ├── Clear screen       Erase the text display
     ├── Analyzer           HP-IL bus analyzer view (own menu on OK)
@@ -604,13 +644,17 @@ Main menu
   cable, then press OK. Every frame value is sent and must come back
   unchanged. A progress bar is shown; the result is either
   *Loopback OK!* or the first failing frame. Touch anywhere to continue.
-- **Scan I2C** — scans addresses 0x08–0x77 on the shared I2C bus (the one
-  the touch controller and BMP280 sit on) and shows a grid of responding
-  addresses. Handy when adding a new I2C device.
+- **Hardware test** — a page to try the LEDs (each one, a chase, HP-IL
+  activity on LED 3/4 on or off), the colour pixels (count, a running light,
+  solid colours) and the I2C bus (what answers, what it is, whether it
+  works; **Scan I2C** shows the i2cdetect grid). See *Hardware test page*
+  below.
 - **Bootsel mode** — see [section 3.1](#31-enter-bootsel-mode).
 
 ### 6.2 Settings
 
+- **Emulate** — which display `TFDISPLAY` is: HP 82163 or HP 92198 (80
+  columns). Font size and Columns show the chosen one's settings.
 - **Textcolor / Font size / Brightness** — apply immediately and are saved.
   Brightness previews as you move; **X** restores the previous level.
 - **Columns** — forces the line-wrap width. *Auto* uses the natural width
@@ -696,6 +740,267 @@ until it's done.
 
 The Tape view is not available on the 5" panel, which has no spare display
 memory.
+
+**Printer view.** `TFPRINT` (`printer.h`/`.cpp`) is an HP 82162A thermal
+printer, and its view a picture of one: `hp82162a.bmp`, made to match
+`hp82161a.bmp` in size, place and colour (the real devices are the same
+size and stack). It's loaded once at boot into its own layer
+(`LT7683::kPrinterLayerAddr`, the 7th 1024x600 slot -- past CGRAM's,
+inside the 16 MB SDRAM), its moving parts (`prtparts.bmp`) into
+`kPrinterPartsAddr`. Each part is a piece of the same picture with one
+control changed, so showing it is one BTE copy over the base picture:
+POWER lit and the switch ON, the MODE switch's three positions, the
+INTENSITY switch's five, PRINT and PAPER ADVANCE pressed -- and the
+print head, which moves.
+`plotterview_poll()` compares the printer's state with what's drawn and
+copies only what changed. Both pictures are made from a photo by
+`tools/images/make_hp82162a.py`, which also prints the sprite table that
+`kPrt*` in `plotterview.cpp` must match.
+
+Touches (`plotterview_printerHitTest()`, handled in `boardui.cpp`): the
+power switch toggles `TFPRINT` on and off (like **Devices**), MODE and
+INTENSITY jump to the position touched (or one step for LIGHT/DARK), PRINT
+and PAPER ADVANCE are held while the finger is down
+(`boardui_handleRelease()` lets go) and shown pressed for at least 150 ms.
+The positions are saved (`printer_mode`, `printer_intensity`). Unlike the
+other device views, the Printer view is there while the printer is off:
+it starts off, and its switch is in the view.
+
+On the loop the printer answers like the real one (and pyILPER's
+emulation): accessory ID 0x20, address 1 after AAU, two status bytes on
+SST (low byte first: SR, MB = NORM, MA = TRACE, PA, PR; high byte: EL, ID,
+BE, EB, RJ, DW, CO, LC), then ETO. A key press sets SR, and while it's
+set the printer adds the Service Request bit to passing data and IDY
+frames; SST clears it. A quick tap is still reported once (PR/PA stay in
+the status until read, at most 3 s).
+
+A line is built like the real printer does: 168 dot columns (24
+characters of 7: a blank, the 5x7 glyph, a blank), from characters
+(`printer_font.cpp`: ASCII in escape mode, the HP-41's set in 8-bit mode
+-- the glyphs of pyILPER's emulation), graphics columns (column mode, ESC
+*b<n>G), skips, double wide and lower case; it's printed at CR, when the
+next item doesn't fit, right justified if asked. Bar codes are consumed,
+not drawn. The last `kMaxLines` (200) lines are kept, as dots and text
+(`CPrinter::lines()`, `line(n)`); with trace on each is in the log.
+
+**The paper.** The ink is kept in its own layer (`kPrinterInkAddr`): the
+print area as seen through the window, 252 x 323 pixels, ink on white,
+the newest line at the bottom. Dots are 1.5 px (168 -> 252), anti-aliased,
+blue-black, as dark as INTENSITY says when the line is printed; a line is
+16 px. On the panel the ink is combined with the picture's own paper by a
+BTE "S0 AND destination" (`LT7683::andLayerRegion()`, ROP 1000b): white
+leaves the picture as it is, so its shading under the cover stays; the
+tear-off bar's rows are left out. Below the bar the paper bends towards
+the print head and runs a little to the left (`kSlant`, up to 8 px at the
+lower edge, a gentle curve -- the picture is made with the same table), so
+the ink there is put on in bands of rows, each moved by its row's slant.
+A new line, as on the real printer: the
+print head -- the small carriage in the slot under the paper, a sprite
+(`kPrtHead`, cut from the photo; the picture has the slot without it) --
+glides over to the other side (12 steps, eased), while the line is put
+into the ink layer one line *below* what the window shows (the layer is
+`kInkBufH`, a line taller); then the layer moves up 4 px at a time (via a
+staging copy, `kPrinterInkStageAddr`) and the line comes into view. The
+next line the head glides back. Blank lines (PAPER ADVANCE, an empty CR)
+only move the paper. One step per `plotterview_poll()`, at most every
+15-20 ms, so the main loop isn't held up; while the head moves only the
+slot is redrawn. Lines that come
+faster, or while the view isn't showing, go onto the paper at once;
+more than a window full redraws it from `line(n)`. PAPER ADVANCE held
+feeds a line every 220 ms.
+
+`tools/printertest` checks the HP-IL side and the dots (`make test`);
+`tools/hipiview`'s `printer_view_test` runs the real `plotterview.cpp`,
+`printer.cpp`, BMP loader and LT7683 driver against the emulated chip
+with the real pictures, checks the paper and saves `printer_view_*.png`.
+
+**The display's two models.** `TFDISPLAY` (`CDisplay`, `display.h`/
+`.cpp`) is one device that emulates either display -- **Emulate** in
+Settings → Screen and in the Display view's menu, `display_model` in
+CONFIG.TXT, `CDisplay::setModel()`:
+
+- HP 82163: accessory ID 0x3E, the bytes go to `Screen`; SST/SDA are not
+  answered (the frame passes on).
+- HP 92198 (Mountain Computer MC00701A, 80 columns): accessory ID 0x32,
+  device ID `MC00701A` CR LF (`deviceId()`), SST = 0x80 then the device
+  dependent status byte (bit 0 40 columns, 1 Roman-8, 2 PAL, 3 cursor
+  off, 4 insert mode), then ETO; DCL/SDC is a hard reset. The bytes go to
+  `hipi::Video80` (`video80.h`/`.cpp`, made in `pico_main.cpp`).
+
+Both: address 31 after AAU, data queued and handed over one byte per
+`idle()`. The controller sees a changed identity the next time it sets
+up the loop. On the panel the Display view is `Screen` (output
+`DisplayOutput::Display`) or `Video80` (output `DisplayOutput::Video80`):
+`outputFor(ViewKind::Display)` and the "back to the display" paths ask
+`displayOutput()`, and `plotterview_setDisplayModel()` swaps them while
+the display is showing (on the 5" with the menu open it only hands over
+-- closing the menu draws). Text colour applies to both; each keeps its
+own font and columns settings (`fontsize`/`columns` for the 82163,
+`v80_font`/`v80_columns` for the 92198), and the menu's **Font size** and
+**Columns** show the current model's.
+
+`Video80` is separate from `Screen`, after the owner's manual:
+
+- 48 lines of memory, a window of 24 (or 20 in 40-column mode) shown.
+  LF on the window's last line moves the window down (clearing the line
+  coming in) until it reaches the end of the memory; then the whole
+  memory moves up and line 0 is lost. ESC S / ESC T move the window.
+- Cursor addressing (ESC %, A–D, H) is relative to the window, clamped
+  to the screen -- no wrap at 16 rows / 32 columns as on the 82163.
+- Long lines continue on the next line (`cont_[]`); insert (ESC N, a new
+  line is made when needed) and delete character (ESC O) work across the
+  whole long line. ESC J/K/L/M, ESC Q/R, ESC Y/Z (monitor mode: control
+  codes shown in cyan as `@`–`_`), ESC [ / ] (80×24 / 40×20, clears), ESC
+  / and = (NTSC/PAL, only the status bit), ESC e/E, ESC h, ESC j/k, ESC z
+  (always passes) and ESC > / <. HIPI's own `ESC #` / `ESC ~` commands
+  (screen dumps, choosing the view) work as on `TFDISPLAY`.
+- ASCII set: 128–255 are the same characters in inverse video. Roman-8:
+  bytes kept as they are, drawn as the nearest ISO 8859-1 character
+  (`kRoman8[]`), the solid block as an inverse space.
+
+It draws with the chip's text engine and its built-in font: 12×24 on the
+7" panel (`selectBuiltinFontSize(1)`, 80×24 = 960×576) unless the small
+one is chosen (`setSmallFont()`), 8×16 on the 5"; 40 columns doubles the
+width (`txtScaleXY(2, 1)`); `setDefaultForty()` is the width after a
+reset. Changes draw only the
+cells or lines that changed; LF at the bottom is one `bteScrollShift()`
+plus the new line (7"). The chip's text cursor is the cursor: a block, or
+an underline for the insert cursor (`setTextCursorShape()`). The view only
+draws while it's shown (`setActive()`), and not while something has
+pointed the drawing elsewhere (the 7" menu) or covers it (5" menu/strip):
+then it remembers to draw everything (`catchUp()`). When it stops it puts
+the 8×16 font and scale back for the other views; the info box and device
+list select the built-in font themselves.
+
+As an HP 92198, ▲/▼ (shift: a page) look back through the memory, X goes
+back to the cursor, Shift+X clears the screen.
+
+`tools/hipiview`'s `video80_view_test` runs `video80.cpp`, `display.cpp`
+and the LT7683 driver against the emulated chip, checks the HP-IL answers
+of both models, the escape sequences, scrolling, long lines and the font
+and columns settings, and saves `video80_*.png`.
+
+**Hardware test page.** `hwtest.h`/`.cpp` is a full-screen view
+(`DisplayOutput::HwTest`, `plotterview_showHwTest()` from System, X or
+**Leave view** goes back) drawn like the loop map: off-screen in layer 3
+and copied on the 7", directly on the 5"; small changes (a button, a pixel
+dot, the I2C rows -- padded text, no clearing) are drawn on the panel when
+nothing else owns the canvas, else the whole page is redrawn later. Touches
+go to `hwtest_tap()` (boardui.cpp), `hwtest_poll()` runs the LED chase
+(150 ms), the pixel run (60 ms a step) and the I2C rescan (3 s).
+
+The hardware is behind `hwtest_io.h` (firmware: `hwtest_io.cpp`; PC test:
+`tools/hipiview/test/hwio_stub.cpp`). `hwio::begin()` holds the HP-IL
+activity LEDs (`hpil_leds_hold()`), switches the LEDs off and stops
+`TFPIXEL`'s effects; `hwio::end()` switches everything off again. The
+pixel count is `pixelStrip.setActiveCount()` -- TFPIXEL's saved
+`pixel_count`. HP-IL activity (`hpil_led_activity()`, leds.cpp) flashes
+LED 3 for 30 ms per frame (restarted at most every 10 ms) and keeps LED 4
+lit while no frames come, through the PWM LED drivers -- the old
+`led_on(gpio)` did nothing on those pins since they are PWM outputs.
+`hpil_leds=0` leaves them alone.
+
+The I2C list is `i2c_identify()` (`i2c_ident.h`/`.cpp`): every address
+0x08-0x77 is probed with a one-byte read (3 ms timeout), then each one that
+answers is matched against the chip descriptions. Those are text files:
+the user's `.txt` files in `i2c/` on the SD card, read first (so they win),
+then always the built-in `sdcard/i2c/chips.txt` (`kI2cChipsDefault`,
+generated by CMake from `src/i2c_chips_default.cpp.in` -- changing
+`chips.txt` re-runs CMake); all read again each time the page opens
+(`i2c_loadChips()`). A `chips.txt` on the card is not read: an old copy
+there would hide what a newer firmware knows (it once did: the VL53L0X's
+`MD` answered ERR NAME from a stale card copy). The SD card zip has it as
+`i2c/chips.txt.example` (`make_sd_card.py`). The format and the matching are in
+`i2c_chips.h`/`.cpp` (no hardware: the bus is an `I2cBus`): a `chip` with
+an address range, a name and what it is, then checks -- `id`/`id16` (a
+register's value, optionally renaming the chip), `text`, `status` (a byte
+read without a register), a `show` reading with a `range`, and `probe
+<name>` for the checks that need code, which stay in `i2c_ident.cpp`:
+`touch`, `clock` (DS3231/DS1307: valid BCD time, ticking, temperature,
+"oscillator stopped") and `bosch` (the chip ID; a BMP280 on 0x76 or 0x77
+is read through `CBmp280` for temperature and pressure). Chips with checks are tried before those
+without ("probably"), each group in reading order (files by name).
+`expected` chips (the panel's touch controller, `panel 7`/`panel 5`) show
+as missing when silent. Only register numbers are written, and never on
+0x20-0x27 (a PCF8574 would take it as its output levels): there only
+`status` and `probe` checks run. Lines that can't be read go to the log,
+and the page's I2C header says what was read. `tools/i2ctest` checks the
+format with `chips.txt` itself and the matching on a made-up bus.
+
+**TFI2C** (`ili2c.h`/`.cpp`, last on the loop so the others keep their
+addresses) lets the controller use any I2C chip. The device only collects
+a line (ended by CR/LF or UNL) and sends the answer (then CR LF, ETO); the
+commands are `I2cCommander` (`i2c_command.h`/`.cpp`, no hardware):
+`A` (address, or a chip name via `i2c_identify()`), `R`, `W`, `Q`, `D`,
+`M` (measurement), `L`, `P`, `S`, `I`, separated by `;` or by a `,` that
+a letter follows (`A118,MT`: the HP-41 hardly types `;`). Numbers in: decimal or `$hex`;
+out: decimal. A line without `W` is kept and run again at every SDA (a
+fresh value per INA); a line with `W` runs once when it ends.
+Waits run inside the frame handling (at most 2 s per line) -- the
+controller simply waits for the frame, as with a slow device. Writes to
+HIPI's own chips are refused (`hipiOwns()`: the touch panel). DCL reads
+the chip files again.
+
+Measurements are described in the chip files (`i2c_chips.h`): a
+`measure` block with `write` / `wait` / `read [reg] n [crc=..]` steps and
+a `value` (bytes to a number: mask, sign, shift, scale, offset), `format
+bcd` (with `text=` pieces: the DS3231's `TIME` as HH.MMSS) or `builtin`
+(`bosch.T`/`bosch.P` through `CBmp280` -- the Bosch chips need their
+calibration maths; `vl53l0x.D` -- ST's long set-up, `src/vl53l0x.cpp`); `setup` steps run once per
+address before the first measurement. `I2cChipList::run()` /
+`measure()` do the work; CRC: Sensirion (per word), AHT (all, from 0xFF),
+HTU (all, from 0). (TFI2C replaced the old TFTEMP device: `MT`, `MP`,
+`P<n>` are the same.) `tools/i2ctest` covers the measurements, the
+VL53L0X set-up on a made-up chip, every command and the device on the loop.
+
+`tools/hipiview`'s `hwtest_view_test` runs the page (with the stand-in
+hardware and a made-up bus), taps its buttons, checks the LEDs and pixels
+it drives and saves `hwtest_*.png`.
+
+**Demo.** `demo.h`/`.cpp` (System → Demo, 7" only) is a script of steps
+run from `demo_poll()`: each step is a function called every poll until it
+says it's done (`Step`), built by helpers -- `type()` (characters to
+`Screen` or `Video80`, n ms apart), `hpgl()` (HP-GL to the plotter, n
+characters per 15 ms, through `CPlotter::put()`), `print()` (lines to
+`CPrinter::put()`), `view()` (`plotterview_showView()`: a view without the
+name box), `caption()` (a yellow band at the bottom, drawn in the menu
+layer and shown as PIP-1), `wait()`, `call()`. What is shown lives in
+`demo_content.cpp` (texts, HP-GL, printouts; plain data -- the logo is
+hatched from the built-in bitmap, one stroke per run of coloured pixels in
+the nearest pen).
+
+Special steps: `tapePick()` opens the lid (`plotterview_setTapeEjected()`),
+shows the cassette list through UiDialog's own drawing
+(`demoShowPicker()`/`demoMovePicker()`/`demoHidePicker()`, via
+`DemoHooks` -- nothing is chosen, the menu stays closed), puts the picked
+name on the label and lets the reels turn (`plotterview_setDemoTape()`);
+`dir()` formats `lifDescribe()` of that file. `session()` sends a made-up
+HP-41 session through HIPI's own devices with `hipi_simFrame()` (the same
+path as a real frame, minus PILBOX and the PIO; the analyzer captures it,
+so the analyzer and the loop map show it) -- the devices' addresses are
+saved first and put back when the demo stops. `lightShow()` uses
+`hwtest_io.h`.
+
+Stopping (`demo_stop()`): any touch, swipe or hipiview button
+(boardui.cpp), or a real non-idle HP-IL frame (`demo_hpilActivity()` from
+`hipi_loop()`, acted on at the next poll). It puts back what it changed
+(Screen's size/colour/columns, Video80's font/width/colour, plot fit and
+paper, the Tape view's label, the display model's view, the addresses),
+empties the display, the 92198 screen, the plot, the paper
+(`plotterview_clearPaper()`) and the analyzer (`loopmap_reset()` too), and
+shows the view it started from. Nothing is written to CONFIG.TXT.
+
+`tools/hipiview`: `demo_view_test` renders `demo_content.cpp` (the texts,
+the plots, the printout) through the real Screen, Video80, plotter and
+printer; `demo_run_test` runs the real demo engine for a whole round in
+fake time (stand-ins for the SD card, analyzer, LEDs and the loop), saves
+a picture of each view and checks that stopping puts everything back.
+
+**New devices and CONFIG.TXT.** `known_devices` lists the devices the file
+has met. In `hipi_init()`, a device not in it (new in this version) gets
+its first state and is added: the printer starts switched off, since with
+a printer on the loop the HP-41 prints there instead of on the video
+display.
 
 **Devices** has two items: **Enable/disable** (the list above) and
 **Change order**, which sets the devices' order on the loop (and so
@@ -784,8 +1089,9 @@ register level, so new drawing code needs nothing extra to be mirrored.
   pictures in its cache. Just opening the port (ModemManager, terminals)
   starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a
   greeting, the register snapshot (plus the live cursor positions), and
-  the chip's built-in font. `LT7683::captureBuiltinFont()` draws it
-  off-screen and reads it back, once per boot.
+  the chip's built-in fonts (`kFont` 8×16, `kFont24` 12×24 -- protocol
+  version 6). `LT7683::captureBuiltinFont()` / `captureBuiltinFont24()`
+  draw them off-screen and read them back, once per boot.
 - Then it reads back, 8 kB per main-loop pass, with `LT7683::readSdram()`
   (the encoder suspended, the data sent as `kMem` packets, the changed
   registers resent afterwards), in this order:
@@ -823,14 +1129,15 @@ HP-IL loop (see `hipi_init()` in `src/hipi.cpp`):
 
 | Name        | Class        | SAI  | Function |
 |-------------|--------------|------|----------|
-| `TFDISPLAY` | `CDisplay`   | 0x3E | HP82163 video display emulation |
+| `TFDISPLAY` | `CDisplay`   | 0x3E / 0x32 | HP82163 video display, or HP 92198 / MC00701A 80 columns (setting) |
 | `TFDRIVE`   | `CDrive`     | 0x10 | HP82161 cassette drive, backed by a `.dat` on SD |
 | `TFLEDS`    | `CHipiLed`   | 0xEE | LED control (syntax in `README.md`) |
 | `TFPIXEL`   | `CHipiPixel` | 0xED | Pixel/LED strip control |
-| `TFTEMP`    | `CHipiTemp`  | 0x51 | BMP280 temperature/pressure sensor over I2C |
+| `TFI2C`     | `CHipiI2c`   | 0x52 | Any I2C chip: registers, or measurements from `i2c/*.txt` (last on the loop) |
 | `PILBOX`    | `CPilBox`    | —    | Forwards the loop to a PC over CDC 1 |
 | `TFPLOT`    | `CPlotter`   | 0x60 | HP7470A-compatible plotter (HP-GL subset) |
 | `TFTERM`    | `CTerminal`  | 0x4E | Terminal bridge over CDC 2 |
+| `TFPRINT`   | `CPrinter`   | 0x20 | HP 82162A thermal printer (starts off) |
 
 Devices *after* `PILBOX` in the chain come after any virtual devices running
 on the PC.
@@ -1021,98 +1328,57 @@ the line with `MODULE`.
 > continuous drain above. See the comment at the top of `include/terminal.h`
 > if your controller behaves that way.
 
-### 9.5 Example: an I2C device (like `TFTEMP`)
+### 9.5 Example: an I2C sensor
 
-I2C devices are split in two layers:
+An I2C sensor doesn't need an HP-IL device of its own: `TFI2C` reaches
+every chip on the bus, and what a measurement is lives in the chip files
+(`i2c/*.txt` on the SD card, see *Hardware test page* and the top of
+`sdcard/i2c/chips.txt`). In order of preference:
 
-1. **Chip driver** derived from `CI2CDevice` (`include/i2c_device.h`) —
-   knows only the chip: registers, conversion, calibration. Example:
-   `CBmp280` in `include/bmp280.h` / `src/bmp280.cpp`.
-2. **HP-IL device** derived from `CDevice` — knows only the HP-IL protocol
-   and holds a reference to the chip driver. Example: `CHipiTemp` in
-   `include/iltemp.h` / `src/iltemp.cpp`.
+1. **A description only** -- most sensors: write a register, wait, read
+   bytes, scale them. No firmware change:
 
-This keeps the chip driver reusable and testable without HP-IL.
+   ```
+   chip 0x23 BH1750 | light
+     measure L,LUX | light in lux
+       write 0x20                 # one high-resolution measurement
+       wait 180
+       read 2
+       value bytes=0-1 scale=0.8333 dec=0
+   ```
 
-**The shared bus.** All I2C devices share `i2c0` on GP16 (SDA) / GP17 (SCL)
+2. **A built-in measurement** -- when the chip needs code: calibration
+   maths (the Bosch sensors) or a long set-up (the VL53L0X). Write a
+   function that measures through the `I2cBus` (so it runs in
+   `tools/i2ctest` too), register it in `i2c_commandEnv()`
+   (`src/i2c_ident.cpp`) and name it in the chip file:
+
+   ```cpp
+   // src/my_sensor.cpp -- one value, set-up done when needed
+   bool mysensor_read(hipi::I2cBus& bus, std::uint8_t addr, double& value);
+
+   // src/i2c_ident.cpp, i2c_commandEnv():
+   e.measures = { ..., { "mysensor.X", mysensor_read } };
+   ```
+   ```
+   chip 0x52 MYSENSOR | something
+     measure X | the value
+       builtin mysensor.X dec=1
+   ```
+
+   `vl53l0x.cpp` is a full example: it does ST's set-up the first time,
+   notices when the chip has lost it (unplugged: a register is back at
+   its reset value) and does it again; `vl53l0x_reset()` (called on
+   DCL via `i2c_loadChips()`) forgets every set-up.
+
+The HP-41 then only says which chip and which measurement:
+`"AMYSENSOR;MX" OUTA INA`.
+
+**The shared bus.** All I2C chips share `i2c0` on GP16 (SDA) / GP17 (SCL)
 with the touch controller. `touchInit()` initialises the bus and
-`pico_main.cpp` then calls `CI2CBus::markInitialized(touch_i2c)`, so your
-driver's `initBus()` will not re-initialise it. Use **System → Scan I2C** to
-confirm the chip's address before writing any code.
-
-Chip driver skeleton (a BH1750 light sensor — an example only, not part of the project):
-
-```cpp
-// include/bh1750.h
-#pragma once
-#include "i2c_device.h"
-
-class CBh1750 : public CI2CDevice {
-public:
-    explicit CBh1750(i2c_inst_t* bus, std::uint8_t addr = 0x23)
-        : CI2CDevice(bus, addr) {}
-
-    bool begin(uint sda, uint scl) {
-        initBus(sda, scl);                           // no-op if the bus is ready
-        const std::uint8_t powerOn = 0x01, contHiRes = 0x10;
-        return i2c_write_blocking(bus_, address_, &powerOn, 1, false) == 1 &&
-               i2c_write_blocking(bus_, address_, &contHiRes, 1, false) == 1;
-    }
-
-    // Returns lux * 10 (one decimal) -- false if the chip does not answer
-    bool readLuxTenths(std::int32_t& out) {
-        std::uint8_t b[2];
-        if (i2c_read_blocking(bus_, address_, b, 2, false) != 2) return false;
-        const std::uint32_t raw = (static_cast<std::uint32_t>(b[0]) << 8) | b[1];
-        out = static_cast<std::int32_t>(raw * 10 / 12);   // lux = raw / 1.2
-        return true;
-    }
-};
-```
-
-For chips with a normal register map, use the protected helpers
-`writeReg8()`, `readReg()` and `readReg8()` instead of raw
-`i2c_*_blocking()` calls.
-
-HP-IL wrapper: copy the skeleton from 9.4 and let `prepareReply()` call the
-chip driver:
-
-```cpp
-class CHipiLight : public CDevice {
-public:
-    CHipiLight(const char* name, IL_ADDR_t sai, CBh1750& sensor, IL_ADDR_t aau = 31)
-        : CDevice(name, sai, aau, NONE), sensor_(sensor) {}
-    // clear(), ifc(), doListener(), doTalker() as in 9.4
-private:
-    void prepareReply();   // sensor_.readLuxTenths() -> "123.4\r\n" or "ERR\r\n"
-    CBh1750& sensor_;
-    std::vector<std::uint8_t> outQueue_;
-    bool midTransfer_ = false;
-};
-```
-
-Registration in `hipi_init()`, following the `TFTEMP` pattern:
-
-```cpp
-static CBh1750* lightSensor = nullptr;
-...
-lightSensor = new CBh1750(touch_i2c);
-if (!lightSensor->begin(TOUCH_SDA, TOUCH_SCL)) {
-    LOGF("\r\n * WARNING: BH1750 not responding -- TFLIGHT will report ERR");
-}
-devices.push_back(new CHipiLight("TFLIGHT", 0x51, *lightSensor));
-```
-
-Tips for I2C devices:
-
-- A single transaction must be short. A 100 kHz read of a few bytes is
-  fine inside `doTalker()`; anything with a long conversion time should be
-  started earlier (e.g. by a listener command) and polled in `idle()`.
-- Always return something on SDA — `"ERR"` if the chip does not answer —
-  so the controller never waits forever.
-- Because the bus is shared with touch, a hanging I2C device also blocks
-  touch. Use the `*_timeout_us()` variants of the SDK calls if the chip may
-  be missing.
+`pico_main.cpp` then calls `CI2CBus::markInitialized(touch_i2c)`, so a
+driver's `initBus()` doesn't initialise it again. Use **System → Hardware
+test** (its I2C list, or **Scan I2C**) to see the chip's address first.
 
 ### 9.6 Example: a device with graphical output (like `TFPLOT`)
 
@@ -1166,7 +1432,7 @@ redrawn completely when the user switches back to it.
 | HP-IL doesn't respond | Run **System → Loopback test** with a cable from OUT to IN. Check that the device isn't `[OFF]` in **Settings → Devices** |
 | A device has no address | It is disabled, or the controller has not run auto-addressing yet (e.g. power-cycle the HP-41 loop) |
 | Nothing on `/dev/ttyACM0` | Check the `dialout` group and the port number. Early boot messages are buffered (4 kB) and sent when the terminal opens the port |
-| New I2C device not found | **System → Scan I2C**; check address, pull-ups and power |
+| New I2C device not found | **System → Hardware test** (I2C list / Scan I2C); check address, pull-ups and power |
 | Files copied from the PC not visible | Select **Disconnect from PC** and eject on the PC before using the drive again |
 | Build fails after editing `CMakeLists.txt` | Delete `build/` and configure again |
 | `RP2350` drive does not appear | Use a USB cable that carries data, and hold BOOTSEL *while* connecting |

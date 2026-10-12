@@ -11,8 +11,21 @@ SDL_LIBS   := $(shell pkg-config --libs sdl2)
 SOURCES := hipiview.cpp lt7683_emu.cpp serial_port.cpp
 HEADERS := lt7683_emu.hpp deframer.hpp png.hpp input.hpp serial_port.hpp ../../include/mirror_protocol.h
 
-hipiview: $(SOURCES) $(HEADERS)
-	$(CXX) $(CXXFLAGS) $(SDL_CFLAGS) $(SOURCES) -o $@ $(SDL_LIBS) -lz -pthread
+# The version, from git (../../cmake/hipi_version.cmake, run every time; it
+# only rewrites gen/hipiview_version.h when the version changes). Without
+# cmake: "unknown".
+VERSION_H := gen/hipiview_version.h
+$(VERSION_H): FORCE
+	@if command -v cmake >/dev/null 2>&1; then \
+	    cmake -DOUT=$(CURDIR)/$@ -DPREFIX=HIPIVIEW -P ../../cmake/hipi_version.cmake; \
+	elif [ ! -f $@ ]; then \
+	    mkdir -p gen && printf '#pragma once\n#define HIPIVIEW_VERSION_TEXT "unknown"\n#define HIPIVIEW_VERSION_FULL "unknown"\n' > $@; \
+	fi
+.PHONY: FORCE
+FORCE:
+
+hipiview: $(SOURCES) $(HEADERS) $(VERSION_H)
+	$(CXX) $(CXXFLAGS) -Igen $(SDL_CFLAGS) $(SOURCES) -o $@ $(SDL_LIBS) -lz -pthread
 
 # Windows, cross-compiled on Linux (MinGW-w64): one hipiview.exe with
 # SDL2 and zlib built in. Needs the mingw SDL2 package and a mingw zlib
@@ -22,8 +35,8 @@ MINGW      ?= x86_64-w64-mingw32-g++
 SDL2_MINGW ?= $(HOME)/mingw/SDL2/x86_64-w64-mingw32
 ZLIB_MINGW ?= $(HOME)/mingw/zlib
 windows: hipiview.exe
-hipiview.exe: $(SOURCES) $(HEADERS)
-	$(MINGW) -O2 -std=c++17 -Wall -Wextra -I$(SDL2_MINGW)/include -I$(ZLIB_MINGW)/include $(SOURCES) -o $@ \
+hipiview.exe: $(SOURCES) $(HEADERS) $(VERSION_H)
+	$(MINGW) -O2 -std=c++17 -Wall -Wextra -Igen -I$(SDL2_MINGW)/include -I$(ZLIB_MINGW)/include $(SOURCES) -o $@ \
 	    -static -L$(SDL2_MINGW)/lib -L$(ZLIB_MINGW)/lib -lmingw32 -lSDL2main -lSDL2 -lz \
 	    -lsetupapi -ladvapi32 -lwinmm -limm32 -lversion -lole32 -loleaut32 -luuid -lgdi32 -luser32 \
 	    -lshell32 -lcfgmgr32 -mconsole
@@ -35,14 +48,55 @@ host_test: test/host_test.cpp lt7683_emu.cpp lt7683_emu.hpp ../../src/LT7683.cpp
 	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -I../../include test/host_test.cpp lt7683_emu.cpp \
 	    ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz
 
-test: host_test
+# The Printer view as HIPI draws it (real plotterview.cpp, printer.cpp,
+# BMP loader, LT7683 driver) with the pictures from resources/ -- saves
+# printer_view_*.png to look at
+PV_SRC := test/printer_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
+          ../../src/plotterview.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
+          ../../src/plotter.cpp ../../src/device.cpp ../../src/video80.cpp \
+          ../../src/hwtest.cpp test/hwio_stub.cpp
+printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/plotterview.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(PV_SRC) -o $@ -lz
+
+# TFDISPLAY as an HP 92198 / MC00701A: the real Video80 screen and the
+# display device against the emulated chip -- saves video80_*.png to look at
+V80_SRC := test/video80_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
+           ../../src/video80.cpp ../../src/display.cpp ../../src/device.cpp
+video80_view_test: $(V80_SRC) ../../include/video80.h ../../include/display.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -I../../include $(V80_SRC) -o $@ -lz
+
+# The Hardware test page as HIPI draws it (a stand-in for the LEDs,
+# pixels and I2C bus) -- saves hwtest_*.png
+HW_SRC := test/hwtest_view_test.cpp $(filter-out test/printer_view_test.cpp,$(PV_SRC))
+hwtest_view_test: $(HW_SRC) test/hwio_stub.h ../../include/hwtest.h ../../include/hwtest_io.h ../../include/i2c_ident.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(HW_SRC) -o $@ -lz
+
+# What the demo shows (demo_content.cpp) -- saves demo_*.png
+DEMO_SRC := test/demo_view_test.cpp ../../src/demo_content.cpp ../../src/logo_image.cpp \
+            $(filter-out test/printer_view_test.cpp,$(PV_SRC))
+demo_view_test: $(DEMO_SRC) ../../include/demo_content.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(DEMO_SRC) -o $@ -lz
+
+# The demo itself, a whole round in fake time -- saves demo_run_*.png
+RUN_SRC := test/demo_run_test.cpp ../../src/demo.cpp ../../src/display.cpp \
+           $(filter-out test/demo_view_test.cpp,$(DEMO_SRC))
+demo_run_test: $(RUN_SRC) ../../include/demo.h ../../include/demo_content.h $(wildcard test/pvstubs/*.h test/demostubs/*.hpp)
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(RUN_SRC) -o $@ -lz
+
+test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test
 	./host_test
+	./printer_view_test
+	./video80_view_test
+	./hwtest_view_test
+	./demo_view_test
+	./demo_run_test
 
 install: hipiview
 	install -m 755 hipiview /usr/local/bin/
 
 clean:
-	rm -f hipiview hipiview.exe host_test link_sim *_viewer.png *_chip.png *.hvlog
+	rm -rf gen
+	rm -f hipiview hipiview.exe host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png *_viewer.png *_chip.png printer_view_*.png *.hvlog
 
 .PHONY: test install clean windows
 

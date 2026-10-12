@@ -1,0 +1,322 @@
+# I2C chips HIPI knows -- for System -> Hardware test and for TFI2C.
+#
+# This list is built into the firmware (a new firmware brings new chips).
+# On the SD card it's i2c/chips.txt.example: a reference, not read. Your
+# own chips go in other .txt files in i2c/ (one for all, or one per chip,
+# e.g. i2c/mcp9808.txt); HIPI reads those first, so a chip described there
+# wins over the built-in one. The Hardware test page reads them again each
+# time it opens, TFI2C at a device clear (CLRDEV / DCL) -- no new firmware
+# needed. (An old i2c/chips.txt on the card is not read either.)
+#
+# ── A chip ─────────────────────────────────────────────────────────────────
+#
+#   chip <address>[-<last address>] <name> | <what it is>
+#
+# then, indented, the checks that tell it's really that chip (all must
+# pass), in any order:
+#
+#   id <register> <value>[=<name>] ...  [mask=<bits>]
+#                    One byte read from the register must be one of the
+#                    values (after "and" with the mask). <value>=<name>
+#                    renames the chip, e.g. id 0xD0 0x58=BMP280 0x60=BME280
+#   id16 <register> <value>[=<name>] ...  [mask=<bits>]
+#                    The same with two bytes, high byte first
+#   text <register> "<characters>"
+#                    The bytes from the register are these characters
+#   status <mask> <value>
+#                    One byte read without a register: (byte and mask) = value
+#   probe <name>     A check built into the firmware: touch, clock, bosch
+#
+# optionally a reading for the Hardware test page:
+#
+#   show <register> <type> [mask=..] [bits=..] [shift=..] [scale=..] [unit=..] [dec=..]
+#                    type: u8, s8, u16, s16 (high byte first), u16le, s16le.
+#                    The value: (raw and mask), signed in "bits" bits, shifted
+#                    right "shift" bits, times "scale"; shown with "dec"
+#                    decimals and the unit
+#   range <lowest> <highest>
+#                    The reading must be within these (else: fault)
+#
+# and:
+#
+#   expected         It's always there: shown as missing if it doesn't answer
+#   panel 5|7        Only on HIPIs with that panel
+#
+# A chip with checks (or a reading) is tried before a chip without; one
+# without is only "probably" that chip. Numbers: 0x.. (hex) or decimal.
+# Identifying only reads: the one thing written is the register number to
+# read from -- and never on 0x20-0x27, where a PCF8574 would take it as its
+# output levels (there only "status" checks are tried). '#' starts a comment.
+#
+# ── Measurements (TFI2C) ───────────────────────────────────────────────────
+#
+# What TFI2C's "M" command can measure on the chip ("MT" -> 23.4):
+#
+#   setup            Steps done once, before the first measurement (e.g. to
+#                    wake the chip up); then write / wait lines
+#   measure <name>[,<name>...] | <what it is>
+#                    A measurement and its names (short ones work best on
+#                    the HP-41: T, H, P ...); then, in order:
+#     write <byte> ...        Bytes to the chip (the first is usually a register)
+#     wait <ms>               Wait (at most 2000 ms in all)
+#     read <count> [crc=..]   Read bytes (no register)
+#     read <register> <count> [crc=..]
+#                             Read bytes from a register. crc=sensirion: a
+#                             CRC byte after every 2 bytes (SHT3x, SCD4x ...);
+#                             crc=aht: the last byte, over all (AHT20);
+#                             crc=htu: the last byte, from 0 (HTU21D). The
+#                             CRC bytes are checked and dropped
+#   and what's answered -- one of:
+#     value [<type>] [bytes=<first>-<last>] [le] [mask=..] [bits=..] [shift=..]
+#           [scale=..] [offset=..] [dec=..] [unit=..]
+#                             A number from the bytes read: <type> as for
+#                             show, or bytes=: those bytes as one number
+#                             (high byte first; le: low byte first). Then
+#                             as for show, plus offset (added at the end)
+#     format bcd <byte>[/<mask>] ... [text=<text>] ... [sep=<text>]
+#                             The bytes as BCD digits, e.g. a time 12:34:56
+#                             (sep= between two bytes). text= puts text
+#                             in between: 2 text=. 1 0 gives 12.3456, a
+#                             number the HP-41 can use (HH.MMSS); with
+#                             text= there is no sep unless one is given
+#     builtin <name> [dec=..] A measurement built into the firmware:
+#                             bosch.T, bosch.P (a BMP280, 0x76 or 0x77),
+#                             vl53l0x.D (distance in mm; the chip's set-up
+#                             is done by HIPI)
+#     range <lowest> <highest> (optional) else the answer is ERR RANGE
+#
+# The unit is only for reading this file: TFI2C answers the bare number.
+
+# ── On the board ───────────────────────────────────────────────────────────
+chip 0x38 FT5316 | touch panel
+  probe touch
+  expected
+  panel 7
+
+chip 0x40 GSL1680 | touch panel
+  probe touch
+  expected
+  panel 5
+
+# ── Identified by an ID register or checked values ─────────────────────────
+chip 0x68 DS3231 | real-time clock
+  probe clock                      # valid time, ticking, temperature, time lost
+  measure TIME | time HH.MMSS (as the HP-41: HMS+, HR ...)
+    read 0x00 3
+    format bcd 2/0x3F text=. 1/0x7F 0/0x7F
+  measure DATE | date YYYY.MMDD
+    read 0x04 3
+    format bcd text=20 2 text=. 1/0x1F 0/0x3F
+  measure DMY | date DD.MMYYYY (the TIME module with flag 31 set)
+    read 0x04 3
+    format bcd 0/0x3F text=. 1/0x1F text=20 2
+  measure MDY | date MM.DDYYYY (the TIME module, flag 31 clear)
+    read 0x04 3
+    format bcd 1/0x1F text=. 0/0x3F text=20 2
+  measure T,TEMP | temperature (DS3231)
+    read 0x11 2
+    value s16 shift=6 scale=0.25 dec=2 unit=C
+
+chip 0x68-0x69 MPU-6050 | motion sensor
+  id 0x75 0x68=MPU-6050 0x70=MPU-6500 0x71=MPU-9250 0x19=MPU-6886
+  setup
+    write 0x6B 0x00                # wake up
+  measure AX | acceleration x
+    read 0x3B 2
+    value s16 scale=0.00006103515625 dec=3 unit=g
+  measure AY | acceleration y
+    read 0x3D 2
+    value s16 scale=0.00006103515625 dec=3 unit=g
+  measure AZ | acceleration z
+    read 0x3F 2
+    value s16 scale=0.00006103515625 dec=3 unit=g
+  measure T,TEMP | temperature
+    read 0x41 2
+    value s16 scale=0.0029411765 offset=36.53 dec=1 unit=C
+  measure GX | rotation x
+    read 0x43 2
+    value s16 scale=0.0076335878 dec=1 unit=deg/s
+  measure GY | rotation y
+    read 0x45 2
+    value s16 scale=0.0076335878 dec=1 unit=deg/s
+  measure GZ | rotation z
+    read 0x47 2
+    value s16 scale=0.0076335878 dec=1 unit=deg/s
+
+chip 0x76-0x77 BMP280 | temperature/pressure
+  probe bosch                      # BMP280/BME280/BME680/BMP180; a BMP280 is read on either address
+  measure T,TEMP | temperature
+    builtin bosch.T dec=1
+  measure P,PRES | pressure in hPa
+    builtin bosch.P dec=1
+
+chip 0x29 VL53L0X | distance sensor
+  id 0xC0 0xEE
+  measure D,DIST | distance in mm (8190: nothing in range)
+    builtin vl53l0x.D dec=0        # HIPI does ST's set-up (once) and a single measurement
+
+chip 0x38 AHT20 | temperature/humidity
+  status 0x08 0x08                 # the "calibrated" bit
+  measure T,TEMP | temperature
+    write 0xAC 0x33 0x00
+    wait 80
+    read 7 crc=aht
+    value bytes=3-5 mask=0xFFFFF scale=0.00019073486328125 offset=-50 dec=1 unit=C
+  measure H,HUM | relative humidity
+    write 0xAC 0x33 0x00
+    wait 80
+    read 7 crc=aht
+    value bytes=1-3 shift=4 mask=0xFFFFF0 scale=0.0000953674316 dec=1 unit=%
+
+chip 0x48-0x4B ADS1115 | A/D converter
+  id16 0x01 0x8583=ADS1115/1015    # the config register after power-on
+  measure A0 | input 0 (0-4.096 V)
+    write 0x01 0xC3 0x83           # single shot, +-4.096 V, 128/s
+    wait 9
+    read 0x00 2
+    value s16 scale=0.000125 dec=4 unit=V
+  measure A1 | input 1
+    write 0x01 0xD3 0x83
+    wait 9
+    read 0x00 2
+    value s16 scale=0.000125 dec=4 unit=V
+  measure A2 | input 2
+    write 0x01 0xE3 0x83
+    wait 9
+    read 0x00 2
+    value s16 scale=0.000125 dec=4 unit=V
+  measure A3 | input 3
+    write 0x01 0xF3 0x83
+    wait 9
+    read 0x00 2
+    value s16 scale=0.000125 dec=4 unit=V
+
+chip 0x48-0x4B TMP102 | temperature
+  id16 0x01 0x6000 mask=0xFF00
+  show 0x00 s16 shift=4 scale=0.0625 unit=C dec=1
+  range -40 125
+  measure T,TEMP | temperature
+    read 0x00 2
+    value s16 shift=4 scale=0.0625 dec=2 unit=C
+
+chip 0x18-0x1F MCP9808 | temperature
+  id16 0x06 0x0054                 # Microchip's manufacturer ID
+  show 0x05 u16 mask=0x1FFF bits=13 scale=0.0625 unit=C dec=2
+  range -40 125
+  measure T,TEMP | temperature
+    read 0x05 2
+    value u16 mask=0x1FFF bits=13 scale=0.0625 dec=2 unit=C
+
+chip 0x53 ADXL345 | accelerometer
+  id 0x00 0xE5
+  setup
+    write 0x2D 0x08                # measure
+  measure AX | acceleration x
+    read 0x32 2
+    value s16le scale=0.0039 dec=3 unit=g
+  measure AY | acceleration y
+    read 0x34 2
+    value s16le scale=0.0039 dec=3 unit=g
+  measure AZ | acceleration z
+    read 0x36 2
+    value s16le scale=0.0039 dec=3 unit=g
+
+chip 0x1D ADXL345 | accelerometer
+  id 0x00 0xE5
+  setup
+    write 0x2D 0x08
+  measure AX | acceleration x
+    read 0x32 2
+    value s16le scale=0.0039 dec=3 unit=g
+  measure AY | acceleration y
+    read 0x34 2
+    value s16le scale=0.0039 dec=3 unit=g
+  measure AZ | acceleration z
+    read 0x36 2
+    value s16le scale=0.0039 dec=3 unit=g
+
+chip 0x18-0x19 LIS3DH | accelerometer
+  id 0x0F 0x33
+  setup
+    write 0x20 0x57                # 100/s, x y z on
+  measure AX | acceleration x
+    read 0xA8 2                    # (0x80: the address counts up)
+    value s16le shift=6 scale=0.004 dec=3 unit=g
+  measure AY | acceleration y
+    read 0xAA 2
+    value s16le shift=6 scale=0.004 dec=3 unit=g
+  measure AZ | acceleration z
+    read 0xAC 2
+    value s16le shift=6 scale=0.004 dec=3 unit=g
+
+chip 0x1E HMC5883L | compass
+  text 0x0A "H43"
+
+chip 0x0D QMC5883L | compass
+  id 0x0D 0xFF
+
+# ── Known by their address only ────────────────────────────────────────────
+chip 0x57 AT24C32 | EEPROM (clock module)
+chip 0x50-0x57 AT24Cxx | EEPROM
+chip 0x3C-0x3D SSD1306 | OLED display
+
+chip 0x23 BH1750 | light sensor
+  measure L,LUX | light
+    write 0x20                     # one measurement, 1 lx
+    wait 180
+    read 2
+    value bytes=0-1 scale=0.8333 dec=0 unit=lx
+
+chip 0x5C BH1750 | light sensor
+  measure L,LUX | light
+    write 0x20
+    wait 180
+    read 2
+    value bytes=0-1 scale=0.8333 dec=0 unit=lx
+
+chip 0x44-0x45 SHT3x | temperature/humidity
+  measure T,TEMP | temperature
+    write 0x24 0x00                # one measurement, high repeatability
+    wait 20
+    read 6 crc=sensirion
+    value bytes=0-1 scale=0.0026703288 offset=-45 dec=1 unit=C
+  measure H,HUM | relative humidity
+    write 0x24 0x00
+    wait 20
+    read 6 crc=sensirion
+    value bytes=2-3 scale=0.0015259022 dec=1 unit=%
+
+chip 0x40 HTU21D/INA219 | humidity / current
+  measure T,TEMP | temperature (HTU21D)
+    write 0xF3
+    wait 50
+    read 3 crc=htu
+    value bytes=0-1 mask=0xFFFC scale=0.00268127441 offset=-46.85 dec=1 unit=C
+  measure H,HUM | relative humidity (HTU21D)
+    write 0xF5
+    wait 16
+    read 3 crc=htu
+    value bytes=0-1 mask=0xFFFC scale=0.0019073486 offset=-6 dec=1 unit=%
+  measure V | bus voltage (INA219)
+    read 0x02 2
+    value u16 shift=3 scale=0.004 dec=3 unit=V
+  measure I | current, 0.1 ohm shunt (INA219)
+    read 0x01 2
+    value s16 scale=0.0001 dec=4 unit=A
+
+chip 0x48-0x4F LM75 | temperature
+  measure T,TEMP | temperature
+    read 0x00 2
+    value s16 shift=7 scale=0.5 dec=1 unit=C
+
+chip 0x41-0x4F INA219 | current sensor
+  measure V | bus voltage
+    read 0x02 2
+    value u16 shift=3 scale=0.004 dec=3 unit=V
+  measure I | current, 0.1 ohm shunt
+    read 0x01 2
+    value s16 scale=0.0001 dec=4 unit=A
+
+chip 0x20-0x27 PCF8574/MCP23017 | I/O expander / LCD
+chip 0x38-0x3F PCF8574A | I/O expander / LCD
+chip 0x70-0x77 TCA9548A | I2C multiplexer

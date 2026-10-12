@@ -41,6 +41,7 @@ std::uint16_t rop(int code, std::uint16_t s0, std::uint16_t s1) {
 
 LT7683Emu::LT7683Emu() : mem_(kSdramSize, 0) {
     std::memset(font_, 0, sizeof(font_));
+    std::memset(font24_, 0, sizeof(font24_));
     reset();
 }
 
@@ -57,6 +58,10 @@ void LT7683Emu::reset() {
 void LT7683Emu::setBuiltinFont(const std::uint8_t font[256][16]) {
     std::memcpy(font_, font, sizeof(font_));
     fontKnown_ = true;
+}
+
+void LT7683Emu::setBuiltinFont24(const std::uint16_t font[256][24]) {
+    std::memcpy(font24_, font, sizeof(font24_));
 }
 
 int LT7683Emu::syncPercent() const {
@@ -242,6 +247,12 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
         std::memcpy(font_, p + 1, 4096);
         fontKnown_ = true;
         return 1 + 4096;
+    case mp::kFont24:
+        if (n < 1 + 256 * 48) return 0;
+        for (int c = 0; c < 256; ++c)
+            for (int r = 0; r < 24; ++r)
+                font24_[c][r] = static_cast<std::uint16_t>(p[1 + c * 48 + 2 * r] | (p[2 + c * 48 + 2 * r] << 8));
+        return 1 + 256 * 48;
     case mp::kSyncStart:
         if (n < 5) return 0;
         syncTotal_ = static_cast<std::uint32_t>(p[1] | (p[2] << 8) | (p[3] << 16) | (static_cast<std::uint32_t>(p[4]) << 24));
@@ -553,17 +564,22 @@ void LT7683Emu::textByte(std::uint8_t v) {
 }
 
 void LT7683Emu::drawChar(std::uint32_t code) {
-    std::uint8_t g[16];
+    // The glyph as rows of up to 16 pixels, bit 15 = leftmost
+    std::uint16_t g[24];
+    int gw = 8, gh = 16;
     if ((regs_[0xCC] & 0xC0) == 0x80) {
         const std::uint32_t a = r32(0xDB) + code * 16u;
-        for (int i = 0; i < 16; ++i) g[i] = a + i < mem_.size() ? mem_[a + i] : 0;
+        for (int i = 0; i < 16; ++i) g[i] = static_cast<std::uint16_t>((a + i < mem_.size() ? mem_[a + i] : 0) << 8);
+    } else if (builtinSize() == 1) {                     // 12x24
+        gw = 12; gh = 24;
+        std::memcpy(g, font24_[code & 0xFF], sizeof(g));
     } else {
-        std::memcpy(g, font_[code & 0xFF], 16);
+        for (int i = 0; i < 16; ++i) g[i] = static_cast<std::uint16_t>(font_[code & 0xFF][i] << 8);
     }
     const std::uint8_t ccr1 = regs_[0xCD];
     const int hs = ((ccr1 >> 2) & 3) + 1, vs = (ccr1 & 3) + 1;
     const bool transparent = (ccr1 & 0x40) != 0;
-    const int cw = 8 * hs, ch = 16 * vs;
+    const int cw = gw * hs, ch = gh * vs;
     const int ax = r16(0x56), aw = r16(0x5A);
     int x = r16(0x63), y = r16(0x65);
     if (x + cw > ax + aw && x > ax) {                    // no room left: next line
@@ -571,9 +587,9 @@ void LT7683Emu::drawChar(std::uint32_t code) {
         y += ch + (regs_[0xD0] & 0x1F);
     }
     const std::uint16_t f = fg(), b = bg();
-    for (int row = 0; row < 16; ++row)
-        for (int col = 0; col < 8; ++col) {
-            const bool on = (g[row] & (0x80 >> col)) != 0;
+    for (int row = 0; row < gh; ++row)
+        for (int col = 0; col < gw; ++col) {
+            const bool on = (g[row] & (0x8000 >> col)) != 0;
             if (!on && transparent) continue;
             const std::uint16_t c = on ? f : b;
             for (int sy = 0; sy < vs; ++sy)
@@ -662,7 +678,8 @@ void LT7683Emu::render(std::uint32_t* out, double timeSec, bool backlight) const
         if (on) {
             const int hs = ((regs_[0xCD] >> 2) & 3) + 1, vs = (regs_[0xCD] & 3) + 1;
             const int cw = (regs_[0x3E] + 1) * hs, chh = (regs_[0x3F] + 1) * vs;
-            const int cx = r16(0x63) - mwx, cy = r16(0x65) - mwy + 16 * vs - chh;
+            const int baseH = (regs_[0xCC] & 0xC0) == 0 && builtinSize() == 1 ? 24 : 16;
+            const int cx = r16(0x63) - mwx, cy = r16(0x65) - mwy + baseH * vs - chh;
             const std::uint16_t c = fg();
             for (int y = std::max(0, cy); y < std::min(H, cy + chh); ++y)
                 for (int x = std::max(0, cx); x < std::min(W, cx + cw); ++x) px[static_cast<std::size_t>(y) * W + x] = c;

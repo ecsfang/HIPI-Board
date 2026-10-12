@@ -25,6 +25,29 @@ on:
       - 'include/mirror_*.h*'
       - 'include/display_mirror.h'
       - 'src/display_mirror.cpp'
+      - 'src/plotterview.cpp'
+      - 'src/printer*.cpp'
+      - 'include/printer*.h'
+      - 'src/video80*.cpp'
+      - 'include/video80*.h'
+      - 'src/display.cpp'
+      - 'src/hwtest.cpp'
+      - 'include/hwtest*.h'
+      - 'include/i2c_ident.h'
+      - 'src/demo*.cpp'
+      - 'include/demo*.h'
+      - 'include/display.h'
+      - 'src/LT7683.cpp'
+      - 'include/LT7683.hpp'
+      - 'tools/printertest/**'
+      - 'tools/i2ctest/**'
+      - 'src/i2c_chips.cpp'
+      - 'src/i2c_command.cpp'
+      - 'src/ili2c.cpp'
+      - 'include/i2c_command.h'
+      - 'include/ili2c.h'
+      - 'include/i2c_chips.h'
+      - 'sdcard/i2c/**'
       - '.github/workflows/build-hipiview.yml'
   workflow_dispatch:
     inputs:
@@ -50,6 +73,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0   # all history and tags: the version comes from git describe (cmake/hipi_version.cmake)
 
       - name: Version
         id: version
@@ -82,6 +106,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0   # all history and tags: the version comes from git describe (cmake/hipi_version.cmake)
 
       - name: Version
         id: version
@@ -96,9 +121,22 @@ jobs:
         working-directory: tools/hipiview
         run: make hipiview
 
-      # HIPI's real display driver and mirror code against an emulated chip
-      - name: Test (host_test)
+      # HIPI's real display driver and mirror code against an emulated chip,
+      # the Printer view as HIPI draws it (printer_view_test), the display
+      # as an HP 92198 (video80_view_test), the Hardware test page (hwtest_view_test)
+      # and the demo (demo_view_test, demo_run_test)
+      - name: Test (host_test and the view tests)
         working-directory: tools/hipiview
+        run: make test
+
+      # TFPRINT (HP 82162A) against the frames an HP-41 sends it
+      - name: Test (printertest)
+        working-directory: tools/printertest
+        run: make test
+
+      # The I2C chip descriptions (sdcard/i2c/chips.txt), their matching and TFI2C
+      - name: Test (i2ctest)
+        working-directory: tools/i2ctest
         run: make test
 
       # The whole chain over a USB that loses 2 % of its packets, then the

@@ -117,13 +117,14 @@ typedef enum {
     PIXEL,
     PILBOX,
     PLOTTER,
-    TERMINAL
+    TERMINAL,
+    PRINTER
 } IL_Type_e;
 
 // Which view on the panel a device has (if any). Swiping goes through
 // the devices in loop order and shows each one's view; a new kind of view
 // (e.g. another drive model with its own picture) gets a new value here.
-enum class ViewKind { None, Display, Plotter, Tape };
+enum class ViewKind { None, Display, Plotter, Tape, Printer };
 
 class CDevice {
 protected:
@@ -186,6 +187,9 @@ public:
         if (cmd == AAU || inAddrRange(cmd, AAD)) addr(31);
     }
     const char *name() { return m_devName; }
+    // What the device answers to SDI (Send Device ID): its name, unless
+    // it emulates a device with its own ID string (e.g. "MC00701A\r\n")
+    virtual const char *deviceId() { return m_devName; }
     void type(IL_Type_e type) { m_type = type; }
     IL_Type_e type(void) { return m_type; }
 

@@ -856,7 +856,7 @@ void Screen::pr_char(std::uint8_t c) {
             if (escN_)
                 inschar();
             rowPtr(ROWS_ - 1 - row_)[col_] = c;
-            draw_letter(c);
+            draw_letter(c, col_, row_);
             col_++;
             if (cp_ == cnt_)
                 cnt_++;
@@ -897,7 +897,15 @@ void Screen::pr_str(const char *p) {
 void Screen::draw_row(std::uint8_t row, const std::uint8_t* line) {
     for (std::uint8_t col = 0; col < COLS_; ++col) {
         set_cursor(col, row);
-        draw_letter(line[col]);
+        draw_letter(line[col], col, row);
+    }
+    // Every cell (and gap) of the row is now drawn: it has a coloured gap
+    // only if it holds an inverse character now
+    if (row < 64) {
+        bool any = false;
+        for (std::uint8_t col = 0; col < COLS_ && !any; ++col) any = line[col] > 127;
+        const std::uint64_t bit = std::uint64_t{1} << row;
+        inverseRows_ = any ? (inverseRows_ | bit) : (inverseRows_ & ~bit);
     }
 }
 
@@ -958,7 +966,7 @@ void Screen::beginBulkDraw() {
     inBulkDraw_ = true;
 }
 
-void Screen::draw_letter(std::uint8_t c) {
+void Screen::draw_letter(std::uint8_t c, std::uint8_t col, std::uint8_t row) {
     if (suspended_) return;
     // Only ASCII 32-126 (space through '~') has a meaningful glyph in
     // the uploaded HP82163 font -- control codes (0-31), DEL (127), and
@@ -1023,9 +1031,27 @@ void Screen::draw_letter(std::uint8_t c) {
         // evidence against the transmission path itself -- CGROM and UCG
         // simply need different wire formats on this chip.
         d_->selectCustomFont();
+        // The position too: the chip has one text cursor, and anything
+        // that wrote text since the last set_cur() (a demo caption, a
+        // menu, an info box) has moved it -- the character would land
+        // there instead (the first one of a line, after a caption, did).
+        // draw_row() has just set it (bulk draws skip this).
+        set_cursor(col, row);
     }
     if (inverse) {
         if (size_ < 4) {
+            // The glyph is 8k pixels wide but the cell 10k (the gap between
+            // characters, see screen_pars()): fill the whole cell first,
+            // so an inverse word is one solid bar, not separate blocks
+            const std::int16_t x = static_cast<std::int16_t>(col * width() + ofx_);
+            const std::int16_t y = static_cast<std::int16_t>(row * height() + ofy_);
+            const std::int16_t glyphW = static_cast<std::int16_t>(8 * (1 + size_));
+            if (width() > glyphW)
+                d_->fillRect(static_cast<std::int16_t>(x + glyphW), y,
+                             static_cast<std::int16_t>(width() - glyphW),
+                             static_cast<std::int16_t>(height()), color_);
+            if (row < 64) inverseRows_ |= (std::uint64_t{1} << row);
+            set_cursor(col, row);
             d_->txtColor(0, color_);
             d_->txtWriteChar(base);
         } else {
@@ -1040,6 +1066,17 @@ void Screen::draw_letter(std::uint8_t c) {
         }
         d_->txtColor(color_, 0);
     } else {
+        if (size_ < 4 && row < 64 && (inverseRows_ & (std::uint64_t{1} << row)) != 0) {
+            // An inverse cell may have been here: clear its gap too
+            const std::int16_t glyphW = static_cast<std::int16_t>(8 * (1 + size_));
+            if (width() > glyphW) {
+                d_->fillRect(static_cast<std::int16_t>(col * width() + ofx_ + glyphW),
+                             static_cast<std::int16_t>(row * height() + ofy_),
+                             static_cast<std::int16_t>(width() - glyphW),
+                             static_cast<std::int16_t>(height()), 0);
+                set_cursor(col, row);
+            }
+        }
         d_->txtColor(color_, 0);
         if (size_ < 4) {
             d_->txtWriteChar(base);

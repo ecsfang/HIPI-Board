@@ -75,6 +75,36 @@ bootsel_ready() {
     return 0
 }
 
+# ------------------------------------------------------------
+# Lista filer med samma filändelse i Downloads
+# ------------------------------------------------------------
+
+list_files_with_extension() {
+    local ext="$1"
+    local found=0
+    local file
+
+    echo
+    echo "Filer med filändelsen .$ext i $DOWNLOAD_DIR:"
+
+    while IFS= read -r -d '' file; do
+        printf '  %s\n' "$(basename "$file")"
+        found=1
+    done < <(
+        find "$DOWNLOAD_DIR" \
+            -maxdepth 1 \
+            -type f \
+            -iname "*.$ext" \
+            -print0 |
+        sort -z
+    )
+
+    if [ "$found" -eq 0 ]; then
+        echo "  (Inga filer hittades.)"
+    fi
+
+    echo
+}
 
 # ------------------------------------------------------------
 # Tolka parametrar
@@ -212,6 +242,12 @@ if [ "${#FILES[@]}" -gt 0 ]; then
                 echo
                 echo "FEL: Filen finns inte:"
                 echo "  $DOWNLOAD_DIR/$NAME"
+
+                # Lista tillgängliga filer med samma filändelse
+                EXT="${NAME##*.}"
+                list_files_with_extension "$EXT"
+
+                echo "Avbryter."
                 echo
                 popd > /dev/null
                 exit 1

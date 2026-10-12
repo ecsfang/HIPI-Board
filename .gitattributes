@@ -1,0 +1,3 @@
+# GitHub's "Source code" downloads (git archive) fill in VERSION with the
+# version, as there is no git there (cmake/hipi_version.cmake)
+VERSION export-subst

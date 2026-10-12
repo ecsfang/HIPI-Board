@@ -5,6 +5,12 @@
 #include "boot_service.h"
 #include "tusb.h"
 #include "plotter.h"
+#include "printer.h"
+#include "video80.h"
+#include "demo.h"
+#include "ili2c.h"
+#include "bmp280.h"
+#include "i2c_ident.h"
 #include "terminal.h"
 #include "hipi.h"
 
@@ -12,7 +18,6 @@
 #include "drive.h"
 #include "illeds.h"
 #include "ilpixels.h"
-#include "iltemp.h"
 #include "touch.h"
 #include "uidialog.hpp"
 #include "boardui.h"
@@ -30,6 +35,8 @@ CDisplay* videoDisplay = nullptr;  // Same pattern -- needed for pico_main.cpp's
                                      // own periodic fifoSize() diagnostic (see
                                      // display.h's own comment on fifoSize()).
 CPlotter* plotter = nullptr;    // Need to be global for plotterview.cpp
+CPrinter* printer = nullptr;    // TFPRINT, shown in the Printer view
+extern hipi::Video80* video80Term;   // TFDISPLAY's HP 92198 screen (pico_main.cpp)
 CBmp280* bmp280Sensor = nullptr;  // Constructed in hipi_init() rather than as
                                     // a file-scope global (like pixelStrip in
                                     // pixels.cpp) -- its constructor needs
@@ -142,7 +149,10 @@ static int pilboxFirstAddr = -1;
 
 void hipi_init()
 {
-    videoDisplay = new CDisplay("TFDISPLAY", 0x3E);
+    // The video display: HP 82163 or HP 92198, as set (display.h)
+    videoDisplay = new CDisplay("TFDISPLAY");
+    videoDisplay->setVideo80(video80Term);
+    videoDisplay->setModel(static_cast<DisplayModel>(config.displayModel()));
     devices.push_back(videoDisplay);
     {
         // Each drive has its own cassette file, saved per device name
@@ -168,25 +178,13 @@ void hipi_init()
     // other device's own SAI, which it is.
     devices.push_back(new CHipiPixel("TFPIXEL", 0xED));
 
-    // 0x51 -- HP-IL Interface Specification, Appendix C.4 "Accessory
-    // Identification": class 5x = Electronic Instrumentation, and within
-    // it, if bit D3=0 the lower 3 bits are signal-source/signal-switch/
-    // signal-measurement flags (D2/D1/D0 respectively) -- 0x51 = D0 only,
-    // i.e. a pure measurement device (no source/switch capability),
-    // exactly what this is. begin() shares the SD-card style "did it
-    // actually come up" check (see initSD()'s own SDOK) -- if it fails
-    // (chip not wired up, wrong address, etc.) the device is still
-    // registered and answers HP-IL normally, it'll just always report
-    // "ERR" for a reading (see CHipiTemp::triggerReading()) rather than
-    // silently vanishing from the loop the way a failed SD mount does
-    // for CDrive -- there's no other device depending on this one being
-    // present the way config-file loading depends on the SD card.
+    // The BMP280 on 0x76 (TFI2C's "MT"/"MP", the Hardware test page):
+    // its driver, with the factory calibration read once. Not there is
+    // fine -- TFI2C then answers ERR, the test page doesn't list it.
     bmp280Sensor = new CBmp280(touch_i2c);
     if (!bmp280Sensor->begin(TOUCH_SDA, TOUCH_SCL)) {
-        LOGF("\r\n * WARNING: BMP280 sensor not responding "
-             "(check wiring/address) -- TFTEMP will report ERR");
+        LOGF("\r\n * No BMP280 on 0x76 (TFI2C finds it when it's connected)");
     }
-    devices.push_back(new CHipiTemp("TFTEMP", 0x51, *bmp280Sensor));
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
     plotter = new CPlotter("TFPLOT");
@@ -196,6 +194,30 @@ void hipi_init()
     // for why that, rather than the formal Accessory ID table's 0x4E
     // "general interface" suggestion we used before.
     devices.push_back(new CTerminal("TFTERM", 0x4E));
+    // HP 82162A thermal printer (printer.h), its switches as saved
+    printer = new CPrinter("TFPRINT");
+    printer->setMode(static_cast<PrinterMode>(config.printerMode()));
+    printer->setIntensity(config.printerIntensity());
+    devices.push_back(printer);
+    hipi::plotterview_setPrinter(printer);
+    // TFI2C: any I2C chip, from the controller (ili2c.h) -- last, so the
+    // devices before it keep their addresses
+    devices.push_back(new CHipiI2c("TFI2C", hipi::i2c_commandEnv(), [] { hipi::i2c_loadChips(); }));
+
+    // A device this CONFIG.TXT hasn't seen (new in this version) gets its
+    // first state now. The printer starts switched OFF: with a printer on
+    // the loop the HP-41 prints there, no longer on the video display --
+    // switching it on is the user's choice (Printer view or Devices).
+    {
+        bool added = false;
+        for (CDevice* dev : devices) {
+            if (config.isKnownDevice(dev->name())) continue;
+            if (dev->type() == PRINTER) config.setDeviceEnabled(dev->name(), false);
+            config.addKnownDevice(dev->name());
+            added = true;
+        }
+        if (added) config.save();
+    }
 
     // Saved loop order (Devices -> Change order), then mark the last device
     restoreDeviceOrder();
@@ -548,10 +570,27 @@ static void conArrived(HpIlLoop& loop, IL_CMD_t f, int depth, IL_CMD_t sent) {
     if (next != NO_FRAME && depth < 6) conInject(loop, next, depth);
 }
 
+IL_CMD_t hipi_simFrame(IL_CMD_t frame) {
+    const IL_CMD_t arrived = frame;
+    bool absorbed = false;
+    for (CDevice* dev : devices) {
+        if (!dev->enabled() || dev == pilbox) continue;
+        const IL_CMD_t rtn = dev->hpil(frame);
+        if (rtn == IL_NO_FRAME) { absorbed = true; break; }
+        frame = rtn;
+    }
+#if HIPI_ANALYZER
+    hipi::analyzer_capture(arrived, absorbed ? static_cast<IL_CMD_t>(IL_NO_FRAME) : frame);
+#else
+    (void)arrived;
+#endif
+    return absorbed ? static_cast<IL_CMD_t>(IL_NO_FRAME) : frame;
+}
+
 static bool conLoop(HpIlLoop& loop) {
     uint32_t rx;
     if (loop.receiveFrame(rx)) {
-        led_on(HPIL_ACT_LED);
+        hpil_led_activity(false);   // HP-IL activity LED (if chosen, leds.h)
         if (!conInFlight) {
             // Nothing of ours is out there: someone else controls the loop
             conWarn("Another controller is on the loop.", "Only one may control it (PC or HP-41).");
@@ -563,7 +602,6 @@ static bool conLoop(HpIlLoop& loop) {
             TRC_LOGF("\r\n\t   CON <== %03X", static_cast<unsigned>(rx));
             conArrived(loop, static_cast<IL_CMD_t>(rx), 0, conSent);
         }
-        led_off(HPIL_ACT_LED);
         return true;
     }
     if (conInFlight) {
@@ -575,9 +613,8 @@ static bool conLoop(HpIlLoop& loop) {
     }
     const IL_CMD_t f = pilbox->conFromPc();
     if (f != NO_FRAME) {
-        led_on(HPIL_ACT_LED);
+        hpil_led_activity(false);   // HP-IL activity LED (if chosen, leds.h)
         conInject(loop, f, 0);
-        led_off(HPIL_ACT_LED);
         return true;
     }
     for (CDevice* dev : devices)                      // (not PILBOX: it reads the PC above)
@@ -599,7 +636,9 @@ bool hipi_loop(HpIlLoop& loop) {
     // Check if any HP-IL frame from the PIO interface is available
     if( loop.receiveFrame(rx_frame) ) {
         // Turn on HPIL-active led
-        led_on(HPIL_ACT_LED);
+        hpil_led_activity(false);   // HP-IL activity LED (if chosen, leds.h)
+        // Real traffic: the demo stops (demo.h)
+        if (!IS_IDLE(static_cast<IL_CMD_t>(rx_frame))) hipi::demo_hpilActivity();
         // Got a frame, send to all devices in the loop
         preTrace(rx_frame);
         const IL_CMD_t arrived = static_cast<IL_CMD_t>(rx_frame);   // for the analyzer
@@ -644,8 +683,6 @@ bool hipi_loop(HpIlLoop& loop) {
             // Send the final frame back to the HP-IL loop using the PIO interface
             loop.sendFrame(rx_frame);
         }
-        // Turn off HPIL-active led
-        led_off(HPIL_ACT_LED);
         // PILBox commands from the PC (TDIS/COFI/COFF/CON) must be answered
         // even while frames keep coming -- the HP-41 polls with IDY frames
         // non-stop, so idle() below may never run. While translation is off
@@ -655,13 +692,12 @@ bool hipi_loop(HpIlLoop& loop) {
             pilbox->idle();
         return true;    // Handled a frame
     } else {
-        led_on(HPIL_IDY_LED);
+        hpil_led_activity(true);    // HP-IL idle LED: lit while no frames come (leds.h)
         // No frame received, call idle() on all enabled devices
         for (CDevice* dev : devices) {
             if (dev->enabled())
                 dev->idle();
         }
-        led_off(HPIL_IDY_LED);
         return false;   // No frame handled
     }
 }

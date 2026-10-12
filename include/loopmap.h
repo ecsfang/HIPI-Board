@@ -25,5 +25,8 @@ void loopmap_drawAll();
 // A tap while the map is shown: on a card -> its details, on the details
 // box -> closes it. Returns false if the tap hit nothing of the map.
 bool loopmap_tap(int x, int y);
+// Forgets the loop (the demo, after its made-up session); it is learnt
+// again from the next auto-addressing
+void loopmap_reset();
 
 }  // namespace hipi

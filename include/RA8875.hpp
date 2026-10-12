@@ -363,6 +363,14 @@ public:
     void setCharSpacing(std::uint8_t pixels);
     void setLineSpacing(std::uint8_t pixels);
     void selectBuiltinFont();
+    // RA8875: only the 8x16 CGROM font (sizeCode ignored) -- see LT7683
+    void selectBuiltinFontSize(std::uint8_t /*sizeCode*/) { selectBuiltinFont(); }
+    // Text enlargement, horizontal and vertical separately (1..4 each)
+    void txtScaleXY(std::uint8_t hx, std::uint8_t vy);
+    // RA8875: block (h > 2) or underline cursor, its own fixed size
+    void setTextCursorShape(bool visible, std::uint8_t /*w*/, std::uint8_t h) {
+        setTextCursorVisible(visible, h > 2);
+    }
 
     // -----------------------------------------------------------------------
     // Accessors

@@ -14,6 +14,9 @@
 #include "pico/bootrom.h" // reset_usb_boot(), for the "Bootsel mode" menu item
 #include "usb_msc.h"      // enterUsbMscMode()/exitUsbMscMode(), for "Connect to PC"
 #include "drive.h"        // CDrive -- deferred switch-off in the Devices menu
+#include "printer.h"      // CPrinter -- the Printer view's menu
+#include "video80.h"      // the display's HP 92198 mode (80-column screen)
+#include "display.h"      // TFDISPLAY -- Settings -> Screen -> Emulate
 #include "screendump.h"   // Display -> Screendump
 #include "analyzer.h"     // Display -> Analyzer
 #include "backlight.h"    // Settings -> Screen saver
@@ -23,8 +26,8 @@ extern hipi::Config config;      // pico_main.cpp
 #include "hipi.h"         // hipi_applyDeviceOrder(), Devices -> Change order
 #include "lif_info.hpp"   // file picker: contents of a LIF .dat image
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
-#include "i2c_device.h"       // CI2CBus::scan(), for "Scan I2C"
-#include "touch.h"            // touch_i2c, the bus "Scan I2C" scans
+#include "hwtest.h"           // System -> Hardware test (its menu: Scan I2C)
+#include "demo.h"             // System -> Demo
 #include "glyph_font.h"       // menu titles in the HP-41 font
 
 // Menu titles in the HP-41 display font (1) or the built-in font (0)
@@ -158,6 +161,11 @@ public:
 
     void setExitRequestedCallback(std::function<void()> cb) {
         onExitRequested_ = std::move(cb);
+    }
+    // ← (X) with no menu open and nothing to go back to: the button strip
+    // goes away, like Shift+Ok (EXIT) -- the same callback
+    void hideStrip() {
+        if (onExitRequested_) onExitRequested_();
     }
     // Called once at startup (from pico_main.cpp, right after config's
     // own filename() is known) so openFilePicker() can highlight the
@@ -334,6 +342,37 @@ public:
         close();
     }
 
+    // The demo (demo.h): the cassette list as in the menu, only drawn --
+    // nothing is chosen, the menu stays closed
+    void demoShowPicker(const std::vector<std::string>& files, int sel) {
+        files_ = files;
+        demoMovePicker(sel, true);
+    }
+    void demoMovePicker(int sel, bool box = false) {
+        selected_ = sel;
+        fileScrollOffset_ = sel >= kMaxFilesShown ? sel - kMaxFilesShown + 1 : 0;
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        if (box) {
+            title_ = "SELECT CASSETTE";
+            drawBox();
+        }
+        drawFileList();
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        if (box) d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+#endif
+    }
+    void demoHidePicker() {
+        files_.clear();
+        selected_ = 0;
+#ifdef DISPLAY_7INCH
+        d_->hidePipOverlay();
+#endif
+    }
+
     bool isShowingLoopbackResult() const { return state_ == State::LoopbackResult; }
     void dismissLoopbackResult() {
         if (state_ != State::LoopbackResult) return;
@@ -358,25 +397,6 @@ public:
 #endif
     }
 
-    // Same pattern as isShowingLoopbackResult()/dismissLoopbackResult()
-    // just above (see their own comments for the full reasoning) --
-    // Config > "Scan I2C" runs instantly (no confirmation dialog needed;
-    // scanning is quick and non-destructive, unlike the loopback test's
-    // own physical-jumper requirement) and shows its own result grid,
-    // dismissed by touch.
-    bool isShowingI2CScanResult() const { return state_ == State::I2CScanResult; }
-    void dismissI2CScanResult() {
-        if (state_ != State::I2CScanResult) return;
-#ifdef DISPLAY_7INCH
-        d_->beginOverlayDraw();
-#endif
-        openSystemMenu();
-#ifdef DISPLAY_7INCH
-        d_->endOverlayDraw();
-        screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
-#endif
-    }
 
     // Called from the main loop when a button touch is detected.
     // Shift+Ok closes the menu from any depth (see the check right
@@ -453,7 +473,7 @@ public:
             // this same call for the full reasoning on why it can't run
             // any earlier than "canvas is definitely back at the main
             // window".
-            screen_.refreshCursor();
+            plotterview_refreshCursor();
 #endif
             if (onExitRequested_) onExitRequested_();
             return;
@@ -483,8 +503,25 @@ public:
                     plotterview_leaveLoopMap();
                 } else if (plotterview_output() == DisplayOutput::Signals && b == Button::X) {
                     plotterview_leaveSignals();
+                } else if (plotterview_output() == DisplayOutput::HwTest && b == Button::X) {
+                    plotterview_leaveHwTest();
                 } else if (plotterview_output() == DisplayOutput::CharTable) {
                     withMainCanvas([] { plotterview_leaveCharTable(); });   // any button closes it
+                } else if (plotterview_output() == DisplayOutput::Video80 && b != Button::Ok) {
+                    // The display as an HP 92198: the arrows look back
+                    // through its 48-line memory (Shift: a screen at a
+                    // time), X back to the live window (Shift+X: clear,
+                    // like ESC E)
+                    if (Video80* v = plotterview_video80()) {
+                        const int page = v->rows();
+                        if (b == Button::Up)        v->scrollView(shifted ? page : 1);
+                        else if (b == Button::Down) v->scrollView(shifted ? -page : -1);
+                        else if (b == Button::X) {
+                            if (shifted)               { v->put(27); v->put('E'); }
+                            else if (!v->viewIsLive()) v->viewLive();
+                            else                       hideStrip();
+                        }
+                    }
                 } else if (plotterview_output() == DisplayOutput::Analyzer) {
                     // The Analyzer view: its own menu, and the arrows scroll
                     // its log instead of the HP-41 text
@@ -492,8 +529,9 @@ public:
                     else if (b == Button::Up)   analyzer_scroll(shifted ? analyzer_pageRows() : 1);
                     else if (b == Button::Down) analyzer_scroll(shifted ? -analyzer_pageRows() : -1);
                     else if (b == Button::X) {
-                        if (shifted) analyzer_clear();
-                        else         analyzer_scrollToLive();
+                        if (shifted)                 analyzer_clear();
+                        else if (!analyzer_isLive()) analyzer_scrollToLive();
+                        else                         hideStrip();
                     }
                 } else if (b == Button::Ok) {
                     openContextMenu();
@@ -505,9 +543,15 @@ public:
                     // Down = scroll back toward the live view (newer content).
                     screen_.scrollBy(shifted ? -screen_.rows() : -1);
                 } else if (b == Button::X) {
-                    // X = jump to the bottom (live view). Shift+X = clear.
-                    if (shifted) screen_.clear();
-                    else         screen_.scrollToLive();
+                    // X = back to the live view if scrolled back, otherwise
+                    // (nothing to go back to) hide the button strip.
+                    // Shift+X = clear. On the views without a text to
+                    // scroll (Plotter, Printer, Tape...) X just hides it.
+                    const bool scrolledBack = plotterview_output() == DisplayOutput::Display &&
+                                              screen_.scrollOffset() != 0;
+                    if (shifted)           screen_.clear();
+                    else if (scrolledBack) screen_.scrollToLive();
+                    else                   hideStrip();
                 }
                 break;
 
@@ -611,12 +655,6 @@ public:
                 if (b == Button::Ok || b == Button::X) openSystemMenu();
                 break;
 
-            case State::I2CScanResult:
-                // Same "primarily touch, Ok/X also work" pattern as
-                // State::LoopbackResult just above -- see boardui.cpp's
-                // own isShowingI2CScanResult()/dismissI2CScanResult() check.
-                if (b == Button::Ok || b == Button::X) openSystemMenu();
-                break;
         }
 
 #ifdef DISPLAY_7INCH
@@ -664,7 +702,7 @@ public:
                 // re-applies Screen's own last-known visibility/position
                 // without a full redraw (nothing to redraw anyway -- the
                 // main window's own content was never touched).
-                screen_.refreshCursor();
+                plotterview_refreshCursor();
             }
         }
 #endif
@@ -680,7 +718,7 @@ private:
     enum class State {
         Closed, List,                       // List: every menu (see openList())
         FilePicker, ConfirmFile, DeviceList,
-        LoopbackConfirm, LoopbackResult, I2CScanResult, LifInfo, DeviceOrder,
+        LoopbackConfirm, LoopbackResult, LifInfo, DeviceOrder,
         AnalyzerLogMenu, Warning
     };
 
@@ -832,94 +870,6 @@ private:
     }
 #endif
 
-
-    // "Scan I2C" -- runs immediately (no confirmation needed; scanning
-    // is quick, ~112 short probes, and non-destructive to whatever's on
-    // the bus) and shows the result grid, dismissed by touch (see
-    // isShowingI2CScanResult()/dismissI2CScanResult()) or Ok/X.
-    void runI2CScan() {
-        state_ = State::I2CScanResult;
-        title_ = "SYSTEM / I2C SCAN";
-        drawBox();
-        d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
-        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-        d_->txtWrite("Scanning...");
-
-        bool found[128] = { false };
-        CI2CBus::scan(touch_i2c, found);
-
-        // Clears "Scanning..." (drawn above at MenuFrame::TextScale, a
-        // larger/taller glyph) before the grid below switches to its own
-        // smaller scale -- without this, the smaller grid text doesn't
-        // fully cover the larger text's own footprint, leaving visible
-        // remnants of "Scanning..." peeking out around/under the grid.
-        // Same "redraw the box before showing the final content" pattern
-        // runLoopbackTest() already uses between its own "Testing..." and
-        // result text.
-        drawBox();
-        drawI2CScanGrid(found);
-    }
-
-    // Renders the classic i2cdetect-style grid: a header row of column
-    // nibbles (0-f), then one row per address decade (00, 10, 20, ...)
-    // with each cell showing the full 2-digit hex address if that
-    // address acknowledged, "--" if it didn't (but was actually probed),
-    // or left blank for the reserved 0x00-0x07/0x78-0x7f range CI2CBus::
-    // scan() deliberately never touches -- immediately recognisable to
-    // anyone who's used the Linux i2cdetect tool, rather than inventing
-    // a new layout. Uses a smaller text scale than the rest of the menu
-    // (this project's own txtSize() scale 0, the smallest available --
-    // see LT7683::txtSize()/RA8875::txtSize()) purely for this one
-    // screen, restored to MenuFrame::TextScale by whatever's drawn next
-    // (every other open*Menu() already sets its own scale explicitly
-    // before drawing, so nothing else needs to know or care this dialog
-    // used a different one).
-    void drawI2CScanGrid(const bool found[128]) {
-        constexpr std::uint8_t kGridScale = 0;
-        d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSize(kGridScale);
-        const int lineHeight = 18;  // a little taller than the scale-0 glyph's own 16px,
-                                     // for readability -- matches this dialog's own grid
-                                     // rows below, nothing else on screen uses this pitch
-        const int gridX = MenuFrame::X + 20;
-        int y = MenuFrame::Y + 20;
-
-        char line[64];
-        int foundCount = 0;
-        for (int a = 0x08; a <= 0x77; ++a) if (found[a]) ++foundCount;
-        std::snprintf(line, sizeof(line), "Found %d device(s):", foundCount);
-        d_->txtSetCursor(gridX, y);
-        d_->txtWrite(line);
-        y += lineHeight + 4;
-
-        d_->txtSetCursor(gridX, y);
-        d_->txtWrite("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
-        y += lineHeight;
-
-        for (int row = 0; row < 8; ++row) {
-            int pos = std::snprintf(line, sizeof(line), "%02x: ", row * 16);
-            for (int col = 0; col < 16; ++col) {
-                const int addr = row * 16 + col;
-                if (addr < 0x08 || addr > 0x77) {
-                    pos += std::snprintf(line + pos, sizeof(line) - static_cast<std::size_t>(pos), "   ");
-                } else if (found[addr]) {
-                    pos += std::snprintf(line + pos, sizeof(line) - static_cast<std::size_t>(pos),
-                                         "%02x ", addr);
-                } else {
-                    pos += std::snprintf(line + pos, sizeof(line) - static_cast<std::size_t>(pos), "-- ");
-                }
-            }
-            d_->txtSetCursor(gridX, y);
-            d_->txtWrite(line);
-            y += lineHeight;
-        }
-
-        y += 4;
-        d_->txtSize(MenuFrame::TextScale);
-        d_->txtSetCursor(gridX, y);
-        d_->txtWrite("Touch anywhere to continue.");
-    }
 
     // "Loopback test" -- first shows a confirmation dialog explaining
     // the physical jumper it needs (Button::Ok proceeds to actually run
@@ -1584,9 +1534,58 @@ private:
         return 0;
     }
     int traceIndex() const { return bExtTrace ? 2 : (bTrace ? 1 : 0); }
+    // TFDISPLAY emulates the HP 92198 (else the HP 82163)
+    static Video80* displayV80() {
+        return videoDisplay != nullptr && videoDisplay->isVideo80() ? videoDisplay->video80() : nullptr;
+    }
+    void clearDisplay() {
+        if (Video80* v = displayV80()) { v->put(27); v->put('E'); }
+        else screen_.clear();
+    }
+    // Which display TFDISPLAY is: HP 82163 or HP 92198
+    Item emulateItem() {
+        return value("Emulate", [] { return std::string(displayV80() ? "HP 92198" : "HP 82163"); },
+                     [this] {
+                         const bool v80 = displayV80() == nullptr;
+                         config.setDisplayModel(v80 ? 1 : 0);
+                         if (videoDisplay != nullptr)
+                             videoDisplay->setModel(v80 ? DisplayModel::Hp92198 : DisplayModel::Hp82163);
+                         withMainCanvas([&] { plotterview_setDisplayModel(displayV80() != nullptr); });
+                         refreshItems();
+                     });
+    }
+    // The HP 82163's font size 0-3; the HP 92198's font, 12x24 or 8x16
     Item fontSizeItem() {
-        return value("Font size", [] { return std::to_string(config.fontSize()); },
-                     [this] { applyFontSize((config.fontSize() + 1) % kFontSizeCount); refreshItems(); });
+        return value("Font size", [] {
+                         if (Video80* v = displayV80()) return std::string(v->smallFont() ? "8x16" : "12x24");
+                         return std::to_string(config.fontSize());
+                     },
+                     [this] {
+                         if (Video80* v = displayV80()) {
+                             config.setV80Small(!v->smallFont());
+                             withMainCanvas([&] { v->setSmallFont(config.v80Small()); });
+                         } else {
+                             applyFontSize((config.fontSize() + 1) % kFontSizeCount);
+                         }
+                         refreshItems();
+                     });
+    }
+    // The HP 82163's columns; the HP 92198's width after a reset, 80 or
+    // 40 (set now too -- the screen is cleared)
+    Item columnsItem() {
+        return value("Columns", [this] {
+                         if (displayV80()) return std::string(config.v80Forty() ? "40" : "80");
+                         return std::string(kColumnsLabels[columnsIndex()]);
+                     },
+                     [this] {
+                         if (Video80* v = displayV80()) {
+                             config.setV80Forty(!config.v80Forty());
+                             withMainCanvas([&] { v->setDefaultForty(config.v80Forty()); });
+                         } else {
+                             applyColumns((columnsIndex() + 1) % kColumnsCount);
+                         }
+                         refreshItems();
+                     });
     }
     Item plotViewItem() {
         return value("Plot view", [] { return std::string(plotterview_plotFit() ? "Fit" : "Page"); },
@@ -1647,6 +1646,33 @@ private:
                                   }));
             }
             if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+        } else if (out == DisplayOutput::Printer) {
+            CPrinter* prt = plotterview_printer();
+            title = "PRINTER";
+            if (prt) {
+                // The same as the printer's own switches (the picture follows)
+                m.push_back(value("Power", [prt] { return std::string(prt->enabled() ? "ON" : "OFF"); },
+                                  [this, prt] {
+                                      prt->setEnabled(!prt->enabled());
+                                      config.setDeviceEnabled(prt->name(), prt->enabled());
+                                      refreshItems();
+                                  }));
+                m.push_back(value("Mode", [prt] { return std::string(CPrinter::modeName(prt->mode())); },
+                                  [this, prt] {
+                                      const auto next = static_cast<std::uint8_t>((static_cast<int>(prt->mode()) + 1) % 3);
+                                      prt->setMode(static_cast<PrinterMode>(next));
+                                      config.setPrinterMode(next);
+                                      refreshItems();
+                                  }));
+                m.push_back(value("Intensity", [prt] { return std::to_string(prt->intensity() + 1); },
+                                  [this, prt] {
+                                      const auto next = static_cast<std::uint8_t>((prt->intensity() + 1) % CPrinter::kIntensities);
+                                      prt->setIntensity(next);
+                                      config.setPrinterIntensity(next);
+                                      refreshItems();
+                                  }));
+            }
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::Analyzer) {
             title = "ANALYZER";
             m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveAnalyzer(); }); }));
@@ -1663,6 +1689,11 @@ private:
                               [this] { analyzer_setRelativeTime(!analyzer_relativeTime()); refreshItems(); }));
             m.push_back(value("Idle frames", [] { return std::string(analyzer_showIdle() ? "Shown" : "Hidden"); },
                               [this] { analyzer_setShowIdle(!analyzer_showIdle()); refreshItems(); }));
+        } else if (out == DisplayOutput::HwTest) {
+            title = "HARDWARE TEST";
+            m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveHwTest(); }); }));
+            m.push_back(item("Scan I2C", [this] { doAndClose([] { hwtest_showScan(); }); }));
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::LoopMap || out == DisplayOutput::Signals) {
             const bool map = out == DisplayOutput::LoopMap;
             title = map ? "LOOP MAP" : "HP-IL SIGNALS";
@@ -1681,9 +1712,11 @@ private:
                                   }));
             }
         } else {
+            // The display (Display, or Video80 while it's an HP 92198)
             title = "DISPLAY";
-            m.push_back(item("Clear screen", [this] { doAndClose([this] { screen_.clear(); }); }));
+            m.push_back(item("Clear screen", [this] { doAndClose([this] { clearDisplay(); }); }));
             if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(emulateItem());
             m.push_back(fontSizeItem());
         }
         m.push_back(item("More >", [this] { openHipiMenu(); }));
@@ -1726,11 +1759,11 @@ private:
 
     void openScreenSettings() {
         openList("SETTINGS / SCREEN", {
+            emulateItem(),
             value("Text colour", [this] { return std::string(kColorLabels[colorIndex()]); },
                   [this] { withMainCanvas([&] { applyColor((colorIndex() + 1) % kColorCount); }); refreshItems(); }),
             fontSizeItem(),
-            value("Columns", [this] { return std::string(kColumnsLabels[columnsIndex()]); },
-                  [this] { applyColumns((columnsIndex() + 1) % kColumnsCount); refreshItems(); }),
+            columnsItem(),
             value("Brightness", [this] { return std::string(kBrightnessLabels[brightnessIndex()]); },
                   [this] { applyBrightness((brightnessIndex() + 1) % kBrightnessCount); refreshItems(); }),
             plotViewItem(),
@@ -1813,7 +1846,10 @@ private:
             Item{ [this] { return std::string((usbMscModeActive() || devForceDisconnectLabel_) ? "Disconnect from PC" : "Connect to PC"); },
                   [this] { toggleConnectToPc(); } },
             item("Loopback test >", [this] { openLoopbackConfirm(); }),
-            item("Scan I2C >",      [this] { runI2CScan(); }),
+            item("Hardware test >", [this] { doAndClose([] { plotterview_showHwTest(); }); }),
+#ifdef DISPLAY_7INCH
+            item("Demo",            [this] { doAndClose([] { demo_start(); }); }),
+#endif
             item("Character table >", [this] { doAndClose([] { plotterview_showCharTable(); }); }),
             item("About >",         [this] { openAbout(); }),
             item("Bootsel mode",    [this] { enterBootselMode(); }),
@@ -1886,6 +1922,10 @@ private:
         // splash has taken over the PIP overlay -- leave it
         // up; plotterview_poll() removes it when its timer expires.
         if (!plotterview_isSplashVisible()) d_->hidePipOverlay();
+        // The HP 92198 screen doesn't draw while the menu is being drawn
+        // (it would land in the menu's layer): what it held back, now
+        if (plotterview_output() == DisplayOutput::Video80)
+            if (Video80* v = plotterview_video80()) v->catchUp();
 #else
         if (plotterview_isSplashVisible()) {
             // A view switch just happened (this menu action selected a
@@ -1900,7 +1940,9 @@ private:
             plotterview_output() == DisplayOutput::Analyzer ||
             plotterview_output() == DisplayOutput::LoopMap ||
             plotterview_output() == DisplayOutput::Signals ||
-            plotterview_output() == DisplayOutput::CharTable) {
+            plotterview_output() == DisplayOutput::CharTable ||
+            plotterview_output() == DisplayOutput::HwTest ||
+            plotterview_output() == DisplayOutput::Video80) {
             // Screen stays suspended (it's not what's showing) -- just
             // erase the menu box by redrawing the plot underneath it,
             // instead of screen_.resume()'s HP-41 text redraw below.

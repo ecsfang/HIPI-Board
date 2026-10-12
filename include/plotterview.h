@@ -25,15 +25,28 @@
 
 class CDrive;
 class CDevice;
+class CPrinter;
+
+namespace hipi { class Video80; }
 
 namespace hipi {
 
 // The kinds of view the panel can show (matches ViewKind in hpil.h, plus
 // the Analyzer, which isn't a device's view)
-enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals, CharTable };
+// (Video80: the Display view while TFDISPLAY emulates the HP 92198)
+enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals, CharTable, Printer, Video80, HwTest };
 
 // Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
 enum class TapeHotspot { None, Open, Power, Rewind };
+
+// Touch-sensitive areas of the Printer view -- see
+// plotterview_printerHitTest(). `value` is the switch position the touch
+// asks for (Mode: 0 MAN, 1 TRACE, 2 NORM; Intensity: 0 LIGHT .. 4 DARK).
+enum class PrinterHotspot { None, Power, Mode, Intensity, Print, Advance };
+struct PrinterHit {
+    PrinterHotspot spot = PrinterHotspot::None;
+    int value = 0;
+};
 
 // Call once, after display/screen/plotter all exist (see hipi_init()).
 // On the 7" panel this also loads hp82161a.bmp from the SD card into its own
@@ -59,12 +72,45 @@ void plotterview_setTapeEjected(bool ejected);
 void plotterview_showMessage(const char* text);
 
 void plotterview_setDrive(CDrive* drive);
+
+// Printer view (7" only; needs hp82162a.bmp, and prtparts.bmp for the
+// switches, POWER light and pressed keys): the printer shown. Its front
+// panel follows the device by itself (plotterview_poll()).
+void plotterview_setPrinter(CPrinter* printer);
+CPrinter* plotterview_printer();
+// PRINT / PAPER ADVANCE from the view's keys: passed on to the printer,
+// and the key is shown pressed (at least briefly, even for a quick tap)
+void plotterview_printerPrint(bool down);
+void plotterview_printerAdvance(bool down);
+
+// TFDISPLAY's HP 92198 screen (video80.h). It draws itself; the view
+// only switches it on and off.
+void plotterview_setVideo80(Video80* v);
+Video80* plotterview_video80();
+// Puts the blinking text cursor back where the view showing has it
+// (Screen's, or the HP 92198 view's) -- after something else has drawn
+// text with the chip's one shared text cursor (menu, button strip, boxes)
+void plotterview_refreshCursor();
+// The display's model (display.h): true = HP 92198, the Display view is
+// then Video80 (output DisplayOutput::Video80) instead of Screen. If the
+// display is showing, the other one takes over at once.
+void plotterview_setDisplayModel(bool v80);
+
+// ── The demo (demo.h) ───────────────────────────────────────────────────
+// Shows a view without the name box (dev: the device, for a device's view)
+void plotterview_showView(DisplayOutput mode, CDevice* dev);
+// The Tape view as if the drive were working: POWER and BUSY lit, the
+// reels turning (nothing happens to the drive itself)
+void plotterview_setDemoTape(bool busy);
+// The printer's paper torn off (CPrinter::clearPaper()), redrawn empty
+void plotterview_clearPaper();
 // The drive given to plotterview_setDrive() (nullptr if none) -- e.g. for
 // the power switch hotspot, which toggles it (see boardui_handleTap()).
 CDrive* plotterview_drive();
 
 // True if the view can be shown on this build/board. Tape is only
-// available on the 7" panel, and only if hp82161a.bmp loaded at boot.
+// available on the 7" panel, and only if hp82161a.bmp loaded at boot;
+// the same for Printer and hp82162a.bmp.
 bool plotterview_isAvailable(DisplayOutput mode);
 
 // The kind of view currently shown
@@ -111,6 +157,10 @@ void plotterview_showSignals();
 void plotterview_leaveSignals();
 
 // System -> Character table (chartable.h) -- a help page, like the loop map
+// System -> Hardware test (hwtest.h) -- not a device's view; leaving it
+// goes back to the view before
+void plotterview_showHwTest();
+void plotterview_leaveHwTest();
 void plotterview_showCharTable();
 void plotterview_leaveCharTable();
 
@@ -172,5 +222,10 @@ bool plotterview_isActive();
 // Always TapeHotspot::None unless the Tape view is showing and its
 // switch splash has timed out.
 TapeHotspot plotterview_tapeHitTest(std::uint16_t x, std::uint16_t y);
+
+// Which Printer control (if any) is at the given screen point -- always
+// PrinterHotspot::None unless the Printer view is showing and its switch
+// splash has timed out.
+PrinterHit plotterview_printerHitTest(std::uint16_t x, std::uint16_t y);
 
 }  // namespace hipi

@@ -306,7 +306,9 @@ private:
     // ---- Internal cursor helpers ----
     void set_cursor(std::uint8_t c, std::uint8_t r);
     void set_cur();
-    void draw_letter(std::uint8_t c);
+    // Draws one character in the cell at col/row (the text cursor must
+    // already be there -- set_cursor())
+    void draw_letter(std::uint8_t c, std::uint8_t col, std::uint8_t row);
     // One full row from the text buffer, each character explicitly
     // positioned -- see its comment in Screen.cpp
     void draw_row(std::uint8_t row, const std::uint8_t* line);
@@ -428,6 +430,11 @@ private:
     // between. Cleared by set_cur(), which every one of these bulk loops
     // already calls exactly once, right at the end.
     bool inBulkDraw_ = false;
+    // Screen rows (bit = row) that may have an inverse cell on them, i.e.
+    // a coloured gap between characters: a normal character drawn there
+    // also clears its gap. Rows without one skip that (a full redraw
+    // would otherwise cost a rectangle per character).
+    std::uint64_t inverseRows_ = 0;
 };
 
 }  // namespace hipi

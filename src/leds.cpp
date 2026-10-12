@@ -151,6 +151,34 @@ CLedDriver ledB     (LED_PINS[4]);   // General purpose B
 CLedDriver* leds[] = { &ledPower, &ledStatus, &ledError, &ledA, &ledB };
 CLedParser  parser(leds, 5);
 
+// ─── HP-IL activity LEDs (see leds.h) ─────────────────────────────────────
+namespace {
+bool hpilLedsOn_ = true;
+bool hpilLedsHeld_ = false;
+std::uint64_t hpilLastUs_[2] = { 0, 0 };
+constexpr std::uint32_t kHpilLitMs = 30;    // lit this long after a frame
+}  // namespace
+
+void hpil_led_activity(bool idle) {
+    if (!hpilLedsOn_ || hpilLedsHeld_) return;
+    // At most one (re)start every 10 ms: a frame costs only a time read
+    const std::uint64_t now = time_us_64();
+    std::uint64_t& last = hpilLastUs_[idle ? 1 : 0];
+    if (now - last < 10000) return;
+    last = now;
+    leds[idle ? 3 : 2]->blink(kHpilLitMs, 1, 1);   // LED 3: a frame, LED 4: quiet -- one flash, then off
+}
+
+void hpil_leds_setEnabled(bool on) {
+    if (on == hpilLedsOn_) return;
+    hpilLedsOn_ = on;
+    if (!on && !hpilLedsHeld_) { leds[2]->off(); leds[3]->off(); }
+}
+
+bool hpil_leds_enabled() { return hpilLedsOn_; }
+
+void hpil_leds_hold(bool held) { hpilLedsHeld_ = held; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 void ledTest() {

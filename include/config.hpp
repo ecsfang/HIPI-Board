@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <cctype>
 #include <map>
 
 namespace hipi {
@@ -92,6 +93,20 @@ public:
                            static_cast<unsigned>(fontSize_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "display_model=%s\n",
+                           displayModel_ == 1 ? "92198" : "82163");
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        n = std::snprintf(line, sizeof(line), "v80_font=%s\n", v80Small_ ? "small" : "large");
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        n = std::snprintf(line, sizeof(line), "v80_columns=%d\n", v80Forty_ ? 40 : 80);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        n = std::snprintf(line, sizeof(line), "hpil_leds=%d\nleds_fitted=%d\npixels_fitted=%d\n",
+                           hpilLeds_ ? 1 : 0, ledsFitted_ ? 1 : 0, pixelsFitted_ ? 1 : 0);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         n = std::snprintf(line, sizeof(line), "brightness=%u\n",
                            static_cast<unsigned>(brightness_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
@@ -119,7 +134,14 @@ public:
         n = std::snprintf(line, sizeof(line), "display_mirror=%s\n", kMirror[displayMirror_ < 3 ? displayMirror_ : 0]);
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
-        n = std::snprintf(line, sizeof(line), "pixel_count=%u\n", static_cast<unsigned>(pixelCount_));
+        n = std::snprintf(line, sizeof(line), "pixel_count=%u\npixel_order=%s\n", static_cast<unsigned>(pixelCount_),
+                          pixelOrder_.c_str());
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        static const char* kPrtModes[] = { "man", "trace", "norm" };
+        n = std::snprintf(line, sizeof(line), "printer_mode=%s\nprinter_intensity=%u\n",
+                          kPrtModes[printerMode_ < 3 ? printerMode_ : 0],
+                          static_cast<unsigned>(printerIntensity_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
         n = std::snprintf(line, sizeof(line), "saver=%u\nclock_style=%u\nclock_us=%d\nclock_12h=%d\nclock_fallback=%u\n",
@@ -133,6 +155,10 @@ public:
 
         n = std::snprintf(line, sizeof(line), "device_order=%s\n",
                            deviceOrder_.c_str());
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        n = std::snprintf(line, sizeof(line), "known_devices=%s\n",
+                           knownDevices_.c_str());
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
         f_close(&file);
@@ -163,6 +189,27 @@ public:
 
     std::uint8_t fontSize() const { return fontSize_; }
     void setFontSize(std::uint8_t s) { fontSize_ = s; save(); }
+
+    // TFDISPLAY's model: 0 = HP 82163 (Screen), 1 = HP 92198 / MC00701A
+    // 80-column interface (Video80) -- Settings -> Screen -> Emulate
+    std::uint8_t displayModel() const { return displayModel_; }
+    void setDisplayModel(std::uint8_t m) { displayModel_ = m; save(); }
+    // HP 92198: the small 8x16 font instead of 12x24 (7" panel), and
+    // 40 x 20 instead of 80 x 24 after a reset
+    bool v80Small() const { return v80Small_; }
+    void setV80Small(bool s) { v80Small_ = s; save(); }
+    bool v80Forty() const { return v80Forty_; }
+    void setV80Forty(bool f) { v80Forty_ = f; save(); }
+
+    // Hardware test page: HP-IL activity on LED 3/4 (else they're free
+    // for TFLEDS), and whether the LEDs / pixels are fitted (for now only
+    // used by the test page)
+    bool hpilLeds() const { return hpilLeds_; }
+    void setHpilLeds(bool on) { hpilLeds_ = on; save(); }
+    bool ledsFitted() const { return ledsFitted_; }
+    void setLedsFitted(bool f) { ledsFitted_ = f; save(); }
+    bool pixelsFitted() const { return pixelsFitted_; }
+    void setPixelsFitted(bool f) { pixelsFitted_ = f; save(); }
 
     // TFDRIVE's OFF-STANDBY-ON switch: Off is stored as a disabled device
     // (disabled_devices); this flag tells Standby from On
@@ -210,6 +257,28 @@ public:
     // controller, "0N<n>" -- see pixels.h)
     std::uint8_t pixelCount() const { return pixelCount_; }
     void setPixelCount(std::uint8_t n) { if (n == pixelCount_) return; pixelCount_ = n; save(); }
+    // The colour byte order of the pixel strip: "RGB", "GRB", "BRG", "RBG",
+    // "GBR" or "BGR" (pixels.h: kPixelOrders) -- Hardware test page
+    const std::string& pixelOrder() const { return pixelOrder_; }
+    void setPixelOrder(const std::string& o) { if (o == pixelOrder_) return; pixelOrder_ = o; save(); }
+    // TFPRINT's MODE switch (0 MAN, 1 TRACE, 2 NORM) and INTENSITY
+    // switch (0 LIGHT .. 4 DARK) -- see printer.h
+    std::uint8_t printerMode() const { return printerMode_; }
+    void setPrinterMode(std::uint8_t m) { if (m > 2 || m == printerMode_) return; printerMode_ = m; save(); }
+    std::uint8_t printerIntensity() const { return printerIntensity_; }
+    void setPrinterIntensity(std::uint8_t i) { if (i > 4 || i == printerIntensity_) return; printerIntensity_ = i; save(); }
+    // Devices this CONFIG.TXT has seen. A device added in a newer version
+    // isn't in it yet -- hipi_init() can then give it its first state
+    // (the printer starts switched off) and add it.
+    bool isKnownDevice(const std::string& name) const {
+        return wrapCsv(knownDevices_).find(wrapCsv(name)) != std::string::npos;
+    }
+    // Adds a name not known yet (no save -- the caller saves once)
+    void addKnownDevice(const std::string& name) {
+        if (isKnownDevice(name)) return;
+        if (!knownDevices_.empty()) knownDevices_ += ",";
+        knownDevices_ += name;
+    }
     // PILBox CON mode: the loop closed inside HIPI (no cable needed)
     bool conInternal() const { return conInternal_; }
     void setConInternal(bool in) { conInternal_ = in; save(); }
@@ -308,6 +377,18 @@ private:
                     extTrace_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "fontsize") == 0) {
                     fontSize_ = static_cast<std::uint8_t>(std::atoi(value));
+                } else if (std::strcmp(key, "display_model") == 0) {
+                    displayModel_ = std::strcmp(value, "92198") == 0 ? 1 : 0;
+                } else if (std::strcmp(key, "v80_font") == 0) {
+                    v80Small_ = std::strcmp(value, "small") == 0;
+                } else if (std::strcmp(key, "v80_columns") == 0) {
+                    v80Forty_ = std::atoi(value) == 40;
+                } else if (std::strcmp(key, "hpil_leds") == 0) {
+                    hpilLeds_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "leds_fitted") == 0) {
+                    ledsFitted_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "pixels_fitted") == 0) {
+                    pixelsFitted_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "screendump_next") == 0) {
                     screendumpNext_ = static_cast<unsigned>(std::strtoul(value, nullptr, 10));
                 } else if (std::strcmp(key, "drive_standby") == 0) {
@@ -329,6 +410,20 @@ private:
                 } else if (std::strcmp(key, "signal_cells") == 0) {
                     signalCells_ = std::strcmp(value, "lines") == 0 ? 1
                                  : std::strcmp(value, "none") == 0  ? 2 : 0;
+                } else if (std::strcmp(key, "printer_mode") == 0) {
+                    printerMode_ = std::strcmp(value, "trace") == 0 ? 1
+                                 : std::strcmp(value, "norm") == 0  ? 2 : 0;
+                } else if (std::strcmp(key, "printer_intensity") == 0) {
+                    const int i = std::atoi(value);
+                    if (i >= 0 && i <= 4) printerIntensity_ = static_cast<std::uint8_t>(i);
+                } else if (std::strcmp(key, "known_devices") == 0) {
+                    knownDevices_ = value;
+                } else if (std::strcmp(key, "pixel_order") == 0) {
+                    std::string v = value;
+                    for (char& c : v) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (v.size() == 3 && v.find('R') != std::string::npos && v.find('G') != std::string::npos &&
+                        v.find('B') != std::string::npos)
+                        pixelOrder_ = v;
                 } else if (std::strcmp(key, "pixel_count") == 0) {
                     const int n = std::atoi(value);
                     if (n >= 1 && n <= 255) pixelCount_ = static_cast<std::uint8_t>(n);
@@ -368,6 +463,12 @@ private:
     // pico_main.cpp, so first boot (before a config file exists) looks
     // the same as before.
     std::uint8_t  fontSize_   = 0;
+    std::uint8_t  displayModel_ = 0;   // 82163
+    bool          v80Small_   = false;
+    bool          v80Forty_   = false;
+    bool          hpilLeds_   = true;
+    bool          ledsFitted_ = true;
+    bool          pixelsFitted_ = true;
     std::uint8_t  brightness_ = 0xFF;
     bool          driveStandby_ = false;
     unsigned      screendumpNext_ = 0;
@@ -382,6 +483,10 @@ private:
     std::uint8_t  displayMirror_ = 0;      // display_mirror=off|view|control (USB CDC3, tools/hipiview)
     std::uint8_t  signalCells_ = 0;        // signal_cells=bands|lines|none
     std::uint8_t  pixelCount_ = 5;         // pixel_count=1..32 (TFPIXEL)
+    std::string   pixelOrder_ = "RGB";     // pixel_order=RGB|GRB|BRG|RBG|GBR|BGR (the HIPI board's strip: RGB)
+    std::uint8_t  printerMode_ = 0;        // printer_mode=man|trace|norm (TFPRINT)
+    std::uint8_t  printerIntensity_ = 2;   // printer_intensity=0..4
+    std::string   knownDevices_ = "";      // known_devices=<names> (see isKnownDevice())
     std::uint8_t  clockFallback_ = 3;  // SaverRain
     // Comma-separated device names (matched against CDevice::name()) that
     // should start disabled. Empty = everything enabled (the default).

@@ -8,9 +8,11 @@
 
 What goes on the card:
     README.txt   from sdcard/
-    resources/   the Tape view pictures, from resources/ (the other files
+    resources/   the Tape and Printer view pictures, from resources/ (the other files
                  there -- buttons, logo, fonts -- are built into the firmware)
     lif/         the example cassette(s), from sdcard/lif/
+    i2c/         chips.txt.example: HIPI's built-in I2C chip list, as a reference
+                 (sdcard/i2c/chips.txt), and any other files there
 
 HIPI creates CONFIG.TXT, screenshots/ and logs/ by itself.
 
@@ -28,7 +30,8 @@ PROJECT = Path(__file__).resolve().parent.parent      # (this file is in sdcard/
 
 # The pictures HIPI reads from the card (see include/sd_paths.h and
 # src/plotterview.cpp)
-PICTURES = ["hp82161a.bmp", "tape-in.bmp", "open.bmp", "leds.bmp", "reels.bmp"]
+PICTURES = ["hp82161a.bmp", "tape-in.bmp", "open.bmp", "leds.bmp", "reels.bmp",
+            "hp82162a.bmp", "prtparts.bmp"]
 
 # Every entry gets this time stamp, so the zip is the same byte for byte
 # for the same contents
@@ -41,6 +44,11 @@ def card_files():
     files += [(f"resources/{name}", PROJECT / "resources" / name) for name in PICTURES]
     lif = PROJECT / "sdcard" / "lif"
     files += [(f"lif/{p.name}", p) for p in sorted(lif.iterdir()) if p.is_file()]
+    i2c = PROJECT / "sdcard" / "i2c"
+    # chips.txt is built into the firmware; on the card only as a reference
+    # and example (HIPI doesn't read it: your own chips go in another .txt)
+    files += [(f"i2c/{p.name}.example" if p.name == "chips.txt" else f"i2c/{p.name}", p)
+              for p in sorted(i2c.iterdir()) if p.is_file()]
     missing = [str(src) for _, src in files if not src.is_file()]
     if missing:
         sys.exit("make_sd_card: missing " + ", ".join(missing))
@@ -51,7 +59,7 @@ def write_zip(path, files):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     with zipfile.ZipFile(tmp, "w") as z:
-        for folder in ("resources/", "lif/"):
+        for folder in ("resources/", "lif/", "i2c/"):
             info = zipfile.ZipInfo(folder, STAMP)
             info.external_attr = (0o40755 << 16) | 0x10        # a directory
             z.writestr(info, b"")

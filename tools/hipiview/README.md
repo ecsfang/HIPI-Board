@@ -171,6 +171,7 @@ or press a key, and with **Control** it shows "control".
 | `--render FILE` | With `--replay`: turn the saved stream into a video, as fast as possible, with no window |
 | `--scale X` | Window size factor, e.g. `0.75` or `1.5` |
 | `--backlight` | Dim the picture like the real backlight |
+| `--version` | Show the version (from git, like the firmware's: `1.2.0`, or `1.2.0-beta.5` after the tag) |
 | `--test-input FILE` | For tests: play mouse and key events from FILE (see `test/link_sim.cpp`) |
 
 **The cleanest recordings** come from saving the stream and rendering it
@@ -238,9 +239,11 @@ sudo udevadm control --reload-rules
   may run a little slower while hipiview is connected. If hipiview stops
   reading for more than a second, HIPI gives up and starts a fresh session
   (the picture is sent again).
-- **The built-in font.** The chip's own font (used in the menus) is read
-  from the real chip when hipiview connects, so menu text looks exactly as
-  on the panel.
+- **The built-in font.** The chip's own fonts — 8×16 (the menus) and
+  12×24 (the display as an HP 92198) — are read from the real chip when hipiview
+  connects, so the text looks exactly as on the panel. (A HIPI from
+  before the HP 92198 mode doesn't send the 12×24 font; an older hipiview
+  doesn't know it — use the hipiview that goes with the firmware.)
 - **The blinking text cursor** is drawn by the chip itself, outside its
   memory. hipiview draws it as a block in the text colour, blinking at
   the same rate. Its exact look on the real panel may differ slightly.
@@ -278,6 +281,11 @@ as touches and buttons with **Control** — and nothing with **View**.
 | `ci/build-windows.sh` | The Windows build, as GitHub (and you) run it |
 | `test/host_test.cpp` | The test (`make test`) |
 | `test/link_sim.cpp`, `test/stubs/` | The lossy-USB test (`make link_sim`) |
+| `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures (part of `make test`; saves `printer_view_*.png`) |
+| `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
+| `test/hwtest_view_test.cpp`, `test/hwio_stub.*` | The Hardware test page as HIPI draws it, with stand-in LEDs, pixels and I2C bus (part of `make test`; saves `hwtest_*.png`) |
+| `test/demo_view_test.cpp` | What the demo shows (`demo_content.cpp`): texts, plots, printout (part of `make test`; saves `demo_*.png`) |
+| `test/demo_run_test.cpp`, `test/demostubs/` | The demo itself, a whole round in fake time, then stopped and checked (part of `make test`; saves `demo_run_*.png`) |
 | `../../include/mirror_protocol.h` | The stream format, shared with the firmware |
 | `../../include/mirror_encoder.hpp`, `mirror_session.hpp` | Firmware side, also used by the test |
 | `../../src/display_mirror.cpp` | Firmware: the mirror port |

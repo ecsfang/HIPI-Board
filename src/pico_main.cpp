@@ -30,12 +30,11 @@
 // TEST_DISPLAY too (runs first, see the call site below).
 //#define TEST_FONT
 
-#define HIPI_VERSION_TEXT "1.1.0"
-
 #include <stdlib.h>
 #include <cstring>
 #include <vector>
 #include "pico/bootrom.h"   // reset_usb_boot()
+#include "version.h"
 #include "pico/stdlib.h"
 #include <stdio.h>
 #include <pico/stdio.h>
@@ -80,10 +79,13 @@ extern void init_spi(void);
 #include "backlight.h"
 #include "clock.h"
 #include "loopmap.h"
+#include "hwtest.h"
+#include "demo.h"
 #include "chartable.h"
 #include "hpil_diag.h"
 #include "pilbox.h"      // the PILBox row on the start-up screen
 #include "analyzer.h"
+#include "video80.h"     // the 80-column video interface's screen
 #include "pixels.h"      // pixelStrip: pixel count (saved), effects (main loop)
 #include "display_mirror.h"   // the display mirrored to a PC (tools/hipiview)
 #include "config.hpp"
@@ -115,7 +117,7 @@ namespace {
 // FONT_COLOR/TEXT_SIZE/BRIGHTNESS used to be hardcoded here; the defaults
 // now live in Config.hpp and are overridden by CONFIG.TXT on the SD card
 // once one exists.
-constexpr const char* HIPI_VERSION = HIPI_VERSION_TEXT;  // shown on splash screen
+const char* const HIPI_VERSION = hipi::kVersion;  // shown on splash screen (from git, version.h)
 }  // namespace
 
 bool usb_connected = false;
@@ -141,6 +143,8 @@ void SetPinDriveStrength(uint pin, uint mA) {
 // rather than a fixed boot-time color-cycle demo run directly from here).
 
 hipi::Screen *screen;
+// TFDISPLAY's screen when it emulates the HP 92198 (video80.h, display.h)
+hipi::Video80* video80Term = nullptr;
 hipi::UiDialog *dialog = nullptr;
 
 hipi::PicoSpiTransport* transport = nullptr;
@@ -245,10 +249,20 @@ static hipi::BootState pilboxState() {
 
 // Rows after the devices exist: Tape view, each drive's cassette, trace,
 // and the DEVICES card
+// The "Bitmaps" row: shown as "Loading ..." before the Tape and Printer
+// pictures are read from the SD card (that takes a few seconds), and
+// filled in with the result afterwards (bootRowsDevices())
+static int bitmapsRow = -1;
+
 static void bootRowsDevices() {
     const bool tape = hipi::plotterview_isAvailable(hipi::DisplayOutput::Tape);
-    hipi::bootscreen_row("Bitmaps", tape ? hipi::BootState::Ok : hipi::BootState::Fail,
-                         tape ? "images loaded" : "images missing");
+    const bool prt = hipi::plotterview_isAvailable(hipi::DisplayOutput::Printer);
+    const hipi::BootState st = tape && prt ? hipi::BootState::Ok : hipi::BootState::Fail;
+    const char* what = tape && prt ? "images loaded"
+                     : tape        ? "printer images missing"
+                     : prt         ? "tape images missing" : "images missing";
+    if (bitmapsRow >= 0) hipi::bootscreen_updateRow(bitmapsRow, st, what);
+    else                 hipi::bootscreen_row("Bitmaps", st, what);
     for (CDevice* dev : devices) {
         if (dev->type() != DRIVE) continue;
         const std::string& f = static_cast<CDrive*>(dev)->mediaFile();
@@ -312,7 +326,7 @@ int main() {
     // ITF_HPIL)), no manual wiring needed here.
 
     // First here we know if the debug-port is open or not (usb_connected)
-    LOGF("\r\n\nHIPI Board v%s\r\n", HIPI_VERSION);
+    LOGF("\r\n\nHIPI Board v%s\r\n", hipi::kVersionFull);
     LOGF("======================");
     LOGF("\r\n * Init SD-card ... ");
     if (FR_OK != fr) {
@@ -379,7 +393,7 @@ int main() {
     // touchInit() just did the real i2c_init()/gpio_set_function() work
     // for this board's one physical I2C bus (see touch.h's own
     // touch_i2c) -- mark it so any CI2CDevice-derived device (e.g.
-    // CHipiTemp's own CBmp280, set up later in hipi_init()) skips
+    // the BMP280 driver, set up later in hipi_init()) skips
     // repeating that when it comes up, rather than each device needing
     // to know touch got there first.
     CI2CBus::markInitialized(touch_i2c);
@@ -443,7 +457,10 @@ int main() {
     tud_task();
 
     dialog = new hipi::UiDialog(display, *screen);
-    dialog->setColorChangedCallback([](std::uint16_t c) { config.setTextColor(c); });
+    dialog->setColorChangedCallback([](std::uint16_t c) {
+        config.setTextColor(c);
+        if (video80Term != nullptr) video80Term->setColor(c);   // the HP 92198 mode too
+    });
     dialog->setTraceChangedCallback([](bool t, bool d) { config.setTraceMode(t, d); });
     dialog->setFontSizeChangedCallback([](std::uint8_t s) { config.setFontSize(s); });
     dialog->setBrightnessChangedCallback([](std::uint8_t b) { config.setBrightness(b); });
@@ -453,6 +470,14 @@ int main() {
     });
 
     hipi::boardui_init(screen, dialog, HIPI_VERSION);
+    {
+        // System -> Demo: it shows the cassette list through the menu's own drawing
+        hipi::DemoHooks h;
+        h.showPicker = [](const std::vector<std::string>& files, int sel) { dialog->demoShowPicker(files, sel); };
+        h.movePicker = [](int sel) { dialog->demoMovePicker(sel); };
+        h.hidePicker = [] { dialog->demoHidePicker(); };
+        hipi::demo_init(display, h, HIPI_VERSION);
+    }
 
     // touchInit() and its drain loop already ran, much earlier -- see
     // the comment right after Screen construction above for why moving
@@ -493,21 +518,36 @@ int main() {
 #endif
 #endif
 
+    // TFDISPLAY's HP 92198 screen (its model setting; the device is made
+    // in hipi_init()) -- in the same text colour, font and width as set
+    video80Term = new hipi::Video80(display);
+    video80Term->setColor(config.textColor());
+    video80Term->setSmallFont(config.v80Small());
+    video80Term->setDefaultForty(config.v80Forty());
+
     // Setup all devices in the HPIL loop (display, drive, LEDs, PILBox)
     hipi_init();
 
     // Wire up the plotter's live-draw callbacks now that display/screen/
-    // plotter all exist (plotter is set inside hipi_init() above).
+    // plotter all exist (plotter is set inside hipi_init() above). On the
+    // 7" panel this also loads the Tape and Printer pictures -- slow, so
+    // the start-up screen says so first.
+#ifdef DISPLAY_7INCH
+    bitmapsRow = hipi::bootscreen_row("Bitmaps", hipi::BootState::Info, "Loading ...");
+#endif
     hipi::plotterview_init(display, screen, plotter);
     hipi::plotterview_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
     hipi::plotterview_setPaperBlack(config.plotPaperBlack());  // Plotter -> Paper (saved)
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
     hipi::loopmap_init(display);             // HP-IL loop map (Display -> Loop map)
+    hipi::hwtest_init(display);              // System -> Hardware test
     hipi::chartable_init(display);           // System -> Character table
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
     hipi::hpil_diag_setBitCells(static_cast<hipi::BitCells>(config.signalCells()));   // saved
     // TFPIXEL: the number of pixels connected, as the controller last said
     pixelStrip.setActiveCount(config.pixelCount(), /*notify=*/false);
+    pixelStrip.setColorOrder(pixelOrderIndex(config.pixelOrder().c_str()));   // its colour byte order (saved)
+    hpil_leds_setEnabled(config.hpilLeds());  // HP-IL activity on LED 3/4 (Hardware test page, saved)
     pixelStrip.setCountChangedCallback([](uint32_t n) { config.setPixelCount(static_cast<std::uint8_t>(n)); });
     hipi::displayMirror_setMode(static_cast<hipi::MirrorMode>(config.displayMirror()));   // Settings -> Screen -> Mirror to PC (saved)
     // Mirror to PC < Control >: the mouse and keys in hipiview
@@ -524,11 +564,15 @@ int main() {
     //                          other overlays
     //   "ESC # V <addr>"       show the view of the HIPI device at HP-IL
     //                          address <addr> (one byte, 1..30)
-    screen->setExtCommandCallback([](std::uint8_t c, std::uint8_t arg) {
+    auto extCommand = [](std::uint8_t c, std::uint8_t arg) {
         if (c == 'D') hipi::screendump_request(false);
         else if (c == 'M') hipi::screendump_request(true);
         else if (c == 'V') hipi::plotterview_requestViewByAddress(arg);
-    }, "V");
+    };
+    screen->setExtCommandCallback(extCommand, "V");
+    // ... and the same in the HP 92198 mode
+    video80Term->setExtCommandCallback(extCommand, "V");
+    hipi::plotterview_setVideo80(video80Term);
 
 #ifdef DISPLAY_7INCH
     bootRowsDevices();
@@ -628,6 +672,8 @@ int main() {
     screen->clear();
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());
+    // The display emulates the HP 92198: its screen is the Display view
+    hipi::plotterview_setDisplayModel(videoDisplay != nullptr && videoDisplay->isVideo80());
 
     hipi::backlight_init(screen);   // the screen saver timer starts now (backlight.h)
     hipi_bootServiceDone();   // the main loop handles USB and PILBox from here
@@ -644,6 +690,8 @@ int main() {
         pixelStrip.poll();           // TFPIXEL effects (pixels.h)
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
+        hipi::hwtest_poll();         // Hardware test: running lights, I2C list (while open)
+        hipi::demo_poll();           // System -> Demo (while running)
         hipi::loopmap_poll();        // HP-IL loop map: learn from the traffic, redraw
         hipi::hpil_diag_poll();      // HP-IL signals view: scope captures while shown
 #endif

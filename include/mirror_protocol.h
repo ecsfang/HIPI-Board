@@ -88,6 +88,11 @@
 //                                     rows, MSB = leftmost pixel. Captured
 //                                     from the real chip, so the viewer
 //                                     doesn't need its own copy.
+//   kFont24  12288 bytes              the 12x24 built-in font (CCR0 bits
+//                                     5:4 = 01): 256 chars x 24 rows, a row
+//                                     a 16-bit little-endian word, bit 15 =
+//                                     leftmost pixel (12 used). Sent after
+//                                     kFont (since version 6).
 //   kSyncStart total(4)               the SDRAM read-back starts; total =
 //                                     the number of bytes it will read (for
 //                                     a progress display)
@@ -138,9 +143,10 @@ constexpr std::uint8_t kAssetEnd  = 0x19;
 constexpr std::uint8_t kMode      = 0x1A;   // mode(1): the Mirror to PC setting (see below)
 constexpr std::uint8_t kBye       = 0x1B;   // HIPI restarts now (Bootsel mode): the
                                             // picture is final, a new HIPI comes later
+constexpr std::uint8_t kFont24    = 0x1C;
 constexpr int kMaxViewerAssets = 32;     // ids a request may list
 
-constexpr std::uint8_t kVersion   = 5;
+constexpr std::uint8_t kVersion   = 6;
 // Input from the viewer (see INPUT above)
 constexpr std::uint8_t kMsgTouch  = 'T';
 constexpr std::uint8_t kMsgButton = 'B';

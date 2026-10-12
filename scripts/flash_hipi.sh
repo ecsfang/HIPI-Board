@@ -27,7 +27,8 @@ done
 
 echo
 echo "Pico hittad: $PICO_MOUNT"
+echo "Flashing hipi_${PANEL}_pico.uf2 ..."
 
-cp ./build/hipi_7_pico.uf2 /media/thomas/RP2350/
+cp ./build/hipi_${PANEL}_pico.uf2 $PICO_MOUNT/
 
 popd

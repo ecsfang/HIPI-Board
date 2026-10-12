@@ -504,6 +504,15 @@ void RA8875::txtSize(std::uint8_t scale) {
     txtScale_ = scale;
 }
 
+void RA8875::txtScaleXY(std::uint8_t hx, std::uint8_t vy) {
+    txtMode();
+    hx = static_cast<std::uint8_t>(hx < 1 ? 0 : (hx > 4 ? 3 : hx - 1));
+    vy = static_cast<std::uint8_t>(vy < 1 ? 0 : (vy > 4 ? 3 : vy - 1));
+    // FNCR1 bit[3:2] horizontal, bit[1:0] vertical enlargement
+    writeData(static_cast<std::uint8_t>((readReg(FNCR1) & ~0x0F) | (hx << 2) | vy));
+    txtScale_ = vy;
+}
+
 void RA8875::txtWrite(const char* s) {
     txtMode();
     writeCmd(MRWC);

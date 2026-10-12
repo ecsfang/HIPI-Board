@@ -81,6 +81,17 @@ class PicoPwm {
 
 
 
+// HP-IL activity on LED 3 (frames) and LED 4 (idle frames), if chosen
+// (LED 1/2 are left for RX/TX or anything else)
+// (config hpil_leds, the Hardware test page): each call keeps the LED lit
+// for a short while, so traffic is visible. enabled = false leaves the
+// two LEDs to TFLEDS (or whatever else is wired there); held = true while
+// the Hardware test page drives the LEDs itself.
+void hpil_led_activity(bool idle);
+void hpil_leds_setEnabled(bool on);
+bool hpil_leds_enabled();
+void hpil_leds_hold(bool held);
+
 extern void led_on(int n);
 extern void led_off(int n);
 extern void blink_led(int led, int t=250, int n=1);

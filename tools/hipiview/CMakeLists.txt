@@ -21,6 +21,20 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 add_executable(hipiview hipiview.cpp lt7683_emu.cpp serial_port.cpp)
+
+# The version, from git (../../cmake/hipi_version.cmake): now, and again at
+# every build; gen/hipiview_version.h only changes with the version
+set(HIPIVIEW_VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/gen/hipiview_version.h)
+set(HIPIVIEW_VERSION_ARGS -DOUT=${HIPIVIEW_VERSION_HEADER} -DPREFIX=HIPIVIEW
+                          -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../..
+                          -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/hipi_version.cmake)
+execute_process(COMMAND ${CMAKE_COMMAND} ${HIPIVIEW_VERSION_ARGS})
+add_custom_target(hipiview_version ALL
+    COMMAND ${CMAKE_COMMAND} ${HIPIVIEW_VERSION_ARGS}
+    BYPRODUCTS ${HIPIVIEW_VERSION_HEADER}
+    VERBATIM)
+add_dependencies(hipiview hipiview_version)
+target_include_directories(hipiview PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
 target_link_libraries(hipiview PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # SDL2's own CMake files name their targets SDL2::SDL2 (+ SDL2::SDL2main on

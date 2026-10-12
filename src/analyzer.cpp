@@ -773,6 +773,8 @@ void analyzer_scrollToLive() {
     if (d_ != nullptr && visible()) draw();
 }
 
+bool analyzer_isLive() { return scroll_ == 0; }
+
 int analyzer_pageRows() { return kRows; }
 
 void analyzer_clear() {

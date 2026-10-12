@@ -11,6 +11,8 @@
 #define HIPI_DIR_LIF         "lif"
 // Analyzer logs (analyzer_<n>.txt) -- created when the first is started
 #define HIPI_DIR_LOGS        "logs"
+// I2C chip descriptions (*.txt) for System -> Hardware test -- optional
+#define HIPI_DIR_I2C         "i2c"
 
 // Path of a file in one of these folders, e.g. HIPI_PATH(HIPI_DIR_RESOURCES, "logo.bmp")
 #define HIPI_PATH(dir, file) dir "/" file

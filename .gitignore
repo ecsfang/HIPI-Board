@@ -82,3 +82,27 @@ documents/images/*.bmp
 tools/hipiview/build-win/
 tools/hipiview/hipiview-*.zip
 tools/hipiview/hipiview-*.tar.gz
+tools/hipiview/gen/
+
+
+# host test programs (tools/*/Makefile)
+tools/pixeltest/pixeltest
+tools/printertest/printertest
+tools/hipiview/printer_view_test
+tools/hipiview/printer_view_*.png
+
+# host test programs and their output
+tools/i2ctest/i2ctest
+tools/hipiview/hipiview
+tools/hipiview/hipiview.exe
+tools/hipiview/*_test
+tools/hipiview/link_sim
+tools/hipiview/*.png
+tools/hipiview/*.hvlog
+tools/hipiview/*.mp4
+tools/hipiview/demo_sd/
+
+# local copies, not part of HIPI
+HIPI-SD-card/
+PicoLed/
+pyilper2/

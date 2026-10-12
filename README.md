@@ -6,16 +6,17 @@ classic HP peripherals at once:
 
 | HIPI acts as…               | Original HP device               | Loop name           |
 |-----------------------------|----------------------------------|---------------------|
-| Video display               | HP 82163 Video Interface         | `TFDISPLAY`         |
+| Video display               | HP 82163 Video Interface, or HP 92198 80-column (a setting) | `TFDISPLAY` |
 | Cassette drive              | HP 82161A Digital Cassette Drive | `TFDRIVE`           |
 | Plotter                     | HP 7470A                         | `TFPLOT`            |
-| Temperature/pressure sensor | —                                | `TFTEMP`            |
+| Thermal printer (7" view)   | HP 82162A Thermal Printer        | `TFPRINT`           |
+| Any I2C chip / sensor       | —                                | `TFI2C`             |
 | LEDs and colour pixels      | —                                | `TFLEDS`, `TFPIXEL` |
 | Link to a PC (e.g. pyILPER) | PIL-Box                          | `PILBOX`            |
 | Terminal over USB           | —                                | `TFTERM`            |
 
 Cassettes are LIF image files on a micro-SD card. Besides the device views
-(display, plotter, tape drive) there is an HP-IL analyzer, a loop map, an
+(display, plotter, tape drive, printer) there is an HP-IL analyzer, a loop map, an
 HP-IL signal view, screen savers, screen dumps, and — on the 7" panel — a
 mirror of the screen to a PC for recording videos.
 
@@ -113,6 +114,7 @@ The card then holds:
 ```
 README.txt      what's what
 resources/      Tape view pictures: hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
+                Printer view pictures: hp82162a.bmp, prtparts.bmp
 lif/            cassettes (*.dat, LIF) — one example to start with
 CONFIG.TXT      settings — created by HIPI on first start
 screenshots/    screen dumps — created by the first Screendump
@@ -155,7 +157,7 @@ menu:
 More >
 ├── Go to view >   Display · Plotter · Tape · Analyzer · Loop map · HP-IL signals
 ├── Settings >     Screen · Screen saver · Devices · PC link
-└── System >       Connect to PC · Loopback test · Scan I2C · Character table ·
+└── System >       Connect to PC · Loopback test · Hardware test · Demo · Character table ·
                    About · Bootsel mode
 ```
 
@@ -180,11 +182,12 @@ CMakeLists.txt   build: one target chain per panel (hipi_5_pico, hipi_7_pico)
 include/, src/   the firmware (below)
 lib/             no-OS-FatFS (SD card), vendored, unmodified
 PicoLED/         WS2812 library for TFPIXEL, vendored
-resources/       artwork: Tape view pictures (SD card), buttons and logo (built in)
+resources/       artwork: Tape and Printer view pictures (SD card), buttons and logo (built in)
 sdcard/          the SD card: README.txt, example cassette in lif/, make_sd_card.py
 HIPI-SD-card.zip everything for a new SD card (made by the build)
 scripts/         build/flash helpers, bmp_to_rgb565.py (turns BMPs into C++)
-tools/           PC programs: hipiview (display mirror), ilctrl (HP-IL controller), pixeltest
+tools/           PC programs: hipiview (display mirror), ilctrl (HP-IL controller), pixeltest,
+                 printertest; images/ (how the Printer view pictures are made)
 documents/       USER_MANUAL.md, GUIDE.md, images
 pcb/             hardware: README, BOM, schematics, PCB
 ```
@@ -195,16 +198,16 @@ The firmware, by area (`.h`/`.hpp` in `include/`, `.cpp` in `src/`):
 |------|-------|-|
 | **Start-up** | `pico_main`, `hipi`, `boot_service`, `hipi_features.h` | Boot sequence and main loop; creates the HP-IL devices; build switches |
 | **HP-IL** | `hpil`, `hpil.pio`, `device` | Frames, the PIO physical layer, the `CDevice` base class |
-| **HP-IL devices** | `display`, `drive` + `tape`, `plotter`, `illeds`, `ilpixels`, `iltemp`, `terminal`, `pilbox` | `TFDISPLAY`, `TFDRIVE` (LIF on SD), `TFPLOT` (HP-GL), `TFLEDS`, `TFPIXEL`, `TFTEMP`, `TFTERM`, `PILBOX` |
+| **HP-IL devices** | `display`, `drive` + `tape`, `plotter`, `printer`, `illeds`, `ilpixels`, `terminal`, `pilbox`, `ili2c` | `TFDISPLAY` (HP 82163 or HP 92198), `TFDRIVE` (LIF on SD), `TFPLOT` (HP-GL), `TFPRINT` (HP 82162A), `TFLEDS`, `TFPIXEL`, `TFTERM`, `PILBOX`, `TFI2C` (any I2C chip: temperature, pressure, distance, clock ...) |
 | **Display drivers** | `LT7683`, `RA8875`, `*Transport`, `display_config.h` | 7" and 5" controllers; SPI on the Pico (or spidev on Linux) |
-| **Text display** | `Screen`, `hp82163_font.hpp` | HP 82163 emulation: text buffer, escape codes, scroll-back |
-| **Views** | `plotterview`, `analyzer`, `loopmap`, `hpil_diag` (+ `.pio`), `chartable` | Display / Plotter / Tape views and switching; analyzer, loop map, HP-IL signals, character table |
+| **Text display** | `Screen`, `hp82163_font.hpp`, `video80` | HP 82163 emulation: text buffer, escape codes, scroll-back; the HP 92198's 80-column screen |
+| **Views** | `plotterview`, `analyzer`, `loopmap`, `hpil_diag` (+ `.pio`), `chartable` | Display / Plotter / Tape / Printer views and switching; analyzer, loop map, HP-IL signals, character table |
 | **User interface** | `boardui`, `uidialog.hpp`, `ui_buttons.hpp`, `touch`, `bootscreen` | Button strip, menus, info box, device list, touch, start-up screen |
 | **Screen extras** | `backlight`, `clock`, `rtc`, `saver_anim`, `screendump` | Backlight and screen savers, DS3231 clock, screen dumps |
 | **Display mirror** | `display_mirror`, `mirror_*.h(pp)` | 7" screen mirrored to a PC (`tools/hipiview`) |
 | **Settings & files** | `config.hpp`, `sd_paths.h`, `bmp_loader.hpp`, `lif_info.hpp`, `hw_config` | `CONFIG.TXT`, SD folders, BMP loading, LIF directories, SD card wiring |
 | **USB** | `usb_serial.h`, `usb_msc`, `my_descriptors.c`, `tusb_config.h` | Serial ports, the SD card as a USB drive, descriptors |
-| **Hardware drivers** | `leds`, `pixels`, `bmp280`, `i2c_device` | LEDs, NeoPixels, pressure sensor, I2C |
+| **Hardware drivers** | `leds`, `pixels`, `bmp280`, `i2c_device`, `i2c_ident`, `i2c_chips` | LEDs, NeoPixels, pressure sensor, I2C; what's on the I2C bus (chips described in `sdcard/i2c/*.txt`) |
 | **Fonts & pictures** | `*_font*.cpp`, `glyph_font`, `buttons_image.cpp`, `logo_image.cpp` | Generated data (see `scripts/`) |
 | **Other** | `display_test.hpp`, `display_boot_test.hpp`, `linux_main` | Optional diagnostics; a Linux demo (off by default) |
 

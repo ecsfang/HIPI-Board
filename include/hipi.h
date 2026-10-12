@@ -67,6 +67,10 @@ LoopbackResult hipi_loopbackTest(
     std::function<void(int tested, int total, std::uint32_t lastCmd)> onProgress = nullptr);
 
 void hipi_init(void);
+// The demo (demo.h): one made-up frame through HIPI's devices, as if it
+// came round the loop (not PILBOX, not the switched-off ones), seen by
+// the analyzer too. Returns what leaves HIPI.
+unsigned short hipi_simFrame(unsigned short frame);   // (IL_CMD_t, hpil.h)
 bool hipi_loop(HpIlLoop& loop);
 bool hipi_test();
 

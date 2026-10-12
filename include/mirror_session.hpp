@@ -112,6 +112,26 @@ public:
             enc_.emit(&op, 1);
             enc_.emit(&font_[0][0], 256 * 16);
         }
+        if (font24_ == nullptr) {
+            font24_ = new (std::nothrow) std::uint16_t[256][24];
+            if (font24_ != nullptr) {
+                enc_.suspend();
+                d.captureBuiltinFont24(font24_);
+                enc_.resume();
+            }
+        }
+        if (font24_ != nullptr) {
+            const std::uint8_t op = kFont24;
+            enc_.emit(&op, 1);
+            for (int c = 0; c < 256; ++c) {
+                std::uint8_t rows[48];
+                for (int r = 0; r < 24; ++r) {
+                    rows[2 * r] = static_cast<std::uint8_t>(font24_[c][r]);
+                    rows[2 * r + 1] = static_cast<std::uint8_t>(font24_[c][r] >> 8);
+                }
+                enc_.emit(rows, sizeof(rows));
+            }
+        }
 
         planDump();
         std::uint32_t total = 0;
@@ -235,6 +255,7 @@ private:
 
     Encoder& enc_;
     std::uint8_t (*font_)[16] = nullptr;      // captured once, kept (4 kB)
+    std::uint16_t (*font24_)[24] = nullptr;   // the 12x24 font, likewise (12 kB)
     Layer layers_[kMaxLayers] = {};
     int layerCount_ = 0;
     std::uint32_t viewerAssets_[kMaxViewerAssets] = {};

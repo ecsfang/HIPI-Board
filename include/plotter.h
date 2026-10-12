@@ -111,6 +111,9 @@ struct PlotSegment {
 
 class CPlotter : public CDevice {
 public:
+    // One character of HP-GL as if from the controller (the demo, demo.h)
+    void put(char c) { feed_char(c); }
+
     ViewKind viewKind() const override { return ViewKind::Plotter; }
     // sai/aau/device-id match the real HP-7475A/pyILPER conventions:
     // AID 0x60, default address 5, device-id string "HP7470A".

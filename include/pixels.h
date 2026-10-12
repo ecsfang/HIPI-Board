@@ -21,13 +21,13 @@
 #define PIXEL_PIN           26
 #define PIXEL_PIO           pio1
 
-// The order the LED strip takes its color bytes in. Classic WS2812B want
-// green-red-blue (PicoLed::FORMAT_GRB), but many strips sold as WS2812/
-// "NeoPixel" take red-green-blue -- the one on the HIPI board does: with
-// FORMAT_GRB, red and green came out swapped (224 = green, 28 = red).
-// If red and green are swapped on your strip, switch to the other one.
+// The order the strip takes its colour bytes in. Strips differ (classic
+// WS2812B: GRB; many sold as WS2812/"NeoPixel", like the HIPI board's: RGB;
+// some WS2811 strings: BRG ...), so it's a setting (pixel_order, chosen on
+// the Hardware test page): CPixelStrip::setColorOrder(). This is only
+// what the strip starts with.
 #ifndef PIXEL_COLOR_ORDER
-#define PIXEL_COLOR_ORDER   PicoLed::FORMAT_GRB
+#define PIXEL_COLOR_ORDER   PicoLed::FORMAT_RGB
 #endif
 #define PIXEL_SM            0
 
@@ -128,6 +128,12 @@ public:
     // All pixels off (black). Not visible until show() is also called.
     void clear();
 
+    // The colour byte order the strip takes: one of kPixelOrders ("RGB",
+    // "GRB", "BRG", "RBG", "GBR", "BGR"). What's showing is sent again in
+    // the new order at the next show().
+    void setColorOrder(int order);
+    int colorOrder() const { return order_; }
+
     // Pushes the current pixel buffer (and brightness) out to the physical
     // strip -- nothing set via setPixelRGB332()/setPixelRGB()/off()/on()/
     // clear()/setBrightness() above is actually visible until this runs.
@@ -148,6 +154,7 @@ private:
     std::function<void(uint32_t)> countChanged_;
     std::uint8_t brightness_ = 255;   // set with setBrightness() (0-255)
     std::uint8_t applied_ = 255;      // last given to PicoLED (after the current limit)
+    int order_ = 0;                   // colorOrder(): an index into kPixelOrders
 
     struct Effect {
         uint32_t first, last;                         // 0-based, inclusive
@@ -167,6 +174,12 @@ private:
     // clear()) -- unlike lastR_/G_/B_ above, off()/clear() DO update this.
     std::vector<std::uint8_t> currentR_, currentG_, currentB_;
 };
+
+// The colour byte orders a strip can take (pixel_order= in CONFIG.TXT)
+constexpr int kPixelOrderCount = 6;
+extern const char* const kPixelOrders[kPixelOrderCount];   // "RGB", "GRB", ...
+// The index of an order's name (case doesn't matter), -1 if there's none
+int pixelOrderIndex(const char* name);
 
 // The project's single, global pixel strip instance (mirrors leds.cpp's
 // own ledPower/ledStatus/etc. globals) -- defined in pixels.cpp.

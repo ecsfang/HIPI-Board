@@ -70,7 +70,7 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
         return true;
     }
     if( cmd == SDI && isTalker() ) {
-        m_sdi = name();
+        m_sdi = deviceId();
         *rtn = *m_sdi++;
         return true;
     }

@@ -9,6 +9,7 @@
 #include "Effects/Particles.hpp"
 #include "Effects/Fade.hpp"
 #include "pico/time.h"
+#include <cctype>
 #include <algorithm>
 #include <cstdlib>
 #include <initializer_list>
@@ -45,7 +46,52 @@ struct ControllerAccess : PicoLed::PicoLedController {
         return (c.*(&ControllerAccess::target))->getPixelColor(index);
     }
 };
+
+// The byte order in PicoLED's target (protected: reached through a derived
+// class, as the controller's target above)
+struct TargetAccess : PicoLed::PicoLedTarget {
+    static void setOrder(PicoLed::PicoLedTarget& t, PicoLed::DataByte a, PicoLed::DataByte b, PicoLed::DataByte c) {
+        PicoLed::DataByte (&bytes)[4] = t.*(&TargetAccess::bytes);
+        bytes[0] = a;
+        bytes[1] = b;
+        bytes[2] = c;
+        bytes[3] = PicoLed::NONE;              // (24 bits: no white byte)
+    }
+};
+struct ControllerTarget : PicoLed::PicoLedController {
+    static PicoLed::PicoLedTarget& of(PicoLed::PicoLedController& c) { return *(c.*(&ControllerTarget::target)); }
+};
 }  // namespace
+
+const char* const kPixelOrders[kPixelOrderCount] = { "RGB", "GRB", "BRG", "RBG", "GBR", "BGR" };
+
+int pixelOrderIndex(const char* name) {
+    if (name == nullptr) return -1;
+    for (int i = 0; i < kPixelOrderCount; ++i) {
+        const char* o = kPixelOrders[i];
+        int k = 0;
+        while (k < 3 && name[k] != 0 && std::toupper(static_cast<unsigned char>(name[k])) == o[k]) ++k;
+        if (k == 3 && name[3] == 0) return i;
+    }
+    return -1;
+}
+
+void CPixelStrip::setColorOrder(int order) {
+    if (order < 0 || order >= kPixelOrderCount || order == order_) return;
+    PicoLed::PicoLedTarget& t = ControllerTarget::of(strip_);
+    // What's in the buffer, read in the old order ...
+    std::vector<PicoLed::Color> colours(count_);
+    for (uint32_t i = 0; i < count_; ++i) colours[i] = t.getPixelColor(i);
+    auto byteOf = [](char c) {
+        return c == 'R' ? PicoLed::RED : c == 'G' ? PicoLed::GREEN : PicoLed::BLUE;
+    };
+    const char* o = kPixelOrders[order];
+    TargetAccess::setOrder(t, byteOf(o[0]), byteOf(o[1]), byteOf(o[2]));
+    order_ = order;
+    // ... and written again in the new one
+    for (uint32_t i = 0; i < count_; ++i) t.setPixelColor(i, colours[i]);
+    MLOGF("colour order %s", o);
+}
 
 // ─── Rainbow effect ─────────────────────────────────────────────────────────
 // Not one of PicoLED's own effects: the whole range in rainbow colours,
@@ -76,6 +122,7 @@ CPixelStrip::CPixelStrip(uint pin, uint count, PIO pio, uint sm)
       active_(std::min<uint32_t>(PIXEL_COUNT_INITIAL, count)),
       lastR_(count, 0), lastG_(count, 0), lastB_(count, 0),
       currentR_(count, 0), currentG_(count, 0), currentB_(count, 0) {
+    order_ = PIXEL_COLOR_ORDER == PicoLed::FORMAT_GRB ? 1 : 0;   // (kPixelOrders: GRB / RGB)
     strip_.setBrightness(255);  // full brightness by default -- the "S" ASCII
                                  // command scales this down later if asked
     strip_.clear();

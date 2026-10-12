@@ -571,6 +571,34 @@ void LT7683::bteMemoryCopy(std::uint32_t srcAddr, std::uint16_t srcStride,
                            std::uint32_t dstAddr, std::uint16_t dstStride,
                            std::int16_t dstX, std::int16_t dstY,
                            std::uint16_t w, std::uint16_t h) {
+    // S1: valid, distinct, never-read address -- same reasoning as
+    // bteMcuWriteBitmap()'s own comment on why this can't be skipped or
+    // left at 0. kBteLayer2Addr specifically (not kBteLayer3Addr, the
+    // staging area bteScrollShift() itself uses) so this never collides
+    // with an in-flight staging copy either. ROP 0xC: "DT = S0".
+    bteCopyRop(srcAddr, srcStride, srcX, srcY, kBteLayer2Addr, 4, 0, 0,
+               dstAddr, dstStride, dstX, dstY, w, h, 0xC);
+}
+
+void LT7683::andLayerRegion(std::uint32_t srcAddr, std::uint16_t srcStride,
+                            std::int16_t srcX, std::int16_t srcY,
+                            std::uint32_t dstAddr, std::uint16_t dstStride,
+                            std::int16_t dstX, std::int16_t dstY,
+                            std::uint16_t w, std::uint16_t h) {
+    const auto sy = static_cast<std::int16_t>(srcY + vertOffset_);
+    const auto dy = static_cast<std::int16_t>(dstY + vertOffset_);
+    // ROP 0x8: "DT = S0 AND S1", S1 = the destination region
+    bteCopyRop(srcAddr, srcStride, srcX, sy, dstAddr, dstStride, dstX, dy,
+               dstAddr, dstStride, dstX, dy, w, h, 0x8);
+}
+
+void LT7683::bteCopyRop(std::uint32_t srcAddr, std::uint16_t srcStride,
+                        std::int16_t srcX, std::int16_t srcY,
+                        std::uint32_t s1Addr, std::uint16_t s1Stride,
+                        std::int16_t s1X, std::int16_t s1Y,
+                        std::uint32_t dstAddr, std::uint16_t dstStride,
+                        std::int16_t dstX, std::int16_t dstY,
+                        std::uint16_t w, std::uint16_t h, std::uint8_t rop) {
     // Same precondition as bteMcuWriteBitmap() -- see its own comment.
     waitBteIdle();
 
@@ -584,17 +612,13 @@ void LT7683::bteMemoryCopy(std::uint32_t srcAddr, std::uint16_t srcStride,
     writeReg16(S0_X0, static_cast<std::uint16_t>(srcX));
     writeReg16(S0_Y0, static_cast<std::uint16_t>(srcY));
 
-    // ---- S1: valid, distinct, never-read address -- same reasoning as
-    // bteMcuWriteBitmap()'s own comment on why this can't be skipped or
-    // left at 0. kBteLayer2Addr specifically (not kBteLayer3Addr, the
-    // staging area bteScrollShift() itself uses) so this never collides
-    // with an in-flight staging copy either.
-    writeReg16(S1_STR0, static_cast<std::uint16_t>(kBteLayer2Addr & 0xFFFF));
+    // ---- S1: the second operand (bteMemoryCopy(): a never-read dummy)
+    writeReg16(S1_STR0, static_cast<std::uint16_t>(s1Addr & 0xFFFF));
     writeReg16(static_cast<std::uint8_t>(S1_STR0 + 2),
-              static_cast<std::uint16_t>((kBteLayer2Addr >> 16) & 0xFFFF));
-    writeReg16(S1_WTH0, 4);
-    writeReg16(S1_X0, 0);
-    writeReg16(S1_Y0, 0);
+              static_cast<std::uint16_t>((s1Addr >> 16) & 0xFFFF));
+    writeReg16(S1_WTH0, s1Stride);
+    writeReg16(S1_X0, static_cast<std::uint16_t>(s1X));
+    writeReg16(S1_Y0, static_cast<std::uint16_t>(s1Y));
 
     // ---- Destination.
     writeReg16(DT_STR0, static_cast<std::uint16_t>(dstAddr & 0xFFFF));
@@ -611,12 +635,12 @@ void LT7683::bteMemoryCopy(std::uint32_t srcAddr, std::uint16_t srcStride,
     // REG[92h] (BLT_COLR): all three at 16bpp, same as bteMcuWriteBitmap().
     writeReg(BLT_COLR, 0x25);
 
-    // REG[91h]: ROP[7:4]=0xC ("DT = S0") | operation code[3:0]=0010b
+    // REG[91h]: ROP[7:4] (0xC "DT = S0", 0x8 "S0 AND S1") | operation code[3:0]=0010b
     // (Memory Copy with ROP) -- the ONLY difference from
     // bteMcuWriteBitmap()'s own REG[91h] value (0xC0, opcode 0000b) is
     // this opcode nibble, matching Table 7-1's own "0010b: Memory Copy
     // (move) with ROP".
-    writeReg(BLT_CTRL1, 0xC2);
+    writeReg(BLT_CTRL1, static_cast<std::uint8_t>((rop << 4) | 0x02));
 
     // REG[90h] bit4=1: BTE enable/start -- unlike bteMcuWriteBitmap(),
     // there's no pixel data for this project's own code to stream
@@ -1374,6 +1398,67 @@ void LT7683::captureBuiltinFont(std::uint8_t out[256][16]) {
     }
 }
 
+void LT7683::captureBuiltinFont24(std::uint16_t out[256][24]) {
+    // As captureBuiltinFont(), with the 12x24 CGROM font
+    // Everything this changes, to put back afterwards
+    const std::uint32_t savedCanvas = canvasAddr_;
+    const std::uint16_t savedStride = canvasStride_;
+    const std::uint16_t awX0 = activeWindowX0Cached_, awY0 = activeWindowY0Cached_;
+    const std::uint16_t awW = activeWindowWCached_, awH = activeWindowHCached_;
+    const GfxTxtMode savedMode = currentGfxTxtMode_;
+    const bool savedCustom = usingCustomFont_;
+    static constexpr std::uint8_t kSaveRegs[] = {
+        FGCR, FGCG, FGCB, BGCR, BGCG, BGCB, CCR0_TEXT, CCR1_TEXT, FLDR, F2FSSR,
+        0x3C,                                   // GTCCR: text cursor on/blink
+        F_CURX0, F_CURX0 + 1, F_CURY0, F_CURY0 + 1,
+    };
+    std::uint8_t saved[sizeof(kSaveRegs)];
+    waitStatus(STSR_CORE_BUSY);
+    for (std::size_t i = 0; i < sizeof(kSaveRegs); ++i) saved[i] = readReg(kSaveRegs[i]);
+
+    // Draw all 256 characters in a 32 x 8 grid of 12x24 cells
+    beginLayerDraw(kBteLayer2Addr);
+    setActiveWindow(0, 0, static_cast<std::uint16_t>(width_ - 1), static_cast<std::uint16_t>(height_ - 1));
+    writeReg(0x3C, 0x00);                       // no blinking cursor meanwhile
+    selectBuiltinFontSize(1);
+    writeReg(CCR1_TEXT, static_cast<std::uint8_t>(saved[7] & ~0x4F));   // opaque, scale x1
+    setCharSpacing(0);
+    setLineSpacing(0);
+    setColor(0xFFFF);
+    setBgColor(0x0000);
+    for (int c = 0; c < 256; ++c) {
+        txtSetCursor(static_cast<std::uint16_t>((c % 32) * 12), static_cast<std::uint16_t>((c / 32) * 24));
+        txtWriteChar(static_cast<std::uint8_t>(c));
+    }
+    // Read them back: one row of 384 pixels covers 32 characters
+    static std::uint16_t row[384];
+    for (int y = 0; y < 192; ++y) {
+        readRow565(0, static_cast<std::int16_t>(y), 384, row);
+        for (int col = 0; col < 32; ++col) {
+            std::uint16_t bits = 0;
+            for (int px = 0; px < 12; ++px)
+                if (row[col * 12 + px] != 0) bits = static_cast<std::uint16_t>(bits | (0x8000 >> px));
+            out[(y / 24) * 32 + col][y % 24] = bits;
+        }
+    }
+
+    // Put everything back
+    txtMode();                                  // text registers: change only while not busy
+    for (std::size_t i = 0; i < sizeof(kSaveRegs); ++i) writeReg(kSaveRegs[i], saved[i]);
+    usingCustomFont_ = savedCustom;
+    if (savedMode == GfxTxtMode::Graphic) gfxMode();
+    if (savedCanvas == 0 && savedStride == width_) endOverlayDraw();
+    else beginLayerDraw(savedCanvas, savedStride);
+    if (awW != 0 && awH != 0) {
+        writeReg16(AWUL_X0, awX0);
+        writeReg16(AWUL_Y0, awY0);
+        writeReg16(AW_WTH0, awW);
+        writeReg16(AW_HT0, awH);
+        activeWindowX0Cached_ = awX0; activeWindowY0Cached_ = awY0;
+        activeWindowWCached_ = awW;   activeWindowHCached_ = awH;
+    }
+}
+
 // -----------------------------------------------------------------------
 // Primitives -- geometric drawing engine, REG[67h]-[7Eh]
 // -----------------------------------------------------------------------
@@ -1732,6 +1817,34 @@ void LT7683::selectCustomFont() {
     // txtWriteChar() automatically use the correct (2-byte) write
     // protocol this font source needs.
     usingCustomFont_ = true;
+}
+
+void LT7683::selectBuiltinFontSize(std::uint8_t sizeCode) {
+    // CCR0 bit[7:6]=00b internal CGROM, bit[5:4] = character height
+    // (00b 8x16, 01b 12x24, 10b 16x32), bit[1:0]=00b ISO/IEC 8859-1
+    writeReg(CCR0_TEXT, static_cast<std::uint8_t>((sizeCode & 0x03) << 4));
+    usingCustomFont_ = false;
+}
+
+void LT7683::txtScaleXY(std::uint8_t hx, std::uint8_t vy) {
+    txtMode();
+    hx = static_cast<std::uint8_t>(hx < 1 ? 0 : (hx > 4 ? 3 : hx - 1));
+    vy = static_cast<std::uint8_t>(vy < 1 ? 0 : (vy > 4 ? 3 : vy - 1));
+    writeData(static_cast<std::uint8_t>((readReg(CCR1_TEXT) & ~0x0F) | (hx << 2) | vy));
+    txtScale_ = vy;
+}
+
+void LT7683::setTextCursorShape(bool visible, std::uint8_t w, std::uint8_t h) {
+    // Same registers as setTextCursorVisible() (see its comments); the
+    // cache there no longer describes what's set, so it's invalidated
+    cursorVisibleCached_ = -1;
+    cursorBlockStyleCached_ = -1;
+    if (visible) {
+        writeReg(0x3E, static_cast<std::uint8_t>(w > 0 ? w - 1 : 0));
+        writeReg(0x3F, static_cast<std::uint8_t>(h > 0 ? h - 1 : 0));
+        writeReg(0x3D, 0x2D);
+    }
+    writeReg(0x3C, visible ? 0x03 : 0x00);
 }
 
 void LT7683::selectBuiltinFont() {

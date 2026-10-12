@@ -52,6 +52,7 @@ public:
     std::uint8_t hostRead();
     std::uint8_t hostStatus() const { return 0x44; }   // RAM ready, write FIFO empty, idle
     void setBuiltinFont(const std::uint8_t font[256][16]);
+    void setBuiltinFont24(const std::uint16_t font[256][24]);   // 12x24 (kFont24)
 
     // ── Output ──────────────────────────────────────────────────────────
     int width() const { return width_; }
@@ -122,6 +123,9 @@ private:
     bool bteMcu_ = false;
     std::uint32_t bteCount_ = 0;
     std::uint8_t font_[256][16];
+    std::uint16_t font24_[256][24];          // bit 15 = leftmost pixel
+    // CCR0 bits 5:4 -- the built-in font size (0 = 8x16, 1 = 12x24, 2 = 16x32)
+    int builtinSize() const { return (regs_[0xCC] >> 4) & 3; }
     bool fontKnown_ = false;
 
     bool hello_ = false;

@@ -14,6 +14,8 @@
 #include "backlight.h"
 #include "display_mirror.h"   // layers a PC viewer needs
 #include "loopmap.h"
+#include "hwtest.h"
+#include "demo.h"
 #include "plotterview.h"
 #include "plotterview.h"
 
@@ -28,6 +30,7 @@
 #include "hipi.h"      // DeviceInfo, hipi_enumerateDevices() -- "Devices" dialog
 #include "hpil.h"      // hpilDevices
 #include "drive.h"     // CDrive -- Tape view power switch
+#include "printer.h"   // CPrinter -- Printer view controls
 #include "screendump.h"
 extern std::vector<CDevice*> devices;
 #include "pilbox.h"    // pilbox, CPilBox::isConnected()
@@ -123,6 +126,9 @@ Button pressedButton = Button::None;
 constexpr std::uint32_t kRepeatDelayMs = 500;
 constexpr std::uint32_t kRepeatIntervalMs = 200;
 Button repeatButton = Button::None;
+// Printer view: the key (PRINT / PAPER ADVANCE) the finger is on, let go
+// in boardui_handleRelease()
+PrinterHotspot printerKeyHeld = PrinterHotspot::None;
 absolute_time_t repeatNext = nil_time;
 
 // Slide animation timing for showButtonStrip()/hideButtonStrip() below --
@@ -455,6 +461,7 @@ void showInfoBox() {
 #endif
 
     MenuFrame::draw(display_, boxX, boxY, boxW, boxH);
+    display_->selectBuiltinFont();       // (a view may have left another font selected)
 
     display_->txtColor(0xFFFF, 0x0000);
     char buf[64];
@@ -502,7 +509,7 @@ void showInfoBox() {
 #ifdef DISPLAY_7INCH
     display_->endOverlayDraw();
     screen_->reassertRenderState();
-    screen_->refreshCursor();       // see showDeviceList()
+    plotterview_refreshCursor();       // see showDeviceList()
     display_->showPipOverlay(boxX, boxY, boxW, boxH);
 #endif
 
@@ -535,6 +542,9 @@ void hideInfoBox() {
 // fresh, live query rather than a cached/stale one.
 bool deviceListVisible = false;
 int deviceListScrollOffset = 0;
+absolute_time_t deviceListNextRefresh = nil_time;
+constexpr std::uint32_t kDeviceListRefreshMs = 500;
+
 std::vector<DeviceInfo> deviceListCache;
 
 constexpr std::uint16_t kDeviceListCornerSize = 120;  // touch hit-zone: bottom-left NxN
@@ -543,55 +553,55 @@ bool isDeviceListCornerTouch(std::uint16_t x, std::uint16_t y) {
     return x < kDeviceListCornerSize && y >= static_cast<std::uint16_t>(SCREEN_MAX_Y - kDeviceListCornerSize);
 }
 
-bool isInsideDeviceListBox(std::uint16_t x, std::uint16_t y) {
-    return x >= MenuFrame::X && x < MenuFrame::X + MenuFrame::W &&
-           y >= MenuFrame::Y && y < MenuFrame::Y + MenuFrame::H;
-}
-
-// How many device rows fit below the title line.
-// MenuFrame::RowPitch (36px) is sized for TextScale(1) -- the settings
-// menu's font. The device list uses the smaller txtSize(0) (16px glyph
-// height), so reusing that pitch left a lot of dead space between rows.
-constexpr int kDeviceListRowPitch = 22;
-
-// Space reserved above the rows for the "Devices" title (txtSize(1) at
-// Y+16 -- roughly 32px tall, so this needs real clearance past that, not
-// just past its baseline) -- too little here was exactly what let the
-// first row overlap the title.
-constexpr int kDeviceListRowsTopOffset = 56;
+// The device list: a menu-style box (the frame with a yellow title band,
+// as the cassette list), one device a row in the small font, scrolled a
+// device at a time by a vertical swipe. Closed with its close button (the
+// X in the title band) -- other touches don't close it.
+constexpr int kDeviceListRowPitch = 24;
+constexpr int kDeviceListRowsTop = MenuFrame::Y + 14;          // the first row
+constexpr int kDeviceListCloseW = 44;                          // the close button in the title band
 
 int deviceListVisibleRows() {
-    // Bottom margin reserves MenuFrame::CornerRadius so the row area
-    // (see drawDeviceListRows()'s fill below) never has to reach all the
-    // way into the frame's rounded corners.
-    return (MenuFrame::H - kDeviceListRowsTopOffset - MenuFrame::CornerRadius) / kDeviceListRowPitch;
+    // (above the frame's rounded bottom corners)
+    return (MenuFrame::Y + MenuFrame::H - MenuFrame::CornerRadius - kDeviceListRowsTop) / kDeviceListRowPitch;
 }
 
-// Redraws just the row area (not the frame/title) -- used both for the
-// initial display and every scroll step, so scrolling doesn't need to
-// redraw the whole dialog each time.
+// The close button: drawn in the title band's right end, touched a bit
+// around it too
+bool isDeviceListClose(std::uint16_t x, std::uint16_t y) {
+    const int right = MenuFrame::X + MenuFrame::W;
+    return x >= right - kDeviceListCloseW - 24 && x < right + 8 &&
+           y + 10 >= MenuFrame::MenuTop && y < MenuFrame::MenuTop + MenuFrame::TitleH + 14;
+}
+
+void drawDeviceListClose() {
+    using namespace MenuFrame;
+    const int x = X + W - BorderThickness - kDeviceListCloseW - 6, y = MenuTop + BorderThickness + 3;
+    const int w = kDeviceListCloseW, h = TitleH - BorderThickness - 6;
+    display_->fillRoundRect(x, y, w, h, 5, 0x0000);
+    const int cx = x + w / 2, cy = y + h / 2;
+    auto i16 = [](int v) { return static_cast<std::int16_t>(v); };
+    for (int t = -1; t <= 1; ++t) {
+        display_->line(i16(cx - 6 + t), i16(cy - 6), i16(cx + 6 + t), i16(cy + 6), 0xFFFF);
+        display_->line(i16(cx - 6 + t), i16(cy + 6), i16(cx + 6 + t), i16(cy - 6), 0xFFFF);
+    }
+}
+
+// Redraws just the rows (not the frame and title): the first display
+// and every scroll step
 void drawDeviceListRows() {
-    const int rowsY = MenuFrame::Y + kDeviceListRowsTopOffset;
-    // Inset by CornerRadius on every side (not just BorderThickness) --
-    // this fill is a plain rectangle, not a rounded one, so anything
-    // closer to the corners than the frame's own CornerRadius would
-    // paint squarely over the curve where the yellow border is meant to
-    // show through, blacking out the rounded corners. A real test showed
-    // exactly that on the two corners this fill's own bottom edge
-    // reached (top was never close enough to be affected).
     const int rowsBottom = MenuFrame::Y + MenuFrame::H - MenuFrame::CornerRadius;
+    // (inset by the corner radius: a plain rectangle mustn't cut the
+    // frame's rounded corners)
     const int fillX = MenuFrame::X + MenuFrame::CornerRadius;
     const int fillW = MenuFrame::W - 2 * MenuFrame::CornerRadius;
-    display_->fillRect(static_cast<std::int16_t>(fillX),
-                       static_cast<std::int16_t>(rowsY - 6),
-                       fillW,
-                       static_cast<std::int16_t>(rowsBottom - (rowsY - 6)),
-                       0x0000);
+    display_->fillRect(static_cast<std::int16_t>(fillX), static_cast<std::int16_t>(kDeviceListRowsTop - 4), fillW,
+                       static_cast<std::int16_t>(rowsBottom - (kDeviceListRowsTop - 4)), 0x0000);
 
-    display_->txtColor(0xFFFF, 0x0000);
+    display_->selectBuiltinFont();       // (a view may have left another font selected)
     display_->txtSize(0);
     const int visibleRows = deviceListVisibleRows();
-    int y = rowsY;
+    int y = kDeviceListRowsTop;
     char buf[96];
     for (int i = 0; i < visibleRows; ++i) {
         const std::size_t idx = static_cast<std::size_t>(deviceListScrollOffset + i);
@@ -614,20 +624,24 @@ void drawDeviceListRows() {
             std::snprintf(buf, sizeof(buf), "addr %2d  %-10s0x%02X [%c]",
                           info.addr, info.devName, info.sai, info.enabled ? 'X' : ' ');
         }
+        // Switched-off devices dimmer
+        display_->txtColor(info.enabled ? 0xFFFF : 0x8410, 0x0000);
         display_->txtSetCursor(MenuFrame::X + 20, y);
         display_->txtWrite(buf);
         y += kDeviceListRowPitch;
     }
 
-    // Simple scroll hints -- "^" if there's more above, "v" if there's
-    // more below -- drawn in the frame's own border area (top/bottom
-    // right corner of the box) rather than stealing a row from the list.
-    display_->txtSetCursor(MenuFrame::X + MenuFrame::W - 30, MenuFrame::Y + 16);
-    display_->txtWrite(deviceListScrollOffset > 0 ? "^" : " ");
-    const bool moreBelow = deviceListScrollOffset + visibleRows <
-                           static_cast<int>(deviceListCache.size());
-    display_->txtSetCursor(MenuFrame::X + MenuFrame::W - 30, rowsBottom - kDeviceListRowPitch);
-    display_->txtWrite(moreBelow ? "v" : " ");
+    // More above / below: arrows at the right, in the rows' own margin
+    const int ax = MenuFrame::X + MenuFrame::W - 34;
+    const bool moreAbove = deviceListScrollOffset > 0;
+    const bool moreBelow = deviceListScrollOffset + visibleRows < static_cast<int>(deviceListCache.size());
+    auto i16 = [](int v) { return static_cast<std::int16_t>(v); };
+    if (moreAbove)
+        display_->fillTriangle(i16(ax), i16(kDeviceListRowsTop + 14), i16(ax + 16), i16(kDeviceListRowsTop + 14),
+                               i16(ax + 8), i16(kDeviceListRowsTop + 2), MenuFrame::Yellow);
+    if (moreBelow)
+        display_->fillTriangle(i16(ax), i16(rowsBottom - 18), i16(ax + 16), i16(rowsBottom - 18),
+                               i16(ax + 8), i16(rowsBottom - 6), MenuFrame::Yellow);
 }
 
 void showDeviceList() {
@@ -635,6 +649,7 @@ void showDeviceList() {
 
     deviceListCache = hipi_enumerateDevices();
     deviceListScrollOffset = 0;
+    deviceListNextRefresh = make_timeout_time_ms(kDeviceListRefreshMs);
 
     // Same PIP-vs-suspend split, same reasoning, as showInfoBox() just
     // above -- see its own comment for the full story.
@@ -644,13 +659,25 @@ void showDeviceList() {
     screen_->suspend();
 #endif
 
-    MenuFrame::draw(display_, MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
-
-    display_->txtColor(0xFFFF, 0x0000);
-    display_->txtSize(1);
-    display_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 16);
-    display_->txtWrite("Devices");
-    display_->txtSize(0);
+    // The frame with its title band, as the menus (UiDialog::drawBox())
+    {
+        using namespace MenuFrame;
+        MenuFrame::draw(display_, X, MenuTop, W, MenuH);
+        display_->fillRect(X + BorderThickness, MenuTop + BorderThickness, W - 2 * BorderThickness,
+                           TitleH - BorderThickness, Yellow);
+#if HIPI_MENU_TITLE_HP41FONT
+        drawGlyphText(display_, X + 16, MenuTop + (TitleH - kMenuTitleFont.height) / 2 + 1, kMenuTitleFont,
+                      "HP-IL DEVICES", 0x0000, Yellow);
+#endif
+        display_->selectBuiltinFont();
+#if !HIPI_MENU_TITLE_HP41FONT
+        display_->txtSize(0);
+        display_->txtColor(0x0000, Yellow);
+        display_->txtSetCursor(X + 16, MenuTop + 8);
+        display_->txtWrite("HP-IL DEVICES");
+#endif
+        drawDeviceListClose();
+    }
 
     drawDeviceListRows();
 
@@ -659,8 +686,8 @@ void showDeviceList() {
     screen_->reassertRenderState();
     // Drawing the list moved the chip's (shared) text cursor into the
     // box -- put the blinking cursor back where the text stands
-    screen_->refreshCursor();
-    display_->showPipOverlay(MenuFrame::X, MenuFrame::Y, MenuFrame::W, MenuFrame::H);
+    plotterview_refreshCursor();
+    display_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
 #endif
 
     deviceListVisible = true;
@@ -698,7 +725,7 @@ void scrollDeviceList(bool down) {
         deviceListScrollOffset = newOffset;
         // Called from boardui_handleSwipe() -- a separate call path from
         // showDeviceList() above, needing its own explicit PIP wrapping
-        // for the same reason dismissLoopbackResult()/dismissI2CScanResult()
+        // for the same reason dismissLoopbackResult()
         // do in uidialog.hpp (see their own comments there): nothing else
         // wraps this call in one.
 #ifdef DISPLAY_7INCH
@@ -708,9 +735,44 @@ void scrollDeviceList(bool down) {
 #ifdef DISPLAY_7INCH
         display_->endOverlayDraw();
         screen_->reassertRenderState();
-        screen_->refreshCursor();
+        plotterview_refreshCursor();
 #endif
     }
+}
+
+// While the list is open it follows the loop: the addresses come when
+// the HP-41 auto-addresses (AAU/AAD), devices are switched on and off ...
+// Looked at twice a second; the rows are drawn again when something changed.
+
+bool sameDevices(const std::vector<DeviceInfo>& a, const std::vector<DeviceInfo>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const DeviceInfo& p = a[i];
+        const DeviceInfo& q = b[i];
+        if (std::strcmp(p.devName, q.devName) != 0 || p.addr != q.addr || p.sai != q.sai || p.enabled != q.enabled ||
+            p.extDevices != q.extDevices || p.extFirstAddr != q.extFirstAddr || std::strcmp(p.extMode, q.extMode) != 0)
+            return false;
+    }
+    return true;
+}
+
+void refreshDeviceList() {
+    if (!deviceListVisible || saverActive || !time_reached(deviceListNextRefresh)) return;
+    deviceListNextRefresh = make_timeout_time_ms(kDeviceListRefreshMs);
+    std::vector<DeviceInfo> now = hipi_enumerateDevices();
+    if (sameDevices(now, deviceListCache)) return;
+    deviceListCache = std::move(now);
+    const int maxOffset = std::max(0, static_cast<int>(deviceListCache.size()) - deviceListVisibleRows());
+    if (deviceListScrollOffset > maxOffset) deviceListScrollOffset = maxOffset;
+#ifdef DISPLAY_7INCH
+    display_->beginOverlayDraw();
+#endif
+    drawDeviceListRows();
+#ifdef DISPLAY_7INCH
+    display_->endOverlayDraw();
+    screen_->reassertRenderState();
+    plotterview_refreshCursor();
+#endif
 }
 
 }  // namespace
@@ -743,6 +805,7 @@ void showSplashScreen(DisplayDriver* display, const char* version,
     const int splashX = (panelW - splashW) / 2;
     const int splashY = (panelH - splashH) / 2;
     MenuFrame::draw(display, splashX, splashY, splashW, splashH);
+    display->selectBuiltinFont();       // (a view may have left another font selected)
 
     // Logo on the left, vertically centered in the box; if it's missing
     // from the SD card, just skip it and fall back to text-only (same
@@ -873,6 +936,7 @@ void boardui_showWarning(const char* title, const char* line1, const char* line2
 }
 
 void boardui_poll() {
+    refreshDeviceList();                 // (only while the device list is open)
     // Held ▲/▼: repeat (see kRepeatDelayMs). Released -> boardui_handleRelease()
     if (repeatButton != Button::None && pressedButton == repeatButton &&
         time_reached(repeatNext)) {
@@ -1036,7 +1100,7 @@ void pressStripButton(Button b) {
     // bit. Screen never sees this happen (these calls bypass it
     // entirely), so the blinking cursor would otherwise vanish on
     // every single button touch.
-    screen_->refreshCursor();
+    plotterview_refreshCursor();
     dialog_->handleButton(b);
     if (b == Button::Up || b == Button::Down) {
         repeatButton = b;                       // see boardui_poll()
@@ -1044,9 +1108,46 @@ void pressStripButton(Button b) {
     }
 }
 
+// Printer view: a touch on one of its controls. The switches and keys
+// act like the real ones; the switch positions are saved (CONFIG.TXT),
+// power like the Devices menu does. The picture follows in
+// plotterview_poll().
+void handlePrinterTouch(const PrinterHit& hit) {
+    CPrinter* prt = plotterview_printer();
+    if (prt == nullptr) return;
+    switch (hit.spot) {
+        case PrinterHotspot::Power: {
+            const bool on = !prt->enabled();
+            prt->setEnabled(on);
+            config.setDeviceEnabled(prt->name(), on);
+            break;
+        }
+        case PrinterHotspot::Mode:
+            prt->setMode(static_cast<PrinterMode>(hit.value));
+            config.setPrinterMode(static_cast<std::uint8_t>(hit.value));
+            break;
+        case PrinterHotspot::Intensity:
+            prt->setIntensity(static_cast<std::uint8_t>(hit.value));
+            config.setPrinterIntensity(static_cast<std::uint8_t>(hit.value));
+            break;
+        case PrinterHotspot::Print:
+            plotterview_printerPrint(true);
+            printerKeyHeld = hit.spot;
+            break;
+        case PrinterHotspot::Advance:
+            plotterview_printerAdvance(true);
+            printerKeyHeld = hit.spot;
+            break;
+        default:
+            break;
+    }
+}
+
 }  // namespace
 
 void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
+    // The demo: any touch stops it (demo.h)
+    if (demo_running()) { demo_stop(); return; }
     // A dimmed screen: this touch only wakes it (backlight.h)
     if (backlight_wakeByTouch()) return;
 #ifdef DISPLAY_7INCH
@@ -1056,6 +1157,13 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     // hidden by the splash's own timeout. See plotterview.cpp.
     if (plotterview_isSplashVisible()) return;
 #endif
+    // The button strip's zone (right edge) belongs to the strip -- a view's
+    // own touch areas under it (loop map cards reach the edge) don't get
+    // those touches, or OK on the strip would open a card instead of the menu
+    const bool stripZone = x >= buttonStripScreenX0;
+    // Printer view controls (nothing while a menu is open)
+    const PrinterHit printerHit = (dialog_ != nullptr && dialog_->isOpen()) || stripZone
+                                      ? PrinterHit{} : plotterview_printerHitTest(x, y);
     if (dialog_ != nullptr && dialog_->isShowingLoopbackResult()) {
         // Any touch anywhere dismisses the loopback test's own result
         // dialog -- same "any touch while it's up" pattern as
@@ -1070,30 +1178,33 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     } else if (dialog_ != nullptr && dialog_->isShowingWarning()) {
         // A warning box (UiDialog::showWarning()): any touch closes it
         dialog_->dismissWarning();
-    } else if (dialog_ != nullptr && dialog_->isShowingI2CScanResult()) {
-        // Same pattern as isShowingLoopbackResult() just above -- see
-        // uidialog.hpp's own runI2CScan()/dismissI2CScanResult().
-        dialog_->dismissI2CScanResult();
     } else if (infoBoxVisible) {
         // Any touch while it's up dismisses it early -- consumed here, not
         // treated as a button-strip wake/press or another corner-tap.
         hideInfoBox();
     } else if (deviceListVisible) {
-        // Only a tap OUTSIDE the dialog closes it -- a tap inside is
-        // simply ignored (scrolling is via the vertical swipe gesture,
-        // not tap, and there's nothing else to act on in here yet).
-        if (!isInsideDeviceListBox(x, y)) {
-            hideDeviceList();
-        }
+        // Only its close button closes it (a touch beside the box used to,
+        // which made a long list easy to lose); scrolling is a vertical swipe
+        if (isDeviceListClose(x, y)) hideDeviceList();
     } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::CharTable) {
         plotterview_leaveCharTable();         // the character table: any touch closes it
-    } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::LoopMap &&
+    } else if (!dialog_->isOpen() && !(stripZone && buttonStripVisible) &&
+               plotterview_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
+        // Hardware test: its buttons (checked before the corners). Its
+        // buttons reach the right edge (and its close button sits there):
+        // they get the touch unless the strip is showing -- a touch there
+        // that hits none of them still wakes the strip.
+    } else if (!dialog_->isOpen() && !stripZone && plotterview_output() == DisplayOutput::LoopMap &&
                loopmap_tap(x, y)) {
         // Loop map: a card -> its details; the details box -> closed
         // (checked before the corners: cards may sit in them)
-    } else if (isInfoCornerTouch(x, y)) {
+    } else if (printerHit.spot != PrinterHotspot::None) {
+        handlePrinterTouch(printerHit);
+    } else if (isInfoCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest) {
+        // (not on the Hardware test page: its buttons sit in the corners,
+        // and a touch just beside one shouldn't open the box instead)
         showInfoBox();
-    } else if (isDeviceListCornerTouch(x, y)) {
+    } else if (isDeviceListCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest) {
         showDeviceList();
     } else if (!dialog_->isOpen() &&
                plotterview_tapeHitTest(x, y) == TapeHotspot::Open) {
@@ -1177,6 +1288,9 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 
 void boardui_handleRelease() {
     repeatButton = Button::None;          // finger lifted: stop auto-repeat
+    if (printerKeyHeld == PrinterHotspot::Print)   plotterview_printerPrint(false);
+    if (printerKeyHeld == PrinterHotspot::Advance) plotterview_printerAdvance(false);
+    printerKeyHeld = PrinterHotspot::None;
     if (pressedButton == Button::None) return;
     // The button strip may have been hidden entirely DURING the press
     // (e.g. Shift+Ok -- see UiDialog::setExitRequestedCallback()'s own
@@ -1204,11 +1318,12 @@ void boardui_handleRelease() {
     // matching restore for why this matters (a later Screen::full(), on
     // menu close, would otherwise clear the whole panel instead of just
     // its own text area). drawOnStrip() restores it.
-    screen_->refreshCursor();  // same MWCR0-clobber fix as on press
+    plotterview_refreshCursor();  // same MWCR0-clobber fix as on press
     pressedButton = Button::None;
 }
 
 void boardui_handleSwipe(bool forward) {
+    if (demo_running()) { demo_stop(); return; }
     if (backlight_wakeByTouch()) return;
     // Ignore while the menu -- or the Devices list dialog -- is open; a
     // swipe crossing either box shouldn't also switch views underneath it.
@@ -1300,6 +1415,7 @@ void releaseRemoteButton() {
 }  // namespace
 
 void boardui_remoteButton(std::uint8_t code, bool down) {
+    if (down && demo_running()) { demo_stop(); return; }
     // 0: let go of everything (the session ended)
     if (code == 0) { releaseRemoteButton(); return; }
     // 6/7: next/previous view -- like a swipe to the left/right
@@ -1332,6 +1448,7 @@ bool boardui_isMenuOpen() {
 }
 
 void boardui_handleVerticalSwipe(bool down) {
+    if (demo_running()) { demo_stop(); return; }
     if (backlight_wakeByTouch()) return;
     if (bTrace) {
         mLOGF("TOUCH", "vertical swipe down=%d deviceListVisible=%d", down, deviceListVisible);

@@ -64,9 +64,10 @@ CDevice* hipiDeviceAt(int addr) {
 // What a HIPI device emulates (its card's ID line)
 std::string modelOf(CDevice* d) {
     switch (d->type()) {
-        case DISPLAY: return "HP82163";
+        case DISPLAY: return d->accessoryId() == 0x32 ? "MC00701A" : "HP82163";   // (its model setting)
         case DRIVE:   return "HP82161A";
         case PLOTTER: return "HP7470A";
+        case PRINTER: return "HP82162A";
         case PILBOX:  return "PIL-Box";
         default:      return "HIPI device";
     }
@@ -528,6 +529,20 @@ void updateChanged() {
 
 void loopmap_init(DisplayDriver* display) {
     d_ = display;
+}
+
+void loopmap_reset() {
+    for (Node& n : nodes_) n = Node{};
+    haveAad_ = false;
+    hipiFirst_ = hipiNext_ = 0;
+    aadT_ = lastFrameT_ = roundTripUs_ = 0;
+    talker_ = -1;
+    listeners_ = 0;
+    pending_ = 0;
+    sdiBuf_.clear();
+    selected_ = 0;
+    cursor_ = 0;
+    dirty_ = true;
 }
 
 void loopmap_poll() {

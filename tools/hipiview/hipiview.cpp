@@ -19,6 +19,7 @@
 #include "png.hpp"
 #include "input.hpp"
 #include "serial_port.hpp"
+#include "hipiview_version.h"   // generated from git (cmake/hipi_version.cmake)
 #include <zlib.h>
 
 #include <SDL2/SDL.h>
@@ -69,7 +70,7 @@ struct Options {
 
 void usage() {
     std::printf(
-        "hipiview -- HIPI's 7\" display on the PC (display mirror)\n\n"
+        "hipiview " HIPIVIEW_VERSION_TEXT " -- HIPI's 7\" display on the PC (display mirror)\n\n"
         "usage: hipiview [options] [device]\n\n"
         "  device              the mirror port, e.g. /dev/ttyACM3\n"
         "                      (default: found by its name, \"HIPI Display Mirror\")\n"
@@ -80,7 +81,8 @@ void usage() {
         "  --replay FILE       play a saved stream instead of a port\n"
         "  --render FILE       with --replay: make a video, as fast as possible, no window\n"
         "  --scale X           window size factor (default 1)\n"
-        "  --backlight         dim the picture like the real backlight (screen saver)\n\n"
+        "  --backlight         dim the picture like the real backlight (screen saver)\n"
+        "  --version           show the version\n\n"
         "keys: R record, S screenshot, F full screen (Esc leaves it), B backlight,\n"
         "      T touch rings on/off, Q quit\n"
         "with Mirror to PC < Control > on HIPI: the mouse is a finger on the screen;\n"
@@ -98,6 +100,7 @@ bool parseArgs(int argc, char** argv, Options& o) {
         };
         std::string v;
         if (a == "-h" || a == "--help") { usage(); std::exit(0); }
+        else if (a == "--version") { std::printf("hipiview %s\n", HIPIVIEW_VERSION_FULL); std::exit(0); }
         else if (a == "--record") { if (!next(o.record)) return false; }
         else if (a == "--log") { if (!next(o.log)) return false; }
         else if (a == "--replay") { if (!next(o.replay)) return false; }
@@ -667,7 +670,7 @@ int main(int argc, char** argv) {
     attachCache(emu);
     ReplayFeeder feeder(emu, replayFramed);
     int W = emu.width(), H = emu.height();
-    SDL_Window* win = SDL_CreateWindow("hipiview", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    SDL_Window* win = SDL_CreateWindow("hipiview " HIPIVIEW_VERSION_TEXT, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        static_cast<int>(W * o.scale), static_cast<int>(H * o.scale),
                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -877,7 +880,7 @@ int main(int argc, char** argv) {
             if (reader && emu.connected() && emu.mirrorMode() == 2) state += "  |  control";
             if (viewOnlyHintUntil > sec)
                 state = "VIEW ONLY - set Mirror to PC to Control on HIPI to use the mouse and keys  |  " + state;
-            SDL_SetWindowTitle(win, ("hipiview - " + state).c_str());
+            SDL_SetWindowTitle(win, ("hipiview " HIPIVIEW_VERSION_TEXT " - " + state).c_str());
         }
         // At most ~60 frames a second, also without vsync
         const auto spent = Clock::now() - now;

@@ -167,6 +167,23 @@ include("PicoLED/PicoLed.cmake")
 #             include/display_config.h)
 #   SUFFIX -- short tag used in target/output names, e.g. "5" or "7"
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# The version, from git: cmake/hipi_version.cmake writes
+# hipi_generated/hipi_version.h (HIPI_VERSION_TEXT / _FULL) -- now, so it's
+# there for the first build, and again at every build, so a new commit or
+# tag shows up without re-running CMake. The header is only rewritten when
+# the version changes, and only src/version.cpp includes it.
+# ----------------------------------------------------------------------
+set(HIPI_VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/hipi_version.h)
+set(HIPI_VERSION_ARGS -DOUT=${HIPI_VERSION_HEADER} -DPREFIX=HIPI -DSRC=${CMAKE_CURRENT_SOURCE_DIR}
+                      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipi_version.cmake)
+execute_process(COMMAND ${CMAKE_COMMAND} ${HIPI_VERSION_ARGS})
+add_custom_target(hipi_version ALL
+    COMMAND ${CMAKE_COMMAND} ${HIPI_VERSION_ARGS}
+    BYPRODUCTS ${HIPI_VERSION_HEADER}
+    COMMENT "HIPI version from git"
+    VERBATIM)
+
 function(hipi_add_pico_targets PANEL SUFFIX)
     set(CORE_TARGET      hipi_core_${SUFFIX})
     set(TRANSPORT_TARGET hipi_pico_transport_${SUFFIX})
@@ -198,6 +215,14 @@ function(hipi_add_pico_targets PANEL SUFFIX)
     )
     target_include_directories(${TRANSPORT_TARGET} PUBLIC include)
 
+    # ---- The built-in I2C chip list: sdcard/i2c/chips.txt as a string ----
+    # (i2c_ident.cpp uses it when the SD card has no i2c/ folder). Changing
+    # chips.txt re-runs CMake by itself.
+    file(READ ${CMAKE_CURRENT_SOURCE_DIR}/sdcard/i2c/chips.txt HIPI_I2C_CHIPS_TEXT)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sdcard/i2c/chips.txt)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/i2c_chips_default.cpp.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp @ONLY)
+
     # ---- Firmware executable — flashed to the board. ----
     add_executable(${EXE_TARGET}
         src/pico_main.cpp
@@ -209,7 +234,6 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/display.cpp
         src/illeds.cpp
         src/ilpixels.cpp
-        src/iltemp.cpp
         src/touch.cpp
         src/leds.cpp
         src/pixels.cpp
@@ -218,6 +242,19 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/pilbox.cpp
         src/plotter.cpp
         src/plotterview.cpp
+        src/printer.cpp
+        src/printer_font.cpp
+        src/video80.cpp
+        src/hwtest.cpp
+        src/hwtest_io.cpp
+        src/i2c_ident.cpp
+        src/i2c_chips.cpp
+        src/i2c_command.cpp
+        src/ili2c.cpp
+        src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
+        ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp
+        src/demo.cpp
+        src/demo_content.cpp
         src/terminal.cpp
         src/hw_config.cpp
         src/my_descriptors.c
@@ -246,7 +283,10 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/saver_font_goose92.cpp
         src/saver_font_goose112.cpp
         src/logo_image.cpp          # built-in logo, see scripts/bmp_to_rgb565.py
+        src/version.cpp             # the version from git, see cmake/hipi_version.cmake
     )
+    target_include_directories(${EXE_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated)
+    add_dependencies(${EXE_TARGET} hipi_version)
 
     target_link_libraries(${EXE_TARGET} PRIVATE
         ${CORE_TARGET}
@@ -358,6 +398,7 @@ if(NOT EXISTS ${CMAKE_SOURCE_DIR}/sdcard/make_sd_card.py)
     message(STATUS "hipi: sdcard/make_sd_card.py is missing -- HIPI-SD-card.zip is not remade")
 elseif(Python3_Interpreter_FOUND)
     file(GLOB HIPI_SD_CASSETTES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/sdcard/lif/*)
+    file(GLOB HIPI_SD_I2C CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/sdcard/i2c/*)
     set(HIPI_SD_ZIP ${CMAKE_SOURCE_DIR}/HIPI-SD-card.zip)
     add_custom_command(
         OUTPUT ${HIPI_SD_ZIP}
@@ -365,11 +406,14 @@ elseif(Python3_Interpreter_FOUND)
         DEPENDS ${CMAKE_SOURCE_DIR}/sdcard/make_sd_card.py
                 ${CMAKE_SOURCE_DIR}/sdcard/README.txt
                 ${HIPI_SD_CASSETTES}
+                ${HIPI_SD_I2C}
                 ${CMAKE_SOURCE_DIR}/resources/hp82161a.bmp
                 ${CMAKE_SOURCE_DIR}/resources/tape-in.bmp
                 ${CMAKE_SOURCE_DIR}/resources/open.bmp
                 ${CMAKE_SOURCE_DIR}/resources/leds.bmp
                 ${CMAKE_SOURCE_DIR}/resources/reels.bmp
+                ${CMAKE_SOURCE_DIR}/resources/hp82162a.bmp
+                ${CMAKE_SOURCE_DIR}/resources/prtparts.bmp
         COMMENT "Packing the SD card: HIPI-SD-card.zip"
         VERBATIM)
     add_custom_target(hipi_sd_card ALL DEPENDS ${HIPI_SD_ZIP})

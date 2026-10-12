@@ -42,6 +42,7 @@ void analyzer_poll();
 void analyzer_redrawAll();
 void analyzer_scroll(int lines);          // > 0 = back in time
 void analyzer_scrollToLive();
+bool analyzer_isLive();                  // showing the newest lines (not scrolled back)
 int  analyzer_pageRows();
 void analyzer_clear();                    // screen + captured history
 

@@ -167,13 +167,17 @@ void bootscreen_devices(const std::vector<CDevice*>& devices) {
             char num[12];
             std::snprintf(num, sizeof(num), "%d", i + 1);
             text(x, y, num, 1, kGrey);
+            // The number is in the large font (16 px per digit): "10" and up
+            // need 32 px, so the box starts a little after that. The box
+            // fits the longest name (9 characters, 8 px each) with a margin.
+            constexpr int kBoxDx = 40, kBoxW = 130;
             const bool on = devices[static_cast<std::size_t>(i)]->enabled();
             if (on) {
-                d_->fillRoundRect(x + 30, y, 170, 28, 6, kYellow);
-                text(x + 40, y + 6, devices[static_cast<std::size_t>(i)]->name(), 0, kBlack, kYellow);
+                d_->fillRoundRect(x + kBoxDx, y, kBoxW, 28, 6, kYellow);
+                text(x + kBoxDx + 10, y + 6, devices[static_cast<std::size_t>(i)]->name(), 0, kBlack, kYellow);
             } else {
-                d_->roundRect(x + 30, y, 170, 28, 6, kDark);
-                text(x + 40, y + 6, devices[static_cast<std::size_t>(i)]->name(), 0, kGrey);
+                d_->roundRect(x + kBoxDx, y, kBoxW, 28, 6, kDark);
+                text(x + kBoxDx + 10, y + 6, devices[static_cast<std::size_t>(i)]->name(), 0, kGrey);
             }
         }
         text(kDevX + 26, kCardY + kCardH - 32, "yellow = on    grey = off", 0, kGrey);

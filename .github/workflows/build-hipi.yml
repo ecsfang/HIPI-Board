@@ -142,7 +142,10 @@ jobs:
 
       # 9. List build output
       - name: List build output
-        run: find build -type f \( -name '*.uf2' -o -name '*.elf' -o -name '*.bin' -o -name '*.hex' -o -name '*.map' \)
+        run: |
+          find build -type f \( -name '*.uf2' -o -name '*.elf' -o -name '*.bin' -o -name '*.hex' -o -name '*.map' \)
+          echo "=== version (from git, cmake/hipi_version.cmake) ==="
+          cat build/hipi_generated/hipi_version.h
 
       # 10. Prepare release files
       - name: Prepare release files

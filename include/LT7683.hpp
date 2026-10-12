@@ -374,6 +374,17 @@ public:
                        std::uint32_t dstAddr, std::uint16_t dstStride,
                        std::int16_t dstX, std::int16_t dstY,
                        std::uint16_t w, std::uint16_t h);
+    // Like copyLayerRegion(), but combines instead of copying: DT = S0 AND
+    // S1, where S1 is the destination region itself (ROP 1000b). A white
+    // source pixel leaves the destination as it is, a dark one darkens it
+    // -- ink put on a picture of paper (the Printer view), which keeps
+    // the picture's own shading. vertOffset_ is applied like
+    // copyLayerRegion() does.
+    void andLayerRegion(std::uint32_t srcAddr, std::uint16_t srcStride,
+                        std::int16_t srcX, std::int16_t srcY,
+                        std::uint32_t dstAddr, std::uint16_t dstStride,
+                        std::int16_t dstX, std::int16_t dstY,
+                        std::uint16_t w, std::uint16_t h);
     // Shifts a w x h region UP by shiftRows pixel rows, entirely via BTE
     // (no SPI pixel data), safely handling the fact that source and
     // destination overlap when done in-place (moving content up within
@@ -617,6 +628,30 @@ public:
     // power switch ON and STANDBY), narrow stride, right after the
     // open-lid area (~19 kB).
     static constexpr std::uint32_t kLedsAddr          = kCgramAddr + 0x120000UL;
+    // Printer view (see plotterview.cpp): the HP82162A picture
+    // (hp82162a.bmp) in a full layer of its own, the 7th slot -- past
+    // CGRAM's slot, well inside the 16 MB (128 Mbit) SDRAM set up in
+    // begin() (SDRAR) -- and its control sprites (prtparts.bmp, narrow
+    // stride, ~100 kB) at the start of the 8th slot.
+    static constexpr std::uint32_t kPrinterLayerAddr   = 1024UL * 600UL * 2UL * 6UL;
+    static constexpr std::uint32_t kPrinterPartsAddr   = 1024UL * 600UL * 2UL * 7UL;
+    static constexpr std::uint32_t kPrinterPartsMaxBytes = 0x40000UL;   // 256 kB
+    // The printed paper (ink on white, its own narrow stride, ~160 kB) and
+    // a staging area of the same size for moving it up (see
+    // bteScrollShift() for why a staging copy), after the parts.
+    static constexpr std::uint32_t kPrinterInkAddr     = kPrinterPartsAddr + 0x40000UL;
+    static constexpr std::uint32_t kPrinterInkStageAddr = kPrinterInkAddr + 0x30000UL;
+    static constexpr std::uint32_t kPrinterInkMaxBytes = 0x30000UL;   // 192 kB each
+
+    // Memory Copy with ROP: DT = rop(S0, S1) -- bteMemoryCopy() and
+    // andLayerRegion() (rop: REG[91h] bits 7:4)
+    void bteCopyRop(std::uint32_t srcAddr, std::uint16_t srcStride,
+                    std::int16_t srcX, std::int16_t srcY,
+                    std::uint32_t s1Addr, std::uint16_t s1Stride,
+                    std::int16_t s1X, std::int16_t s1Y,
+                    std::uint32_t dstAddr, std::uint16_t dstStride,
+                    std::int16_t dstX, std::int16_t dstY,
+                    std::uint16_t w, std::uint16_t h, std::uint8_t rop);
 
     // TEMPORARY DIAGNOSTIC -- see lastCvssaReadback()'s own comment above.
     std::uint32_t lastCvssaReadback_ = 0;
@@ -917,6 +952,23 @@ public:
     void setCharSpacing(std::uint8_t pixels);
     void setLineSpacing(std::uint8_t pixels);
     void selectBuiltinFont();
+    // The built-in CGROM font (ISO 8859-1) in one of its three sizes:
+    // 0 = 8x16 (what selectBuiltinFont() selects), 1 = 12x24, 2 = 16x32
+    // (CCR0 bit[5:4]). Used by the 80-column view (video80.h).
+    void selectBuiltinFontSize(std::uint8_t sizeCode);
+    // Text enlargement, horizontal and vertical separately (1..4 each;
+    // txtSize() sets both the same) -- CCR1 bit[3:2] / bit[1:0]
+    void txtScaleXY(std::uint8_t hx, std::uint8_t vy);
+    // The text cursor with an explicit size in BASE pixels (before
+    // enlargement): w x h, drawn up from the bottom of the character cell
+    // -- e.g. a 12x24 block or a 12x2 underline for the 12x24 font.
+    // setTextCursorVisible() (Screen's 8x16 cursor) sets its own size
+    // again the next time it's called.
+    void setTextCursorShape(bool visible, std::uint8_t w, std::uint8_t h);
+    // Like captureBuiltinFont(), for the 12x24 CGROM font: 256 glyphs of
+    // 24 rows, 12 pixels each, MSB = leftmost (bit 15). For the display
+    // mirror (tools/hipiview), which draws this font itself.
+    void captureBuiltinFont24(std::uint16_t out[256][24]);
 
     // -----------------------------------------------------------------------
     // Accessors
