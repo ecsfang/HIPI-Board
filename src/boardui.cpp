@@ -1339,6 +1339,28 @@ void boardui_handleRelease() {
     pressedButton = Button::None;
 }
 
+// A finger on the Printer view's paper drags it (touch_set_drag_callback())
+bool boardui_handleDrag(TouchDragPhase phase, std::uint16_t x, std::uint16_t y) {
+    if (phase == TouchDragPhase::Begin) {
+        if (demo_running() || backlight_dimmed()) return false;   // (that touch only stops / wakes)
+        if (dialog_->isOpen() || infoBoxVisible || deviceListVisible) return false;
+        if (x >= buttonStripScreenX0 && buttonStripVisible) return false;
+        if (!plotterview_paperDragBegin(x, y)) return false;
+        backlight_activity();
+        return true;
+    }
+    if (phase == TouchDragPhase::Move) {
+        plotterview_paperDragMove(x, y);
+        backlight_activity();
+    } else {
+        plotterview_paperDragEnd();
+        // Up to the tear-off edge and then sideways: tear it off? (asks)
+        int dir = 0;
+        if (plotterview_takeTearGesture(dir)) dialog_->openTearOff(dir);
+    }
+    return true;
+}
+
 void boardui_handleSwipe(bool forward) {
     if (demo_running()) { demo_stop(); return; }
     if (backlight_wakeByTouch()) return;

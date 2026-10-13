@@ -28,6 +28,7 @@
 #include "display_config.h"
 #include "Screen.hpp"
 #include "uidialog.hpp"
+#include "touch.h"     // TouchDragPhase
 
 namespace hipi {
 
@@ -81,6 +82,10 @@ void boardui_handleSwipe(bool forward);
 // the "Devices" list dialog (bottom-left corner tap) when it's open --
 // does nothing otherwise.
 void boardui_handleVerticalSwipe(bool down);
+
+// Register with touch_set_drag_callback() (see touch.h): a finger on the
+// Printer view's paper moves it (plotterview_paperDragBegin())
+bool boardui_handleDrag(TouchDragPhase phase, std::uint16_t x, std::uint16_t y);
 
 // Called by UiDialog::close() (see uidialog.hpp) -- shortens the button
 // strip's auto-hide countdown to a quick ~0.5s instead of leaving

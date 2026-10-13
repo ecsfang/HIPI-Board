@@ -54,7 +54,8 @@ host_test: test/host_test.cpp lt7683_emu.cpp lt7683_emu.hpp ../../src/LT7683.cpp
 PV_SRC := test/printer_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
           ../../src/plotterview.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
           ../../src/plotter.cpp ../../src/device.cpp ../../src/video80.cpp \
-          ../../src/hwtest.cpp test/hwio_stub.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp
+          ../../src/hwtest.cpp test/hwio_stub.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp \
+          ../../src/printout.cpp
 printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/plotterview.h
 	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(PV_SRC) -o $@ -lz
 

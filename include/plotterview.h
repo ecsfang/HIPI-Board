@@ -105,6 +105,31 @@ void plotterview_showView(DisplayOutput mode, CDevice* dev);
 void plotterview_setDemoTape(bool busy);
 // The printer's paper torn off (CPrinter::clearPaper()), redrawn empty
 void plotterview_clearPaper();
+// The Printer view's paper, moved by hand (7"): a finger on the paper
+// drags it up and down (boardui.cpp, touch_set_drag_callback()). Down
+// shows older lines, back to the first one at the top; up pulls the
+// newest line out above the tear-off bar, no further. Where it's let go
+// it stays -- until something is printed (or PAPER ADVANCE, PRINT, X):
+// then it glides back to the print head first.
+bool plotterview_paperDragBegin(int x, int y);   // true: on the paper, the touch moves it
+void plotterview_paperDragMove(int x, int y);
+void plotterview_paperDragEnd();
+// Tearing off: the paper dragged up to the tear-off edge and then
+// sideways (at least 100 px, finger still down). After the drag ends:
+// true once, with the direction (-1 left, 1 right) -- the caller asks
+// (Save / Discard / Cancel) and then calls plotterview_tearOff().
+bool plotterview_takeTearGesture(int& dir);
+// The paper above the tear-off edge slides away to that side, then the
+// printer's paper is empty (CPrinter::clearPaper())
+void plotterview_tearOff(int dir);
+int  plotterview_paperLines();                   // lines on the paper (kept)
+// The printer's paper was replaced (a printout loaded): drawn afresh,
+// back at the print head
+void plotterview_reloadPaper();
+void plotterview_paperScrollBy(int lines);       // > 0: older lines (▲), < 0: newer (▼)
+int  plotterview_paperWindowLines();             // lines the window shows (Shift+▲/▼)
+bool plotterview_paperScrolled();                // not where it prints
+void plotterview_paperToLive();                  // back there (glides)
 // The drive given to plotterview_setDrive() (nullptr if none) -- e.g. for
 // the power switch hotspot, which toggles it (see boardui_handleTap()).
 CDrive* plotterview_drive();

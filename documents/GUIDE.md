@@ -483,6 +483,26 @@ The frame and title live in `include/menu_frame.h` (`MenuFrame::drawTitled()`
 draws one at any place and size), so other dialogs look the same.
 Order in every menu: where to go, what to do, settings, More.
 
+**Printer paper by hand.** `paperOff_` in plotterview.cpp is how far the
+paper is from where it prints (pixels; > 0 older lines, < 0 pulled up, at
+most to the tear-off bar). The ink layer is moved with `shiftInk()` (BTE via
+the staging area) and only the rows that come into view are rendered
+(`renderInkRows()`), so dragging is smooth. The finger comes from
+`touch_set_drag_callback()` (touch.h): a press that its Begin claims is
+neither tap nor swipe. `pollPaper()` waits while the paper is held and
+glides it back (`paperReturn_`) before anything new is printed.
+Tearing off: at the edge (`paperOff_ == -kMaxPullUp`) a sideways move of
+`kTearDx` sets `tearGesture_`; boardui takes it at the drag's end and opens
+`UiDialog::openTearOff()` (State::TearOff: Save / Discard / Cancel, touch or
+strip). Save is `printout_save()` (`src/printout.cpp`: 1-bpp BMP + text);
+`plotterview_tearOff()` slides the ink sideways (`tearDir_`) and then calls
+`CPrinter::clearPaper()`.
+The menu's **Printouts** (`UiDialog::openPrintouts()`) lists
+`printout_list()`; loading is `printout_load()` (the BMP read back into each
+line's dots -- the 2x2 cells' top-left pixel -- and the text from the .txt)
+into `CPrinter::loadPaper()`, then `plotterview_reloadPaper()` redraws the
+ink at the live position. `printout_delete()` removes both files.
+
 **Media map.** `src/mediamap.cpp` (DisplayOutput::MediaMap, from the Tape
 view's menu): the LIF directory only (header, then entries up to the end
 mark) becomes extents; a cassette gets its 2 tracks as rings, anything else

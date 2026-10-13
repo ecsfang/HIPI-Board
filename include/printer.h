@@ -75,6 +75,13 @@ public:
     void put(std::uint8_t c) { feed(c); }
     // Tears off the paper: the kept lines are dropped (lineCount() stays)
     void clearPaper() { lines_.clear(); }
+    // Puts paper back in (a saved printout, printout.h): replaces what's
+    // there; the controller isn't told. Counted as printed (lineCount()).
+    void loadPaper(std::deque<Line> lines) {
+        while (lines.size() > kMaxLines) lines.pop_front();
+        lines_ = std::move(lines);
+        lineCount_ += static_cast<std::uint32_t>(lines_.size());
+    }
     void clear() override;                       // DCL / SDC
     void doListener(IL_CMD_t cmd, IL_CMD_t* rtn) override;
     void doTalker(IL_CMD_t cmd, IL_CMD_t* rtn) override;

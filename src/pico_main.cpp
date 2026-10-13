@@ -487,6 +487,7 @@ int main() {
     touch_set_tap_callback(hipi::boardui_handleTap);
     touch_set_release_callback(hipi::boardui_handleRelease);
     touch_set_swipe_callback(hipi::boardui_handleSwipe);
+    touch_set_drag_callback(hipi::boardui_handleDrag);          // the printer's paper
     LOGF("\r\n\t* %s: Boot up completed!", gTouchDevice);
 
     tud_task();

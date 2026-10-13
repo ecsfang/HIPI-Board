@@ -326,6 +326,45 @@ like the real ones.
 | **PAPER ADVANCE** key | Feeds the paper one line — held, it keeps feeding — and tells the controller |
 | **Paper window** | What has been printed, the newest line at the bottom. Like on the real printer, the print head — just visible in the slot under the paper — glides over to the other side while it prints, then the paper moves up and the line comes into view; the next line it glides back. PAPER ADVANCE (and an empty line) only moves the paper |
 
+**Looking back on the paper.** Put a finger on the paper and drag it up or
+down — it follows the finger and stays where you let go. Down shows older
+lines, back to the first one (the last 200 lines are kept, until the paper
+is torn off); up pulls the newest line out above the tear-off edge, where it
+can be read. On the button strip: ▲/▼ a line, Shift+▲/▼ a window. As soon as
+something is printed — or PRINT / PAPER ADVANCE, or **X** — the paper glides
+back to the print head and printing goes on from there. Swiping sideways
+still changes the view.
+
+**Tearing off the paper.** Drag the paper up to the tear-off edge and,
+without letting go, on sideways (left or right) — or choose **Tear off
+paper** in the Printer view's menu. HIPI asks:
+
+- **Save** — the paper is saved on the SD card in `printouts/`, then torn
+  off: `printout_<n>.bmp`, a picture of the paper as printed (every dot
+  2 × 2 pixels, black on white — HP-41 characters and graphics included),
+  and `printout_<n>.txt`, the text of each line for copying a listing (a
+  line of graphics only says `[graphics]`). The message box shows the name.
+- **Discard** — torn off without saving.
+- **Cancel** — the paper stays as it is.
+
+On the button strip: ▲/▼ choose, **OK** picks, **X** is Cancel. The torn-off
+paper slides away to the side, and the printer starts on fresh paper.
+
+**Saved printouts.** **Printouts** in the Printer view's menu lists what
+has been saved (`printout_<n>`, newest first, with its number of lines).
+Pick one:
+
+- **Load into the printer** — the printout replaces the paper in the
+  printer, as it was when it was saved, so it can be looked at (and
+  scrolled) again. Whatever was on the paper is gone — tear it off and save
+  it first if it's wanted. New printing continues below it.
+- **Delete** — after a question, both `printout_<n>.bmp` and
+  `printout_<n>.txt` are removed from the SD card.
+
+Loading reads the dots back from the `.bmp` and the text from the `.txt`,
+so a picture edited on a PC comes back as edited (it must still be 352
+pixels wide, 1 bit per pixel).
+
 **The printer starts switched off.** With a printer on the loop, the HP-41
 sends its printouts (`PRA`, `PRX`, listings) to the printer instead of the
 video display. Switch it on when you want them on the printer. The view is

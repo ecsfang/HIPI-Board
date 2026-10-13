@@ -65,6 +65,15 @@ void touch_set_swipe_callback(TouchSwipeCallback cb);
 // swipe's view-cycling.
 void touch_set_vertical_swipe_callback(TouchVerticalSwipeCallback cb);
 
+// Dragging something along with the finger (the Printer view's paper).
+// Begin comes at the first sample of a press: return true to take the
+// touch -- then Move follows with each new position while it's down
+// (about every 30 ms) and End when it's lifted, and the touch is no tap
+// and no swipe. Return false and the touch goes on as usual.
+enum class TouchDragPhase { Begin, Move, End };
+using TouchDragCallback = std::function<bool(TouchDragPhase phase, std::uint16_t x, std::uint16_t y)>;
+void touch_set_drag_callback(TouchDragCallback cb);
+
 // Call once per main-loop iteration. Consumes the IRQ flag, runs the
 // confirm-resample debounce, and detects release via periodic polling
 // (also used to track ongoing position for swipe detection) --

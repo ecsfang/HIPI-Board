@@ -16,6 +16,7 @@
 #include "LT7683.hpp"
 #include "Screen.hpp"
 #include "plotterview.h"
+#include "printout.h"
 #include "printer.h"
 #include "plotter.h"
 #include "../lt7683_emu.hpp"
@@ -24,6 +25,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <deque>
+#include <fstream>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unistd.h>
@@ -221,6 +225,157 @@ int main(int argc, char** argv) {
     long diff = 0;
     for (std::size_t i = 0; i < panel.size(); ++i) if (panel[i] != before[i]) ++diff;
     check(diff == 0, "the view comes back the same");
+
+    // ── The paper moved by hand ────────────────────────────────────────
+    for (int i = 0; i < 40; ++i) send("LINE " + std::to_string(i) + "\r");
+    run(3000);
+    auto inkRows = [](int y0, int y1) {
+        chip.render(panel.data(), 0.0);
+        int n = 0;
+        for (int y = y0; y < y1; ++y)
+            for (int x = 496; x < 748; ++x) if (lum(at(x, y)) < 120) ++n;
+        return n;
+    };
+    check(!hipi::plotterview_paperDragBegin(200, 300), "a finger beside the paper: no drag");
+    check(hipi::plotterview_paperDragBegin(620, 200), "a finger on the paper: it drags");
+    // Up as far as it goes: the newest line out above the tear-off bar
+    for (int y = 200; y >= 0; y -= 10) { hipi::plotterview_paperDragMove(620, y); run(30); }
+    hipi::plotterview_paperDragEnd();
+    snapshot("tools/hipiview/printer_view_4_pulled_up.png");
+    check(hipi::plotterview_paperScrolled(), "moved: not where it prints");
+    check(inkRows(270, 290) > 50 && inkRows(310, 340) == 0, "pulled up: the newest line just above the tear-off bar, nothing below");
+    const std::vector<std::uint32_t> upTop = panel;
+    hipi::plotterview_paperDragBegin(620, 100);
+    hipi::plotterview_paperDragMove(620, 20);                    // further up: no
+    run(30);
+    hipi::plotterview_paperDragEnd();
+    chip.render(panel.data(), 0.0);
+    check(panel == upTop, "... and no further");
+    // Down to the first line
+    hipi::plotterview_paperDragBegin(620, 40);
+    for (int y = 40; y < 340; y += 7) { hipi::plotterview_paperDragMove(620, y); run(20); }
+    for (int k = 0; k < 4; ++k) {
+        hipi::plotterview_paperDragEnd();
+        hipi::plotterview_paperDragBegin(620, 40);
+        for (int y = 40; y < 340; y += 13) { hipi::plotterview_paperDragMove(620, y); run(20); }
+    }
+    hipi::plotterview_paperDragEnd();
+    snapshot("tools/hipiview/printer_view_5_first_line.png");
+    const std::vector<std::uint32_t> stepped = panel;
+    check(inkRows(24, 40) > 50, "pulled down: the first line at the top of the window");
+    // The same place drawn afresh (one big jump): the same paper
+    hipi::plotterview_paperToLive();
+    run(1500);
+    check(!hipi::plotterview_paperScrolled(), "X: back to the print head (gliding)");
+    hipi::plotterview_paperDragBegin(620, 30);
+    hipi::plotterview_paperDragMove(620, 30 + 2000);             // one jump, clamped to the first line
+    hipi::plotterview_paperDragEnd();
+    chip.render(panel.data(), 0.0);
+    long d2 = 0;
+    for (std::size_t i = 0; i < panel.size(); ++i) if (panel[i] != stepped[i]) ++d2;
+    check(d2 == 0, "moved step by step or at once: the same paper");
+    // ▲ / ▼ (a line)
+    hipi::plotterview_paperScrollBy(-1);
+    check(hipi::plotterview_paperScrolled(), "▼: a line towards the newest");
+    // Printing while it's moved: back to the head first, then the line
+    send("AFTER\r");
+    run(1500);
+    snapshot("tools/hipiview/printer_view_6_printing_again.png");
+    check(!hipi::plotterview_paperScrolled() && inkRows(331, 347) > 50, "printing again: back at the head, the new line there");
+    // ── Saving the paper (printouts/printout_<n>.bmp + .txt) ───────────
+    {
+        char cwd[512];
+        if (getcwd(cwd, sizeof(cwd)) == nullptr) return 1;
+        const std::string tmp = std::string(cwd) + "/tools/hipiview/printout_sd";
+        if (std::system(("rm -rf '" + tmp + "' && mkdir -p '" + tmp + "'").c_str()) != 0) return 1;
+        if (chdir(tmp.c_str()) != 0) return 1;
+        std::string msg;
+        const bool ok = hipi::printout_save(*printer, msg);
+        const bool ok2 = hipi::printout_save(*printer, msg);
+        check(ok && ok2 && msg == "printout_2", "saved twice: printout_1, printout_2");
+        FILE* f = std::fopen("printouts/printout_1.bmp", "rb");
+        std::vector<unsigned char> bmp;
+        if (f) { int c; while ((c = std::fgetc(f)) != EOF) bmp.push_back(static_cast<unsigned char>(c)); std::fclose(f); }
+        auto le32 = [&](std::size_t o) { return bmp[o] | bmp[o + 1] << 8 | bmp[o + 2] << 16 | bmp[o + 3] << 24; };
+        const std::size_t lines = printer->lines().size();
+        check(bmp.size() > 62 && bmp[0] == 'B' && le32(18) == 352 && le32(22) == static_cast<int>(lines * 22 + 16) && bmp[28] == 1,
+              "BMP: 352 wide (168 dots x 2 + margins), 22 px a line, 1 bit per pixel");
+        long black = 0;
+        for (std::size_t i = 62; i < bmp.size(); ++i) black += __builtin_popcount(bmp[i]);
+        check(black > 1000, "... with the print in it");
+        std::ifstream t("printouts/printout_1.txt");
+        std::string all((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+        check(all.find("01*LBL \"FIB\"") != std::string::npos && all.find("LINE 39") != std::string::npos &&
+              all.find("[graphics]") != std::string::npos, "TXT: the listing, the lines, [graphics] for the sine curve");
+        if (chdir(cwd) != 0) return 1;
+        if (std::system(("cp '" + tmp + "/printouts/printout_1.bmp' tools/hipiview/printer_view_printout.bmp").c_str()) != 0) ++failures;
+    }
+    const std::deque<CPrinter::Line> savedPaper = printer->lines();
+
+    // ── Tearing off: up to the edge, then sideways ─────────────────────
+    hipi::plotterview_paperDragBegin(620, 300);
+    for (int y = 300; y >= 100; y -= 20) { hipi::plotterview_paperDragMove(620, y); run(20); }
+    int dir = 0;
+    for (int x = 620; x >= 480; x -= 20) { hipi::plotterview_paperDragMove(x, 100); run(20); }
+    hipi::plotterview_paperDragEnd();
+    check(hipi::plotterview_takeTearGesture(dir) && dir == -1, "up to the edge, then left: tear off (to the left)");
+    check(!hipi::plotterview_takeTearGesture(dir), "... asked once");
+    // Not at the edge: sideways does nothing
+    hipi::plotterview_paperDragBegin(620, 200);
+    hipi::plotterview_paperDragMove(620, 230);
+    hipi::plotterview_paperDragMove(400, 230);
+    hipi::plotterview_paperDragEnd();
+    check(!hipi::plotterview_takeTearGesture(dir), "sideways without being at the edge: nothing");
+    hipi::plotterview_tearOff(-1);
+    const int inkBefore = inkRows(24, 340);
+    run(40);
+    const int inkMid = inkRows(24, 340);
+    check(inkMid > 0 && inkMid < inkBefore, "tearing: the paper slides away to the side");
+    snapshot("tools/hipiview/printer_view_7_tearing.png");
+    run(1000);
+    check(hipi::plotterview_paperLines() == 0 && inkRows(24, 340) == 0, "torn off: the paper is empty");
+    hipi::plotterview_paperScrollBy(5);
+    check(!hipi::plotterview_paperScrolled(), "torn off: nothing older to show");
+
+    // ── Printouts: listed, loaded back into the printer, deleted ───────
+    {
+        char cwd[512];
+        if (getcwd(cwd, sizeof(cwd)) == nullptr) return 1;
+        const std::string tmp = std::string(cwd) + "/tools/hipiview/printout_sd";
+        if (chdir(tmp.c_str()) != 0) return 1;
+        const auto list = hipi::printout_list();
+        check(list.size() == 2 && list[0].number == 2 && list[1].number == 1 &&
+              list[0].lines == static_cast<int>(savedPaper.size()), "listed: printout_2, printout_1 (newest first), with their lines");
+        std::string msg;
+        const bool ok = hipi::printout_load(1, *printer, msg);
+        bool same = ok && printer->lines().size() == savedPaper.size();
+        for (std::size_t i = 0; same && i < savedPaper.size(); ++i) {
+            const auto& a = printer->lines()[i];
+            const auto& b = savedPaper[i];
+            if (a.dots != b.dots) same = false;
+            if (!b.text.empty() && a.text != b.text) same = false;
+        }
+        check(same, "loaded: the same dots and text as when it was saved");
+        hipi::plotterview_reloadPaper();
+        run(300);
+        snapshot((std::string(cwd) + "/tools/hipiview/printer_view_8_loaded.png").c_str());
+        check(inkRows(24, 340) > 1000 && !hipi::plotterview_paperScrolled(), "loaded: on the paper again, at the live position");
+        hipi::plotterview_paperScrollBy(5);
+        check(hipi::plotterview_paperScrolled(), "... and it can be scrolled back");
+        hipi::plotterview_paperToLive();
+        run(1000);
+        check(hipi::printout_delete(2), "deleted printout_2");
+        FILE* f1 = std::fopen("printouts/printout_2.bmp", "rb");
+        FILE* f2 = std::fopen("printouts/printout_2.txt", "rb");
+        check(f1 == nullptr && f2 == nullptr, "... both the .bmp and the .txt");
+        if (f1) std::fclose(f1);
+        if (f2) std::fclose(f2);
+        check(hipi::printout_list().size() == 1, "... and it's no longer listed");
+        check(!hipi::printout_load(7, *printer, msg) && printer->lines().size() == savedPaper.size(),
+              "loading one that's not there: an error, the paper as it was");
+        if (chdir(cwd) != 0) return 1;
+        if (std::system(("rm -rf '" + tmp + "'").c_str()) != 0) ++failures;
+    }
 
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;

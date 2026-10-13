@@ -30,6 +30,7 @@ extern hipi::Config config;      // pico_main.cpp
 #include "demo.h"             // System -> Demo
 #include "menu_frame.h"       // the menus' box, title in the HP-41 font
 #include "media_create_ui.h"  // File picker -> Create media...
+#include "printout.h"         // Printer: the torn-off paper saved
 #include "clock.h"            // ... the date for a new image
 #include "pico/time.h"
 #include <vector>
@@ -298,14 +299,37 @@ public:
     // File picker -> Create media...: its dialogs are worked by touch too
     // (boardui_handleTap()), and write the new file a piece at a time
     // from the main loop (boardui_poll())
-    bool wantsTouch() const { return state_ == State::CreateMedia; }
+    bool wantsTouch() const { return state_ == State::CreateMedia || state_ == State::TearOff; }
     void handleTap(std::uint16_t x, std::uint16_t y) {
+        if (state_ == State::TearOff) {
+            const int b = tearButtonAt(x, y);
+            if (b >= 0) drawingMenu([&] { tearChoose(b); });
+            return;
+        }
         if (state_ != State::CreateMedia) return;
         drawingMenu([&] { mediaAction(media_.tap(x, y)); });
     }
     void poll() {
+        // A message after the menu has gone (the tear-off's "Saved ...")
+        if (state_ == State::Closed && !pendingMessage_.empty()) {
+            const std::string m = pendingMessage_;
+            pendingMessage_.clear();
+            plotterview_showMessage(m.c_str());
+        }
         if (state_ != State::CreateMedia || !media_.busy()) return;
         drawingMenu([&] { mediaAction(media_.poll(to_ms_since_boot(get_absolute_time()))); });
+    }
+
+    // Printer: tear off the paper -- asks Save / Discard / Cancel. dir: the
+    // side the paper slides away to (-1 left, 1 right). From the touch
+    // gesture (boardui.cpp) or the Printer view's menu.
+    void openTearOff(int dir) {
+        if (plotterview_paperLines() == 0) return;
+        if (state_ == State::Closed) {
+            drawingMenu([&] { menuOpening(); showTearOff(dir); });
+        } else {
+            showTearOff(dir);
+        }
     }
 
     bool isShowingLoopbackResult() const { return state_ == State::LoopbackResult; }
@@ -440,6 +464,14 @@ public:
                     plotterview_leaveSignals();
                 } else if (plotterview_output() == DisplayOutput::HwTest && b == Button::X) {
                     plotterview_leaveHwTest();
+                } else if (plotterview_output() == DisplayOutput::Printer && b != Button::Ok &&
+                           (b != Button::X || plotterview_paperScrolled())) {
+                    // The Printer view: ▲/▼ move the paper (Shift: a window
+                    // at a time), X takes it back to the print head
+                    const int page = plotterview_paperWindowLines() - 1;
+                    if (b == Button::Up)        plotterview_paperScrollBy(shifted ? page : 1);
+                    else if (b == Button::Down) plotterview_paperScrollBy(shifted ? -page : -1);
+                    else if (b == Button::X)    plotterview_paperToLive();
                 } else if (plotterview_output() == DisplayOutput::MediaMap && b == Button::X) {
                     plotterview_leaveMediaMap();
                 } else if (plotterview_output() == DisplayOutput::CharTable) {
@@ -585,6 +617,15 @@ public:
                 mediaAction(media_.button(b));
                 break;
 
+            case State::TearOff:
+                if (b == Button::Up || b == Button::Down) {
+                    tearFocus_ = (tearFocus_ + (b == Button::Down ? 1 : 2)) % 3;
+                    drawTearButtons();
+                }
+                if (b == Button::Ok) tearChoose(tearFocus_);
+                if (b == Button::X)  tearChoose(2);
+                break;
+
             case State::LoopbackConfirm:
                 if (b == Button::Ok) runLoopbackTest();
                 if (b == Button::X)  openSystemMenu();
@@ -664,7 +705,8 @@ private:
         FilePicker, ConfirmFile, DeviceList,
         LoopbackConfirm, LoopbackResult, LifInfo, DeviceOrder,
         AnalyzerLogMenu, Warning,
-        CreateMedia                         // File picker -> Create media... (media_create_ui.h)
+        CreateMedia,                        // File picker -> Create media... (media_create_ui.h)
+        TearOff                             // Printer: tear off the paper -- Save / Discard / Cancel
     };
 
 
@@ -1620,6 +1662,9 @@ private:
                                       refreshItems();
                                   }));
             }
+            if (plotterview_paperLines() > 0)
+                m.push_back(item("Tear off paper >", [this] { showTearOff(1); }));
+            m.push_back(item("Printouts >", [this] { openPrintouts(); }));
             if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::Analyzer) {
             title = "ANALYZER";
@@ -1960,6 +2005,116 @@ private:
 
     // The frame, with the menu's title (title_) in its top band -- in the
     // HP-41's display font (HIPI_MENU_TITLE_HP41FONT) or the built-in one
+    // ── Printer: tear off the paper (openTearOff()) ─────────────────────
+    int tearDir_ = 1;
+    int tearFocus_ = 0;                   // 0 Save, 1 Discard, 2 Cancel
+    std::string pendingMessage_;          // shown once the menu has gone (poll())
+    static constexpr int kTearBtnW = 160, kTearBtnH = 56, kTearBtnGap = 20;
+    static int tearBtnX(int i) { return MenuFrame::X + 20 + i * (kTearBtnW + kTearBtnGap); }
+    static constexpr int kTearBtnY = MenuFrame::Y + 130;
+
+    void showTearOff(int dir) {
+        state_ = State::TearOff;
+        tearDir_ = dir;
+        tearFocus_ = 0;
+        title_ = "TEAR OFF PAPER";
+        drawBox();
+        d_->txtSize(MenuFrame::TextScale);
+        d_->txtColor(0xFFFF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
+        const int n = plotterview_paperLines();
+        const std::string t = std::to_string(n) + (n == 1 ? " line" : " lines") + " on the paper";
+        d_->txtWrite(t.c_str());
+        d_->txtSize(0);
+        d_->txtColor(0x7BEF, 0x0000);
+        d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 70);
+        d_->txtWrite("Save: printouts/printout_<n>.bmp and .txt");
+        drawTearButtons();
+    }
+    void drawTearButtons() {
+        static const char* kLabels[3] = { "Save", "Discard", "Cancel" };
+        for (int i = 0; i < 3; ++i) {
+            const int x = tearBtnX(i);
+            const bool hot = i == tearFocus_;
+            const std::uint16_t fill = i == 0 ? MenuFrame::Yellow : 0x31A6;
+            const std::uint16_t fg = i == 0 ? 0x0000 : 0xFFFF;
+            d_->fillRoundRect(static_cast<std::int16_t>(x), kTearBtnY, kTearBtnW, kTearBtnH, 10, hot ? 0xFFFF : 0x7BEF);
+            d_->fillRoundRect(static_cast<std::int16_t>(x + 3), kTearBtnY + 3, kTearBtnW - 6, kTearBtnH - 6, 8, fill);
+            const int tw = static_cast<int>(std::strlen(kLabels[i])) * 16;
+            d_->txtSize(MenuFrame::TextScale);
+            d_->txtColor(fg, fill);
+            d_->txtSetCursor(static_cast<std::uint16_t>(x + (kTearBtnW - tw) / 2), kTearBtnY + (kTearBtnH - 32) / 2);
+            d_->txtWrite(kLabels[i]);
+        }
+    }
+    int tearButtonAt(int x, int y) const {
+        if (y < kTearBtnY || y >= kTearBtnY + kTearBtnH) return -1;
+        for (int i = 0; i < 3; ++i) if (x >= tearBtnX(i) && x < tearBtnX(i) + kTearBtnW) return i;
+        return -1;
+    }
+    // 0 Save (then tear off), 1 Discard (tear off), 2 Cancel
+    void tearChoose(int i) {
+        const int dir = tearDir_;
+        if (i == 0) {
+            std::string msg;
+            CPrinter* prt = plotterview_printer();
+            const bool ok = prt != nullptr && printout_save(*prt, msg);
+            LOGF("\r\n * Printer paper %s: %s", ok ? "saved" : "not saved", msg.c_str());
+            close();
+            pendingMessage_ = ok ? "Saved " + msg : msg;
+            if (ok) plotterview_tearOff(dir);
+            return;
+        }
+        close();
+        if (i == 1) plotterview_tearOff(dir);
+    }
+
+    // ── Printer: the saved printouts (printout.h) ───────────────────────
+    // Printer menu -> Printouts: the list, newest first; a printout ->
+    // load it into the printer (instead of the paper there) or delete it
+    int printoutsRowInMenu() const { return plotterview_paperLines() > 0 ? 4 : 3; }
+
+    void openPrintouts(unsigned select = 0) {
+        const std::vector<PrintoutInfo> list = printout_list();
+        std::vector<Item> items;
+        int sel = 0;
+        if (list.empty()) items.push_back(item("(none saved)", [this] { openContextMenu(printoutsRowInMenu()); }));
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            const unsigned n = list[i].number;
+            std::string label = printout_name(n);
+            label.resize(std::max<std::size_t>(label.size() + 2, 16), ' ');
+            label += list[i].lines >= 0 ? std::to_string(list[i].lines) + " lines" : std::string("text only");
+            items.push_back(item(label + " >", [this, n] { openPrintout(n); }));
+            if (n == select) sel = static_cast<int>(i);
+        }
+        openList("PRINTOUTS", std::move(items), [this] { openContextMenu(printoutsRowInMenu()); }, sel);
+    }
+
+    void openPrintout(unsigned n) {
+        std::string t = printout_name(n);
+        for (char& c : t) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        openList(t, {
+            item("Load into the printer", [this, n] {
+                std::string msg;
+                CPrinter* prt = plotterview_printer();
+                const bool ok = prt != nullptr && printout_load(n, *prt, msg);
+                LOGF("\r\n * Printer: %s %s", ok ? "loaded" : "not loaded", msg.c_str());
+                doAndClose([] { plotterview_reloadPaper(); });
+                pendingMessage_ = ok ? "Loaded " + msg : msg;
+            }),
+            item("Delete >", [this, n, t] {
+                openList("DELETE " + t + "?", {
+                    item("Yes, delete it", [this, n] {
+                        printout_delete(n);
+                        LOGF("\r\n * Printer: %s deleted", printout_name(n).c_str());
+                        openPrintouts();
+                    }),
+                    item("No", [this, n] { openPrintout(n); }),
+                }, [this, n] { openPrintout(n); }, 1);
+            }),
+        }, [this, n] { openPrintouts(n); });
+    }
+
     void drawBox() {
         setPip(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
         MenuFrame::drawTitled(d_, MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH, title_);

@@ -994,6 +994,26 @@ int headX_ = kHeadMaxX;                   // the head's place (sprite left edge,
 int headFrom_ = kHeadMaxX;                // a glide: from ...
 int headTo_ = kHeadMinX;                  // ... to
 bool paperDirty_ = false;                 // redraw it all (too much to catch up)
+// Moved by hand (plotterview_paperDragBegin()): how far the paper is
+// from where it prints, in pixels -- > 0 down (older lines in view),
+// < 0 pulled up (the newest line out above the tear-off bar)
+int paperOff_ = 0;
+bool paperDrag_ = false;
+int dragY0_ = 0, dragOff0_ = 0;
+bool paperReturn_ = false;                // gliding back to the print head
+absolute_time_t returnNext_ = nil_time;
+constexpr int kReturnStepMs = 15;
+// Pulled up: the newest line's bottom just above the tear-off bar
+constexpr int kMaxPullUp = kInkH - (kBarY0 - kPaperY0) + 2;
+// Tearing off (plotterview_takeTearGesture()): at the edge, then sideways
+constexpr int kTearDx = 100, kTearMaxDy = 80;
+bool atEdge_ = false;
+int edgeX_ = 0, edgeY_ = 0;
+int tearGesture_ = 0;                     // seen in this drag: -1 / 1
+int tearDir_ = 0;                         // tearing off: sliding away to -1 / 1
+int tearStep_ = 0;
+absolute_time_t tearNext_ = nil_time;
+constexpr int kTearSteps = 12, kTearStepMs = 18;
 
 // Ink colour at full darkness, and how dark each INTENSITY position prints
 constexpr int kInkR = 34, kInkG = 38, kInkB = 70;
@@ -1091,11 +1111,66 @@ void showHeadArea(int x0, int x1) {
                       static_cast<std::int16_t>(x1 - x0 + kPrtHead.w), kPrtHead.h);
 }
 
+// The oldest line still kept (the printer keeps the last kMaxLines;
+// tearing off drops them all)
+std::uint32_t firstKept() {
+    const std::uint32_t kept = static_cast<std::uint32_t>(printer_->lines().size());
+    const std::uint32_t total = printer_->lineCount();
+    return total > kept ? total - kept : 0;
+}
+// How far down the paper can go: the first line at the top of the window
+int maxPullDown() {
+    const std::uint32_t first = firstKept();
+    const int shown = paperShown_ > first ? static_cast<int>(paperShown_ - first) : 0;
+    return std::max(0, shown * kLinePx - kInkH);
+}
+
+// Ink layer rows y0..y1 drawn afresh: white, and the lines that lie there
+// (line n's top is at kInkH - (paperShown_ - n) * kLinePx + paperOff_)
+void renderInkRows(int y0, int y1) {
+    y0 = std::max(y0, 0);
+    y1 = std::min(y1, kInkBufH);
+    if (y1 <= y0) return;
+    {
+        LayerDrawScope scope(LT7683::kPrinterInkAddr, kInkW);
+        display_->setActiveWindow(0, 0, kInkW - 1, SCREEN_MAX_Y - 1);
+        display_->fillRect(0, static_cast<std::int16_t>(y0), kInkW, static_cast<std::int16_t>(y1 - y0), 0xFFFF);
+    }
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    screen_->reassertRenderState();
+    if (printer_ == nullptr) return;
+    for (std::uint32_t n = firstKept(); n < paperShown_; ++n) {
+        const int top = kInkH - static_cast<int>(paperShown_ - n) * kLinePx + paperOff_;
+        if (top + kLinePx <= y0 || top >= y1) continue;
+        const CPrinter::Line* l = printer_->line(n);
+        if (!blankLine(l)) renderInkLine(top, l);
+    }
+}
+
+// Moves what's on the paper by dy pixel rows (> 0 down, < 0 up) and draws
+// the rows that come into view
+void shiftInk(int dy) {
+    if (dy == 0) return;
+    const int n = std::abs(dy);
+    if (n >= kInkBufH) { renderInkRows(0, kInkBufH); return; }
+    // Via the staging area: source and destination overlap otherwise
+    const std::int16_t from = static_cast<std::int16_t>(dy < 0 ? n : 0), to = static_cast<std::int16_t>(dy < 0 ? 0 : n);
+    display_->copyLayerRegion(LT7683::kPrinterInkAddr, kInkW, 0, from,
+                              LT7683::kPrinterInkStageAddr, kInkW, 0, 0,
+                              kInkW, static_cast<std::uint16_t>(kInkBufH - n));
+    display_->copyLayerRegion(LT7683::kPrinterInkStageAddr, kInkW, 0, 0,
+                              LT7683::kPrinterInkAddr, kInkW, 0, to,
+                              kInkW, static_cast<std::uint16_t>(kInkBufH - n));
+    screen_->reassertRenderState();
+    if (dy < 0) renderInkRows(kInkBufH - n, kInkBufH);
+    else renderInkRows(0, n);
+}
+
 // Moves the paper up by n pixel rows; white paper comes in at the bottom
+// (printing: the paper is where it prints, nothing below the newest line)
 void feedInk(int n) {
     if (n <= 0) return;
     if (n < kInkBufH) {
-        // Via the staging area: source and destination overlap otherwise
         display_->copyLayerRegion(LT7683::kPrinterInkAddr, kInkW, 0, static_cast<std::int16_t>(n),
                                   LT7683::kPrinterInkStageAddr, kInkW, 0, 0,
                                   kInkW, static_cast<std::uint16_t>(kInkBufH - n));
@@ -1113,18 +1188,12 @@ void feedInk(int n) {
     screen_->reassertRenderState();
 }
 
-// Draws the whole paper again: the last lines printed, the newest at the
-// bottom
+// Draws the whole paper again: the lines printed, the newest at the print
+// head (or where the paper has been moved to)
 void redrawInk() {
-    feedInk(kInkBufH);                                   // all white
-    const std::uint32_t total = printer_ != nullptr ? printer_->lineCount() : 0;
-    int row = kInkH - kLinePx;
-    for (std::uint32_t n = total; n > 0 && row > -kLinePx; --n, row -= kLinePx) {
-        const CPrinter::Line* l = printer_->line(n - 1);
-        if (l == nullptr) break;
-        renderInkLine(row, l);
-    }
-    paperShown_ = total;
+    paperShown_ = printer_ != nullptr ? printer_->lineCount() : 0;
+    paperOff_ = std::clamp(paperOff_, -kMaxPullUp, maxPullDown());
+    renderInkRows(0, kInkBufH);
 }
 
 // Puts the ink on the panel over whatever of the picture's paper lies in
@@ -1170,6 +1239,16 @@ void showPaper() {
                       static_cast<std::int16_t>(printerY_ + kPaperY0), kInkW + maxSlant, kInkH);
 }
 
+// The paper moved by hand to `off` (clamped), on the panel at once
+void setPaperOff(int off) {
+    off = std::clamp(off, -kMaxPullUp, maxPullDown());
+    const int dy = off - paperOff_;
+    if (dy == 0) return;
+    paperOff_ = off;
+    shiftInk(dy);
+    showPaper();
+}
+
 // One step of the paper (from plotterview_poll())
 void pollPaper() {
     if (!inkReady_ || printer_ == nullptr) return;
@@ -1180,6 +1259,54 @@ void pollPaper() {
     }
     const std::uint32_t total = printer_->lineCount();
     const bool showing = output_ == DisplayOutput::Printer;
+    // Held by a finger: nothing moves it meanwhile (new lines wait)
+    if (paperDrag_) return;
+    // Tearing off: the paper slides away sideways, then it's empty
+    if (tearDir_ != 0) {
+        if (!time_reached(tearNext_)) return;
+        tearNext_ = make_timeout_time_ms(kTearStepMs);
+        const int step = (kInkW + kTearSteps - 1) / kTearSteps;
+        if (++tearStep_ < kTearSteps && showing) {
+            const int keep = kInkW - step;
+            const std::int16_t from = static_cast<std::int16_t>(tearDir_ < 0 ? step : 0);
+            const std::int16_t to = static_cast<std::int16_t>(tearDir_ < 0 ? 0 : step);
+            display_->copyLayerRegion(LT7683::kPrinterInkAddr, kInkW, from, 0,
+                                      LT7683::kPrinterInkStageAddr, kInkW, 0, 0,
+                                      static_cast<std::uint16_t>(keep), kInkBufH);
+            display_->copyLayerRegion(LT7683::kPrinterInkStageAddr, kInkW, 0, 0,
+                                      LT7683::kPrinterInkAddr, kInkW, to, 0,
+                                      static_cast<std::uint16_t>(keep), kInkBufH);
+            {
+                LayerDrawScope scope(LT7683::kPrinterInkAddr, kInkW);
+                display_->setActiveWindow(0, 0, kInkW - 1, SCREEN_MAX_Y - 1);
+                display_->fillRect(static_cast<std::int16_t>(tearDir_ < 0 ? keep : 0), 0,
+                                   static_cast<std::int16_t>(step), kInkBufH, 0xFFFF);
+            }
+            display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+            screen_->reassertRenderState();
+            showPaper();
+            return;
+        }
+        tearDir_ = 0;
+        printer_->clearPaper();
+        paperOff_ = 0;
+        paperReturn_ = false;
+        redrawInk();
+        showPaper();
+        return;
+    }
+    // Moved by hand, and something to print (or asked to): back to the
+    // print head first, gliding (a quarter of a second or so)
+    if (paperOff_ != 0 && paperPhase_ == PaperPhase::Idle &&
+        (paperReturn_ || paperShown_ < total || printer_->advanceDown() || !showing)) {
+        if (!showing) { paperOff_ = 0; paperReturn_ = false; redrawInk(); return; }
+        if (!time_reached(returnNext_)) return;
+        returnNext_ = make_timeout_time_ms(kReturnStepMs);
+        const int step = std::max(8, std::abs(paperOff_) / 3);
+        setPaperOff(paperOff_ > 0 ? std::max(0, paperOff_ - step) : std::min(0, paperOff_ + step));
+        return;
+    }
+    if (paperOff_ == 0) paperReturn_ = false;
     if (paperPhase_ == PaperPhase::Idle) {
         if (paperDirty_) {
             paperDirty_ = false;
@@ -1344,12 +1471,93 @@ void plotterview_clearPaper() {
     if (printer_ == nullptr) return;
     printer_->clearPaper();
 #ifdef DISPLAY_7INCH
+    paperOff_ = 0;
+    paperReturn_ = false;
     if (printerLoaded_ && inkReady_) {
         redrawInk();
         if (output_ == DisplayOutput::Printer) drawPrinterRegion(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
     }
 #endif
 }
+
+#ifdef DISPLAY_7INCH
+bool plotterview_paperDragBegin(int x, int y) {
+    if (output_ != DisplayOutput::Printer || !inkReady_ || printer_ == nullptr || plotterview_isSplashVisible())
+        return false;
+    // The paper's window, with a little room on the sides
+    const int x0 = printerX_ + kPaperX0 - 24, x1 = printerX_ + kPaperX0 + kPaperW + 24;
+    const int y0 = printerY_ + kPaperY0, y1 = printerY_ + kPaperY1 + 8;
+    if (x < x0 || x >= x1 || y < y0 || y >= y1) return false;
+    if (tearDir_ != 0) return true;          // (being torn off: the touch does nothing)
+    paperDrag_ = true;
+    paperReturn_ = false;
+    dragY0_ = y;
+    dragOff0_ = paperOff_;
+    atEdge_ = false;
+    tearGesture_ = 0;
+    return true;
+}
+void plotterview_paperDragMove(int x, int y) {
+    if (!paperDrag_) return;
+    // While a line is still on its way (the head, the feed) it finishes first
+    if (paperPhase_ != PaperPhase::Idle) { dragY0_ = y; dragOff0_ = paperOff_; return; }
+    setPaperOff(dragOff0_ + (y - dragY0_));
+    // At the tear-off edge, then sideways: tear it off (asked at the end)
+    if (paperOff_ == -kMaxPullUp && !printer_->lines().empty()) {
+        if (!atEdge_) { atEdge_ = true; edgeX_ = x; edgeY_ = y; }
+        if (y < edgeY_) edgeY_ = y;           // (the finger going on up: the paper stays at the edge)
+        if (std::abs(x - edgeX_) >= kTearDx && std::abs(y - edgeY_) < kTearMaxDy) tearGesture_ = x > edgeX_ ? 1 : -1;
+    } else {
+        atEdge_ = false;
+    }
+}
+void plotterview_paperDragEnd() { paperDrag_ = false; }
+bool plotterview_takeTearGesture(int& dir) {
+    if (tearGesture_ == 0) return false;
+    dir = tearGesture_;
+    tearGesture_ = 0;
+    return true;
+}
+void plotterview_tearOff(int dir) {
+    if (printer_ == nullptr) return;
+    if (output_ != DisplayOutput::Printer || !inkReady_) { plotterview_clearPaper(); return; }
+    tearDir_ = dir < 0 ? -1 : 1;
+    tearStep_ = 0;
+    tearNext_ = nil_time;
+}
+int plotterview_paperLines() { return printer_ != nullptr ? static_cast<int>(printer_->lines().size()) : 0; }
+void plotterview_reloadPaper() {
+    // The printer's lines were replaced (a saved printout loaded): drawn
+    // afresh, at the live position
+    paperOff_ = 0;
+    paperReturn_ = false;
+    tearDir_ = 0;
+    if (printerLoaded_ && inkReady_) {
+        redrawInk();
+        if (output_ == DisplayOutput::Printer) drawPrinterRegion(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
+    }
+}
+void plotterview_paperScrollBy(int lines) {
+    if (output_ != DisplayOutput::Printer || !inkReady_ || paperPhase_ != PaperPhase::Idle) return;
+    paperReturn_ = false;
+    setPaperOff(paperOff_ + lines * kLinePx);
+}
+int plotterview_paperWindowLines() { return kInkH / kLinePx; }
+bool plotterview_paperScrolled() { return paperOff_ != 0; }
+void plotterview_paperToLive() { if (paperOff_ != 0) paperReturn_ = true; }
+#else
+bool plotterview_paperDragBegin(int, int) { return false; }
+void plotterview_paperDragMove(int, int) {}
+void plotterview_paperDragEnd() {}
+bool plotterview_takeTearGesture(int&) { return false; }
+void plotterview_tearOff(int) { plotterview_clearPaper(); }
+int plotterview_paperLines() { return printer_ != nullptr ? static_cast<int>(printer_->lines().size()) : 0; }
+void plotterview_reloadPaper() {}
+void plotterview_paperScrollBy(int) {}
+int plotterview_paperWindowLines() { return 0; }
+bool plotterview_paperScrolled() { return false; }
+void plotterview_paperToLive() {}
+#endif
 
 void plotterview_setTapeEjected(bool ejected) {
     if (ejected == tapeEjected_) return;

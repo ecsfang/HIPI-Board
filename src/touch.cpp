@@ -542,6 +542,8 @@ TouchTapCallback     tapCallback;
 TouchReleaseCallback releaseCallback;
 TouchSwipeCallback   swipeCallback;
 TouchVerticalSwipeCallback verticalSwipeCallback;
+TouchDragCallback    dragCallback;
+bool dragging = false;               // this touch was taken by dragCallback
 }  // namespace
 
 void touch_set_tap_callback(TouchTapCallback cb) {
@@ -558,6 +560,10 @@ void touch_set_swipe_callback(TouchSwipeCallback cb) {
 
 void touch_set_vertical_swipe_callback(TouchVerticalSwipeCallback cb) {
     verticalSwipeCallback = std::move(cb);
+}
+
+void touch_set_drag_callback(TouchDragCallback cb) {
+    dragCallback = std::move(cb);
 }
 
 void touch_remote(bool down, uint16_t x, uint16_t y) {
@@ -606,6 +612,9 @@ void touch_poll() {
                 lastTy = ty;
                 confirmDeadline = make_timeout_time_ms(kTouchConfirmMs);
                 MTRC_LOGF("press (%u,%u)", tx, ty);
+                // Something to drag there: the touch is a drag, no tap
+                dragging = dragCallback && dragCallback(TouchDragPhase::Begin, tx, ty);
+                if (dragging) confirmChecked = true;
             }
         }
         // If touchActive is already true: ignore -- the finger is still
@@ -654,10 +663,17 @@ void touch_poll() {
             lastTx = tx;
             lastTy = ty;
             MTRC_LOGF("still down @ (%u,%u)", tx, ty);
+            if (dragging) dragCallback(TouchDragPhase::Move, tx, ty);
         } else {
             touchActive = false;
             touchConfirmed = false;
             remoteOwns = false;
+            if (dragging) {
+                dragging = false;
+                dragCallback(TouchDragPhase::End, lastTx, lastTy);
+                if (releaseCallback) releaseCallback();
+                return;
+            }
 
             // Swipe check: total travel from the very first sample to the
             // last known position before lift-off. Requires enough
