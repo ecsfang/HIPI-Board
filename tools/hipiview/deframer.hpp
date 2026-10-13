@@ -21,7 +21,11 @@ public:
     // A new session was asked for: wait for its first frame
     void reset() { sid_ = -1; expected_ = 0; gap_ = false; acked_ = 0; heartbeat_ = false; reack_ = false; buf_.clear(); }
 
-    // Raw bytes in; out(payload, n) for every frame, in order, once
+    // Raw bytes in; out(payload, n) for every frame, in order, once.
+    // out(nullptr, 0) when a new session starts: what came before may end
+    // in the middle of a command (HIPI dropped the rest when it ended that
+    // session), so the receiver must forget it -- LT7683Emu::desync() --
+    // and wait for the new session's greeting.
     template <typename F>
     void feed(const std::uint8_t* p, std::size_t n, double now, F&& out, const Send& send) {
         namespace mp = hipi::mirror;
@@ -48,6 +52,7 @@ public:
                 gap_ = false;
                 heartbeat_ = false;
                 ++sessions_;
+                out(nullptr, 0);
             }
             lastFrame_ = now;
             if (len == 0) heartbeat_ = true;     // HIPI sends these when idle

@@ -34,7 +34,8 @@ namespace hipi {
 // The kinds of view the panel can show (matches ViewKind in hpil.h, plus
 // the Analyzer, which isn't a device's view)
 // (Video80: the Display view while TFDISPLAY emulates the HP 92198)
-enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals, CharTable, Printer, Video80, HwTest };
+enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals, CharTable, Printer, Video80, HwTest,
+                           MediaMap };
 
 // Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
 enum class TapeHotspot { None, Open, Power, Rewind };
@@ -161,6 +162,10 @@ void plotterview_leaveSignals();
 // goes back to the view before
 void plotterview_showHwTest();
 void plotterview_leaveHwTest();
+// Media map (mediamap.h): the drive's cassette/disk as rings; leaving goes
+// back to the view before
+void plotterview_showMediaMap();
+void plotterview_leaveMediaMap();
 void plotterview_showCharTable();
 void plotterview_leaveCharTable();
 

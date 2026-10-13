@@ -15,6 +15,7 @@
 #include "display_mirror.h"   // layers a PC viewer needs
 #include "loopmap.h"
 #include "hwtest.h"
+#include "mediamap.h"
 #include "demo.h"
 #include "plotterview.h"
 #include "plotterview.h"
@@ -937,6 +938,7 @@ void boardui_showWarning(const char* title, const char* line1, const char* line2
 
 void boardui_poll() {
     refreshDeviceList();                 // (only while the device list is open)
+    if (dialog_ != nullptr) dialog_->poll();   // File picker -> Create media: writing the file
     // Held ▲/▼: repeat (see kRepeatDelayMs). Released -> boardui_handleRelease()
     if (repeatButton != Button::None && pressedButton == repeatButton &&
         time_reached(repeatNext)) {
@@ -1145,6 +1147,13 @@ void handlePrinterTouch(const PrinterHit& hit) {
 
 }  // namespace
 
+// A tap on the media map (mediamap.h): true if it hit something
+static bool mediaMapTap(int x, int y) {
+    const MediaMapTap t = mediamap_tap(x, y);
+    if (t == MediaMapTap::Close) plotterview_leaveMediaMap();
+    return t != MediaMapTap::None;
+}
+
 void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     // The demo: any touch stops it (demo.h)
     if (demo_running()) { demo_stop(); return; }
@@ -1178,6 +1187,9 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     } else if (dialog_ != nullptr && dialog_->isShowingWarning()) {
         // A warning box (UiDialog::showWarning()): any touch closes it
         dialog_->dismissWarning();
+    } else if (dialog_ != nullptr && dialog_->wantsTouch() && !stripZone) {
+        // File picker -> Create media...: its keyboard and buttons
+        dialog_->handleTap(x, y);
     } else if (infoBoxVisible) {
         // Any touch while it's up dismisses it early -- consumed here, not
         // treated as a button-strip wake/press or another corner-tap.
@@ -1194,17 +1206,22 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // buttons reach the right edge (and its close button sits there):
         // they get the touch unless the strip is showing -- a touch there
         // that hits none of them still wakes the strip.
+    } else if (!dialog_->isOpen() && !(stripZone && buttonStripVisible) &&
+               plotterview_output() == DisplayOutput::MediaMap && mediaMapTap(x, y)) {
+        // Media map: a ring -> that file; the X in the title bar -> back
     } else if (!dialog_->isOpen() && !stripZone && plotterview_output() == DisplayOutput::LoopMap &&
                loopmap_tap(x, y)) {
         // Loop map: a card -> its details; the details box -> closed
         // (checked before the corners: cards may sit in them)
     } else if (printerHit.spot != PrinterHotspot::None) {
         handlePrinterTouch(printerHit);
-    } else if (isInfoCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest) {
+    } else if (isInfoCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest &&
+               plotterview_output() != DisplayOutput::MediaMap) {
         // (not on the Hardware test page: its buttons sit in the corners,
         // and a touch just beside one shouldn't open the box instead)
         showInfoBox();
-    } else if (isDeviceListCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest) {
+    } else if (isDeviceListCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest &&
+               plotterview_output() != DisplayOutput::MediaMap) {
         showDeviceList();
     } else if (!dialog_->isOpen() &&
                plotterview_tapeHitTest(x, y) == TapeHotspot::Open) {

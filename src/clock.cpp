@@ -350,6 +350,14 @@ bool clock_available() {
     return rtcValid();
 }
 
+bool clock_dateTime(int& year, int& month, int& day, int& hour, int& minute, int& second) {
+    DateTime t;
+    if (!rtcValid() || !rtcRead(t)) return false;
+    year = t.year; month = t.month; day = t.day;
+    hour = t.hour; minute = t.minute; second = t.second;
+    return true;
+}
+
 std::string clock_nowText() {
     DateTime t;
     if (!rtcRead(t)) return "";

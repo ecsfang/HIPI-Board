@@ -479,7 +479,32 @@ open calls `openContextMenu()`, which builds the menu of the view showing;
 its "More >" leads to `openHipiMenu()` (Go to view / Settings / System).
 The title goes in the frame's top band (`MenuFrame::TitleH`; drawn with
 `kMenuTitleFont`, the HP-41 font, unless `HIPI_MENU_TITLE_HP41FONT` is 0).
+The frame and title live in `include/menu_frame.h` (`MenuFrame::drawTitled()`
+draws one at any place and size), so other dialogs look the same.
 Order in every menu: where to go, what to do, settings, More.
+
+**Media map.** `src/mediamap.cpp` (DisplayOutput::MediaMap, from the Tape
+view's menu): the LIF directory only (header, then entries up to the end
+mark) becomes extents; a cassette gets its 2 tracks as rings, anything else
+8 rings of `total/8` blocks, at most 400 steps a ring, each step showing the
+most important kind in it (`kPriority`). Arcs are drawn as triangles
+(`fillArc()`). The drive is reached through `mediamap_setSource()`
+(pico_main.cpp): `CDrive::headBlock()/lastOp()/blocksWritten()` and
+`CDrive::peekBlock()`, which reads through the drive's own open file and
+puts its position back (FatFs locks a file open for writing). PC test:
+`tools/hipiview/test/mediamap_test.cpp`.
+
+**Create media.** The file picker's second row opens `State::CreateMedia`:
+`MediaCreateUi` (`include/media_create_ui.h`) draws CREATE MEDIA and the
+MEDIA NAME keyboard left of the button strip, and takes touches
+(`UiDialog::handleTap()`, from `boardui_handleTap()`), buttons and polls
+(`UiDialog::poll()`, from `boardui_poll()`). On the 7" panel the PIP window
+follows the dialog's size (`UiDialog::setPip()`); on the 5" panel what's
+behind it is redrawn before a smaller box (`eraseBigDialog()`). The image
+itself is written by `LifCreator` (`include/lif_create.h`) -- laid out like
+`lifinit -z` from lifutils, 32 kB per main-loop pass; a cancelled or failed
+file is deleted. PC test: `tools/hipiview/test/media_create_test.cpp`
+(the "SD card" is a folder, `test/pvstubs/ff.h`).
 
 **Character table.** `src/chartable.cpp` draws the HP-41's codes 0..127 from
 `src/chartable_font.cpp`, which `scripts/hp41_charset.py` generates from the

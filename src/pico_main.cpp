@@ -90,6 +90,7 @@ extern void init_spi(void);
 #include "display_mirror.h"   // the display mirrored to a PC (tools/hipiview)
 #include "config.hpp"
 #include "drive.h"
+#include "mediamap.h"     // the media map: the drive it shows
 extern std::vector<CDevice*> devices;   // hipi.cpp -- the HP-IL devices, loop order
 
 #include <cstdio>
@@ -536,6 +537,22 @@ int main() {
     bitmapsRow = hipi::bootscreen_row("Bitmaps", hipi::BootState::Info, "Loading ...");
 #endif
     hipi::plotterview_init(display, screen, plotter);
+    // The media map shows the drive of the Tape view (plotterview_drive())
+    hipi::mediamap_setSource(
+        [](hipi::MediaMapLive& l) {
+            CDrive* d = hipi::plotterview_drive();
+            if (d == nullptr) return false;
+            l.file = d->ejected() ? std::string() : d->mediaFile();
+            l.head = d->headBlock();
+            l.op = static_cast<hipi::MediaOp>(d->lastOp());
+            l.writes = d->blocksWritten();
+            l.busy = d->isBusy();
+            return true;
+        },
+        [](std::uint32_t block, std::uint8_t* buf) {
+            CDrive* d = hipi::plotterview_drive();
+            return d != nullptr && d->peekBlock(block, buf);
+        });
     hipi::plotterview_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
     hipi::plotterview_setPaperBlack(config.plotPaperBlack());  // Plotter -> Paper (saved)
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)

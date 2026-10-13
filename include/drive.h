@@ -61,6 +61,12 @@ class CDrive : public CDevice {
     // drive's lid is open). The selected file stays selected, but the
     // drive reports no tape until it's put back (see check()).
     bool ejected_ = false;
+    // Where the drive was last and what it did there, for the media map
+    // (mediamap.h): 0 none, 1 seek, 2 read, 3 write
+    volatile std::uint32_t headBlock_ = 0;
+    volatile std::uint8_t lastOp_ = 0;
+    volatile std::uint32_t blocksWritten_ = 0;
+    void noteHead(std::uint32_t block, std::uint8_t op) { headBlock_ = block; lastOp_ = op; }
     std::string mediaFile_;                            // see mediaFile()
     std::function<void(CDrive*)> onMediaChanged_;
     // Disabling (power switch / Devices menu) is deferred until the drive
@@ -159,6 +165,7 @@ public:
         const std::uint32_t ms = kRewindMinMs +
             static_cast<std::uint32_t>((kRewindMaxMs - kRewindMinMs) * part / total);
         tape->seek(0);
+        noteHead(0, 1);
         rewindUntil_ = make_timeout_time_ms(ms);
         busyUntil_ = rewindUntil_;
         LOGF("\r\n * %s: REWIND from %lu/%lu (%lu ms)", name(),
@@ -238,6 +245,13 @@ public:
     // on the next access (reported as a new tape). The callback is told,
     // e.g. to save it in CONFIG.TXT and update the Tape view.
     const std::string& mediaFile() const { return mediaFile_; }
+    // The media map (mediamap.h): the head's block, the last operation
+    // (0 none, 1 seek, 2 read, 3 write), blocks written so far, and a
+    // look at one block (the drive's position kept)
+    std::uint32_t headBlock() const { return headBlock_; }
+    std::uint8_t lastOp() const { return lastOp_; }
+    std::uint32_t blocksWritten() const { return blocksWritten_; }
+    bool peekBlock(std::uint32_t block, std::uint8_t* out);
     // The file on the SD card: lif/<name> ("" stays "" = no media)
     static std::string lifPath(const std::string& file) {
         return file.empty() ? file : std::string(HIPI_DIR_LIF "/") + file;
@@ -245,6 +259,7 @@ public:
     void setMediaFile(const std::string& file) {
         tape->select(lifPath(file).c_str());
         mediaFile_ = file;
+        noteHead(0, 0);
         LOGF("\r\n * %s: media %s", name(), file.empty() ? "(none)" : file.c_str());
         if (onMediaChanged_) onMediaChanged_(this);
     }
@@ -290,6 +305,12 @@ public:
     }
     void size(size_t sz) {
         m_size = sz;
+    }
+    // The medium's size in bytes, from its LIF header (size()): a 9114 disk
+    // or HDRIVE is much bigger than a cassette (TAPE_SIZE, 512 records) --
+    // reading on past a record and formatting go up to here
+    std::uint32_t mediaBytes() {
+        return static_cast<std::uint32_t>(size() > 0 ? size() : 512) * BUF_SIZE;
     }
 };
 

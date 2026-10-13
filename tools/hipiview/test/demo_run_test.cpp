@@ -51,8 +51,13 @@ unsigned short hipi_simFrame(unsigned short f) {
 void hipi_bootService() {}
 void hipi_bootServiceDone() {}
 
-// The mirror isn't used here
+// The mirror isn't used here -- except how far hipiview is (the demo
+// waits for it): set by the test
+bool mirrorSyncing = false;
+std::uint32_t mirrorBacklog = 0;
 namespace hipi {
+bool displayMirror_syncing() { return mirrorSyncing; }
+std::uint32_t displayMirror_backlog() { return mirrorBacklog; }
 void displayMirror_addLayer(std::uint32_t, std::uint32_t, std::uint32_t, std::uint16_t, std::uint32_t) {}
 std::uint32_t displayMirror_fileAssetId(const char*, std::uint32_t) { return 1; }
 }
@@ -196,6 +201,33 @@ int main(int argc, char** argv) {
     check(hipi::demo_running(), "System -> Demo: it runs");
     run(50);
     check(hipi::plotterview_output() == hipi::DisplayOutput::Display, "it starts on the Display view");
+
+    // hipiview connected and still getting the whole screen: the demo waits
+    run(1500);
+    std::vector<std::uint32_t> before(1024 * 600), after(1024 * 600);
+    chip.render(before.data(), 0.0);
+    mirrorSyncing = true;
+    run(5000);
+    chip.render(after.data(), 0.0);
+    check(before == after, "hipiview still syncing: the demo stands still (5 s)");
+    mirrorSyncing = false;
+    run(1000);
+    chip.render(after.data(), 0.0);
+    check(before != after, "... and goes on once it's in step");
+    // A viewer that never catches up: a step waits 3 s at most, then on
+    mirrorBacklog = 100000;
+    {
+        const hipi::DisplayOutput o0 = hipi::plotterview_output();
+        bool moved = false;
+        int k_ = 0;
+        for (k_ = 0; k_ < 150 && !moved; ++k_) { run(1000); moved = hipi::plotterview_output() != o0; }
+        std::printf("     (next view after %d s)\n", k_);
+        check(moved, "hipiview never catching up: the demo still goes on");
+    }
+    mirrorBacklog = 0;
+    hipi::demo_stop();
+    hipi::demo_start();
+    run(50);
 
     // A whole round: a picture shortly after each new view
     std::vector<std::string> seen;

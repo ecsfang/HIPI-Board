@@ -130,7 +130,7 @@ void CDrive::preProc(IL_CMD_t cmd)
             LOGF("$$$ Formatting ... (%d)\r\n", tape->tell());
             markBusy();
             tape->write(buffer[0]);
-            if( tape->tell() >= TAPE_SIZE ) {
+            if( tape->tell() >= mediaBytes() ) {
                 end = true;
                 ddl = 31;
                 sst = DRV_IDLE;
@@ -308,7 +308,7 @@ IL_CMD_t CDrive::doNextTalker(IL_CMD_t cmd) {
             } else {
                 // Sending Buffer 0 or Read - so read next block
                 if( check() ) {
-                    if( tape->tell() >= TAPE_SIZE ) {
+                    if( tape->tell() >= mediaBytes() ) {
                         end = true;
                         ddt = MAX_CMD;
                     } else {
@@ -352,6 +352,7 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
                 if( b < size() ) {
                     markBusy();     // seek to record: BUSY LED + spinning reels
                     tape->seek(BUF_SIZE*b);
+                    noteHead(b, 1);                  // (the media map)
                     sst = DRV_IDLE;
                 } else {
                     sst = DRV_SIZE_ERROR;
@@ -378,12 +379,35 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
     return rtn;
 }
 
+// One block of the medium for a look at it (the media map), the drive's
+// own position kept: through the drive's open file if it has one (it's
+// opened for writing, so it can't be opened twice), else read-only
+bool CDrive::peekBlock(std::uint32_t block, std::uint8_t* out)
+{
+    if( mediaFile_.empty() || ejected_ ) return false;
+    if( tape->ok() ) {
+        const unsigned int pos = tape->tell();
+        tape->seek(block * BUF_SIZE);
+        tape->read(out);
+        tape->seek(pos);
+        return true;
+    }
+    FIL f;
+    if( f_open(&f, lifPath(mediaFile_).c_str(), FA_READ) != FR_OK ) return false;
+    UINT br = 0;
+    const bool ok = f_lseek(&f, static_cast<FSIZE_t>(block) * BUF_SIZE) == FR_OK &&
+                    f_read(&f, out, BUF_SIZE, &br) == FR_OK && br == BUF_SIZE;
+    f_close(&f);
+    return ok;
+}
+
 void CDrive::readblock()
 {
     if( check() ) {
         // Read BUF_SIZE bytes from tape
         LOGF("$$$ Read block ...\r\n");
         markBusy();
+        noteHead(tape->tell() / BUF_SIZE, 2);
         tape->read(buffer[0]);
     }
 }
@@ -393,6 +417,8 @@ void CDrive::writeblock()
         // Write buffer[0] to tape
         LOGF("$$$ Write block ...\r\n");
         markBusy();
+        noteHead(tape->tell() / BUF_SIZE, 3);
+        blocksWritten_ = blocksWritten_ + 1;
         tape->write(buffer[0]);
         // ... and flush!
         // tape.flush();

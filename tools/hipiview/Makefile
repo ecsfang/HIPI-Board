@@ -54,7 +54,7 @@ host_test: test/host_test.cpp lt7683_emu.cpp lt7683_emu.hpp ../../src/LT7683.cpp
 PV_SRC := test/printer_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
           ../../src/plotterview.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
           ../../src/plotter.cpp ../../src/device.cpp ../../src/video80.cpp \
-          ../../src/hwtest.cpp test/hwio_stub.cpp
+          ../../src/hwtest.cpp test/hwio_stub.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp
 printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/plotterview.h
 	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(PV_SRC) -o $@ -lz
 
@@ -83,20 +83,34 @@ RUN_SRC := test/demo_run_test.cpp ../../src/demo.cpp ../../src/display.cpp \
 demo_run_test: $(RUN_SRC) ../../include/demo.h ../../include/demo_content.h $(wildcard test/pvstubs/*.h test/demostubs/*.hpp)
 	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(RUN_SRC) -o $@ -lz
 
-test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test
+# File picker -> Create media...: the dialogs and the LIF image writer
+# (a folder as the SD card) -- saves media_*.png
+MEDIA_SRC := test/media_create_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/media_create_ui.cpp \
+             ../../src/lif_create.cpp ../../src/glyph_font.cpp ../../src/menu_font_title.cpp
+media_create_test: $(MEDIA_SRC) ../../include/media_create_ui.h ../../include/lif_create.h ../../include/menu_frame.h test/pvstubs/ff.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(MEDIA_SRC) -o $@ -lz
+
+# The Media map view, on LIF images made by the test -- saves mediamap_*.png
+MAP_SRC := test/mediamap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp
+mediamap_test: $(MAP_SRC) ../../include/mediamap.h ../../include/lif_create.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(MAP_SRC) -o $@ -lz
+
+test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test
 	./host_test
 	./printer_view_test
 	./video80_view_test
 	./hwtest_view_test
 	./demo_view_test
 	./demo_run_test
+	./media_create_test
+	./mediamap_test
 
 install: hipiview
 	install -m 755 hipiview /usr/local/bin/
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png *_viewer.png *_chip.png printer_view_*.png *.hvlog
+	rm -f hipiview hipiview.exe host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png *_viewer.png *_chip.png printer_view_*.png *.hvlog
 
 .PHONY: test install clean windows
 

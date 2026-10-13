@@ -28,13 +28,10 @@ extern hipi::Config config;      // pico_main.cpp
 #include "loopback_result.h"  // LoopbackResult, for setLoopbackTestCallback()
 #include "hwtest.h"           // System -> Hardware test (its menu: Scan I2C)
 #include "demo.h"             // System -> Demo
-#include "glyph_font.h"       // menu titles in the HP-41 font
-
-// Menu titles in the HP-41 display font (1) or the built-in font (0)
-#ifndef HIPI_MENU_TITLE_HP41FONT
-#define HIPI_MENU_TITLE_HP41FONT 1
-#endif
-namespace hipi { extern const GlyphFont kMenuTitleFont; }   // src/menu_font_title.cpp
+#include "menu_frame.h"       // the menus' box, title in the HP-41 font
+#include "media_create_ui.h"  // File picker -> Create media...
+#include "clock.h"            // ... the date for a new image
+#include "pico/time.h"
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -59,82 +56,7 @@ namespace hipi {
 // of boardui.h here since it already includes this file (uidialog.hpp).
 void boardui_onMenuClosed();
 
-// Shared box position/size/style for the on-screen menu frame. Pulled out
-// to namespace scope so the splash screen (shown before any UiDialog
-// exists) can draw an identical-looking frame without duplicating the
-// yellow/radius/thickness constants.
-namespace MenuFrame {
-    // W widened to fit filenames up to ~32 characters at TextScale (16px/char
-    // at scale 1) plus margins, while still staying clear of the button
-    // strip at x=680.
-    constexpr int X = 60, Y = 80, W = 580, H = 260;
-    constexpr int BorderThickness = 3;
-    constexpr int CornerRadius    = 14;
-
-    // Same yellow/orange as used in buttons.bmp (#E8B800 -> RGB565).
-    // Now that the display runs in genuine 16bpp mode, this renders as the
-    // real, correct color -- no more of the 8bpp "green mod 8" quirk we
-    // had to work around before (see git history / prior conversation).
-    constexpr std::uint16_t Yellow = 0xEDC0;
-
-    // The RA8875 only has one hardware text-scale register, shared by
-    // Screen (HP-41 video emulation) and the menu. Screen can change it
-    // at any time (font-size menu, or an incoming ESC sequence), so the
-    // menu always forces it back to this fixed scale before drawing --
-    // otherwise menu rows would grow/shrink along with the HP-41 font.
-    constexpr std::uint8_t TextScale = 1;
-
-    // Row pitch must fit TextScale's glyph height (16px base * (1+scale)
-    // = 32px at scale 1) with a bit of breathing room.
-    constexpr int RowPitch = 36;
-
-    // The menus' title band, above the rows: the frame starts TitleH
-    // higher than Y (rows still start at Y + 20)
-    constexpr int TitleH = 30;
-    constexpr int MenuTop = Y - TitleH;
-    constexpr int MenuH = H + TitleH;
-
-    // Thick, rounded frame: fill the whole box yellow (rounded corners),
-    // then lay a smaller rounded black rectangle on top, inset by
-    // BorderThickness on each side -> leaves an even yellow border.
-    inline void draw(DisplayDriver* d, int x = X, int y = Y, int w = W, int h = H) {
-        d->txtSize(TextScale);   // force menu's own scale, independent of Screen's
-        // Every menu-style dialog in this project (the main menu itself,
-        // showInfoBox(), showDeviceList() in boardui.cpp) calls
-        // MenuFrame::draw() as its own first step, so putting this here
-        // covers all of them with one call: menus always use the chip's
-        // own built-in CGROM font (a standard, legible typeface), never
-        // the custom hp82163_font.hpp glyphs Screen's own HP-41-emulated
-        // text uses (see Screen.cpp's own selectCustomFont() call) --
-        // matches this project's own "reassert explicitly, don't rely on
-        // whichever mode was last active" convention (see txtSize()
-        // just above, and Screen.cpp's own comment on why).
-        d->selectBuiltinFont();
-        // The four small corners outside the rounded shape show what's
-        // BEHIND the box, so it really looks round (they used to be
-        // filled black). On the 7" panel the box is drawn on the menu
-        // layer, shown as a PIP window on top of the panel: what's behind
-        // is first copied there from the panel (BTE, inside the display
-        // chip) -- otherwise the corners would show stale layer memory. On
-        // the 5" panel the box is drawn straight onto the screen.
-#ifdef DISPLAY_7INCH
-        if (d->canvasAddr() == LT7683::kMenuLayerAddr) {
-            d->copyLayerRegion(0, SCREEN_MAX_X, static_cast<std::int16_t>(x), static_cast<std::int16_t>(y),
-                               LT7683::kMenuLayerAddr, SCREEN_MAX_X, static_cast<std::int16_t>(x),
-                               static_cast<std::int16_t>(y), static_cast<std::uint16_t>(w),
-                               static_cast<std::uint16_t>(h));
-        } else {
-            d->fillRect(x, y, w, h, 0x0000);   // (another layer: no panel picture to show)
-        }
-#endif
-        d->fillRoundRect(x, y, w, h, CornerRadius, Yellow);
-        const int innerRadius = CornerRadius > BorderThickness
-                                     ? CornerRadius - BorderThickness : 0;
-        d->fillRoundRect(x + BorderThickness, y + BorderThickness,
-                         w - 2 * BorderThickness, h - 2 * BorderThickness,
-                         innerRadius, 0x0000);
-    }
-}  // namespace MenuFrame
+// MenuFrame (the menus' box and title band): menu_frame.h
 
 // Note: the splash screen used to live here, but it's board "chrome" (not
 // part of the interactive menu UiDialog implements) and has moved to
@@ -142,7 +64,7 @@ namespace MenuFrame {
 
 class UiDialog {
 public:
-    UiDialog(DisplayDriver* display, Screen& screen) : d_(display), screen_(screen) {}
+    UiDialog(DisplayDriver* display, Screen& screen) : d_(display), screen_(screen), media_(display) {}
 
     // Called with the newly chosen color whenever the user picks one in
     // the "Textcolor" menu (after screen_.setColor() has already applied
@@ -254,7 +176,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        showPip();
 #endif
     }
 
@@ -272,7 +194,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        showPip();
 #endif
     }
 
@@ -294,7 +216,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        showPip();
 #endif
     }
 
@@ -333,7 +255,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        showPip();
 #endif
     }
     bool isShowingWarning() const { return state_ == State::Warning; }
@@ -362,7 +284,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        if (box) d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        if (box) showPip();
 #endif
     }
     void demoHidePicker() {
@@ -371,6 +293,19 @@ public:
 #ifdef DISPLAY_7INCH
         d_->hidePipOverlay();
 #endif
+    }
+
+    // File picker -> Create media...: its dialogs are worked by touch too
+    // (boardui_handleTap()), and write the new file a piece at a time
+    // from the main loop (boardui_poll())
+    bool wantsTouch() const { return state_ == State::CreateMedia; }
+    void handleTap(std::uint16_t x, std::uint16_t y) {
+        if (state_ != State::CreateMedia) return;
+        drawingMenu([&] { mediaAction(media_.tap(x, y)); });
+    }
+    void poll() {
+        if (state_ != State::CreateMedia || !media_.busy()) return;
+        drawingMenu([&] { mediaAction(media_.poll(to_ms_since_boot(get_absolute_time()))); });
     }
 
     bool isShowingLoopbackResult() const { return state_ == State::LoopbackResult; }
@@ -393,7 +328,7 @@ public:
 #ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        showPip();
 #endif
     }
 
@@ -505,6 +440,8 @@ public:
                     plotterview_leaveSignals();
                 } else if (plotterview_output() == DisplayOutput::HwTest && b == Button::X) {
                     plotterview_leaveHwTest();
+                } else if (plotterview_output() == DisplayOutput::MediaMap && b == Button::X) {
+                    plotterview_leaveMediaMap();
                 } else if (plotterview_output() == DisplayOutput::CharTable) {
                     withMainCanvas([] { plotterview_leaveCharTable(); });   // any button closes it
                 } else if (plotterview_output() == DisplayOutput::Video80 && b != Button::Ok) {
@@ -569,7 +506,10 @@ public:
             case State::FilePicker:
                 if (b == Button::Up)   moveFileSelection(-1);
                 if (b == Button::Down) moveFileSelection(+1);
-                if (b == Button::Ok && !files_.empty()) openConfirmFile(files_[selected_]);
+                if (b == Button::Ok && !files_.empty()) {
+                    if (files_[static_cast<std::size_t>(selected_)] == kCreateMediaRow) openCreateMedia();
+                    else openConfirmFile(files_[static_cast<std::size_t>(selected_)]);
+                }
                 if (b == Button::X) {
                     // Opened from the Tape view: back means straight back to it
                     if (pickerFromTape_) close();
@@ -641,6 +581,10 @@ public:
                 if (b == Button::X)    openContextMenu(2);
                 break;
 
+            case State::CreateMedia:
+                mediaAction(media_.button(b));
+                break;
+
             case State::LoopbackConfirm:
                 if (b == Button::Ok) runLoopbackTest();
                 if (b == Button::X)  openSystemMenu();
@@ -689,7 +633,7 @@ public:
                 // just closed the menu (X, or Shift+Ok handled earlier)
                 // -- close() already called hidePipOverlay() itself,
                 // nothing more to do.
-                d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+                showPip();
             } else {
                 // menuOpening() (every menu opening from closed) hides the
                 // hardware blinking cursor before drawing -- restore it
@@ -719,7 +663,8 @@ private:
         Closed, List,                       // List: every menu (see openList())
         FilePicker, ConfirmFile, DeviceList,
         LoopbackConfirm, LoopbackResult, LifInfo, DeviceOrder,
-        AnalyzerLogMenu, Warning
+        AnalyzerLogMenu, Warning,
+        CreateMedia                         // File picker -> Create media... (media_create_ui.h)
     };
 
 
@@ -994,7 +939,7 @@ private:
         // the menu layer while the PIP overlay kept showing whatever
         // was on screen before this button press.
         d_->endOverlayDraw();
-        d_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        showPip();
 #endif
 #if HIPI_DEV_SCREENDUMPS
         devScreendump("Bootsel message");      // last chance -- we reboot next
@@ -1051,6 +996,7 @@ private:
         setMediaEjected(true);              // cassette out while choosing
         files_.clear();
         files_.push_back("");               // first row: "No media" (no file selected)
+        if (!usbMscModeActive()) files_.push_back(kCreateMediaRow);   // then "Create media..."
         DIR dir;
         if (f_opendir(&dir, HIPI_DIR_LIF) == FR_OK) {      // cassettes live in lif/
             FILINFO info;
@@ -1635,6 +1581,8 @@ private:
                 pickerFromTape_ = true;
                 openFilePicker();
             }));
+            if (drv && !drv->mediaFile().empty())
+                m.push_back(item("Media map >", [this] { doAndClose([] { plotterview_showMediaMap(); }); }));
             if (drv) {
                 m.push_back(item("Rewind", [this, drv] { drv->manualRewind(); close(); }));
                 m.push_back(value("Power", [drv] { return std::string(powerName(drv->powerMode())); },
@@ -1689,6 +1637,10 @@ private:
                               [this] { analyzer_setRelativeTime(!analyzer_relativeTime()); refreshItems(); }));
             m.push_back(value("Idle frames", [] { return std::string(analyzer_showIdle() ? "Shown" : "Hidden"); },
                               [this] { analyzer_setShowIdle(!analyzer_showIdle()); refreshItems(); }));
+        } else if (out == DisplayOutput::MediaMap) {
+            title = "MEDIA MAP";
+            m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveMediaMap(); }); }));
+            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::HwTest) {
             title = "HARDWARE TEST";
             m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveHwTest(); }); }));
@@ -1904,6 +1856,10 @@ private:
         // global Shift+Ok "exit entirely" shortcut, which can fire
         // while BrightnessMenu is open and mid-preview, bypassing that
         // X handling entirely.
+        if (state_ == State::CreateMedia) {
+            media_.cancel();                // a half-written image is deleted
+            eraseBigDialog();
+        }
         state_ = State::Closed;
         pickerFromTape_ = false;
         setMediaEjected(false);             // cassette back in (new or old file)
@@ -1942,6 +1898,7 @@ private:
             plotterview_output() == DisplayOutput::Signals ||
             plotterview_output() == DisplayOutput::CharTable ||
             plotterview_output() == DisplayOutput::HwTest ||
+            plotterview_output() == DisplayOutput::MediaMap ||
             plotterview_output() == DisplayOutput::Video80) {
             // Screen stays suspended (it's not what's showing) -- just
             // erase the menu box by redrawing the plot underneath it,
@@ -2004,23 +1961,87 @@ private:
     // The frame, with the menu's title (title_) in its top band -- in the
     // HP-41's display font (HIPI_MENU_TITLE_HP41FONT) or the built-in one
     void drawBox() {
-        using namespace MenuFrame;
-        MenuFrame::draw(d_, X, MenuTop, W, MenuH);
-        d_->fillRect(X + BorderThickness, MenuTop + BorderThickness, W - 2 * BorderThickness,
-                     TitleH - BorderThickness, Yellow);
-        std::string t = title_.empty() ? std::string("HIPI") : title_;
-        for (char& c : t) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-#if HIPI_MENU_TITLE_HP41FONT
-        drawGlyphText(d_, X + 16, MenuTop + (TitleH - kMenuTitleFont.height) / 2 + 1, kMenuTitleFont,
-                      t.c_str(), 0x0000, Yellow);
-        d_->selectBuiltinFont();
-#else
-        d_->txtSize(0);
-        d_->txtColor(0x0000, Yellow);
-        d_->txtSetCursor(X + 16, MenuTop + 8);
-        d_->txtWrite(t.c_str());
+        setPip(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+        MenuFrame::drawTitled(d_, MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH, title_);
+    }
+
+    // The PIP window the menu layer is shown in (7"): the menus' box, or
+    // a bigger dialog's (Create media)
+    int pipX_ = MenuFrame::X, pipY_ = MenuFrame::MenuTop, pipW_ = MenuFrame::W, pipH_ = MenuFrame::MenuH;
+    void setPip(int x, int y, int w, int h) { pipX_ = x; pipY_ = y; pipW_ = w; pipH_ = h; }
+    void showPip() {
+#ifdef DISPLAY_7INCH
+        d_->showPipOverlay(pipX_, pipY_, pipW_, pipH_);
 #endif
-        d_->txtSize(TextScale);
+    }
+
+    // ── File picker -> Create media... (media_create_ui.h) ──────────────
+    // The picker's row for it (a name no file can have)
+    static constexpr const char* kCreateMediaRow = "\x01" "create";
+    static constexpr const char* kCreateMediaLabel = "Create media...";
+
+    void openCreateMedia() {
+        state_ = State::CreateMedia;
+        media_.setDateSource([](LifDate& t) {
+            return clock_dateTime(t.year, t.month, t.day, t.hour, t.minute, t.second);
+        });
+        media_.open();
+        int x, y, w, h;
+        media_.frameRect(x, y, w, h);
+        setPip(x, y, w, h);
+        media_.draw();
+    }
+
+    // What the dialogs said: back to the list, or the new file is the
+    // drive's medium now (like choosing it in the list)
+    void mediaAction(MediaAction a) {
+        if (a == MediaAction::None) return;
+        if (a == MediaAction::Created) {
+            LOGF("\r\n * Created %s/%s", HIPI_DIR_LIF, media_.createdFile().c_str());
+            applyFile(media_.createdFile());
+            if (pickerFromTape_) { close(); return; }
+            eraseBigDialog();
+            openSystemMenu();
+            return;
+        }
+        // Cancel: back to the list, on its Create media... row
+        eraseBigDialog();
+        openFilePicker();
+        for (std::size_t i = 0; i < files_.size(); ++i)
+            if (files_[i] == kCreateMediaRow) { selected_ = static_cast<int>(i); break; }
+        drawFileList();
+    }
+
+    // The 5" panel has no menu layer: the big dialog was drawn on the
+    // screen itself -- what's behind it comes back before a smaller box
+    // is drawn (the 7" panel just shows a smaller PIP window)
+    void eraseBigDialog() {
+#ifndef DISPLAY_7INCH
+        if (viewIsNotText()) plotterview_redraw();
+        else { screen_.resume(); screen_.suspend(); }
+#endif
+    }
+    static bool viewIsNotText() {
+        const DisplayOutput o = plotterview_output();
+        return o == DisplayOutput::Plotter || o == DisplayOutput::Analyzer || o == DisplayOutput::LoopMap ||
+               o == DisplayOutput::Signals || o == DisplayOutput::CharTable || o == DisplayOutput::HwTest ||
+               o == DisplayOutput::MediaMap ||
+               o == DisplayOutput::Video80;
+    }
+
+    // Draws on the menu layer (7") around fn, then shows it -- or, if fn
+    // closed the menu, puts the cursor back (as at the end of handleButton())
+    template <typename F> void drawingMenu(F&& fn) {
+#ifdef DISPLAY_7INCH
+        d_->beginOverlayDraw();
+#endif
+        fn();
+#ifdef DISPLAY_7INCH
+        d_->endOverlayDraw();
+        screen_.reassertRenderState();
+        if (state_ != State::Closed) showPip();
+        else plotterview_refreshCursor();
+#endif
     }
 
     // Clears the full width of one menu row's own slot to the given
@@ -2133,6 +2154,7 @@ private:
 
     DisplayDriver* d_;
     Screen& screen_;
+    MediaCreateUi media_;                 // CreateMedia: the dialogs
     State state_ = State::Closed;
     int selected_ = 0;
     bool lastShifted_ = false;      // Shift state of the last press (auto-repeat)
@@ -2154,6 +2176,7 @@ private:
     // choosing it deselects the drive's file (drive reports no tape).
     static constexpr const char* kNoMediaLabel = "No media";
     const char* fileLabel(std::size_t i) const {
+        if (files_[i] == kCreateMediaRow) return kCreateMediaLabel;
         return files_[i].empty() ? kNoMediaLabel : files_[i].c_str();
     }
     // True while the file picker was opened directly from the Tape view

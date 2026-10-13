@@ -284,7 +284,10 @@ int main(int argc, char** argv) {
         std::vector<std::uint8_t> b(hdr[1] & 0x7FFFFFFFu);
         if (std::fread(b.data(), 1, b.size(), f) != b.size()) break;
         if (hdr[1] & 0x80000000u) continue;
-        link.feed(b.data(), b.size(), hdr[0] / 1000.0, [&](const std::uint8_t* p, std::size_t n) { viewer.feed(p, n); }, nullptr);
+        link.feed(b.data(), b.size(), hdr[0] / 1000.0, [&](const std::uint8_t* p, std::size_t n) {
+            if (p == nullptr) viewer.desync();       // a new session (see Link::feed)
+            else viewer.feed(p, n);
+        }, nullptr);
     }
     std::fclose(f);
 

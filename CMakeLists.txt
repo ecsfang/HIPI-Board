@@ -252,6 +252,9 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/i2c_command.cpp
         src/ili2c.cpp
         src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
+        src/lif_create.cpp          # File picker -> Create media: an empty LIF image
+        src/media_create_ui.cpp     # ... its dialogs (CREATE MEDIA, MEDIA NAME)
+        src/mediamap.cpp            # Tape view -> Media map: the medium as rings
         ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp
         src/demo.cpp
         src/demo_content.cpp

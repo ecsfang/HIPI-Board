@@ -46,6 +46,8 @@ FILES=()
 # Filer som faktiskt flyttades/kopierades in
 COPIED=()
 
+# Indikerar om vi skall flasha Picon eller inte. Sätts till 1 om vi inte vill flasha.
+NO_FLASH=0
 
 # ------------------------------------------------------------
 # Väntetest
@@ -186,6 +188,10 @@ for ARG in "$@"; do
 
         ALL)
             FULL_BUILD=true
+            ;;
+
+        NO-FLASH)
+            NO_FLASH=1
             ;;
 
         *.zip|*.ZIP)
@@ -552,6 +558,13 @@ if [ ! -f "$UF2_FILE" ]; then
 
 fi
 
+# Om vi inte flashar Picon, avsluta här.
+if [ "$NO_FLASH" -eq 1 ]; then
+    echo
+    echo "NO-FLASH: Bygget är klart. Flash-steget hoppas över."
+    echo "UF2-filen finns i: $PROJECT_DIR/build/"
+    exit 0
+fi
 
 # ------------------------------------------------------------
 # Vänta på Pico BOOTSEL

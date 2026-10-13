@@ -330,7 +330,10 @@ public:
         if (c.input) return;                       // a touch here, not HIPI's
         if (!framed_) { emu_.feed(c.data.data(), c.data.size()); return; }
         link_.feed(c.data.data(), c.data.size(), c.ms / 1000.0,
-                   [&](const std::uint8_t* p, std::size_t n) { emu_.feed(p, n); }, nullptr);
+                   [&](const std::uint8_t* p, std::size_t n) {
+                       if (p == nullptr) emu_.desync();     // a new session (see Link::feed)
+                       else emu_.feed(p, n);
+                   }, nullptr);
     }
 private:
     LT7683Emu& emu_;
@@ -470,7 +473,17 @@ private:
                 const unsigned long long rec = link.recovered();
                 Chunk payload{ t, {} };
                 link.feed(buf.data(), static_cast<std::size_t>(n), secs(),
-                          [&](const std::uint8_t* p, std::size_t k) { payload.data.insert(payload.data.end(), p, p + k); },
+                          [&](const std::uint8_t* p, std::size_t k) {
+                              if (p == nullptr) {
+                                  // A new session: what came before goes first, then the
+                                  // emulator forgets any half command (see Link::feed)
+                                  if (!payload.data.empty()) inbox_.push(std::move(payload));
+                                  payload = Chunk{ t, {} };
+                                  inbox_.push(Chunk{ t, {}, true });
+                                  return;
+                              }
+                              payload.data.insert(payload.data.end(), p, p + k);
+                          },
                           send);
                 if (!was && link.inSession()) { std::printf("hipiview: data is coming\n"); std::fflush(stdout); }
                 resends_ += link.recovered() - rec;

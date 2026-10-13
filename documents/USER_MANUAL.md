@@ -400,7 +400,7 @@ OK in a view — that view's menu
 │                    Font size < 0 > · More >
 ├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > ·
 │                    Paper < White > · More >
-├── TAPE TFDRIVE     Select cassette > · Rewind · Power < ON > · Screendump · More >
+├── TAPE TFDRIVE     Select cassette > · Media map > · Rewind · Power < ON > · Screendump · More >
 ├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
 │                    Time < Relative > · Idle frames < Hidden > · More >
 ├── LOOP MAP         Leave view · Screendump · More >
@@ -486,10 +486,47 @@ Use **Select cassette** in the Tape view's menu (OK), or touch the cassette wind
 <a href="images/menu-filelist.png"><img src="images/menu-filelist.png" alt="File list" width="512"></a>
 
 - **No media** at the top means *no cassette in the drive*.
+- **Create media...** (second) makes a new, empty cassette or disk, see below.
 - After choosing a file you get three options:
   **OK** — use it, **X** — back to the list, **▼** — show what's on it.
 - While the file list is open the drive has no cassette in it, just like a real
   drive with the lid open.
+
+### Making a new cassette
+
+**Create media...** in the file list makes a new, empty image in the `lif`
+folder and puts it in the drive — no PC needed.
+
+<a href="images/menu-create-media.png"><img src="images/menu-create-media.png" alt="Create media" width="512"></a>
+
+- **Name** — a free name is filled in (`CASS01`, `CASS02` … for a cassette,
+  `DISK01` … for the others); touch it to type another. `.DAT` is added.
+- **Type** — ◀ ▶: an HP 82161A cassette (128 kB), an HP 9114B disk, or an
+  HDRIVE1 disk of 640 kB, 2, 4, 8 or 16 MB (the medium types of `lifinit`).
+- **Directory** — ◀ ▶: how many files the directory holds. 64 for a cassette,
+  128 for the 9114B and 640 kB disks and 512 for the larger ones to begin
+  with. The controller can format it again later with another size.
+- Below: the size, how much is left for files, and the free space on the SD card.
+- **Create** writes the file (a progress bar for the larger disks — **Cancel**
+  stops it and deletes what was written) and the drive uses it at once.
+  The volume label is the first 6 characters of the name, the date comes
+  from the clock (if there is one and it's set, else it stays empty).
+- Create can't be used while the name is taken (the name turns red) or the
+  SD card is too full — the line above the buttons says why.
+
+With the buttons: ▲/▼ move between Name, Type, Directory and Create, **OK**
+picks (Type and Directory step to the next value), **X** goes back to the list.
+
+**Typing the name**
+
+<a href="images/menu-media-name.png"><img src="images/menu-media-name.png" alt="Media name" width="512"></a>
+
+Upper-case letters, digits, `-` and `_`, at most 24 characters. ← deletes the
+last character, **OK** keeps the name, **Cancel** goes back without it. On the
+button strip: **OK** = OK, **X** = delete the last character (back when the
+name is empty).
+
+While **Connect to PC** has the SD card, the row isn't there.
 
 ### What's on the cassette?
 
@@ -498,6 +535,33 @@ list of files with type and size (in registers, like the HP-41's `DIR`).
 Scroll with ▲/▼ (Shift for a page), **OK** to use the cassette, **X** to go back.
 
 <a href="images/menu-lif-contents.png"><img src="images/menu-lif-contents.png" alt="Cassette contents" width="512"></a>
+
+### Media map
+
+**Media map** in the Tape view's menu (OK) shows the drive's cassette or disk
+as rings, coloured by what is stored where: programs, data, text, status /
+key assignments / write-all, other (ROM, extended memory ...), **deleted**
+files, free space, and the directory with the volume label.
+
+<a href="images/view-mediamap.png"><img src="images/view-mediamap.png" alt="Media map, a cassette" width="512"></a>
+
+- **A cassette** has two rings — its two tracks, track 0 outside. One step
+  around a ring is one record.
+- **A disk** has eight rings, outside in, like the cylinders of a disk. On a
+  large disk a step holds several blocks (20 on a 16 MB disk); it shows the
+  most important thing in them, so even a one-block file is never lost.
+- **The head** is followed live: a white mark across its ring, a marker on the
+  rim (green: read, orange: write, white: seek), and in the middle what the
+  drive does where. After the drive has written something the map is read
+  again.
+- **Deleted** files (PURGE) still take their space until the controller packs
+  the medium (`PACK` on the HP-41) — MEDIUM says how much that would free.
+  New files go after the last one: *free* is the room left there.
+- **Touch a ring** to see that file — its name, type, where it starts and its
+  size — for a few seconds.
+- **X** (on the strip or in the title bar) goes back to the Tape view.
+
+<a href="images/view-mediamap-disk.png"><img src="images/view-mediamap-disk.png" alt="Media map, a 16 MB disk" width="512"></a>
 
 ---
 
@@ -1203,6 +1267,13 @@ bottom says what you're looking at:
 **Any touch stops it**, and so does real HP-IL traffic — the demo is meant
 for showing HIPI, not for use alongside a controller. You're back in the
 view you started from.
+
+**Recording it with hipiview** (Mirror to PC *View* or *Control*): with
+hipiview connected the demo waits for it — while hipiview is still getting
+the whole screen, and before each step until it has caught up — so the
+recording gets every step whole. Pauses and captions keep their length;
+the demo just takes a little longer. Without hipiview it runs at its usual
+pace.
 
 Nothing is saved or changed: the font size, colours and plot settings are
 only changed on the screen and put back, the cassette isn't really

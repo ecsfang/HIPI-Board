@@ -52,6 +52,13 @@ void displayMirror_init(DisplayDriver* display);
 void displayMirror_poll();
 // A PC viewer is connected and being fed
 bool displayMirror_active();
+// How far the viewer is: syncing() while a session is still sending the
+// whole screen (at the start, or after a restart); backlog() the bytes
+// sent but not yet acknowledged. Both false/0 with no viewer. The demo
+// waits on them, so a recording in hipiview gets every step whole.
+bool displayMirror_syncing();
+std::uint32_t displayMirror_backlog();
+
 // The setting (Settings > Screen > Mirror to PC, config display_mirror):
 //   Off      the port stays silent and a running session ends at once
 //            (the default -- feeding a viewer costs the display some speed)

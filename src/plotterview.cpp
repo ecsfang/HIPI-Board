@@ -11,6 +11,7 @@
 #include "clock.h"
 #include "loopmap.h"
 #include "hwtest.h"
+#include "mediamap.h"
 #include "hpil_diag.h"
 #include "chartable.h"
 #include "backlight.h"
@@ -290,6 +291,7 @@ const char* outputName(DisplayOutput mode) {
         case DisplayOutput::Signals:  return "HP-IL SIGNALS";
         case DisplayOutput::CharTable: return "CHARACTERS";
         case DisplayOutput::HwTest:   return "HARDWARE TEST";
+        case DisplayOutput::MediaMap: return "MEDIA MAP";
         case DisplayOutput::Printer:  return "PRINTER";
         case DisplayOutput::Video80:  return "DISPLAY";     // (the HP 92198)
     }
@@ -1275,6 +1277,7 @@ void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter)
     display_ = display;
     screen_ = screen;
     plotter_ = plotter;
+    mediamap_init(display);
     plotter_->setDrawCallback(onPlotterDraw);
     plotter_->setClearCallback(onPlotterClear);
 #ifdef DISPLAY_7INCH
@@ -1427,6 +1430,10 @@ void plotterview_redraw() {
     }
     if (output_ == DisplayOutput::HwTest) {
         hwtest_drawAll();
+        return;
+    }
+    if (output_ == DisplayOutput::MediaMap) {
+        mediamap_drawAll();
         return;
     }
     if (output_ == DisplayOutput::CharTable) {
@@ -1687,6 +1694,30 @@ void plotterview_leaveHwTest() {
     }
 }
 
+// The view to go back to when leaving the media map
+static CDevice* beforeMediaMap_ = nullptr;
+static DisplayOutput beforeMediaMapOutput_ = DisplayOutput::Display;
+
+void plotterview_showMediaMap() {
+    if (output_ == DisplayOutput::MediaMap) return;
+    beforeMediaMap_ = viewDevice_;
+    beforeMediaMapOutput_ = output_;
+    mediamap_enter();
+    switchView(DisplayOutput::MediaMap, nullptr);
+}
+
+void plotterview_leaveMediaMap() {
+    if (output_ != DisplayOutput::MediaMap) return;
+    const DisplayOutput o = beforeMediaMapOutput_;
+    if (o == DisplayOutput::Analyzer || o == DisplayOutput::LoopMap || o == DisplayOutput::Signals) {
+        switchView(o, nullptr);
+    } else if (deviceHasView(beforeMediaMap_)) {
+        switchView(outputFor(beforeMediaMap_->viewKind()), beforeMediaMap_);
+    } else {
+        switchView(displayOutput(), nullptr);
+    }
+}
+
 // The view to go back to when leaving the loop map
 static CDevice* beforeLoopMap_ = nullptr;
 static DisplayOutput beforeLoopMapOutput_ = DisplayOutput::Display;
@@ -1819,6 +1850,8 @@ std::string plotterview_viewTitle(CDevice* dev) {
 bool plotterview_isSplashVisible() { return splashVisible_; }
 
 void plotterview_poll() {
+    if (output_ == DisplayOutput::MediaMap && !plotterview_isSplashVisible())
+        mediamap_poll(to_ms_since_boot(get_absolute_time()));    // the head, a changed directory
     pollPrinterPanel();     // Printer view: switches, POWER light, keys
     pollPaper();            // ... and the paper
     // Status LEDs -- redraw only on change (a single BTE copy each)

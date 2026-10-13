@@ -39,5 +39,8 @@ void clock_drawAll();
 void clock_poll();
 // Current time as text (for the console / log), "" without RTC
 std::string clock_nowText();
+// The date and time, if the clock is there and set (e.g. for a new LIF
+// image's creation date)
+bool clock_dateTime(int& year, int& month, int& day, int& hour, int& minute, int& second);
 
 }  // namespace hipi

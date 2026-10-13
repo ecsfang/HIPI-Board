@@ -19,6 +19,7 @@
 #include "lif_info.hpp"
 #include "sd_paths.h"
 #include "usb_serial.h"
+#include "display_mirror.h"
 #include "ff.h"
 #include "pico/time.h"
 #include <algorithm>
@@ -64,10 +65,26 @@ bool pickerShown_ = false;
 
 // The caption: a yellow band at the bottom, in the menu layer (PIP)
 bool captionShown_ = false;
-absolute_time_t captionUntil_ = nil_time;
+std::uint32_t captionUntil_ = 0;          // (demo time, nowMs())
 absolute_time_t nextActivity_ = nil_time;
 
-std::uint32_t nowMs() { return to_ms_since_boot(get_absolute_time()); }
+// Waiting for hipiview: with a viewer connected, the demo stands still
+// while the mirror sends the whole screen (a session starting or
+// restarting) and, before each step, until the viewer has caught up --
+// so a recording gets every step whole. Its clock stands still too, so
+// every pause and caption keeps its length. No viewer: no waiting.
+constexpr std::uint32_t kCaughtUpBytes = 2048;   // backlog small enough to go on
+constexpr std::uint32_t kMaxSyncWaitMs = 20000;  // waiting for the whole screen at most this long
+constexpr std::uint32_t kMaxCatchUpMs = 3000;    // ... for a backlog (a view that never stops drawing)
+std::uint32_t pausedMs_ = 0;                     // waited so far, in all
+bool waiting_ = false;
+bool gaveUp_ = false;                            // waited the longest: go on until it's caught up
+std::uint32_t waitFrom_ = 0;
+
+std::uint32_t realMs() { return to_ms_since_boot(get_absolute_time()); }
+// The demo's own clock: real time without the waits
+std::uint32_t nowMs() { return (waiting_ ? waitFrom_ : realMs()) - pausedMs_; }
+bool captionDue() { return static_cast<std::int32_t>(nowMs() - captionUntil_) >= 0; }
 
 // ── Captions, flash, end card ───────────────────────────────────────────
 
@@ -96,7 +113,7 @@ void showCaption(const std::string& text, std::uint32_t ms) {
     screen->reassertRenderState();
     d_->showPipOverlay(x, y, w, h);
     captionShown_ = true;
-    captionUntil_ = make_timeout_time_ms(ms);
+    captionUntil_ = nowMs() + ms;
 }
 
 // A white flash over the panel (the screendump, as a camera would)
@@ -108,7 +125,7 @@ void showFlash() {
     screen->reassertRenderState();
     d_->showPipOverlay(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
     captionShown_ = true;
-    captionUntil_ = make_timeout_time_ms(120);
+    captionUntil_ = nowMs() + 120;
 }
 
 // The start-up screen's box: logo, name, version
@@ -120,7 +137,7 @@ void showEndCard() {
     constexpr int w = 400, h = 170;
     d_->showPipOverlay(((SCREEN_MAX_X - w) / 2) & ~3, (SCREEN_MAX_Y - h) / 2, w, h);
     captionShown_ = true;
-    captionUntil_ = make_timeout_time_ms(7000);
+    captionUntil_ = nowMs() + 7000;
 }
 
 // ── Steps ───────────────────────────────────────────────────────────────
@@ -565,6 +582,7 @@ void demo_start() {
     running_ = true;
     stopRequested_ = false;
     round_ = 0;
+    waiting_ = gaveUp_ = false;
     buildScript();
     at_ = 0;
     first_ = true;
@@ -588,11 +606,24 @@ void demo_hpilActivity() {
 void demo_poll() {
     if (!running_) return;
     if (stopRequested_) { demo_stop(); return; }
-    if (captionShown_ && time_reached(captionUntil_)) hideOverlay();
     if (time_reached(nextActivity_)) {                 // no screen saver meanwhile
         nextActivity_ = make_timeout_time_ms(1000);
         backlight_activity();
     }
+    // hipiview behind? Wait (see waiting_)
+    const bool syncing = displayMirror_syncing();
+    const bool behind = syncing || (first_ && displayMirror_backlog() > kCaughtUpBytes);
+    if (!behind) gaveUp_ = false;
+    if (behind && !gaveUp_) {
+        if (!waiting_) { waiting_ = true; waitFrom_ = realMs(); }
+        if (realMs() - waitFrom_ < (syncing ? kMaxSyncWaitMs : kMaxCatchUpMs)) return;
+        gaveUp_ = true;                                // the viewer can't keep up: go on
+    }
+    if (waiting_) {
+        pausedMs_ += realMs() - waitFrom_;
+        waiting_ = false;
+    }
+    if (captionShown_ && captionDue()) hideOverlay();
     if (at_ >= script_.size()) {                       // round again
         ++round_;
         buildScript();

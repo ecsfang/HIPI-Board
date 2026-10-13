@@ -1,0 +1,57 @@
+// mediamap.h -- the Media map view: what's on the drive's cassette or
+// disk, drawn as rings, coloured by what is stored where -- programs,
+// data, text, status/keys, other, deleted (space only PACK gives back),
+// free, the directory and the volume label.
+//
+//   cassette   two rings: its two tracks, outer = track 0, one step per
+//              record (exact)
+//   disk       eight rings, outside in like the cylinders of a disk; a
+//              step is one block or more (a 16 MB disk: 20 blocks) and
+//              shows the most important thing in it, so even a one-block
+//              file is never lost in the picture
+//
+// Built from the LIF directory alone (a file's first block, length and
+// type -- LIF files are contiguous), so it's quick even for a 16 MB disk.
+// The head is followed live (a marker on the rim and across its ring, the
+// operation in the middle); after the drive has written something the
+// directory is read again. A tap on a ring shows that file.
+//
+// Shown as the DisplayOutput::MediaMap view (plotterview_showMediaMap()).
+// The drive is reached through two functions (mediamap_setSource()), so
+// the view can be tried on the PC (tools/hipiview/test/mediamap_test.cpp).
+#pragma once
+#include "display_config.h"
+#include <cstdint>
+#include <functional>
+#include <string>
+
+namespace hipi {
+
+// What the drive is doing
+enum class MediaOp : std::uint8_t { None, Seek, Read, Write };
+struct MediaMapLive {
+    std::string file;            // the medium's file name ("" = none)
+    std::uint32_t head = 0;      // block the last operation was at
+    MediaOp op = MediaOp::None;  // ... and what it was
+    std::uint32_t writes = 0;    // blocks written so far (any change: read the directory again)
+    bool busy = false;           // the drive is busy (its BUSY light)
+};
+// live(info): false if there's no drive. read(block, buf): one 256-byte block.
+void mediamap_setSource(std::function<bool(MediaMapLive&)> live,
+                        std::function<bool(std::uint32_t, std::uint8_t*)> read);
+
+void mediamap_init(DisplayDriver* display);
+// The view opens: reads the medium
+void mediamap_enter();
+void mediamap_drawAll();
+// Main loop: the head, a changed directory, the tapped file's box
+void mediamap_poll(std::uint32_t nowMs);
+// A tap while the view is shown: Close (the title bar's X), Handled, or None
+enum class MediaMapTap { None, Handled, Close };
+MediaMapTap mediamap_tap(int x, int y);
+
+// For the tests: kinds counted (blocks), see mediamap.cpp's Kind
+std::uint32_t mediamap_blocksOf(int kind);
+int mediamap_rings();
+
+}  // namespace hipi

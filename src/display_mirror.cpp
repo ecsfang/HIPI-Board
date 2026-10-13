@@ -418,6 +418,9 @@ void displayMirror_goodbye(std::uint32_t ms) {
 #endif
 }
 
+bool displayMirror_syncing() { return state_ == State::Dump; }
+std::uint32_t displayMirror_backlog() { return state_ == State::Live ? wr_ - acked_ : 0; }
+
 static void pollMirror();
 
 void displayMirror_poll() {
