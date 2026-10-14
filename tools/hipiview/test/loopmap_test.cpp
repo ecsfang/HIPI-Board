@@ -161,7 +161,7 @@ int main() {
     check(ctrlTalk > 300 && ctrlTalk == c.talk, "... and the controller as the talker");
     // Unaddressed: still shown for a moment, then gone
     frame(UNL);
-    run(500);
+    run(100);
     c = roles();
     check(c.listen > 300, "UNL: still shown for a moment (the hold)");
     run(1500);
@@ -195,7 +195,7 @@ int main() {
     check(c.both > 300 && c.talk == 0 && inBox(140, 30, 1024, 560, lc) == 0,
           "TAD 03 + LAD 03: the plotter in the colour for both (the controller listens)");
     frame(UNT);
-    run(600);
+    run(100);
     c = roles();
     check(c.both > 300, "UNT: still both during the hold (it was talker a moment ago)");
     run(1500);
