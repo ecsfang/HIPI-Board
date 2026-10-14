@@ -38,8 +38,8 @@
 #define LED_PIN_4 27   // D8
 #define LED_PIN_5 26   // D7 -- shared with the pixel strip (PIXEL_PIN)
 
-#define HPIL_ACT_LED    LED_PIN_3   // Indicate HP-IL active
-#define HPIL_IDY_LED    LED_PIN_4   // Indicate HP-IL idle
+// ─── LED usage (index 0-4 = LED 1-5) ──────────────────────────────────────────
+#define HPIL_ACT_LED    3   // LED 4 (D8): HP-IL activity, if chosen (hpil_leds)
 
 class PicoPwmBaseException : public std::exception {
    protected:
@@ -86,13 +86,13 @@ class PicoPwm {
 
 
 
-// HP-IL activity on LED 3 (frames) and LED 4 (idle frames), if chosen
-// (LED 1/2 are left for RX/TX or anything else)
-// (config hpil_leds, the Hardware test page): each call keeps the LED lit
-// for a short while, so traffic is visible. enabled = false leaves the
-// two LEDs to TFLEDS (or whatever else is wired there); held = true while
-// the Hardware test page drives the LEDs itself.
-void hpil_led_activity(bool idle);
+// HP-IL activity on LED 4 (D8), if chosen (config hpil_leds, the Hardware
+// test page): call it for every frame received; it flashes the LED for a
+// short while, so traffic is visible (a quiet loop: the LED is off).
+// enabled = false leaves LED 4 to TFLEDS (or whatever else is wired
+// there); held = true while the Hardware test page drives the LEDs itself.
+// LED 1-3 and 5 are never touched by this.
+void hpil_led_activity();
 void hpil_leds_setEnabled(bool on);
 bool hpil_leds_enabled();
 void hpil_leds_hold(bool held);
@@ -520,8 +520,8 @@ private:
 extern CLedDriver ledPower;    // Power indicator
 extern CLedDriver ledStatus;   // Status / activity
 extern CLedDriver ledError;    // Error / alert
-extern CLedDriver ledA;        // General purpose A
-extern CLedDriver ledB;        // General purpose B
+extern CLedDriver ledAct;      // LED 4: HP-IL activity or general purpose
+extern CLedDriver ledB;        // LED 5: general purpose (pin shared with the pixels)
 extern CLedDriver* leds[];
 
 #endif//__LEDS_H__

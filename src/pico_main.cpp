@@ -290,7 +290,7 @@ int main() {
     //alienBegin();
     //alienStartup(2000);
 
-    //ledA.blink(100, 150);
+    //ledAct.blink(100, 150);
     // neoTest() removed -- superseded by the real CHipiPixel device (see
     // ilpixels.h/hipi_init()), which uses the very same PIXEL_PIN/PIXEL_PIO
     // via the global pixelStrip instance (pixels.cpp). That instance is
@@ -321,7 +321,7 @@ int main() {
 
     // (USB is connected late, see tud_connect() before the wait loop)
 
-    ledA.off();
+    ledAct.off();
 
     // PIL status LED is driven live by boardui_poll() (tud_cdc_n_connected(
     // ITF_HPIL)), no manual wiring needed here.
@@ -566,7 +566,7 @@ int main() {
     pixelStrip.setActiveCount(config.pixelCount(), /*notify=*/false);
     pixelStrip.setColorOrder(pixelOrderIndex(config.pixelOrder().c_str()));   // its colour byte order (saved)
     pixels_setFitted(config.pixelsFitted());  // GPIO26: the pixel strip, or LED 5 (saved)
-    hpil_leds_setEnabled(config.hpilLeds());  // HP-IL activity on LED 3/4 (Hardware test page, saved)
+    hpil_leds_setEnabled(config.hpilLeds());  // HP-IL activity on LED 4 (Hardware test page, saved)
     pixelStrip.setCountChangedCallback([](uint32_t n) { config.setPixelCount(static_cast<std::uint8_t>(n)); });
     hipi::displayMirror_setMode(static_cast<hipi::MirrorMode>(config.displayMirror()));   // Settings -> Screen -> Mirror to PC (saved)
     // Mirror to PC < Control >: the mouse and keys in hipiview

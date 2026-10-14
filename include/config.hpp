@@ -201,7 +201,7 @@ public:
     bool v80Forty() const { return v80Forty_; }
     void setV80Forty(bool f) { v80Forty_ = f; save(); }
 
-    // Hardware test page: HP-IL activity on LED 3/4 (else they're free
+    // Hardware test page: HP-IL activity on LED 4 (else it's free
     // for TFLEDS), and whether the LEDs / pixels are fitted (for now only
     // used by the test page)
     bool hpilLeds() const { return hpilLeds_; }

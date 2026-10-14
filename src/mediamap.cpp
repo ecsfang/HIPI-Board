@@ -164,6 +164,7 @@ bool headShown_ = false;
 std::uint32_t lastWrites_ = 0;
 bool reloadPending_ = false;
 std::uint32_t writesSeenAt_ = 0;
+std::uint32_t nextRetry_ = 0;      // not LIF: when to look again
 std::uint32_t nextPoll_ = 0;
 // The tapped file's box (instead of MEDIUM) until fileUntil_
 int fileShown_ = -1;                    // index in model_.ext, -2 = free space
@@ -548,12 +549,26 @@ void mediamap_poll(std::uint32_t nowMs) {
         mediamap_drawAll();
         return;
     }
-    if (!model_.ok) return;
     // Written to: the directory again once the drive is quiet
     if (l.writes != lastWrites_) {
         lastWrites_ = l.writes;
         reloadPending_ = true;
         writesSeenAt_ = nowMs;
+    }
+    if (!model_.ok) {
+        // Not readable as LIF (yet): while the medium is being formatted
+        // the header comes and goes. Read again once the drive has written
+        // and is quiet, and now and then anyway (a block or two, cheap) --
+        // the map appears as soon as the medium is LIF again.
+        if (!have || file_.empty() || l.busy) return;
+        const bool written = reloadPending_ && nowMs - writesSeenAt_ > 600;
+        if (!written && static_cast<std::int32_t>(nowMs - nextRetry_) < 0) return;
+        nextRetry_ = nowMs + 2000;
+        const std::string before = model_.error;
+        load();
+        shown_ = l;
+        if (model_.ok || model_.error != before) mediamap_drawAll();
+        return;
     }
     if (reloadPending_ && !l.busy && nowMs - writesSeenAt_ > 600) {
         // Only the rings that changed are drawn again (over themselves:

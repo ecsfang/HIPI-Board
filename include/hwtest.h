@@ -1,7 +1,7 @@
 // hwtest.h -- System -> Hardware test: a page to try out what's connected.
 //
-//   LEDS    "Fitted" (are they there?), "HP-IL on LED 3+4" (traffic shown
-//           on LED 3/4, or the two left free for TFLEDS), a button per
+//   LEDS    "Fitted" (are they there?), "HP-IL on LED 4" (traffic shown
+//           on LED 4, or it's left free for TFLEDS), a button per
 //           LED 1-5, Chase (a light running 1 -> 5) and Off.
 //   PIXELS  "Fitted", the number connected (1-16, = TFPIXEL's pixel
 //           count), the pixels mirrored on the screen, Run (one pixel

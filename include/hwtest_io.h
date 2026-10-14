@@ -29,7 +29,7 @@ void setPixelCount(int n);
 int pixelOrder();
 void setPixelOrder(int order);
 
-// HP-IL activity on LED 3/4 (hpil_leds, saved)
+// HP-IL activity on LED 4 (hpil_leds, saved)
 bool hpilLeds();
 void setHpilLeds(bool on);
 

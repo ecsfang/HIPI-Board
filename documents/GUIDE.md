@@ -511,7 +511,10 @@ most important kind in it (`kPriority`). Arcs are drawn as triangles
 (`fillArc()`). The drive is reached through `mediamap_setSource()`
 (pico_main.cpp): `CDrive::headBlock()/lastOp()/blocksWritten()` and
 `CDrive::peekBlock()`, which reads through the drive's own open file and
-puts its position back (FatFs locks a file open for writing). PC test:
+puts its position back (FatFs locks a file open for writing). A medium
+that isn't LIF (yet -- being formatted) is read again once the drive has
+written and is quiet, and every 2 s anyway (`nextRetry_`), so the map comes
+back without leaving the view. PC test:
 `tools/hipiview/test/mediamap_test.cpp`.
 
 **Create media.** The file picker's second row opens `State::CreateMedia`:
@@ -690,7 +693,7 @@ Main menu
   unchanged. A progress bar is shown; the result is either
   *Loopback OK!* or the first failing frame. Touch anywhere to continue.
 - **Hardware test** — a page to try the LEDs (each one, a chase, HP-IL
-  activity on LED 3/4 on or off), the colour pixels (count, a running light,
+  activity on LED 4 on or off), the colour pixels (count, a running light,
   solid colours) and the I2C bus (what answers, what it is, whether it
   works; **Scan I2C** shows the i2cdetect grid). See *Hardware test page*
   below.
@@ -936,14 +939,14 @@ go to `hwtest_tap()` (boardui.cpp), `hwtest_poll()` runs the LED chase
 
 The hardware is behind `hwtest_io.h` (firmware: `hwtest_io.cpp`; PC test:
 `tools/hipiview/test/hwio_stub.cpp`). `hwio::begin()` holds the HP-IL
-activity LEDs (`hpil_leds_hold()`), switches the LEDs off and stops
+activity LED (`hpil_leds_hold()`), switches the LEDs off and stops
 `TFPIXEL`'s effects; `hwio::end()` switches everything off again. The
 pixel count is `pixelStrip.setActiveCount()` -- TFPIXEL's saved
 `pixel_count`. HP-IL activity (`hpil_led_activity()`, leds.cpp) flashes
-LED 3 for 30 ms per frame (restarted at most every 10 ms) and keeps LED 4
-lit while no frames come, through the PWM LED drivers -- the old
-`led_on(gpio)` did nothing on those pins since they are PWM outputs.
-`hpil_leds=0` leaves them alone.
+LED 4 (D8, `HPIL_ACT_LED`) for 30 ms per frame (restarted at most every
+10 ms) through the PWM LED drivers -- the old `led_on(gpio)` did nothing
+on those pins since they are PWM outputs. A quiet loop leaves it dark
+(there is no idle LED any more). `hpil_leds=0` leaves it alone.
 
 The I2C list is `i2c_identify()` (`i2c_ident.h`/`.cpp`): every address
 0x08-0x77 is probed with a one-byte read (3 ms timeout), then each one that

@@ -145,34 +145,35 @@ uint8_t PicoPwm::getChannel() { return this->channel; }
 CLedDriver ledPower (LED_PINS[0]);   // Power indicator
 CLedDriver ledStatus(LED_PINS[1]);   // Status / activity
 CLedDriver ledError (LED_PINS[2]);   // Error / alert
-CLedDriver ledA     (LED_PINS[3]);   // General purpose A
-CLedDriver ledB     (LED_PINS[4]);   // General purpose B
+CLedDriver ledAct   (LED_PINS[3]);   // LED 4 (D8): HP-IL activity or general purpose
+CLedDriver ledB     (LED_PINS[4]);   // LED 5 (D7): general purpose, or the NeoPixels' data line
 
-CLedDriver* leds[] = { &ledPower, &ledStatus, &ledError, &ledA, &ledB };
+CLedDriver* leds[] = { &ledPower, &ledStatus, &ledError, &ledAct, &ledB };
 CLedParser  parser(leds, 5);
 
-// ─── HP-IL activity LEDs (see leds.h) ─────────────────────────────────────
+// ─── HP-IL activity LED (see leds.h) ──────────────────────────────────────
 namespace {
 bool hpilLedsOn_ = true;
 bool hpilLedsHeld_ = false;
-std::uint64_t hpilLastUs_[2] = { 0, 0 };
+std::uint64_t hpilLastUs_ = 0;
 constexpr std::uint32_t kHpilLitMs = 30;    // lit this long after a frame
 }  // namespace
 
-void hpil_led_activity(bool idle) {
+void hpil_led_activity() {
     if (!hpilLedsOn_ || hpilLedsHeld_) return;
     // At most one (re)start every 10 ms: a frame costs only a time read
     const std::uint64_t now = time_us_64();
-    std::uint64_t& last = hpilLastUs_[idle ? 1 : 0];
-    if (now - last < 10000) return;
-    last = now;
-    leds[idle ? 3 : 2]->blink(kHpilLitMs, 1, 1);   // LED 3: a frame, LED 4: quiet -- one flash, then off
+    if (now - hpilLastUs_ < 10000) return;
+    hpilLastUs_ = now;
+    leds[HPIL_ACT_LED]->blink(kHpilLitMs, 1, 1);   // indicate a frame
 }
 
 void hpil_leds_setEnabled(bool on) {
     if (on == hpilLedsOn_) return;
     hpilLedsOn_ = on;
-    if (!on && !hpilLedsHeld_) { leds[2]->off(); leds[3]->off(); }
+    if (!on && !hpilLedsHeld_) {
+        leds[HPIL_ACT_LED]->off();
+    }
 }
 
 bool hpil_leds_enabled() { return hpilLedsOn_; }
@@ -209,12 +210,12 @@ void ledTest() {
 
     // ── Example 4: Fade in on boot ───────────────────────────────────────────
 
-    ledA.fadeOn(1000);              // starts from current brightness (0) → 100%
+    ledAct.fadeOn(1000);              // starts from current brightness (0) → 100%
 
-    while (!ledA.isIdle())
+    while (!ledAct.isIdle())
         tight_loop_contents();
 
-    // ledA is now steady at 100%
+    // ledAct is now steady at 100%
 
 
     // ── Example 5: Fade to a level, then slow pulse ───────────────────────────
@@ -228,27 +229,27 @@ void ledTest() {
     ledB.blink(50, 950);            // brief flash once per second at 60%
 
 
-    // ── Example 6: Chained sequence on ledA ──────────────────────────────────
+    // ── Example 6: Chained sequence on ledAct ────────────────────────────────
     //
-    //  FIX: use ledA (currently steady on) — not ledStatus which is already
-    //  in use. ledA is IDLE at 100% so fadeOn goes 100→100 (instant hold),
+    //  FIX: use ledAct (currently steady on) — not ledStatus which is already
+    //  in use. ledAct is IDLE at 100% so fadeOn goes 100→100 (instant hold),
     //  so we explicitly fade off first to make the sequence visible.
     //
     //  Sequence: fade out → blink 4 times → fade back in
 
     enum class Seq { FADE_OUT, BLINK, FADE_IN, DONE } seq = Seq::FADE_OUT;
 
-    ledA.fadeOff(600);              // start: fade from 100% → 0
+    ledAct.fadeOff(600);              // start: fade from 100% → 0
 
     while (seq != Seq::DONE) {
-        if (ledA.isIdle()) {
+        if (ledAct.isIdle()) {
             switch (seq) {
                 case Seq::FADE_OUT:
-                    ledA.blink(150, 150, 4);
+                    ledAct.blink(150, 150, 4);
                     seq = Seq::BLINK;
                     break;
                 case Seq::BLINK:
-                    ledA.fadeOn(800);
+                    ledAct.fadeOn(800);
                     seq = Seq::FADE_IN;
                     break;
                 case Seq::FADE_IN:
@@ -260,7 +261,7 @@ void ledTest() {
         tight_loop_contents();
     }
 
-    // ledA is back on at 100%, sequence complete
+    // ledAct is back on at 100%, sequence complete
 
 
     // ── Main loop ─────────────────────────────────────────────────────────────

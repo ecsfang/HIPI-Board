@@ -21,7 +21,8 @@ DisplayDriver* d_ = nullptr;
 // ── Look (as the loop map) ──────────────────────────────────────────────
 constexpr std::uint16_t kYellow = 0xEDC0, kBlack = 0x0000, kWhite = 0xFFFF;
 constexpr std::uint16_t kGrey = 0x7BEF, kDark = 0x39C7, kCard = 0x10A2;
-constexpr std::uint16_t kOrange = 0xF4A5, kGreen = 0x07E0, kRed = 0xF800;
+constexpr std::uint16_t kGreen = 0x07E0, kRed = 0xF800;
+constexpr std::uint16_t kMagenta = 0xF81F;   // "fault": apart from red (missing) and yellow (probably)
 constexpr std::uint16_t kFileInk = 0x632C;   // the file column: there, but quieter than the rest
 
 // The page: three cards (yellow frames with a tab, as the boot screen):
@@ -181,7 +182,7 @@ std::string label(Id id) {
     switch (id) {
         case Id::LedFitted: return hwio::ledsFitted() ? "Fitted: YES" : "Fitted: NO";
         case Id::PixFitted: return hwio::pixelsFitted() ? "Fitted: YES" : "Fitted: NO";
-        case Id::HpilLeds:  return hwio::hpilLeds() ? "HP-IL on LED 3+4: ON" : "HP-IL on LED 3+4: OFF";
+        case Id::HpilLeds:  return hwio::hpilLeds() ? "HP-IL on LED 4: ON" : "HP-IL on LED 4: OFF";
         case Id::Chase:     return "Chase";
         case Id::LedOff:
         case Id::PixOff:    return "Off";
@@ -322,7 +323,7 @@ void drawHint() {
 std::uint16_t stateColour(I2cState s) {
     switch (s) {
         case I2cState::Ok:       return kGreen;
-        case I2cState::Fault:    return kOrange;
+        case I2cState::Fault:    return kMagenta;
         case I2cState::Probable: return kYellow;
         case I2cState::Missing:  return kRed;
         default:                 return kGrey;

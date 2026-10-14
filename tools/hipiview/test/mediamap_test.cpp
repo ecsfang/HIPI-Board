@@ -232,6 +232,44 @@ int main() {
     for (int k = 0; k < 9; ++k) sum += hipi::mediamap_blocksOf(k);
     check(sum == 64000, "every block counted once (64000)");
 
+    // Formatting: the header is gone for a while (not LIF), then back
+    {
+        auto ringsDrawn = [] {                           // the outer ring, around it
+            const int cx = 20 + 275, cy = 26 + 14 + 275;
+            int n = 0;
+            for (int k = 0; k < 36; ++k) {
+                const double a = k * M_PI / 18;
+                if (at(static_cast<int>(cx + 262 * std::cos(a)), static_cast<int>(cy + 262 * std::sin(a))) != 0) ++n;
+            }
+            return n > 30;
+        };
+        check(ringsDrawn(), "the rings are drawn");
+        const std::vector<std::uint8_t> good = image;
+        std::memset(image.data(), 0, 512);
+        drive.op = hipi::MediaOp::Write; drive.writes += 1; drive.busy = true;
+        run(300);
+        drive.busy = false;
+        run(1000);
+        check(!ringsDrawn(), "formatting: not LIF for a while");
+        bool msg = false;
+        for (int x = 300; x < 724 && !msg; ++x) for (int y = 270; y < 310 && !msg; ++y) msg = at(x, y) == 0xFFFFFF;
+        check(msg, "... and that's what it says");
+        // The header written again
+        image = good;
+        drive.writes += 1; drive.busy = true;
+        run(300);
+        drive.busy = false;
+        run(1000);
+        check(ringsDrawn(), "formatted: the map is back at once (without leaving the view)");
+        // Not LIF and nothing written: looked at again anyway, now and then
+        std::memset(image.data(), 0, 512);
+        drive.writes += 1;
+        run(1000);
+        image = good;
+        run(2500);
+        check(ringsDrawn(), "LIF again without a write seen: back within a few seconds");
+    }
+
     // No medium
     drive.file = "";
     run(300);

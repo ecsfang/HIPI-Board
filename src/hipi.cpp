@@ -590,7 +590,7 @@ IL_CMD_t hipi_simFrame(IL_CMD_t frame) {
 static bool conLoop(HpIlLoop& loop) {
     uint32_t rx;
     if (loop.receiveFrame(rx)) {
-        hpil_led_activity(false);   // HP-IL activity LED (if chosen, leds.h)
+        hpil_led_activity();        // HP-IL activity on LED 4 (if chosen, leds.h)
         if (!conInFlight) {
             // Nothing of ours is out there: someone else controls the loop
             conWarn("Another controller is on the loop.", "Only one may control it (PC or HP-41).");
@@ -613,7 +613,7 @@ static bool conLoop(HpIlLoop& loop) {
     }
     const IL_CMD_t f = pilbox->conFromPc();
     if (f != NO_FRAME) {
-        hpil_led_activity(false);   // HP-IL activity LED (if chosen, leds.h)
+        hpil_led_activity();        // HP-IL activity on LED 4 (if chosen, leds.h)
         conInject(loop, f, 0);
         return true;
     }
@@ -636,7 +636,7 @@ bool hipi_loop(HpIlLoop& loop) {
     // Check if any HP-IL frame from the PIO interface is available
     if( loop.receiveFrame(rx_frame) ) {
         // Turn on HPIL-active led
-        hpil_led_activity(false);   // HP-IL activity LED (if chosen, leds.h)
+        hpil_led_activity();        // HP-IL activity on LED 4 (if chosen, leds.h)
         // Real traffic: the demo stops (demo.h)
         if (!IS_IDLE(static_cast<IL_CMD_t>(rx_frame))) hipi::demo_hpilActivity();
         // Got a frame, send to all devices in the loop
@@ -692,7 +692,6 @@ bool hipi_loop(HpIlLoop& loop) {
             pilbox->idle();
         return true;    // Handled a frame
     } else {
-        hpil_led_activity(true);    // HP-IL idle LED: lit while no frames come (leds.h)
         // No frame received, call idle() on all enabled devices
         for (CDevice* dev : devices) {
             if (dev->enabled())

@@ -593,6 +593,9 @@ files, free space, and the directory with the volume label.
   rim (green: read, orange: write, white: seek), and in the middle what the
   drive does where. After the drive has written something the map is read
   again.
+- **Formatting** the medium (`NEWM` on the HP-41) shows *Not a LIF volume*
+  for a moment while the header is being written; the map comes back by
+  itself as soon as the medium is LIF again.
 - **Deleted** files (PURGE) still take their space until the controller packs
   the medium (`PACK` on the HP-41) — MEDIUM says how much that would free.
   New files go after the last one: *free* is the room left there.
@@ -660,6 +663,10 @@ what to do; several commands can be separated by spaces.
 LED 5 (D7) shares its pin (GPIO26) with the colour pixels' data line, so it
 only works when no pixels are fitted (**Hardware test → PIXELS → Fitted:
 NO**); with pixels fitted, commands for LED 5 do nothing.
+
+LED 4 (D8) flashes with HP-IL traffic as long as **Hardware test → HP-IL on
+LED 4** is *ON* (the default), so whatever `TFLEDS` does with LED 4 is soon
+overwritten; switch it *OFF* to use LED 4 from the HP-41.
 
 | Send | Means |
 |------|-------|
@@ -1202,9 +1209,10 @@ LEDs and pixels itself — what the HP-41 had set on them is switched off
 **LEDS**
 
 - **Fitted** — are the LEDs there? With *NO* the LED buttons do nothing.
-- **HP-IL on LED 3+4** — *ON*: LED 3 flickers with HP-IL traffic and LED 4
-  is lit while the loop is quiet. *OFF*: the two are free, for `TFLEDS` or
-  whatever else you wire to those pins. Remembered.
+- **HP-IL on LED 4** — *ON*: LED 4 (D8) flickers with HP-IL traffic and is
+  dark while the loop is quiet. *OFF*: LED 4 is free, for `TFLEDS` or
+  whatever else you wire to that pin. Remembered. LED 1–3 and 5 are never
+  used for HP-IL activity.
 - **1** – **5** switch each LED on and off. **Chase** runs a light from 1
   to 5 over and over; **Off** switches them all off. LED 5 shares its pin
   with the pixels: while **PIXELS → Fitted** is *YES* its button is greyed
@@ -1245,7 +1253,7 @@ all. For the chips HIPI knows, it says what it is and checks it:
 | Dot | Means |
 |-----|-------|
 | green **OK** | Identified (its ID or a sensible reading), working — e.g. the clock's time and temperature, the BMP280's temperature and pressure |
-| orange **fault** | Identified, but something's wrong — e.g. the clock has stopped or lost the time (battery?) |
+| magenta **fault** | Identified, but something's wrong — e.g. the clock has stopped or lost the time (battery?) |
 | yellow **probably** | Answers on an address that chip uses, but it has no ID to check |
 | grey **answers** | Something answers; HIPI doesn't know what |
 | red **missing** | Should be there (the touch panel), doesn't answer |
@@ -1362,7 +1370,7 @@ value.
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
 | `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
-| `hpil_leds` | `0` / `1` | `1` | HP-IL traffic on LED 3 and 4 (**Hardware test → HP-IL on LED 3+4**). `0` leaves them to `TFLEDS`. |
+| `hpil_leds` | `0` / `1` | `1` | HP-IL traffic on LED 4 (**Hardware test → HP-IL on LED 4**). `0` leaves it to `TFLEDS`. |
 | `leds_fitted` | `0` / `1` | `1` | **Hardware test**: the LEDs are fitted. (Only the test page uses it, for now.) |
 | `pixels_fitted` | `0` / `1` | `1` | **Hardware test**: colour pixels are connected. GPIO26 drives the pixels with `1`, LED 5 with `0`. |
 | `pixel_count` | `1`–`32` | `5` | `TFPIXEL`: how many colour pixels are connected — set by the HP-41 with `0N<n>` (see [8.3](#83-colour-pixels--tfpixel)). |

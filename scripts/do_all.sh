@@ -168,6 +168,7 @@ list_similar_files() {
 # Kända parametrar:
 #   5 | 7          panelval
 #   ALL            komplett build
+#   NF | NO-FLASH  flasha inte om
 #   *.zip          projektarkiv
 #   *.cpp          C++-fil
 #   *.h            header
@@ -190,7 +191,7 @@ for ARG in "$@"; do
             FULL_BUILD=true
             ;;
 
-        NO-FLASH)
+        NO-FLASH|NF)
             NO_FLASH=1
             ;;
 
