@@ -4,11 +4,13 @@
 //   the display (HP 82163): a program listing, cursor addressing, inverse
 //   video, the font sizes and colours -- then the same display as an
 //   HP 92198 (80 and 40 columns, Roman-8); the cassette drive: the lid
-//   opens, a cassette is picked, the reels turn, and DIR shows what's on
-//   it; the plotter: the HIPI logo, a spirograph (with a screendump), a
-//   function plot and an HP-IL loop drawing; the printer; a made-up HP-41
-//   session in the analyzer, the loop map and the HP-IL signals; the LEDs
-//   and pixels; a screen saver between the rounds.
+//   opens, a cassette is picked, the reels turn, DIR shows what's on it
+//   and the media map where it lies; the plotter: the HIPI logo, a
+//   spirograph (with a screendump), a function plot and an HP-IL loop
+//   drawing; the printer (its paper pulled up and torn off); a made-up
+//   HP-41 session in the analyzer, the loop map and the HP-IL signals (the
+//   example, without traffic); the clock if the RTC is there and set; the
+//   LEDs and pixels; a screen saver between the rounds.
 //
 // Nothing is saved or changed: settings are only changed on the screen
 // and put back, the cassette isn't really chosen, the devices' loop

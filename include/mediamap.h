@@ -40,6 +40,12 @@ struct MediaMapLive {
 void mediamap_setSource(std::function<bool(MediaMapLive&)> live,
                         std::function<bool(std::uint32_t, std::uint8_t*)> read);
 
+// The demo (demo.h) shows a cassette that isn't really in the drive: its
+// own source meanwhile, then the drive's again
+void mediamap_setDemoSource(std::function<bool(MediaMapLive&)> live,
+                            std::function<bool(std::uint32_t, std::uint8_t*)> read);
+void mediamap_clearDemoSource();
+
 void mediamap_init(DisplayDriver* display);
 // The view opens: reads the medium
 void mediamap_enter();

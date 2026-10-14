@@ -271,6 +271,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/chartable.cpp
         src/chartable_font.cpp      # generated, see scripts/ttf_to_glyphs.py
         src/hpil_diag.cpp
+        src/hpil_signals.cpp        # the signals view drawing (and its example)
         src/backlight.cpp
         src/clock.cpp
         src/rtc.cpp

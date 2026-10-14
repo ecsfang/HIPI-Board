@@ -1601,6 +1601,7 @@ static void switchView(DisplayOutput mode, CDevice* dev, bool splash);
 
 void plotterview_showView(DisplayOutput mode, CDevice* dev) {
     if (mode == DisplayOutput::HwTest) hwtest_enter();
+    if (mode == DisplayOutput::MediaMap) mediamap_enter();
     switchView(mode, dev, false);
 }
 

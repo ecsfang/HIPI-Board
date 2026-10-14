@@ -17,6 +17,7 @@
 #include "backlight.h"
 #include "config.hpp"
 #include "lif_info.hpp"
+#include "mediamap.h"
 #include "sd_paths.h"
 #include "usb_serial.h"
 #include "display_mirror.h"
@@ -293,6 +294,77 @@ Step dir() {
     };
 }
 
+// ── The media map of the picked cassette ────────────────────────────────
+// It isn't really in the drive: the map gets its own source meanwhile --
+// the cassette's file, and a head that reads the directory and then runs
+// along the whole tape
+
+bool demoMap_ = false;
+
+Step mediaMap(std::uint32_t ms) {
+    return [ms, until = std::uint32_t(0), captioned = false](bool first) mutable {
+        if (first) {
+            captioned = false;
+            const std::string file = pickTo_ > 0 && pickTo_ < static_cast<int>(files_.size())
+                                         ? files_[static_cast<std::size_t>(pickTo_)] : std::string();
+            if (file.empty()) return true;                // (no medium picked: nothing to map)
+            const std::string path = CDrive::lifPath(file);
+            std::uint32_t blocks = 0;
+            FIL f;
+            if (f_open(&f, path.c_str(), FA_READ) == FR_OK) {
+                blocks = static_cast<std::uint32_t>(f_size(&f) / 256);
+                f_close(&f);
+            }
+            const std::uint32_t t0 = nowMs();
+            mediamap_setDemoSource(
+                [file, blocks, t0, ms](MediaMapLive& l) {
+                    const std::uint32_t t = nowMs() - t0;
+                    l.file = file;
+                    l.op = MediaOp::Read;
+                    l.writes = 0;
+                    l.busy = false;
+                    if (t < 1500 || blocks < 4) l.head = 2 + t / 300;        // the directory first
+                    else l.head = std::min(blocks - 1, 2 + static_cast<std::uint32_t>(
+                                               static_cast<std::uint64_t>(t - 1500) * blocks / std::max<std::uint32_t>(ms - 2000, 1)));
+                    return true;
+                },
+                [path](std::uint32_t blk, std::uint8_t* b) {
+                    FIL f;
+                    if (f_open(&f, path.c_str(), FA_READ) != FR_OK) return false;
+                    UINT br = 0;
+                    const bool ok = f_lseek(&f, static_cast<FSIZE_t>(blk) * 256) == FR_OK &&
+                                    f_read(&f, b, 256, &br) == FR_OK && br == 256;
+                    f_close(&f);
+                    return ok;
+                });
+            demoMap_ = true;
+            plotterview_showView(DisplayOutput::MediaMap, nullptr);   // (no name box: the caption)
+            until = nowMs() + ms;
+            return false;
+        }
+        if (!captioned) {                                 // (once the view is up)
+            showCaption("MEDIA MAP - WHAT'S WHERE ON THE MEDIUM", 3500);
+            captioned = true;
+        }
+        if (static_cast<std::int32_t>(nowMs() - until) < 0) return false;
+        mediamap_clearDemoSource();
+        demoMap_ = false;
+        return true;
+    };
+}
+
+// ── The printer's paper: pulled up to the tear-off edge, then torn off ──
+
+Step paperPullUp() {
+    return [n = 0, next = std::uint32_t(0)](bool first) mutable {
+        if (first) { n = 0; next = nowMs(); }
+        if (static_cast<std::int32_t>(nowMs() - next) < 0) return false;
+        next = nowMs() + 250;
+        if (n < 4) { plotterview_paperScrollBy(-1); ++n; return false; }   // (stops at the edge)
+        return true;
+    };
+}
+
 // ── A made-up HP-41 session (analyzer, loop map) ────────────────────────
 // Through HIPI's own devices (hipi_simFrame()), one frame every 30 ms:
 // auto-addressing, each device asked for its accessory and device ID,
@@ -454,6 +526,7 @@ void buildScript() {
         add(caption("DIR - WHAT'S ON THE CASSETTE", 3000));
         add(dir());
         add(wait(5000));
+        add(mediaMap(8000));
     }
 
     // ── The plotter ─────────────────────────────────────────────────
@@ -485,7 +558,14 @@ void buildScript() {
         add(caption("HP 82162A THERMAL PRINTER", 2500));
         add(wait(1500));
         add(print(900));
-        add(wait(2000));
+        add(wait(1500));
+        add(caption("PULL THE PAPER UP TO THE TEAR-OFF EDGE", 2500));
+        add(paperPullUp());
+        add(wait(1500));
+        add(caption("TEAR IT OFF - .BMP + .TXT  (NOT IN THE DEMO)", 3000));
+        add(wait(1200));
+        add(call([] { plotterview_tearOff(1); }));
+        add(wait(2500));
     }
 
     // ── HP-IL: analyzer, loop map, signals ──────────────────────────
@@ -500,8 +580,18 @@ void buildScript() {
     add(wait(6000));
 #endif
     add(view(DisplayOutput::Signals, nullptr));
-    add(caption("HP-IL SIGNALS - LIVE FROM THE CABLE", 3000));
-    add(wait(5000));
+    add(caption("HP-IL SIGNALS - LIKE AN OSCILLOSCOPE", 3000));
+    add(wait(6000));
+
+    // ── The clock (if the real-time clock is there and set) ─────────
+    if (clock_available()) {
+        add(call([] {
+            clock_setShow(SaverShow::Clock, config.clockStyle() == 1);
+            plotterview_showClock();
+        }));
+        add(caption("THE CLOCK - FROM THE REAL-TIME CLOCK", 3000));
+        add(wait(6000));
+    }
 
     // ── The end: name, lights, a screen saver ───────────────────────
     add(call([] { plotterview_clearPlotter(); plotterview_setPaperBlack(true); }));
@@ -511,11 +601,8 @@ void buildScript() {
     add(lightShow(6500));
     add(call([] { hideOverlay(); }));
     add(call([] {
-        // Rain, goose or the clock (if there is one), in turn
-        const int kinds = clock_available() ? 3 : 2;
-        const int k = round_ % kinds;
-        clock_setShow(k == 0 ? SaverShow::Goose : k == 1 ? SaverShow::Rain : SaverShow::Clock,
-                      config.clockStyle() == 1);
+        // Goose or rain, in turn (the clock had its own turn)
+        clock_setShow(round_ % 2 == 0 ? SaverShow::Goose : SaverShow::Rain, config.clockStyle() == 1);
         plotterview_showClock();
     }));
     add(wait(9000));
@@ -530,6 +617,7 @@ void restore() {
     hideOverlay();
     if (lights_) { hwio::end(); lights_ = false; }
     plotterview_setDemoTape(false);
+    if (demoMap_) { mediamap_clearDemoSource(); demoMap_ = false; }
     if (tapeShown_) {
         CDrive* drv = plotterview_drive();
         plotterview_setTapeFile(drv != nullptr ? drv->mediaFile() : std::string());

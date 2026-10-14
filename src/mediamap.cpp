@@ -141,8 +141,11 @@ Model readModel(const std::function<bool(std::uint32_t, std::uint8_t*)>& read) {
 // ── State ───────────────────────────────────────────────────────────────
 
 DisplayDriver* d_ = nullptr;
-std::function<bool(MediaMapLive&)> live_;
+std::function<bool(MediaMapLive&)> live_;                 // in use: the drive's, or the demo's
 std::function<bool(std::uint32_t, std::uint8_t*)> read_;
+std::function<bool(MediaMapLive&)> driveLive_;            // the drive's (mediamap_setSource())
+std::function<bool(std::uint32_t, std::uint8_t*)> driveRead_;
+bool demoSource_ = false;
 Model model_;
 std::string file_;
 bool haveDrive_ = false;
@@ -509,8 +512,22 @@ void load() {
 // ── Interface ───────────────────────────────────────────────────────────
 
 void mediamap_setSource(std::function<bool(MediaMapLive&)> live, std::function<bool(std::uint32_t, std::uint8_t*)> read) {
+    driveLive_ = std::move(live);
+    driveRead_ = std::move(read);
+    if (!demoSource_) { live_ = driveLive_; read_ = driveRead_; }
+}
+
+void mediamap_setDemoSource(std::function<bool(MediaMapLive&)> live, std::function<bool(std::uint32_t, std::uint8_t*)> read) {
+    demoSource_ = true;
     live_ = std::move(live);
     read_ = std::move(read);
+}
+
+void mediamap_clearDemoSource() {
+    if (!demoSource_) return;
+    demoSource_ = false;
+    live_ = driveLive_;
+    read_ = driveRead_;
 }
 
 void mediamap_init(DisplayDriver* display) {

@@ -21,10 +21,14 @@
 #include "analyzer.h"
 #include "loopmap.h"
 #include "config.hpp"
+#include "clock.h"
+#include "hpil_diag.h"
+#include "mediamap.h"
 #include "hp82163_font.hpp"
 #include "../lt7683_emu.hpp"
 #include "../png.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -146,6 +150,7 @@ const char* outName(hipi::DisplayOutput o) {
         case O::Display: return "display"; case O::Video80: return "video80"; case O::Tape: return "tape";
         case O::Plotter: return "plotter"; case O::Printer: return "printer"; case O::Analyzer: return "analyzer";
         case O::LoopMap: return "loopmap"; case O::Signals: return "signals"; case O::Clock: return "saver";
+        case O::MediaMap: return "mediamap";
         default: return "other";
     }
 }
@@ -183,6 +188,7 @@ int main(int argc, char** argv) {
     hipi::plotterview_init(&d, screen, plotter);
     hipi::plotterview_setVideo80(video80Term);
     hipi::hwtest_init(&d);
+    hipi::hpil_diag_init(&d);
     int pickerShows = 0, pickerMoves = 0, pickerHides = 0;
     std::vector<std::string> pickerFiles;
     hipi::DemoHooks h;
@@ -226,6 +232,7 @@ int main(int argc, char** argv) {
     }
     mirrorBacklog = 0;
     hipi::demo_stop();
+    hipi::clockStubAvailable() = true;          // the RTC is there and set: the clock gets a turn
     hipi::demo_start();
     run(50);
 
@@ -234,13 +241,18 @@ int main(int argc, char** argv) {
     hipi::DisplayOutput last = hipi::plotterview_output();
     int shots = 0;
     bool plotted = false, printed = false, analyzed = false, wentBack = false;
+    bool mapRings = false, signalsExample = false, scrolled = false, tornOff = false, clockShown = false;
+    int maxLines = 0;
     std::uint64_t changedAt = fakeNowUs;
     bool shotDone = false;
     for (int ms = 0; ms < 260000; ms += 5) {
         run(5);
         const hipi::DisplayOutput o = hipi::plotterview_output();
         if (o != last) {
-            if (last == hipi::DisplayOutput::Clock && o != hipi::DisplayOutput::Clock) wentBack = true;
+            // (the clock's own turn first, then the screen saver at the end)
+            if (last == hipi::DisplayOutput::Clock && o != hipi::DisplayOutput::Clock &&
+                hipi::clockStubShow() != hipi::SaverShow::Clock) wentBack = true;
+            if (o == hipi::DisplayOutput::Clock && hipi::clockStubShow() == hipi::SaverShow::Clock) clockShown = true;
             last = o;
             seen.push_back(outName(o));
             changedAt = fakeNowUs;
@@ -253,6 +265,25 @@ int main(int argc, char** argv) {
             shotDone = true;
         }
         if (!plotter->segments().empty()) plotted = true;
+        if (o == hipi::DisplayOutput::MediaMap && hipi::mediamap_rings() > 0) mapRings = true;
+        if (o == hipi::DisplayOutput::Printer && hipi::plotterview_paperScrolled() && !scrolled) {   // (pulled up)
+            scrolled = true;
+            run(1500);
+            snapshot("../demo_run_printer_pulled_up.png");
+        }
+        maxLines = std::max(maxLines, hipi::plotterview_paperLines());
+        if (o == hipi::DisplayOutput::Printer && maxLines > 0 && hipi::plotterview_paperLines() == 0) tornOff = true;
+        if (o == hipi::DisplayOutput::Signals && shotDone && !signalsExample) {
+            chip.render(panel.data(), 0.0);
+            // The cyan "EXAMPLE" band under the title, and a waveform (yellow) in it
+            const std::uint32_t title = at(1010, 10), example = at(1010, 36);
+            int band = 0, trace = 0;
+            for (int x = 0; x < 1024; ++x) if (at(x, 36) == example) ++band;
+            if (example == 0 || example == title) band = 0;
+            for (int y = 110; y < 230; ++y) for (int x = 20; x < 1004; ++x) if (at(x, y) == title) ++trace;
+            std::printf("     signals: band %d px, trace %d px\n", band, trace);
+            signalsExample = band > 500 && trace > 500;
+        }
         if (printer->lineCount() > 0) printed = true;
         if (hipi::analyzerStubFrames() > 20) analyzed = true;
         if (wentBack) break;
@@ -268,6 +299,10 @@ int main(int argc, char** argv) {
     check(printed, "the printer prints");
     check(analyzed && order.find("loopmap") != std::string::npos && order.find("signals") != std::string::npos,
           "the analyzer (a made-up session), the loop map, the signals");
+    check(order.find("mediamap") != std::string::npos && mapRings, "the media map of the picked cassette");
+    check(scrolled && tornOff, "the paper: pulled up to the edge, then torn off");
+    check(signalsExample, "HP-IL signals without traffic: the example, not an empty page");
+    check(clockShown, "the RTC is set: the clock gets its own turn");
     check(order.find("saver") != std::string::npos && wentBack, "a screen saver, then round again");
     check(hipi::demo_running(), "still running");
 

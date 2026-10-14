@@ -32,6 +32,9 @@ struct Node {
     std::uint64_t lastT = 0;         // µs since start-up, 0 = never
     char lastWhat[24] = "";
     std::uint32_t frames = 0;
+    // Talker / listener: until when it's still shown after it stopped
+    // (µs, like lastT) -- see roleOf()
+    std::uint64_t talkEnd = 0, listenEnd = 0;
 };
 constexpr int kMaxAddr = 30;
 Node nodes_[kMaxAddr + 1];           // by address 1..30
@@ -46,6 +49,10 @@ std::uint64_t roundTripUs_ = 0;      // time between two frames during a transfe
 // Protocol state, to know who answers what
 int talker_ = -1;
 std::uint32_t listeners_ = 0;
+// Who is talker / listener is shown on the cards, and for kRoleHoldUs
+// after it ended -- an HP-41 often addresses a device for a few ms only
+constexpr std::uint64_t kRoleHoldUs = 400000;
+std::uint64_t ctrlTalkEnd_ = 0, ctrlListenEnd_ = 0;   // the controller's own
 IL_CMD_t pending_ = 0;               // SAI / SDI / SST / SDA waiting for its answer
 std::string sdiBuf_;
 
@@ -105,6 +112,19 @@ void touch(int a, std::uint64_t t, const std::string& what) {
     }
     n.lastT = t;
     std::snprintf(n.lastWhat, sizeof(n.lastWhat), "%s", what.c_str());
+}
+
+// The roles as they are now are stamped "seen until t + hold" -- called
+// before talker_ / listeners_ change, so a role that ends stays visible
+void stampRoles(std::uint64_t t) {
+    const std::uint64_t until = t + kRoleHoldUs;
+    if (talker_ >= 1 && talker_ <= kMaxAddr) nodes_[talker_].talkEnd = until;
+    for (int a = 1; a <= kMaxAddr; ++a)
+        if (listeners_ & (1u << a)) nodes_[a].listenEnd = until;
+    // The controller talks to the listeners when no device is talker, and
+    // listens when one is
+    if (talker_ >= 1) ctrlListenEnd_ = until;
+    else if (listeners_ != 0) ctrlTalkEnd_ = until;
 }
 
 void onAutoAddress(int first, int next, std::uint64_t t) {
@@ -188,11 +208,11 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
         return;
     }
     const int a = in & 0x1F;
-    if (in >= LAD && in < UNL)       { listeners_ |= 1u << a; touch(a, t, "listener"); }
-    else if (in == UNL)              { listeners_ = 0; }
-    else if (in >= TAD && in < UNT)  { talker_ = a; touch(a, t, "talker"); }
-    else if (in == UNT)              { talker_ = -1; }
-    else if (in == IFC)              { talker_ = -1; listeners_ = 0; pending_ = 0; }
+    if (in >= LAD && in < UNL)       { stampRoles(t); listeners_ |= 1u << a; touch(a, t, "listener"); }
+    else if (in == UNL)              { stampRoles(t); listeners_ = 0; }
+    else if (in >= TAD && in < UNT)  { stampRoles(t); talker_ = a; touch(a, t, "talker"); }
+    else if (in == UNT)              { stampRoles(t); talker_ = -1; }
+    else if (in == IFC)              { stampRoles(t); talker_ = -1; listeners_ = 0; pending_ = 0; }
     else if (in == SAI || in == SDI || in == SST || in == SDA) {
         pending_ = in;
         sdiBuf_.clear();
@@ -220,6 +240,36 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
 constexpr std::uint16_t kYellow = 0xEDC0, kBlack = 0x0000, kWhite = 0xFFFF;
 constexpr std::uint16_t kGrey = 0x7BEF, kDark = 0x39C7, kCard = 0x10A2;
 constexpr std::uint16_t kBlue = 0x563C, kOrange = 0xF4A5;
+// Roles: talker green, listener blue (lighter than the PC cards' blue),
+// both at once magenta
+constexpr std::uint16_t kTalker = 0x07E0, kListener = 0x2B7F, kBoth = 0xF81F;
+
+// What a card shows of the protocol: talker, listener (or both), or none --
+// now, or until the hold after it ended
+enum Role : std::uint8_t { kNone = 0, kTalk = 1, kListen = 2 };
+std::uint8_t roleOf(int a, std::uint64_t now) {
+    const Node& n = nodes_[a];
+    std::uint8_t r = kNone;
+    if (talker_ == a || now < n.talkEnd) r |= kTalk;
+    if ((listeners_ & (1u << a)) || now < n.listenEnd) r |= kListen;
+    return r;
+}
+std::uint8_t ctrlRole(std::uint64_t now) {
+    std::uint8_t r = kNone;
+    if ((talker_ < 1 && listeners_ != 0) || now < ctrlTalkEnd_) r |= kTalk;
+    if (talker_ >= 1 || now < ctrlListenEnd_) r |= kListen;
+    return r;
+}
+std::uint16_t roleColor(std::uint8_t r) {
+    if ((r & kTalk) && (r & kListen)) return kBoth;
+    return (r & kTalk) ? kTalker : kListener;
+}
+const char* roleText(std::uint8_t r) {
+    if ((r & kTalk) && (r & kListen)) return "TALKER+LISTENER";
+    return (r & kTalk) ? "TALKER" : "LISTENER";
+}
+// A frame in the role's colour, 3 px, inside the card
+void roleFrame(int x, int y, int w, int h, int radius, std::uint8_t r);
 
 std::uint16_t srcColor(Src s) {
     switch (s) {
@@ -309,9 +359,16 @@ std::string cardType(int a) {
     return "?";
 }
 
+void roleFrame(int x, int y, int w, int h, int radius, std::uint8_t r) {
+    if (r == kNone) return;
+    const std::uint16_t c = roleColor(r);
+    for (int k = 0; k < 3; ++k) d_->roundRect(x + k, y + k, w - 2 * k, h - 2 * k, radius - k, c);
+}
+
 void drawCard(const Card& c) {
     const Node& n = nodes_[c.addr];
     const std::uint16_t col = srcColor(n.src);
+    const std::uint8_t role = roleOf(c.addr, time_us_64());
     char b[40];
     std::snprintf(b, sizeof(b), "%2d", c.addr);
     if (mode_ == CardMode::Tile) {
@@ -319,6 +376,7 @@ void drawCard(const Card& c) {
         text(c.x + 8, c.y + 2, b, 1, kBlack, col);
         const std::string nm = cardName(c.addr).substr(0, 8);
         text(c.x + 4, c.y + 28, nm.c_str(), 0, kBlack, col);
+        roleFrame(c.x, c.y, c.w, c.h, 8, role);
         return;
     }
     d_->fillRoundRect(c.x, c.y, c.w, c.h, 8, kCard);
@@ -332,8 +390,11 @@ void drawCard(const Card& c) {
         if (n.haveAid) std::snprintf(b, sizeof(b), "accessory ID 0x%02X", n.aid);
         else           std::snprintf(b, sizeof(b), "accessory ID ?");
         text(c.x + 42, c.y + 46, b, 0, kGrey, kCard);
-        text(c.x + 42, c.y + 66, srcText(n.src), 0, col, kCard);
+        // (where it is: the card's colour says it too -- the role while it has one)
+        if (role != kNone) text(c.x + 42, c.y + 66, roleText(role), 0, roleColor(role), kCard);
+        else               text(c.x + 42, c.y + 66, srcText(n.src), 0, col, kCard);
     }
+    roleFrame(c.x, c.y, c.w, c.h, 8, role);
 }
 
 void drawDetails() {
@@ -405,7 +466,8 @@ std::string headerText(int devices) {
 std::string cardSignature(int a) {
     const Node& n = nodes_[a];
     char b[32];
-    std::snprintf(b, sizeof(b), "|%d|%d|%02X|", static_cast<int>(n.src), n.haveAid ? 1 : 0, n.aid);
+    std::snprintf(b, sizeof(b), "|%d|%d|%02X|%d|", static_cast<int>(n.src), n.haveAid ? 1 : 0, n.aid,
+                  roleOf(a, time_us_64()));
     return cardName(a) + b + n.id;
 }
 
@@ -432,6 +494,31 @@ void rememberDrawn(const std::vector<int>& order) {
     drawnDetails_ = detailsSignature();
 }
 
+// The controller's box (left of the ring), framed by its role
+void drawController() {
+    d_->fillRoundRect(ctrlX_, ctrlY_, 116, 100, 10, kDark);
+    d_->roundRect(ctrlX_, ctrlY_, 116, 100, 10, kWhite);
+    text(ctrlX_ + 22, ctrlY_ + 14, "CTRL", 1, kWhite, kDark);
+    const std::uint8_t r = ctrlRole(time_us_64());
+    if (r == kNone) {
+        text(ctrlX_ + 18, ctrlY_ + 56, "controller", 0, kGrey, kDark);
+    } else {
+        const char* t = (r & kTalk) && (r & kListen) ? "both" : (r & kTalk) ? "talker" : "listener";
+        text(ctrlX_ + 58 - static_cast<int>(std::strlen(t)) * 4, ctrlY_ + 56, t, 0, roleColor(r), kDark);
+        roleFrame(ctrlX_, ctrlY_, 116, 100, 10, r);
+    }
+}
+
+// The roles shown now (cards and controller), to notice when they change
+std::string rolesNow() {
+    const std::uint64_t now = time_us_64();
+    std::string s(kMaxAddr + 2, '0');
+    for (int a = 1; a <= kMaxAddr; ++a) if (nodes_[a].used) s[static_cast<std::size_t>(a)] = static_cast<char>('0' + roleOf(a, now));
+    s[0] = static_cast<char>('0' + ctrlRole(now));
+    return s;
+}
+std::string drawnRoles_;
+
 // The whole map, on the current canvas
 void renderFull() {
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
@@ -450,29 +537,33 @@ void renderFull() {
         cards_.clear();
         ctrlY_ = SCREEN_MAX_Y / 2 - 50;
     }
-    d_->fillRoundRect(ctrlX_, ctrlY_, 116, 100, 10, kDark);
-    d_->roundRect(ctrlX_, ctrlY_, 116, 100, 10, kWhite);
-    text(ctrlX_ + 22, ctrlY_ + 14, "CTRL", 1, kWhite, kDark);
-    text(ctrlX_ + 18, ctrlY_ + 56, "controller", 0, kGrey, kDark);
+    drawController();
     // Legend, switched-off HIPI devices
     int x = 20;
     text(x, SCREEN_MAX_Y - 26, "Off:", 0, kGrey, kBlack);
     x += 40;
     for (CDevice* dv : devices) {
-        if (dv->enabled() || x > 420) continue;
+        if (dv->enabled() || x > 250) continue;
         text(x, SCREEN_MAX_Y - 26, dv->name(), 0, kDark, kBlack);
         x += static_cast<int>(std::strlen(dv->name())) * 8 + 16;
     }
-    struct { std::uint16_t c; const char* t; } leg[] = { { kYellow, "HIPI" }, { kBlue, "PC" }, { kOrange, "other" } };
-    x = 560;
+    struct { std::uint16_t c; const char* t; bool frame; } leg[] = {
+        { kTalker, "talker", true }, { kListener, "listener", true }, { kBoth, "both", true },
+        { kYellow, "HIPI", false }, { kBlue, "PC", false }, { kOrange, "other", false } };
+    x = 330;
     for (auto& l : leg) {
-        d_->fillRect(x, SCREEN_MAX_Y - 24, 12, 12, l.c);
-        text(x + 18, SCREEN_MAX_Y - 26, l.t, 0, kWhite, kBlack);
-        x += 18 + static_cast<int>(std::strlen(l.t)) * 8 + 24;
+        if (l.frame) {                                  // (a frame, like on the cards)
+            for (int k = 0; k < 3; ++k) d_->rect(x + k, SCREEN_MAX_Y - 26 + k, 16 - 2 * k, 16 - 2 * k, l.c);
+        } else {
+            d_->fillRect(x + 2, SCREEN_MAX_Y - 24, 12, 12, l.c);
+        }
+        text(x + 22, SCREEN_MAX_Y - 26, l.t, 0, kWhite, kBlack);
+        x += 22 + static_cast<int>(std::strlen(l.t)) * 8 + 22;
     }
-    text(SCREEN_MAX_X - 230, SCREEN_MAX_Y - 26, "tap a device for details", 0, kGrey, kBlack);
+    text(SCREEN_MAX_X - 132, SCREEN_MAX_Y - 26, "tap: details", 0, kGrey, kBlack);
     if (selected_) drawDetails();
     rememberDrawn(order);
+    drawnRoles_ = rolesNow();
 }
 
 }  // namespace
@@ -519,8 +610,11 @@ void updateChanged() {
         if (selected_ == 0) drawCard(cards_[i]);   // (under the details box otherwise)
         any = true;
     }
+    const std::string roles = rolesNow();
+    if ((drawnRoles_.empty() || roles[0] != drawnRoles_[0]) && selected_ == 0) drawController();
     if (selected_ && detailsSignature() != drawnDetails_) drawDetails();
     rememberDrawn(order);
+    drawnRoles_ = roles;
     if (any) backlight_activity();
 }
 
@@ -538,6 +632,7 @@ void loopmap_reset() {
     aadT_ = lastFrameT_ = roundTripUs_ = 0;
     talker_ = -1;
     listeners_ = 0;
+    ctrlTalkEnd_ = ctrlListenEnd_ = 0;
     pending_ = 0;
     sdiBuf_.clear();
     selected_ = 0;
@@ -549,6 +644,8 @@ void loopmap_poll() {
     IL_CMD_t in, out;
     std::uint64_t t;
     for (int n = 0; n < 64 && analyzer_nextFrame(cursor_, in, out, t); ++n) onFrame(in, out, t);
+    // A role came or went (or its hold ran out): the cards again
+    if (visible() && rolesNow() != drawnRoles_) dirty_ = true;
     if (dirty_ && visible() && time_reached(nextDraw_)) {
         nextDraw_ = make_timeout_time_ms(500);
 #ifdef DISPLAY_7INCH

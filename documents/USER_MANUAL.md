@@ -1154,6 +1154,15 @@ ones the devices of a PC program connected through PILBOX (e.g. pyILPER),
 orange ones other devices on the loop. The cards get smaller when there are
 many devices, so up to 30 fit.
 
+**Who's talking.** The device the controller has made **talker** gets a
+green frame, **listeners** a blue one, and a device that is **both** (talker
+and listener at once) a magenta one; a full-size card also says *TALKER*,
+*LISTENER* or *TALKER+LISTENER* instead of where it is. The controller's box shows
+its side: *talker* while it sends to the listeners, *listener* while a
+device answers it. An HP-41 often addresses a device for a few
+milliseconds only, so the frames stay about a second after the device is
+unaddressed (UNL, UNT) — long enough to see who it was.
+
 **Touch a card** to see everything known about that device — where it is,
 its address, device ID and type, its status, when it was last used and how
 much it has sent and received. Touch again to close the box. **X** leaves the
@@ -1182,6 +1191,12 @@ frame found in it. If the receiver can't make a frame of what arrived, the
 view says after how many bits it gave up.
 
 A new capture every half second while traffic comes in. **X** leaves.
+
+**No traffic yet?** Until the first capture since start-up the view shows
+an **example** instead of an empty page — a made-up capture of an HP-41
+printing "HIPI" (LAD 01, the letters, CR LF, UNL), marked by a cyan
+*EXAMPLE* band under the title. The real signals replace it as soon as
+anything arrives on HP-IL IN.
 
 **Bit cells** in the view's menu (OK) chooses how the bits are told apart:
 
@@ -1300,16 +1315,22 @@ bottom says what you're looking at:
    letters (Roman-8), then 40 columns.
 3. **The cassette drive**: the lid opens, the cassette list appears and a
    cassette is picked, the lid closes and the reels turn — then **DIR**
-   shows on the display what's really on that cassette.
+   shows on the display what's really on that cassette, and the **media
+   map** shows where everything lies on it while a head reads it through.
 4. **The plotter**: the HIPI logo on black paper, a spirograph (with a
    screendump, as a flash), a function plot and a drawing of the HP-IL loop.
-5. **The printer** prints a few lines, HP-41 characters and a little graph.
+5. **The printer** prints a few lines, HP-41 characters and a little graph;
+   then the paper is pulled up to the tear-off edge and torn off (nothing
+   is saved in the demo).
 6. **The analyzer** with a made-up HP-41 session (the loop set up, every
    device asked who it is, a line sent to the display), the **loop map**
-   learnt from it, and the **HP-IL signals**.
-7. The start-up box with the version, the LEDs and pixels running (if
-   fitted, see [11.3](#113-hardware-test)), and a screen saver before the
-   next round.
+   learnt from it, and the **HP-IL signals** (the example capture, see
+   [11.2](#112-hp-il-signals-troubleshooting), unless real traffic has
+   been seen).
+7. **The clock** — only when the real-time clock is fitted and set.
+8. The start-up box with the version, the LEDs and pixels running (if
+   fitted, see [11.3](#113-hardware-test)), and a screen saver (the goose
+   or the rain, in turn) before the next round.
 
 **Any touch stops it**, and so does real HP-IL traffic — the demo is meant
 for showing HIPI, not for use alongside a controller. You're back in the

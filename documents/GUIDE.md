@@ -446,7 +446,15 @@ other addresses add devices after HIPI; SAI/SDI/SST answers fill in type,
 ID and status. The layout (`layout()`) spreads the cards evenly over the
 ring's top, right and bottom sides and picks full cards (<= 8), compact
 cards (<= 16) or tiles (<= 30). Taps go to `loopmap_tap()` before the corner
-checks in `boardui_handleTap()`.
+checks in `boardui_handleTap()`. Talker and listeners are framed (green /
+blue, both at once magenta: `roleFrame()`) from `talker_` / `listeners_`; before either changes
+(LAD, UNL, TAD, UNT, IFC) `stampRoles()` gives the roles that are active
+then a `talkEnd` / `listenEnd` of frame time + `kRoleHoldUs` (0.4 s), so a
+role that lasted a few ms is still seen. `loopmap_poll()` compares
+`rolesNow()` with what was drawn and redraws when a role comes or its hold
+runs out (5": the cards whose signature changed, and the controller's box).
+PC test: `tools/hipiview/test/loopmap_test.cpp` (made-up traffic through
+`test/lmstubs/analyzer.h`).
 
 **HP-IL signals view.** `src/hpil_diag.cpp` + `src/hpil_diag.pio`, on
 **PIO2** + one DMA channel, only *reading* the input pins (no
@@ -456,6 +464,11 @@ once either goes high and DMA fills a 32768-sample buffer (~4 ms); a new
 capture every 0.5 s. The view (`DisplayOutput::Signals`) replays the
 receiver's algorithm on the samples (plus = `IN_P_PIN`, minus sampled 0.5 µs
 after plus ends) to show the bits it reads. Nothing runs while it's closed.
+The decoding and drawing are in `src/hpil_signals.cpp` (`signals::draw()`,
+no hardware, so the PC tests use it too); until the first real capture
+`hpil_diag_drawAll()` passes no buffer and it draws `signals::makeExample()`
+-- an HP-41 printing "HIPI", encoded like a real driver (1 µs pulses with
+a little jitter, the sync bit's pair doubled), under a cyan EXAMPLE band.
 
 **PILBox CON.** In CON (`pilbox->mode() == CON`) `hipi_loop()` runs
 `conLoop()` instead: HIPI is the frame's origin. A frame from the PC
@@ -1022,7 +1035,14 @@ shows the cassette list through UiDialog's own drawing
 (`demoShowPicker()`/`demoMovePicker()`/`demoHidePicker()`, via
 `DemoHooks` -- nothing is chosen, the menu stays closed), puts the picked
 name on the label and lets the reels turn (`plotterview_setDemoTape()`);
-`dir()` formats `lifDescribe()` of that file. `session()` sends a made-up
+`dir()` formats `lifDescribe()` of that file; `mediaMap()` shows that file
+on the media map through `mediamap_setDemoSource()` (its blocks read with
+FatFs, a made-up head reading the directory and then the whole medium) and
+`mediamap_clearDemoSource()` puts the drive's source back (also in
+`restore()`). `paperPullUp()` pulls the printer's paper to the tear-off
+edge (`plotterview_paperScrollBy(-1)`), then `plotterview_tearOff()`. The
+clock gets its own turn when `clock_available()` (RTC fitted and set); the
+screen saver at the end alternates goose and rain. `session()` sends a made-up
 HP-41 session through HIPI's own devices with `hipi_simFrame()` (the same
 path as a real frame, minus PILBOX and the PIO; the analyzer captures it,
 so the analyzer and the loop map show it) -- the devices' addresses are
@@ -1041,8 +1061,10 @@ shows the view it started from. Nothing is written to CONFIG.TXT.
 `tools/hipiview`: `demo_view_test` renders `demo_content.cpp` (the texts,
 the plots, the printout) through the real Screen, Video80, plotter and
 printer; `demo_run_test` runs the real demo engine for a whole round in
-fake time (stand-ins for the SD card, analyzer, LEDs and the loop), saves
-a picture of each view and checks that stopping puts everything back.
+fake time (stand-ins for the SD card, analyzer, LEDs, clock and the loop),
+saves a picture of each view, checks the media map, the torn-off paper, the
+signals example and the clock's turn, and that stopping puts everything
+back.
 
 **New devices and CONFIG.TXT.** `known_devices` lists the devices the file
 has met. In `hipi_init()`, a device not in it (new in this version) gets
