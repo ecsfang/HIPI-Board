@@ -788,7 +788,7 @@ private:
     // Generic scrolling list rows (labels, first row shown) -- same look
     // as the other lists
     void drawListRows(const std::vector<std::string>& labels, int scroll) {
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         for (int row = 0; row < kMaxFilesShown; ++row) {
             const std::size_t i = static_cast<std::size_t>(scroll + row);
             const bool has = i < labels.size();
@@ -867,7 +867,7 @@ private:
         title_ = "SYSTEM / LOOPBACK TEST";
         drawBox();
         d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
         d_->txtWrite("Connect the HP-IL loop cable,");
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + MenuFrame::RowPitch);
@@ -891,7 +891,7 @@ private:
         const int textX = MenuFrame::X + 20, textY = MenuFrame::Y + 20;
         d_->fillRect(textX, textY, MenuFrame::W - 40, MenuFrame::RowPitch, 0x0000);
         d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         d_->txtSetCursor(textX, textY);
         d_->txtWrite(buf);
 
@@ -930,7 +930,7 @@ private:
 
         drawBox();  // clear the progress line/bar before showing the result
         d_->txtColor(0xFFFF, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
         char buf[48];
         if (result.errors == 0) {
@@ -1097,7 +1097,7 @@ private:
         const int bottomY = MenuFrame::Y + MenuFrame::H - MenuFrame::BorderThickness - kGlyphH - 2;
         d_->fillRect(indicatorX, topY, kGlyphW, kGlyphH, 0x0000);
         d_->fillRect(indicatorX, bottomY, kGlyphW, kGlyphH, 0x0000);
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         d_->txtColor(0xFFFF, 0x0000);
         if (scrollOffset > 0) {
             d_->txtSetCursor(indicatorX, topY);
@@ -1115,7 +1115,7 @@ private:
         // moveFileSelection()), without drawBox() running again first.
         // Once per call (not per row) is enough -- every row below uses
         // the same scale.
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         for (int row = 0; row < kMaxFilesShown; ++row) {
             const std::size_t fileIndex = static_cast<std::size_t>(fileScrollOffset_ + row);
             const bool hasEntry = fileIndex < files_.size();
@@ -1198,7 +1198,7 @@ private:
     // directly (screen row for position, absolute index for the
     // highlight comparison).
     void drawDeviceList() {
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         for (int row = 0; row < kMaxFilesShown; ++row) {
             const std::size_t devIndex = static_cast<std::size_t>(deviceScrollOffset_ + row);
             const bool hasEntry = devIndex < deviceLabels_.size();
@@ -1275,7 +1275,7 @@ private:
     }
 
     void drawDeviceOrder() {
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         for (int row = 0; row < kMaxFilesShown; ++row) {
             const std::size_t i = static_cast<std::size_t>(deviceScrollOffset_ + row);
             const bool hasEntry = i < orderList_.size();
@@ -1315,7 +1315,7 @@ private:
         // this is really just a safety check rather than a normal case.
         const int row = index - deviceScrollOffset_;
         if (row >= 0 && row < kMaxFilesShown) {
-            d_->txtSize(MenuFrame::TextScale);
+            menuFont();
             // [ON] and [OFF] are different lengths -- without clearing
             // first, toggling OFF->ON leaves a trailing character from
             // "[OFF]" still showing past the end of the now-shorter
@@ -1473,7 +1473,7 @@ private:
         // back for the menu, or its rows come out in the wrong font/clipped
         d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
         d_->selectBuiltinFont();
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         std::vector<std::string> labels;
         for (const Item& it : items_) labels.push_back(it.label());
         drawListRows(labels, itemScroll_);
@@ -2019,7 +2019,7 @@ private:
         tearFocus_ = 0;
         title_ = "TEAR OFF PAPER";
         drawBox();
-        d_->txtSize(MenuFrame::TextScale);
+        menuFont();
         d_->txtColor(0xFFFF, 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
         const int n = plotterview_paperLines();
@@ -2041,7 +2041,7 @@ private:
             d_->fillRoundRect(static_cast<std::int16_t>(x), kTearBtnY, kTearBtnW, kTearBtnH, 10, hot ? 0xFFFF : 0x7BEF);
             d_->fillRoundRect(static_cast<std::int16_t>(x + 3), kTearBtnY + 3, kTearBtnW - 6, kTearBtnH - 6, 8, fill);
             const int tw = static_cast<int>(std::strlen(kLabels[i])) * 16;
-            d_->txtSize(MenuFrame::TextScale);
+            menuFont();
             d_->txtColor(fg, fill);
             d_->txtSetCursor(static_cast<std::uint16_t>(x + (kTearBtnW - tw) / 2), kTearBtnY + (kTearBtnH - 32) / 2);
             d_->txtWrite(kLabels[i]);
@@ -2215,6 +2215,18 @@ private:
     // drawScrollIndicators(), which sits at MenuFrame::W - 34) alone, so
     // clearing a row's own text never also erases the "more above/below"
     // arrows drawn independently of it.
+    // The menu's font, before any menu text: the built-in font at the
+    // menu's size. Both are chip state that other drawing changes between
+    // two menu draws -- the display views (Screen/Video80, also when a
+    // device is switched on or off here) select their own font -- so every
+    // piece of menu text sets them again, not just MenuFrame::draw().
+    // (Only txtSize() here once let a row come out in the display's
+    // larger font, e.g. Devices / On-Off after a toggle.)
+    void menuFont() {
+        d_->txtSize(MenuFrame::TextScale);
+        d_->selectBuiltinFont();
+    }
+
     void _clearRowBackground(int row, std::uint16_t bg) {
         d_->fillRect(MenuFrame::X + 20, MenuFrame::Y + 20 + row * MenuFrame::RowPitch,
                      MenuFrame::W - 60, MenuFrame::RowPitch, bg);
@@ -2230,8 +2242,7 @@ private:
         // Screen.cpp's identical comment on selectCustomFont()), so this
         // reasserts it explicitly per row rather than trusting it's
         // still set from MenuFrame::draw().
-        d_->txtSize(MenuFrame::TextScale);
-        d_->selectBuiltinFont();
+        menuFont();
         const bool isSelected = (index == selected_);
         _clearRowBackground(index, isSelected ? MenuFrame::Yellow : 0x0000);
         rowFg_ = isSelected ? 0x0000 : 0xFFFF;

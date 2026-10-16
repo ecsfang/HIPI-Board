@@ -18,6 +18,7 @@
 #include "../lt7683_emu.hpp"
 #include "../png.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -160,11 +161,13 @@ int main() {
     check(c.listen > 300, "LAD 02: the printer's card is marked as listener");
     check(ctrlTalk > 300 && ctrlTalk == c.talk, "... and the controller as the talker");
     // Unaddressed: still shown for a moment, then gone
+    // (the timing follows the hold, kLoopMapRoleHoldMs, whatever it's set to)
+    const int hold = static_cast<int>(hipi::kLoopMapRoleHoldMs);
     frame(UNL);
-    run(100);
+    run(std::max(hold / 2, 20));
     c = roles();
     check(c.listen > 300, "UNL: still shown for a moment (the hold)");
-    run(1500);
+    run(hold + 600);
     c = roles();
     check(c.listen == 0 && c.talk == 0, "... then gone");
 
@@ -180,7 +183,7 @@ int main() {
     std::printf("     display talks: talker %d px, listener %d px (controller %d)\n", c.talk, c.listen, ctrlListen);
     check(c.talk > 300 && ctrlListen > 300, "TAD 01: the display is the talker, the controller listens");
     frame(UNT);
-    run(2000);
+    run(hold + 600);
     c = roles();
     check(c.talk == 0 && c.listen == 0, "UNT: gone after the hold");
 
@@ -195,10 +198,10 @@ int main() {
     check(c.both > 300 && c.talk == 0 && inBox(140, 30, 1024, 560, lc) == 0,
           "TAD 03 + LAD 03: the plotter in the colour for both (the controller listens)");
     frame(UNT);
-    run(100);
+    run(std::max(hold / 2, 20));
     c = roles();
     check(c.both > 300, "UNT: still both during the hold (it was talker a moment ago)");
-    run(1500);
+    run(hold + 600);
     c = roles();
     chip.render(panel.data(), 0.0, false);
     check(inBox(140, 30, 1024, 560, lc) > 300 && c.both == 0, "... then listener only (still addressed)");

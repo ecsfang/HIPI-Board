@@ -646,7 +646,12 @@ Two things make plotter commands easy to type on the HP-41:
 
 - **No `;` needed.** A new command letter, or the end of the text, ends a
   command, and numbers can be separated with spaces instead of commas —
-  `PD4000 1000` means the same as `PD4000,1000;`.
+  `PD4000 1000` means the same as `PD4000,1000;`. (The end of the text: the
+  last command is carried out when nothing more comes for a moment.)
+- **Line ends are ignored** (CR and LF, as OUTA sends them), except in label
+  text (`LB`): a long command may go on on the next line — even in the
+  middle of a number, as when HP-GL is sent from a file with fixed-length
+  lines (`...,26` CR LF `46,...` is 2646).
 - **Long commands are split** over two program lines, since one text line holds
   at most 15 characters. `⊢` is **APPEND** (in ALPHA mode: shift + K), which
   adds the text to what's already in ALPHA.

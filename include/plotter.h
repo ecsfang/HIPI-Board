@@ -126,6 +126,9 @@ public:
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);
     void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn);
     void show(void);    // extended-trace detail: pen/position/mode/parser state
+    // Main loop: a command left open at a line end (CR / LF) is carried
+    // out when nothing more has come for kLineEndMs (see feed_char())
+    void idle(void) override;
 
     // Registered by whatever drives the actual display (step two).
     void setMoveCallback(std::function<void(std::int16_t, std::int16_t)> cb) {
@@ -201,6 +204,13 @@ private:
     //    (default ETX/0x03) -- see feed_char() in plotter.cpp
     int parseState_ = 0;
     std::string cmdBuf_;
+    // CR / LF don't end a command (see feed_char()); one still open after
+    // a line end is carried out by idle() once the controller has gone
+    // quiet -- so "PU" as the last line of text from the HP-41 still
+    // happens, while a line that goes on ("...,26" CR LF "46,...") isn't cut
+    static constexpr std::uint32_t kLineEndMs = 300;
+    bool lineEnded_ = false;
+    std::uint64_t lineEndAtUs_ = 0;
     bool inParam_ = false;
     bool sawSeparator_ = false;
     int numParam_ = 0;

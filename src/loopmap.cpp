@@ -49,9 +49,9 @@ std::uint64_t roundTripUs_ = 0;      // time between two frames during a transfe
 // Protocol state, to know who answers what
 int talker_ = -1;
 std::uint32_t listeners_ = 0;
-// Who is talker / listener is shown on the cards, and for kRoleHoldUs
-// after it ended -- an HP-41 often addresses a device for a few ms only
-constexpr std::uint64_t kRoleHoldUs = 400000;
+// Who is talker / listener is shown on the cards, and for a while after
+// it ended (kLoopMapRoleHoldMs, loopmap.h)
+constexpr std::uint64_t kRoleHoldUs = kLoopMapRoleHoldMs * 1000ull;
 std::uint64_t ctrlTalkEnd_ = 0, ctrlListenEnd_ = 0;   // the controller's own
 IL_CMD_t pending_ = 0;               // SAI / SDI / SST / SDA waiting for its answer
 std::string sdiBuf_;

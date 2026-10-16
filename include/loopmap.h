@@ -14,8 +14,14 @@
 // Shown via Display -> Loop map (DisplayOutput::LoopMap).
 #pragma once
 #include "display_config.h"
+#include <cstdint>
 
 namespace hipi {
+
+// How long a card stays marked as talker / listener after the device was
+// unaddressed (UNT, UNL, ...) -- an HP-41 often addresses a device for a
+// few ms only. (The map is redrawn at most every 500 ms.)
+constexpr std::uint32_t kLoopMapRoleHoldMs = 1200;
 
 void loopmap_init(DisplayDriver* display);
 // Main loop: takes in new frames, redraws when something changed (while shown)

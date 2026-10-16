@@ -2,6 +2,7 @@
 
 #include "plotter.h"
 #include "hpgl_font.h"
+#include "pico/time.h"
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -36,6 +37,7 @@ void CPlotter::reset_defaults() {
 void CPlotter::reset_state() {
     parseState_ = 0;
     cmdBuf_.clear();
+    lineEnded_ = false;
     inParam_ = false;
     sawSeparator_ = false;
 
@@ -59,6 +61,16 @@ void CPlotter::reset_state() {
     outQueue_.clear();
     outEnd_ = true;
     midTransfer_ = false;
+}
+
+void CPlotter::idle(void) {
+    // The text ended in the middle of a command (no ';' or next command
+    // yet) and nothing more came: it's complete
+    if (!lineEnded_ || parseState_ != 2 || time_us_64() < lineEndAtUs_) return;
+    lineEnded_ = false;
+    execute(cmdBuf_);
+    cmdBuf_.clear();
+    parseState_ = 0;
 }
 
 void CPlotter::clear(void) {
@@ -134,6 +146,19 @@ void CPlotter::queueOutput(const std::string& s) {
 
 // Tokenizer, ported from pyILPER's cls_HP7470Processor.process_char().
 void CPlotter::feed_char(char c) {
+    // CR and LF are ignored outside a label (and DT's argument), as on the
+    // real plotter -- even in the middle of a number: a controller that
+    // sends a long PA line in pieces puts CR LF wherever its line ends
+    // ("...,26" CR LF "46,..." is 2646). They used to end the command,
+    // and the rest of the line was lost.
+    if ((c == '\r' || c == '\n') && parseState_ != 3 && parseState_ != 4) {
+        if (parseState_ == 2) {                  // (an open command: see idle())
+            lineEnded_ = true;
+            lineEndAtUs_ = time_us_64() + kLineEndMs * 1000ull;
+        }
+        return;
+    }
+    lineEnded_ = false;
     switch (parseState_) {
     case 0:
         // First letter of a new command.

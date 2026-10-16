@@ -449,7 +449,8 @@ cards (<= 16) or tiles (<= 30). Taps go to `loopmap_tap()` before the corner
 checks in `boardui_handleTap()`. Talker and listeners are framed (green /
 blue, both at once magenta: `roleFrame()`) from `talker_` / `listeners_`; before either changes
 (LAD, UNL, TAD, UNT, IFC) `stampRoles()` gives the roles that are active
-then a `talkEnd` / `listenEnd` of frame time + `kRoleHoldUs` (0.4 s), so a
+then a `talkEnd` / `listenEnd` of frame time + the hold (`kLoopMapRoleHoldMs`,
+loopmap.h: 1.2 s; the PC test follows it), so a
 role that lasted a few ms is still seen. `loopmap_poll()` compares
 `rolesNow()` with what was drawn and redraws when a role comes or its hold
 runs out (5": the cards whose signature changed, and the controller's box).
@@ -1458,7 +1459,11 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   interpreter. It keeps plotter state and a list of line segments, and
   reports what happens through callbacks (`setDrawCallback()`,
   `setClearCallback()`, `setMoveCallback()`, `setPenChangedCallback()`).
-  It never touches the display.
+  It never touches the display. The tokenizer (`feed_char()`) ignores CR
+  and LF outside LB/DT -- also inside a number, since HP-GL from a file
+  with fixed-length lines is broken anywhere; a command still open after a
+  line end is carried out by `idle()` once nothing more has come for
+  `kLineEndMs` (300 ms). PC test: `tools/hipiview/test/plotter_test.cpp`.
 - **`plotterview`** (`src/plotterview.cpp`) — owns the display while the
   plotter view is active. `plotterview_init()` registers the callbacks,
   scales plotter coordinates to screen coordinates, and redraws everything
