@@ -1,0 +1,43 @@
+// devicelist.h -- the HP-IL DEVICES list (a touch in the bottom-left
+// corner, boardui.cpp): every one of HIPI's devices in loop order with its
+// address, accessory ID and whether it's switched on -- a box in front of
+// it to switch it on or off. Only the drawing and where things are; what a
+// touch does is boardui.cpp's. Apart from boardui.cpp so it can be tried
+// on the PC (tools/hipiview/test/devicelist_test.cpp).
+//
+// 7": the 12x24 built-in font, 34 px a row; 5": 8x16, 24 px a row (the
+// RA8875 has no 12x24 font). Nine rows either way; more scroll.
+#pragma once
+#include "display_config.h"
+#include "device_info.h"
+#include <vector>
+
+namespace hipi {
+namespace devlist {
+
+#ifdef DISPLAY_7INCH
+constexpr int kX = 60, kW = 640, kRowPitch = 34, kCharW = 12, kCheck = 26;
+#else
+constexpr int kX = 60, kW = 580, kRowPitch = 24, kCharW = 8, kCheck = 18;
+#endif
+constexpr int kRows = 9;
+constexpr int kTitleH = 30;
+constexpr int kRowsTopGap = 14;                 // title band -> first row
+constexpr int kH = kTitleH + kRowsTopGap + kRows * kRowPitch + 24;
+constexpr int kY = (SCREEN_MAX_Y - kH) / 2;      // the box (with its title band)
+constexpr int kRowsTop = kY + kTitleH + kRowsTopGap;
+constexpr int kCloseW = 44;                      // the close button in the title band
+
+// The box, its title band and close button
+void drawFrame(DisplayDriver* d);
+// The rows from `offset` on (and the more-above / more-below arrows)
+void drawRows(DisplayDriver* d, const std::vector<DeviceInfo>& list, int offset);
+// The close button (with a margin around it)
+bool isClose(int x, int y);
+// The on/off box of a row (with a margin): its index in the list, or -1
+int checkboxAt(int x, int y, int offset, int count);
+// The largest offset (scrolling)
+int maxOffset(int count);
+
+}  // namespace devlist
+}  // namespace hipi

@@ -100,8 +100,10 @@ IL_CMD_t CDrive::hpil(IL_CMD_t cmd)
 
 void CDrive::clear(void)
 {
-    if( check() )
+    if( check() ) {
         tape->seek(0);
+        noteHead(0, 1);     // (the media map: back at the start, like a seek)
+    }
     mode = WRITE_MODE;
 }
 
@@ -136,6 +138,7 @@ void CDrive::preProc(IL_CMD_t cmd)
                 sst = DRV_IDLE;
                 tape->close();
                 tape->open();
+                noteHead(0, 1);     // (the media map: the file is open at the start again)
                 LOGF("$$$ Done with formatting!\r\n");
             }
         }
@@ -454,6 +457,7 @@ bool CDrive::check()
                     size(512);
                 LOGF("size=%dkb\r\n", (size()*BUF_SIZE)/1024);
                 tape->seek(0);
+                noteHead(0, 0);     // (the media map: a newly opened tape is at its start)
                 sst = DRV_NEW_TAPE_ERROR;
             } else {
                 LOGF("$$$ No tape selected!\r\n");

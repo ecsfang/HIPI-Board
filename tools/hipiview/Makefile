@@ -96,6 +96,11 @@ MAP_SRC := test/mediamap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/
 mediamap_test: $(MAP_SRC) ../../include/mediamap.h ../../include/lif_create.h
 	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(MAP_SRC) -o $@ -lz
 
+# The HP-IL DEVICES list (devicelist.cpp) -- saves devicelist_*.png
+DL_SRC := test/devicelist_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/devicelist.cpp ../../src/glyph_font.cpp ../../src/menu_font_title.cpp
+devicelist_test: $(DL_SRC) ../../include/devicelist.h ../../include/device_info.h ../../include/menu_frame.h
+	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(DL_SRC) -o $@ -lz
+
 # The HP-GL parser (plotter.cpp), no display
 PLOT_SRC := test/plotter_test.cpp ../../src/plotter.cpp ../../src/device.cpp ../../src/hpil.cpp
 plotter_test: $(PLOT_SRC) ../../include/plotter.h
@@ -106,7 +111,7 @@ LM_SRC := test/loopmap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/lo
 loopmap_test: $(LM_SRC) ../../include/loopmap.h $(wildcard test/lmstubs/*.h)
 	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/lmstubs -Itest/pvstubs -I../../include $(LM_SRC) -o $@ -lz
 
-test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test
+test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test
 	./host_test
 	./printer_view_test
 	./video80_view_test
@@ -117,13 +122,14 @@ test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_t
 	./mediamap_test
 	./loopmap_test
 	./plotter_test
+	./devicelist_test
 
 install: hipiview
 	install -m 755 hipiview /usr/local/bin/
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test *_viewer.png *_chip.png printer_view_*.png *.hvlog
+	rm -f hipiview hipiview.exe host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png *_viewer.png *_chip.png printer_view_*.png *.hvlog
 
 .PHONY: test install clean windows
 

@@ -14,6 +14,7 @@
 #include "backlight.h"
 #include "display_mirror.h"   // layers a PC viewer needs
 #include "loopmap.h"
+#include "devicelist.h"   // the HP-IL DEVICES list
 #include "hwtest.h"
 #include "mediamap.h"
 #include "demo.h"
@@ -558,97 +559,38 @@ bool isDeviceListCornerTouch(std::uint16_t x, std::uint16_t y) {
 // as the cassette list), one device a row in the small font, scrolled a
 // device at a time by a vertical swipe. Closed with its close button (the
 // X in the title band) -- other touches don't close it.
-constexpr int kDeviceListRowPitch = 24;
-constexpr int kDeviceListRowsTop = MenuFrame::Y + 14;          // the first row
-constexpr int kDeviceListCloseW = 44;                          // the close button in the title band
-
-int deviceListVisibleRows() {
-    // (above the frame's rounded bottom corners)
-    return (MenuFrame::Y + MenuFrame::H - MenuFrame::CornerRadius - kDeviceListRowsTop) / kDeviceListRowPitch;
+// The devices as the list shows them: a drive being switched off (it
+// waits until it's idle) already shows as off, as in Devices / On-Off
+std::vector<DeviceInfo> listedDevices() {
+    std::vector<DeviceInfo> v = hipi_enumerateDevices();
+    for (DeviceInfo& info : v)
+        for (CDevice* dev : devices)
+            if (dev->type() == DRIVE && std::strcmp(dev->name(), info.devName) == 0)
+                info.enabled = static_cast<CDrive*>(dev)->wantedEnabled();
+    return v;
 }
 
-// The close button: drawn in the title band's right end, touched a bit
-// around it too
-bool isDeviceListClose(std::uint16_t x, std::uint16_t y) {
-    const int right = MenuFrame::X + MenuFrame::W;
-    return x >= right - kDeviceListCloseW - 24 && x < right + 8 &&
-           y + 10 >= MenuFrame::MenuTop && y < MenuFrame::MenuTop + MenuFrame::TitleH + 14;
-}
+// The box itself: devicelist.h
+int deviceListVisibleRows() { return devlist::kRows; }
 
-void drawDeviceListClose() {
-    using namespace MenuFrame;
-    const int x = X + W - BorderThickness - kDeviceListCloseW - 6, y = MenuTop + BorderThickness + 3;
-    const int w = kDeviceListCloseW, h = TitleH - BorderThickness - 6;
-    display_->fillRoundRect(x, y, w, h, 5, 0x0000);
-    const int cx = x + w / 2, cy = y + h / 2;
-    auto i16 = [](int v) { return static_cast<std::int16_t>(v); };
-    for (int t = -1; t <= 1; ++t) {
-        display_->line(i16(cx - 6 + t), i16(cy - 6), i16(cx + 6 + t), i16(cy + 6), 0xFFFF);
-        display_->line(i16(cx - 6 + t), i16(cy + 6), i16(cx + 6 + t), i16(cy - 6), 0xFFFF);
-    }
-}
-
-// Redraws just the rows (not the frame and title): the first display
-// and every scroll step
-void drawDeviceListRows() {
-    const int rowsBottom = MenuFrame::Y + MenuFrame::H - MenuFrame::CornerRadius;
-    // (inset by the corner radius: a plain rectangle mustn't cut the
-    // frame's rounded corners)
-    const int fillX = MenuFrame::X + MenuFrame::CornerRadius;
-    const int fillW = MenuFrame::W - 2 * MenuFrame::CornerRadius;
-    display_->fillRect(static_cast<std::int16_t>(fillX), static_cast<std::int16_t>(kDeviceListRowsTop - 4), fillW,
-                       static_cast<std::int16_t>(rowsBottom - (kDeviceListRowsTop - 4)), 0x0000);
-
-    display_->selectBuiltinFont();       // (a view may have left another font selected)
-    display_->txtSize(0);
-    const int visibleRows = deviceListVisibleRows();
-    int y = kDeviceListRowsTop;
-    char buf[96];
-    for (int i = 0; i < visibleRows; ++i) {
-        const std::size_t idx = static_cast<std::size_t>(deviceListScrollOffset + i);
-        if (idx >= deviceListCache.size()) break;
-        const DeviceInfo& info = deviceListCache[idx];
-        if (info.extMode[0] != '\0' && info.extDevices > 0) {
-            // PILBox: link mode (COFF/COFI/CON, or TDIS when no PC program
-            // is connected) + the PC-side devices and their addresses
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] %s: %d (addr %d-%d)",
-                          "--", info.devName, info.enabled ? 'X' : ' ', info.extMode,
-                          info.extDevices, info.extFirstAddr, info.extFirstAddr + info.extDevices - 1);
-        } else if (info.extMode[0] != '\0') {
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c] %s",
-                          "--", info.devName, info.enabled ? 'X' : ' ', info.extMode);
-        } else if (info.addr < 0) {
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s     [%c]",
-                          "--", info.devName, info.enabled ? 'X' : ' ');
-        } else {
-            // "addr NN": room for two-digit addresses (up to 30)
-            std::snprintf(buf, sizeof(buf), "addr %2d  %-10s0x%02X [%c]",
-                          info.addr, info.devName, info.sai, info.enabled ? 'X' : ' ');
-        }
-        // Switched-off devices dimmer
-        display_->txtColor(info.enabled ? 0xFFFF : 0x8410, 0x0000);
-        display_->txtSetCursor(MenuFrame::X + 20, y);
-        display_->txtWrite(buf);
-        y += kDeviceListRowPitch;
-    }
-
-    // More above / below: arrows at the right, in the rows' own margin
-    const int ax = MenuFrame::X + MenuFrame::W - 34;
-    const bool moreAbove = deviceListScrollOffset > 0;
-    const bool moreBelow = deviceListScrollOffset + visibleRows < static_cast<int>(deviceListCache.size());
-    auto i16 = [](int v) { return static_cast<std::int16_t>(v); };
-    if (moreAbove)
-        display_->fillTriangle(i16(ax), i16(kDeviceListRowsTop + 14), i16(ax + 16), i16(kDeviceListRowsTop + 14),
-                               i16(ax + 8), i16(kDeviceListRowsTop + 2), MenuFrame::Yellow);
-    if (moreBelow)
-        display_->fillTriangle(i16(ax), i16(rowsBottom - 18), i16(ax + 16), i16(rowsBottom - 18),
-                               i16(ax + 8), i16(rowsBottom - 6), MenuFrame::Yellow);
+// The rows again (the first display, every scroll step, a change), on the
+// menu layer on 7"
+void redrawDeviceListRows() {
+#ifdef DISPLAY_7INCH
+    display_->beginOverlayDraw();
+#endif
+    devlist::drawRows(display_, deviceListCache, deviceListScrollOffset);
+#ifdef DISPLAY_7INCH
+    display_->endOverlayDraw();
+    screen_->reassertRenderState();
+    plotterview_refreshCursor();       // (drawing moved the chip's shared text cursor)
+#endif
 }
 
 void showDeviceList() {
     if (deviceListVisible) return;
 
-    deviceListCache = hipi_enumerateDevices();
+    deviceListCache = listedDevices();
     deviceListScrollOffset = 0;
     deviceListNextRefresh = make_timeout_time_ms(kDeviceListRefreshMs);
 
@@ -660,27 +602,8 @@ void showDeviceList() {
     screen_->suspend();
 #endif
 
-    // The frame with its title band, as the menus (UiDialog::drawBox())
-    {
-        using namespace MenuFrame;
-        MenuFrame::draw(display_, X, MenuTop, W, MenuH);
-        display_->fillRect(X + BorderThickness, MenuTop + BorderThickness, W - 2 * BorderThickness,
-                           TitleH - BorderThickness, Yellow);
-#if HIPI_MENU_TITLE_HP41FONT
-        drawGlyphText(display_, X + 16, MenuTop + (TitleH - kMenuTitleFont.height) / 2 + 1, kMenuTitleFont,
-                      "HP-IL DEVICES", 0x0000, Yellow);
-#endif
-        display_->selectBuiltinFont();
-#if !HIPI_MENU_TITLE_HP41FONT
-        display_->txtSize(0);
-        display_->txtColor(0x0000, Yellow);
-        display_->txtSetCursor(X + 16, MenuTop + 8);
-        display_->txtWrite("HP-IL DEVICES");
-#endif
-        drawDeviceListClose();
-    }
-
-    drawDeviceListRows();
+    devlist::drawFrame(display_);
+    devlist::drawRows(display_, deviceListCache, deviceListScrollOffset);
 
 #ifdef DISPLAY_7INCH
     display_->endOverlayDraw();
@@ -688,7 +611,7 @@ void showDeviceList() {
     // Drawing the list moved the chip's (shared) text cursor into the
     // box -- put the blinking cursor back where the text stands
     plotterview_refreshCursor();
-    display_->showPipOverlay(MenuFrame::X, MenuFrame::MenuTop, MenuFrame::W, MenuFrame::MenuH);
+    display_->showPipOverlay(devlist::kX, devlist::kY, devlist::kW, devlist::kH);
 #endif
 
     deviceListVisible = true;
@@ -724,20 +647,7 @@ void scrollDeviceList(bool down) {
     }
     if (newOffset != deviceListScrollOffset) {
         deviceListScrollOffset = newOffset;
-        // Called from boardui_handleSwipe() -- a separate call path from
-        // showDeviceList() above, needing its own explicit PIP wrapping
-        // for the same reason dismissLoopbackResult()
-        // do in uidialog.hpp (see their own comments there): nothing else
-        // wraps this call in one.
-#ifdef DISPLAY_7INCH
-        display_->beginOverlayDraw();
-#endif
-        drawDeviceListRows();
-#ifdef DISPLAY_7INCH
-        display_->endOverlayDraw();
-        screen_->reassertRenderState();
-        plotterview_refreshCursor();
-#endif
+        redrawDeviceListRows();
     }
 }
 
@@ -760,20 +670,25 @@ bool sameDevices(const std::vector<DeviceInfo>& a, const std::vector<DeviceInfo>
 void refreshDeviceList() {
     if (!deviceListVisible || saverActive || !time_reached(deviceListNextRefresh)) return;
     deviceListNextRefresh = make_timeout_time_ms(kDeviceListRefreshMs);
-    std::vector<DeviceInfo> now = hipi_enumerateDevices();
+    std::vector<DeviceInfo> now = listedDevices();
     if (sameDevices(now, deviceListCache)) return;
     deviceListCache = std::move(now);
-    const int maxOffset = std::max(0, static_cast<int>(deviceListCache.size()) - deviceListVisibleRows());
-    if (deviceListScrollOffset > maxOffset) deviceListScrollOffset = maxOffset;
-#ifdef DISPLAY_7INCH
-    display_->beginOverlayDraw();
-#endif
-    drawDeviceListRows();
-#ifdef DISPLAY_7INCH
-    display_->endOverlayDraw();
-    screen_->reassertRenderState();
-    plotterview_refreshCursor();
-#endif
+    deviceListScrollOffset = std::min(deviceListScrollOffset, devlist::maxOffset(static_cast<int>(deviceListCache.size())));
+    redrawDeviceListRows();
+}
+
+// A touch on a row's on/off box: that device switched on or off, as in
+// Devices / On-Off (a drive like its power switch; saved), the rows again
+void toggleListedDevice(int idx) {
+    if (idx < 0 || idx >= static_cast<int>(deviceListCache.size())) return;
+    for (CDevice* dev : devices) {
+        if (std::strcmp(dev->name(), deviceListCache[static_cast<std::size_t>(idx)].devName) != 0) continue;
+        dialog_->toggleDeviceEnabled(dev);
+        break;
+    }
+    deviceListCache = listedDevices();
+    deviceListNextRefresh = make_timeout_time_ms(kDeviceListRefreshMs);
+    redrawDeviceListRows();
 }
 
 }  // namespace
@@ -951,6 +866,16 @@ void boardui_poll() {
     if (infoBoxVisible && !saverActive && time_reached(infoBoxHideDeadline)) {
         hideInfoBox();
     }
+#ifdef DISPLAY_7INCH
+    // Safety net: an info box / device list whose PIP-1 window something
+    // else has taken away isn't open any more -- otherwise it stays
+    // "open" unseen and eats every touch (only its close button helped)
+    if ((infoBoxVisible || deviceListVisible) && !display_->pipState(1).on) {
+        LOGF("\r\n * %s lost its window -- closed", deviceListVisible ? "Device list" : "Info box");
+        infoBoxVisible = false;
+        deviceListVisible = false;
+    }
+#endif
 
     // Keep usb_connected live -- it used to be a one-shot flag set only if
     // tud_mounted() became true within the first 2 seconds of boot (see
@@ -1196,8 +1121,11 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         hideInfoBox();
     } else if (deviceListVisible) {
         // Only its close button closes it (a touch beside the box used to,
-        // which made a long list easy to lose); scrolling is a vertical swipe
-        if (isDeviceListClose(x, y)) hideDeviceList();
+        // which made a long list easy to lose); a row's on/off box switches
+        // that device; scrolling is a vertical swipe
+        if (devlist::isClose(x, y)) hideDeviceList();
+        else toggleListedDevice(devlist::checkboxAt(x, y, deviceListScrollOffset,
+                                                    static_cast<int>(deviceListCache.size())));
     } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::CharTable) {
         plotterview_leaveCharTable();         // the character table: any touch closes it
     } else if (!dialog_->isOpen() && !(stripZone && buttonStripVisible) &&
@@ -1394,28 +1322,32 @@ void boardui_onMenuClosed() {
 
 // ── Screen saver ────────────────────────────────────────────────────────
 // A drawn screen saver (clock, HP-IL rain, goose) gets the whole panel:
-// whatever is on top of the view -- menu, info box, device list, button
-// strip -- goes out of the way while it runs and comes back as it was when
-// it ends. Nothing is closed; the boxes' and the strip's own timers wait.
+// the info box and device list close (both panels -- left open behind the
+// saver, the list could come back unseen yet still taking every touch);
+// the menu and button strip go out of the way while it runs and come back
+// as they were when it ends. Their own timers wait.
 //   7": they are PIP windows over the panel, so they are only switched
 //       off and on again (LT7683::setPipsBlanked()).
-//   5": they are drawn on the panel itself, under the saver. The info box
-//       and device list just close (they're short-lived anyway); the
-//       button strip and an open menu are drawn again afterwards.
+//   5": they are drawn on the panel itself, under the saver: the button
+//       strip and an open menu are drawn again afterwards.
 #ifndef DISPLAY_7INCH
 namespace {
 bool stripBeforeSaver = false;
 }
 #endif
 
+void boardui_closePipBoxes() {
+    hideInfoBox();
+    hideDeviceList();
+}
+
 void boardui_saverBegin() {
     if (saverActive) return;
+    boardui_closePipBoxes();
     saverActive = true;
 #ifdef DISPLAY_7INCH
     display_->setPipsBlanked(true);
 #else
-    hideInfoBox();
-    hideDeviceList();
     // The saver draws over the strip: just forget it's there (no slide-out
     // animation), it's drawn again in boardui_saverEnd()
     stripBeforeSaver = buttonStripVisible;

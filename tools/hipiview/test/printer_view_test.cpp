@@ -16,6 +16,7 @@
 #include "LT7683.hpp"
 #include "Screen.hpp"
 #include "plotterview.h"
+#include "boardui.h"            // (the pvstubs one: counts boardui_closePipBoxes())
 #include "printout.h"
 #include "printer.h"
 #include "plotter.h"
@@ -129,7 +130,10 @@ int main(int argc, char** argv) {
     hipi::plotterview_setPrinter(printer);
     hipi::plotterview_init(&d, &screen, plotter);
     check(hipi::plotterview_isAvailable(hipi::DisplayOutput::Printer), "Printer view loaded (hp82162a.bmp, prtparts.bmp)");
+    const int closedBefore = hipi::pipBoxesClosedStub();
     hipi::plotterview_showDevice(printer);
+    // The name box takes PIP-1: an open info box / device list is closed first
+    check(hipi::pipBoxesClosedStub() == closedBefore + 1, "view switch closes the PIP-1 boxes first");
     run(2000);                                              // the name box goes away
 
     chip.render(panel.data(), 0.0);

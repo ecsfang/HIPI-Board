@@ -31,6 +31,7 @@ extern hipi::Config config;      // pico_main.cpp
 #include "menu_frame.h"       // the menus' box, title in the HP-41 font
 #include "media_create_ui.h"  // File picker -> Create media...
 #include "printout.h"         // Printer: the torn-off paper saved
+#include "loopmap.h"          // Loop map: its details box from the button strip
 #include "clock.h"            // ... the date for a new image
 #include "pico/time.h"
 #include <vector>
@@ -139,6 +140,13 @@ public:
     // user toggles it in the "Devices" menu (after CDevice::setEnabled()
     // has already been applied). Useful for persisting the choice, e.g. to
     // a Config object.
+    // A device switched on or off from elsewhere (the HP-IL DEVICES list,
+    // boardui.cpp) -- as in Devices / On-Off, and saved the same way
+    void toggleDeviceEnabled(CDevice* dev) {
+        if (dev == nullptr) return;
+        switchDevice(dev);
+        if (onDeviceToggled_) onDeviceToggled_(dev->name(), deviceWantedOn(dev));
+    }
     void setDeviceToggledCallback(std::function<void(const std::string&, bool)> cb) {
         onDeviceToggled_ = std::move(cb);
     }
@@ -457,7 +465,14 @@ public:
                 if (b == Button::Ok || b == Button::X) close();
                 break;
             case State::Closed:
-                if (plotterview_output() == DisplayOutput::LoopMap && b == Button::X) {
+                if (plotterview_output() == DisplayOutput::LoopMap && loopmap_detailsOpen() &&
+                    (b == Button::Ok || b == Button::X)) {
+                    // The loop map's details box: OK = the device's view, X = close it
+                    withMainCanvas([&] { if (b == Button::Ok) loopmap_detailsOk(); else loopmap_closeDetails(); });
+                } else if (b == Button::X && !shifted && plotterview_cameFromLoopMap() && !viewScrolledBack()) {
+                    // A device's view opened from the loop map: X goes back there
+                    plotterview_backToLoopMap();
+                } else if (plotterview_output() == DisplayOutput::LoopMap && b == Button::X) {
                     // The loop map: X leaves it (back to the view before)
                     plotterview_leaveLoopMap();
                 } else if (plotterview_output() == DisplayOutput::Signals && b == Button::X) {
@@ -1295,17 +1310,7 @@ private:
     void toggleDevice(int index) {
         if (index < 0 || index >= static_cast<int>(devices.size())) return;
         CDevice* dev = devices[index];
-        if (dev->type() == DRIVE) {
-            // Switching a drive off is deferred until it's idle -- pulling
-            // it out of the loop mid-transfer hangs HP-IL
-            CDrive* drive = static_cast<CDrive*>(dev);
-            // Same as the power switch: OFF, or back to its last position
-            // (STANDBY or ON)
-            drive->setPowerMode(drive->wantedEnabled() ? DrivePower::Off
-                                                       : drive->lastOnMode());
-        } else {
-            dev->toggleEnabled();
-        }
+        switchDevice(dev);
         deviceLabels_[static_cast<std::size_t>(index)] = deviceLabel(dev);
         // Only actually redraw if this device's own row is within the
         // currently-visible scrolled window -- toggleDevice() is only
@@ -1326,6 +1331,21 @@ private:
             d_->txtWrite(deviceLabels_[static_cast<std::size_t>(index)].c_str());
         }
         if (onDeviceToggled_) onDeviceToggled_(dev->name(), deviceWantedOn(dev));
+    }
+
+    // On <-> off (no drawing, no saving -- see toggleDeviceEnabled())
+    static void switchDevice(CDevice* dev) {
+        if (dev->type() == DRIVE) {
+            // Switching a drive off is deferred until it's idle -- pulling
+            // it out of the loop mid-transfer hangs HP-IL
+            CDrive* drive = static_cast<CDrive*>(dev);
+            // Same as the power switch: OFF, or back to its last position
+            // (STANDBY or ON)
+            drive->setPowerMode(drive->wantedEnabled() ? DrivePower::Off
+                                                       : drive->lastOnMode());
+        } else {
+            dev->toggleEnabled();
+        }
     }
 
     void openConfirmFile(const std::string& filename) {
@@ -2215,6 +2235,20 @@ private:
     // drawScrollIndicators(), which sits at MenuFrame::W - 34) alone, so
     // clearing a row's own text never also erases the "more above/below"
     // arrows drawn independently of it.
+    // A view looking back (the printer's paper, the text's or the 92198's
+    // history): X first goes back to live there
+    bool viewScrolledBack() {
+        switch (plotterview_output()) {
+            case DisplayOutput::Printer: return plotterview_paperScrolled();
+            case DisplayOutput::Display: return screen_.scrollOffset() != 0;
+            case DisplayOutput::Video80: {
+                Video80* v = plotterview_video80();
+                return v != nullptr && !v->viewIsLive();
+            }
+            default: return false;
+        }
+    }
+
     // The menu's font, before any menu text: the built-in font at the
     // menu's size. Both are chip state that other drawing changes between
     // two menu draws -- the display views (Screen/Video80, also when a

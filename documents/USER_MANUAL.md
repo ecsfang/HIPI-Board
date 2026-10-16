@@ -161,7 +161,7 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 | Touch | What happens |
 |-------|--------------|
 | **Top-left corner** | Info box: current file, settings, version (not on the Hardware test page) |
-| **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on the Hardware test page.) |
+| **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on the Hardware test page.) |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
 <a href="images/screen-infobox.png"><img src="images/screen-infobox.png" alt="Info box" width="512"></a>
@@ -191,8 +191,9 @@ screen, no touch — HIPI starts its screen saver. Choose what it does in
 With the clock, the rain and the goose the backlight also slowly dims to
 10 %.
 
-The clock, the rain and the geese get the whole screen: an open menu, the
-button strip or a box in a corner goes out of the way while they run.
+The clock, the rain and the geese get the whole screen: an open menu or the
+button strip goes out of the way while they run and comes back afterwards;
+the info box and the device list close.
 
 Anything new on the screen ends the screen saver at once and brings back
 what was shown before, menu and button strip included. A touch also ends
@@ -300,7 +301,7 @@ thing.
 |----------------|--------------|
 | **Cassette window** | Shows the cassette with the file name on its label. Touch it to pick another file |
 | **OPEN** button | Opens the lid and the file list |
-| **REWIND** button | Rewinds the tape (takes a few seconds; not while BUSY is lit) |
+| **REWIND** button | Rewinds the tape (takes a few seconds; not while BUSY is lit, and not when it's already at the start -- the controller often rewinds it itself after writing; the Media map shows where the tape is) |
 | **OFF–STANDBY–ON** switch | Touch to move it one step. OFF takes the drive off the loop; ON keeps it on; in STANDBY the controller can switch it off and on to save power |
 | **POWER** light | The drive is on |
 | **BUSY** light | The drive is working, or the controller is talking to it |
@@ -1170,8 +1171,11 @@ unaddressed (UNL, UNT) — long enough to see who it was.
 
 **Touch a card** to see everything known about that device — where it is,
 its address, device ID and type, its status, when it was last used and how
-much it has sent and received. Touch again to close the box. **X** leaves the
-map.
+much it has sent and received. For a device with a view of its own
+(display, cassette drive, printer, plotter) the box has a **GO TO … VIEW**
+button (or **OK** on the button strip): it shows that view, and **X** there
+brings you back to the loop map. **X CLOSE** (or **X**, or a touch beside the
+box) closes it. With no box open, **X** leaves the map.
 
 <a href="images/loopmap.png"><img src="images/loopmap.png" alt="The loop map" width="512"></a>
 

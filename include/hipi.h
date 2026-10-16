@@ -13,20 +13,7 @@
 #include "hpil_pio.hpp"
 #include "loopback_result.h"
 
-struct DeviceInfo {
-    char devName[16];   // dev->name() -- our own local identifier
-    char sdiName[32];   // whatever the device's SDI response actually said
-    int addr;           // -1 if not addressed (AAD left it at 31, "unaddressed")
-    std::uint8_t sai;   // only meaningful if addr >= 0
-    bool enabled;
-    // PILBOX only: devices on the PC side and the first address they got
-    // at the last auto-addressing (-1 = not known / not applicable)
-    int extDevices = -1;
-    int extFirstAddr = -1;
-    // PILBOX only: the link mode to the PC -- "COFF"/"COFI"/"CON" when a PC
-    // program is connected, "TDIS" when not; "" for other devices
-    char extMode[6] = "";
-};
+#include "device_info.h"   // DeviceInfo
 
 // Lists every device in hipi.cpp's own `devices` vector, in loop order,
 // with its CURRENT address as given by the controller's own AAU/AAD

@@ -397,10 +397,29 @@ void drawCard(const Card& c) {
     roleFrame(c.x, c.y, c.w, c.h, 8, role);
 }
 
+// The details box and its buttons: X CLOSE (left), and GO TO <view> VIEW
+// (right) when the device has a view here
+constexpr int kDetW = 480, kDetH = 292;
+constexpr int kDetX = (SCREEN_MAX_X - kDetW) / 2, kDetY = (SCREEN_MAX_Y - kDetH) / 2;
+constexpr int kBtnH = 40, kBtnY = kDetY + kDetH - 56;
+constexpr int kCloseX = kDetX + 20, kCloseW = 130;
+struct Box { int x, y, w, h; bool in(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; } };
+
+// The selected device's view, if it has one ("PLOTTER" ...), else nullptr
+const char* selectedView() {
+    CDevice* d = selected_ ? hipiDeviceAt(selected_) : nullptr;
+    return d != nullptr ? plotterview_viewName(d) : nullptr;
+}
+std::string viewButtonText(const char* view) { return std::string("GO TO ") + view + " VIEW  >"; }
+Box viewButton(const char* view) {
+    const int w = static_cast<int>(viewButtonText(view).size()) * 8 + 40;
+    return Box{ kDetX + kDetW - 20 - w, kBtnY, w, kBtnH };
+}
+
 void drawDetails() {
     if (selected_ < 1 || selected_ > kMaxAddr || !nodes_[selected_].used) { selected_ = 0; return; }
     const Node& n = nodes_[selected_];
-    const int w = 480, h = 236, x = (SCREEN_MAX_X - w) / 2, y = (SCREEN_MAX_Y - h) / 2;
+    const int w = kDetW, h = kDetH, x = kDetX, y = kDetY;
     d_->fillRect(x, y, w, h, kBlack);
     d_->roundRect(x, y, w, h, 12, kYellow);
     d_->roundRect(x + 1, y + 1, w - 2, h - 2, 11, kYellow);
@@ -440,7 +459,19 @@ void drawDetails() {
         text(x + 20, y + 22 + i * 28, rows[i].k, 0, kGrey, kBlack);
         text(x + 150, y + 22 + i * 28, rows[i].v.c_str(), 0, kWhite, kBlack);
     }
-    text(x + w - 150, y + h - 22, "tap to close", 0, kDark, kBlack);
+    // The buttons, under a thin line: X / OK on the button strip do the same
+    d_->fillRect(x + 16, kBtnY - 10, w - 32, 1, kDark);
+    d_->roundRect(kCloseX, kBtnY, kCloseW, kBtnH, 8, kGrey);
+    d_->roundRect(kCloseX + 1, kBtnY + 1, kCloseW - 2, kBtnH - 2, 7, kGrey);
+    text(kCloseX + (kCloseW - 7 * 8) / 2, kBtnY + 12, "X CLOSE", 0, kWhite, kBlack);
+    if (const char* view = selectedView()) {
+        const Box b = viewButton(view);
+        d_->fillRoundRect(b.x, b.y, b.w, b.h, 8, kYellow);
+        text(b.x + 20, b.y + 12, viewButtonText(view).c_str(), 0, kBlack, kYellow);
+        text(b.x - 28, b.y + 12, "OK", 0, kDark, kBlack);       // (its key on the strip)
+    } else {
+        text(kCloseX + kCloseW + 30, kBtnY + 12, "(no view of its own)", 0, kDark, kBlack);
+    }
 }
 
 bool visible() {
@@ -621,6 +652,22 @@ void updateChanged() {
 }  // namespace
 #endif
 
+bool loopmap_detailsOpen() { return selected_ != 0; }
+
+void loopmap_closeDetails() {
+    if (!selected_) return;
+    selected_ = 0;
+    loopmap_drawAll();
+}
+
+void loopmap_detailsOk() {
+    if (!selected_) return;
+    CDevice* d = hipiDeviceAt(selected_);
+    if (d == nullptr || plotterview_viewName(d) == nullptr) return;   // (no view: OK does nothing)
+    selected_ = 0;                                   // (closed when the map comes back)
+    plotterview_showDeviceFromLoopMap(d);
+}
+
 void loopmap_init(DisplayDriver* display) {
     d_ = display;
 }
@@ -657,9 +704,15 @@ void loopmap_poll() {
 }
 
 bool loopmap_tap(int x, int y) {
-    if (selected_) {                                 // the details box is open: any tap closes it
-        selected_ = 0;
-        loopmap_drawAll();
+    if (selected_) {
+        // The details box: its view button goes there, X CLOSE or a tap
+        // beside the box closes it, a tap elsewhere in it does nothing
+        const char* view = selectedView();
+        if (view != nullptr && viewButton(view).in(x, y)) {
+            loopmap_detailsOk();
+        } else if (Box{ kCloseX, kBtnY, kCloseW, kBtnH }.in(x, y) || !Box{ kDetX, kDetY, kDetW, kDetH }.in(x, y)) {
+            loopmap_closeDetails();
+        }
         return true;
     }
     for (const Card& c : cards_) {

@@ -104,10 +104,14 @@ void boardui_onMenuClosed();
 bool boardui_isMenuOpen();
 
 // A drawn screen saver (clock, rain, goose) takes over the whole panel:
-// Begin puts the menu, info box, device list and button strip out of the
-// way (nothing is closed), End brings them back as they were. Called by
+// Begin closes the info box and device list and puts the menu and button
+// strip out of the way, End brings those two back as they were. Called by
 // backlight.cpp around plotterview_showClock()/plotterview_leaveClock().
 void boardui_saverBegin();
+// Closes the info box and the device list -- called before something else
+// takes their PIP-1 window (the view-switch name box, a message box), so
+// neither stays "open" without being seen (7")
+void boardui_closePipBoxes();
 // A button from the PC (hipiview, Mirror to PC < Control >): code 1 Shift,
 // 2 OK, 3 Up, 4 Down, 5 X, 6 next view, 7 previous view; 0 = release all.
 void boardui_remoteButton(std::uint8_t code, bool down);

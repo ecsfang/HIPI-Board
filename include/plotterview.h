@@ -177,6 +177,14 @@ void plotterview_leaveAnalyzer();
 // leaving it returns to the view shown before
 void plotterview_showLoopMap();
 void plotterview_leaveLoopMap();
+// From the loop map's details box: a device's view, if it has one here
+// (plotterview_viewName(): "PLOTTER", "TAPE" ..., nullptr if none). X
+// there brings back the loop map (plotterview_backToLoopMap() -- true if
+// it did); any other way of leaving the view forgets that.
+const char* plotterview_viewName(CDevice* dev);
+void plotterview_showDeviceFromLoopMap(CDevice* dev);
+bool plotterview_cameFromLoopMap();
+bool plotterview_backToLoopMap();
 
 // HP-IL signal diagnostics (hpil_diag.h) -- like the loop map
 void plotterview_showSignals();

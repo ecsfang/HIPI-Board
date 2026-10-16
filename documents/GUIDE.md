@@ -454,8 +454,13 @@ loopmap.h: 1.2 s; the PC test follows it), so a
 role that lasted a few ms is still seen. `loopmap_poll()` compares
 `rolesNow()` with what was drawn and redraws when a role comes or its hold
 runs out (5": the cards whose signature changed, and the controller's box).
-PC test: `tools/hipiview/test/loopmap_test.cpp` (made-up traffic through
-`test/lmstubs/analyzer.h`).
+The details box's GO TO … VIEW (a HIPI device with a view,
+`plotterview_viewName()`) calls `plotterview_showDeviceFromLoopMap()`: the
+view without its name box, and X on the strip
+(`plotterview_backToLoopMap()`, from `UiDialog::handleButton()`) goes back
+to the map unless that view is scrolled back; any other view change
+forgets it. PC test: `tools/hipiview/test/loopmap_test.cpp` (made-up
+traffic through `test/lmstubs/analyzer.h`).
 
 **HP-IL signals view.** `src/hpil_diag.cpp` + `src/hpil_diag.pio`, on
 **PIO2** + one DMA channel, only *reading* the input pins (no
@@ -622,12 +627,21 @@ commands sent by the HP-41.
 | Gesture                     | Action |
 |-----------------------------|--------|
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
-| Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), enabled state |
+| Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (7": 12x24 font, 34 px rows; 5": 8x16, 24 px; nine rows), PC test `devicelist_test` |
 | Vertical swipe              | Scroll the device list (when it is open) |
 | Horizontal swipe            | Switch view: each device with a view (display, plotter, every cassette drive) in loop order -- left = next device, right = previous |
 
 The device list performs a live AAD/SAI/SDI enumeration of the internal
 devices. Avoid opening it while a controller is in the middle of a transfer.
+
+The info box and the device list share PIP-1 (7") with the menu, the
+view-switch name box and `plotterview_showMessage()`. Whatever else takes
+PIP-1 closes them first (`boardui_closePipBoxes()`, called from
+`showSplashBox()` and `boardui_saverBegin()`), and `boardui_poll()` closes
+either one whose PIP-1 window is gone anyway (logged "... lost its window").
+Otherwise the list stayed "open" unseen and took every touch -- only a tap
+on its invisible close button helped. The vertical swipe is wired up in
+`pico_main.cpp` (`touch_set_vertical_swipe_callback()`).
 
 ### 5.4 Status LEDs
 

@@ -28,9 +28,15 @@ void loopmap_init(DisplayDriver* display);
 void loopmap_poll();
 // The view (see plotterview_showLoopMap())
 void loopmap_drawAll();
-// A tap while the map is shown: on a card -> its details, on the details
-// box -> closes it. Returns false if the tap hit nothing of the map.
+// A tap while the map is shown: on a card -> its details box. In the box:
+// GO TO <view> VIEW (a device with a view here) -> that view, where X on
+// the button strip comes back to the map; X CLOSE or a tap beside the box
+// -> closed. Returns false if the tap hit nothing of the map.
 bool loopmap_tap(int x, int y);
+// The details box from the button strip: OK = its view, X = close
+bool loopmap_detailsOpen();
+void loopmap_detailsOk();
+void loopmap_closeDetails();
 // Forgets the loop (the demo, after its made-up session); it is learnt
 // again from the next auto-addressing
 void loopmap_reset();

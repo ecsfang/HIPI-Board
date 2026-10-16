@@ -304,6 +304,9 @@ const char* outputName(DisplayOutput mode) {
 void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms) {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 #ifdef DISPLAY_7INCH
+    // The box takes PIP-1 (and hides it afterwards): an open info box or
+    // device list there would be left "open" but unseen, eating every touch
+    boardui_closePipBoxes();
     display_->beginOverlayDraw();        // draw into the PIP layer
 #else
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
@@ -1769,9 +1772,13 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
 // Switches the panel to `mode`, for device `dev` (its title goes in the
 // splash). Tape -> Tape with another drive also counts as a switch.
 // splash = false: switch at once, no name box (the screen saver)
+// A device's view opened from the loop map's details box: X goes back there
+static bool fromLoopMap_ = false;
+
 static void switchView(DisplayOutput mode, CDevice* dev, bool splash = true) {
     if (!plotterview_isAvailable(mode)) return;
     if (mode == output_ && dev == viewDevice_) return;
+    fromLoopMap_ = false;                    // (another view: see plotterview_showDeviceFromLoopMap())
     viewDevice_ = dev;
     if (mode == DisplayOutput::Tape && dev != nullptr && dev != drive_) {
         // Another drive: its own cassette, lid and lights
@@ -1936,6 +1943,25 @@ void plotterview_showLoopMap() {
     beforeLoopMap_ = viewDevice_;
     beforeLoopMapOutput_ = output_;
     switchView(DisplayOutput::LoopMap, nullptr);
+}
+
+const char* plotterview_viewName(CDevice* dev) {
+    return deviceHasView(dev) ? outputName(outputFor(dev->viewKind())) : nullptr;
+}
+
+void plotterview_showDeviceFromLoopMap(CDevice* dev) {
+    if (!deviceHasView(dev)) return;
+    switchView(outputFor(dev->viewKind()), dev, /*splash=*/false);   // (chosen by name: no name box)
+    fromLoopMap_ = output_ != DisplayOutput::LoopMap;
+}
+
+bool plotterview_cameFromLoopMap() { return fromLoopMap_ && output_ != DisplayOutput::LoopMap; }
+
+bool plotterview_backToLoopMap() {
+    if (!plotterview_cameFromLoopMap()) return false;
+    // (straight back: the loop map's own "view before" stays what it was)
+    switchView(DisplayOutput::LoopMap, nullptr, false);
+    return true;
 }
 
 void plotterview_leaveLoopMap() {

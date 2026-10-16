@@ -8,6 +8,8 @@
 //   loopmap_1_listener.png   the HP-41 sends to the printer (LAD 02)
 //   loopmap_2_talker.png     the HP-41 asks the display who it is (TAD 01, SAI)
 //   loopmap_3_both.png       the plotter is talker and listener at once
+//   loopmap_4_details.png    TFPLOT's details box, with GO TO PLOTTER VIEW
+//   loopmap_5_no_view.png    a device after HIPI: no view of its own
 //
 //   make loopmap_test && ./loopmap_test   (in tools/hipiview)
 #include "LT7683.hpp"
@@ -26,9 +28,21 @@
 std::uint64_t fakeNowUs = 1000000;
 std::vector<CDevice*> devices;
 
+// The views: the loop map is shown; a device's view is "opened" here only
+// to see that the details box asks for it
+CDevice* viewOpened = nullptr;
 namespace hipi {
 DisplayOutput plotterview_output() { return DisplayOutput::LoopMap; }
 bool plotterview_isSplashVisible() { return false; }
+const char* plotterview_viewName(CDevice* d) {
+    switch (d->type()) {
+        case PLOTTER: return "PLOTTER";
+        case PRINTER: return "PRINTER";
+        case DISPLAY: return "DISPLAY";
+        default:      return nullptr;
+    }
+}
+void plotterview_showDeviceFromLoopMap(CDevice* d) { viewOpened = d; }
 }
 
 namespace {
@@ -205,6 +219,45 @@ int main() {
     c = roles();
     chip.render(panel.data(), 0.0, false);
     check(inBox(140, 30, 1024, 560, lc) > 300 && c.both == 0, "... then listener only (still addressed)");
+
+    // ── The details box: a tap on a card ────────────────────────────────
+    // (three devices: TFPLOT's card at the bottom, about x 380..566)
+    hipi::loopmap_drawAll();
+    check(hipi::loopmap_tap(470, 510) && hipi::loopmap_detailsOpen(), "a tap on TFPLOT's card: its details box");
+    snapshot("loopmap_4_details.png");
+    chip.render(panel.data(), 0.0, false);
+    // The yellow GO TO PLOTTER VIEW button at the box's lower right
+    const std::uint32_t yellow = at(10, 10);
+    const int btn = inBox(512, 380, 752, 425, yellow);
+    std::printf("     view button: %d yellow px\n", btn);
+    check(btn > 3000, "... with a GO TO PLOTTER VIEW button");
+    check(hipi::loopmap_tap(500, 300) && hipi::loopmap_detailsOpen(), "a tap in the box (not a button): stays open");
+    check(hipi::loopmap_tap(640, 400) && viewOpened == &plot && !hipi::loopmap_detailsOpen(),
+          "the button: the plotter's view (and the box closed)");
+    // X CLOSE, a tap beside the box, and the strip's OK / X
+    viewOpened = nullptr;
+    hipi::loopmap_drawAll();
+    hipi::loopmap_tap(470, 510);
+    check(hipi::loopmap_tap(330, 400) && !hipi::loopmap_detailsOpen() && viewOpened == nullptr, "X CLOSE: closed");
+    hipi::loopmap_tap(470, 510);
+    check(hipi::loopmap_tap(60, 60) && !hipi::loopmap_detailsOpen(), "a tap beside the box: closed");
+    hipi::loopmap_tap(470, 510);
+    hipi::loopmap_detailsOk();
+    check(viewOpened == &plot, "OK on the strip: the view");
+    // A device without a view of its own (one after HIPI): no button, OK does nothing
+    viewOpened = nullptr;
+    frame(TAD + 5);
+    frame(UNT);
+    run(600);
+    hipi::loopmap_drawAll();
+    hipi::loopmap_tap(470, 510);              // (four devices now: card 5 sits there)
+    chip.render(panel.data(), 0.0, false);
+    snapshot("loopmap_5_no_view.png");
+    check(hipi::loopmap_detailsOpen() && inBox(512, 380, 752, 425, yellow) == 0, "a device after HIPI: no view button");
+    hipi::loopmap_detailsOk();
+    check(viewOpened == nullptr && hipi::loopmap_detailsOpen(), "... OK does nothing");
+    hipi::loopmap_closeDetails();
+    check(!hipi::loopmap_detailsOpen(), "X on the strip: closed");
 
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
