@@ -40,8 +40,8 @@
 //   OA  - output actual pen position + up/down status
 //   OC  - output commanded pen position + up/down status (same format as
 //         OA -- we don't simulate motor lag, so these never differ here)
-//   OE  - output error status (always reports "no error" -- v1 doesn't
-//         track real error conditions yet)
+//   OE  - output error: 1 = instruction not recognized (sets OS bit 5;
+//         reading OE clears both), 0 = none
 //   OI  - output identification (always "7470A")
 //   OF  - output scaling factors (always "40,40" -- fixed at the real
 //         7470A/7475A's standard resolution, 40 units/mm)
@@ -58,11 +58,12 @@
 //         without moving the pen
 //   YT  - same as XT but perpendicular to the Y axis (a short horizontal
 //         stroke)
-//   IW  - input window: a clip rectangle (defaults to P1-P2) applied to
+//   IW  - input window: a clip rectangle (defaults to the whole area) applied to
 //         every drawn line (PD segments, ticks, and label strokes) --
 //         anything outside gets clipped or dropped entirely, matching the
 //         real plotter's hard-clip behavior
-//   SR  - character size, as a percentage of the P1-P2 span (width,height)
+//   SR  - character size, as a percentage of the P1-P2 span (width,height);
+//         a new P1/P2 (IP) changes it too (SI's absolute size: not)
 //   SI  - character size, in absolute centimeters (width,height) -- fixed
 //         physical size regardless of P1/P2, via the same 40 units/mm
 //         scale as OF
@@ -88,6 +89,11 @@
 //
 //   DF also turns user units (SC) off and plotting back to absolute.
 //
+//   LT  - line type 0..6[,pattern length %] for pen-down lines (PA/PD/PR,
+//         circles, arcs); labels and ticks stay solid; bare LT: solid
+//   SM  - symbol mode: a character drawn centred on every point (SM; off)
+//   DR  - relative label direction (% of P1..P2's width/height)
+//   VS, IM - accepted, nothing to do; CS/CA/SS/SA: set 0 only (others noted)
 //   DP  - digitize: waits for a point -- touched in the Plotter view (the
 //         real plotter: moved with the arrow keys, ENTER); OS bit 2 then
 //         says it's ready, OD outputs it (x,y,pen), DC stops waiting
@@ -168,6 +174,14 @@ public:
     // moves there, OD reports it, OS bit 2 says one is ready
     bool digitizing() const { return digitizing_; }
     void digitize(std::int16_t x, std::int16_t y);
+    void cancelDigitize() { digitizing_ = false; }   // (as DC)
+    // A point in plotter units as user units (SC); false: no SC in use
+    bool userUnits(double px, double py, double& ux, double& uy) const {
+        if (!scaling_) return false;
+        ux = scX1_ + (px - p1x_) * (scX2_ - scX1_) / (p2x_ - p1x_);
+        uy = scY1_ + (py - p1y_) * (scY2_ - scY1_) / (p2y_ - p1y_);
+        return true;
+    }
     // The plotter's whole area in plotter units (a digitized point stays in it)
     static constexpr int kMaxX = 10300, kMaxY = 7650;
     // For the tests: what's waiting to be sent (an O.. answer), and the
@@ -189,6 +203,14 @@ private:
     std::vector<double> parseParams(const std::string& cmd, std::size_t from) const;
     void moveThroughParams(const std::vector<double>& params);
     void doMove(std::int16_t x, std::int16_t y);
+    // A pen-down line in the current line type (LT): dashes/dots
+    void patternedSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1);
+    void drawSymbol();                        // SM: symbol_ centred on the pen
+    char symbol_ = '\0';                      // SM's character, '\0' = off
+    int error_ = 0;                           // OE: 1 unknown instruction, 2 wrong number of parameters, 3 out of range
+    int lineType_ = -1;                       // LT: -1 solid, 0..6
+    double patternPct_ = 4.0;                 // pattern length, % of the P1..P2 diagonal
+    double patPos_ = 0.0;                     // how far into the pattern the pen is
     // Plotter units per user unit (1,1 without SC)
     void unitFactors(double& fx, double& fy) const;
     // CI/AA/AR: from the pen, around (cx,cy) (plotter units), sweepDeg
@@ -218,12 +240,13 @@ private:
     // Renders one LB label's text, character by character.
     void drawLabel(const std::string& text);
 
-    // Renders a single character's stroke glyph (see include/hpgl_font.h)
-    // at the current character position (charPosX_/charPosY_), scaled by
-    // charWidthUnits_/charHeightUnits_ (SR), sheared by charSlant_ (SL),
-    // and rotated by dirCos_/dirSin_ (DI) -- then advances the character
-    // position to the next character's origin.
-    void drawLabelChar(unsigned char code);
+    // One glyph's strokes (include/hpgl_font.h) with its origin at ox,oy:
+    // scaled by charWidthUnits_/charHeightUnits_ (SR/SI), sheared by
+    // charSlant_ (SL), rotated by dirCos_/dirSin_ (DI/DR)
+    void drawGlyph(const char* strokes, double ox, double oy);
+    void glyphToPlotter(double gx, double gy, double& px, double& py) const;
+    // The strokes for a code in the set in use (CS/CA, SO/SI), nullptr: none
+    const char* glyphFor(unsigned char code) const;
 
     // ── Tokenizer state (ported from pyILPER's process_char()) ──────────
     // 0: waiting for the command's first letter
@@ -261,7 +284,8 @@ private:
     bool scaling_ = false;
     double scX1_ = 0, scX2_ = 1, scY1_ = 0, scY2_ = 1;
 
-    // Input window (clip rectangle) -- set by IW, defaults to P1-P2.
+    // Input window (clip rectangle) -- set by IW, defaults to the whole area
+    // (0,0 .. kMaxX,kMaxY).
     std::int16_t iw1x_ = 0, iw1y_ = 0, iw2x_ = 0, iw2y_ = 0;
 
     // OS status-byte bit 3 ("initialized") -- true from reset until the
@@ -284,18 +308,21 @@ private:
     // span -- HP-GL defaults to 0.75%/1.5% width/height).
     double charWidthUnits_ = 0.0, charHeightUnits_ = 0.0;
     double charSlant_ = 0.0;                  // SL -- shear factor, default 0
+    // SR's size in % of P1..P2 (charRelative_: SR in use, not SI) -- kept
+    // so a new P1/P2 (IP) gives the characters their new size
+    double charRelW_ = 0.75, charRelH_ = 1.5;
+    bool charRelative_ = true;
+    void applyRelativeSize();
     double dirCos_ = 1.0, dirSin_ = 0.0;       // DI -- default: horizontal
-    // "Text cursor" position -- kept in sync with penX_/penY_ by doMove()
-    // on every real pen movement, but overridden by CP to offset it by a
-    // number of character cells without touching the actual pen position.
-    std::int16_t charPosX_ = 0, charPosY_ = 0;
-    // "Carriage return home" position -- where an embedded CR (0x0D)
-    // inside LB text snaps the text cursor back to (projected onto the
-    // current text direction, so any perpendicular offset from an
-    // embedded LF is preserved). Reset to the current pen position by
-    // every real PA/PU/PD/PR move and by DI, but NOT by CP -- matches
-    // oo7470A.rx's newCRP: exactly.
-    std::int16_t crPosX_ = 0, crPosY_ = 0;
+    // The CR point (where CR in a label returns to): set by every pen move
+    // and DI/DR, moved by LF/VT in labels and by CP's lines. CP's spaces
+    // wait in cpOff for the next label (from the CR point). See drawLabel().
+    double crPosX_ = 0, crPosY_ = 0;
+    double cpOffX_ = 0, cpOffY_ = 0;
+    // Character sets (CS standard, CA alternate; SS/SA or SO/SI in a label
+    // choose): 0 ASCII, 1..4 national (hpgl_font.h)
+    int charSet_ = 0, altSet_ = 0;
+    bool useAltSet_ = false;
     // Label terminator (DT) -- defaults to ETX (0x03). Per the manual, DT
     // ALWAYS takes the very next character literally as the new
     // terminator, with NO special case for "no parameter" -- only DF, IN,

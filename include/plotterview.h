@@ -256,11 +256,20 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
 // button strip) must be restored via plotterview_redrawRegion().
 bool plotterview_isActive();
 
-// Plotter digitizing (HP-GL DP): while the plotter waits for a point, a
-// touch on the Plotter view gives it (the plot under the finger, in plotter
-// units) -- true if the touch was taken. plotterview_poll() brings up the
-// Plotter view when DP comes.
-bool plotterview_digitizeTap(int x, int y);
+// Plotter digitizing (HP-GL DP): plotterview_poll() brings up the Plotter
+// view with a panel on the right -- a loupe, X/Y, arrows, ENTER, X. A touch
+// on the plot puts the marker there, the arrows move it a pixel (held:
+// repeated), ENTER gives the point to the plotter, X cancels.
+bool plotterview_digitizing();               // the panel is showing
+bool plotterview_digitizeTap(int x, int y);  // true: the touch was taken
+void plotterview_digitizeRelease();          // finger up: an arrow stops repeating
+// A strip button while digitizing (code as boardui: 2 OK = ENTER, 3/4 Up/
+// Down, 5 X = cancel; repeat: held) -- true if taken
+bool plotterview_digitizeButton(int code, bool repeat);
+// For tests: the centre of a panel control (0 up, 1 down, 2 left, 3 right,
+// 4 ENTER, 5 X) and the marker, in screen pixels
+bool plotterview_digitizeControl(int id, int& x, int& y);
+void plotterview_digitizeMarker(int& x, int& y);
 
 // Returns which Tape hotspot (if any) contains the given screen point.
 // Always TapeHotspot::None unless the Tape view is showing and its

@@ -1500,10 +1500,36 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   `CI`/`AA`/`AR` (`arc()`): chords of the chord angle (default 5°, 0.5..180),
   turned in user units and each end mapped to plotter units (unequal x/y
   scaling: an ellipse, as on the real plotter). `DP` sets `digitizing()`;
-  `plotterview_poll()` brings up the Plotter view, and a touch there
-  (`plotterview_digitizeTap()`, from `boardui_handleTap()`) is mapped back
-  to plotter units and given with `CPlotter::digitize()` (OS bit 2, `OD`).
-  OS bit 1 = P1/P2 changed by IP. Unknown mnemonics: logged once per `IN`
+  `plotterview_poll()` (`pollDigitize()`) brings up the Plotter view with the
+  digitize panel ("Digitizing" in plotterview.cpp): the plot is fitted into
+  `plotAreaW_` (left of the panel, which sits left of the button strip's
+  zone), the marker is kept in screen pixels and drawn over the plot
+  (erased with `plotterview_redrawRegion()`), the loupe redraws the segments
+  around it at 4x (software-clipped). `plotterview_digitizeTap()` (from
+  `boardui_handleTap()`) takes plot and panel touches; arrows repeat until
+  `plotterview_digitizeRelease()` (from `boardui_handleRelease()`); strip
+  buttons go through `plotterview_digitizeButton()` when no menu is open.
+  ENTER maps the marker back to plotter units and calls
+  `CPlotter::digitize()` (OS bit 2, `OD`); X calls `cancelDigitize()`.
+  PC test: `printer_view_test` (digitize_1_white.png, digitize_2_black.png).
+  OS bit 1 = P1/P2 changed by IP; IP also re-applies a relative (SR /
+  default) character size (`applyRelativeSize()`), SI's absolute one stays.
+  IW's default is the whole area (0,0..10300,7650), and the Plotter view's
+  Page shows that area too. LB leaves the pen at the label's end; CP moves
+  the pen by cells of 1.5 w x 2 h (the font's own advance and LF). The
+  tokenizer starts a new number at a sign after a number ("-9.-1"); SM's
+  argument is one character (state 5, as DT's). LT: `patternedSegment()`,
+  the pattern (7470A table) carried on across pen-down vectors. Errors:
+  OE 1 unknown mnemonic, 2 wrong number of parameters (IP, SC, CP), 3 out
+  of range (CS/CA) -- OS bit 5 until OE is read.
+  Labels follow emu7470 (LIFUTILS -- the HP-GL engine pyILPER2 runs; GPL,
+  used as a reference only, nothing copied): the CR point (`crPosX_`) is set
+  by moves and DI/DR, moved by LF/VT and CP's lines; CP's spaces wait in
+  `cpOffX_` for the next label, from the CR point; LB leaves the pen where
+  the next character would go; BS/HT(half)/VT/SO/SI act. Character sets 1..4:
+  `hpgl_font::kNationalGlyphs` (own strokes) and `nationalNonSpacing()`
+  (accents overstrike the previous character). SM centres the symbol on its
+  strokes' centre. Unknown mnemonics: logged once per `IN`
   with `LOGF` (not only under trace), listed in `show()`.
   IW stays in plotter units, its default the factory P1-P2. PC test:
   `tools/hipiview/test/plotter_test.cpp`.

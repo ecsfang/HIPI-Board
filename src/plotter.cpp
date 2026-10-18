@@ -28,13 +28,22 @@ void CPlotter::reset_defaults() {
     // Everything DF is documented to reset -- see execute()'s "DF" branch.
     tickLenPos_ = tickLenNeg_ = 0.5;  // HP-GL default: 0.5% of the P1-P2 span
     // SR defaults: 0.75%/1.5% of the P1-P2 span (HP-GL default character
-    // size), converted to plotter units up front so drawLabelChar() never
+    // size), converted to plotter units up front so drawGlyph() never
     // has to redo the percentage math per character.
-    charWidthUnits_  = 0.75 / 100.0 * (p2x_ - p1x_);
-    charHeightUnits_ = 1.5  / 100.0 * (p2y_ - p1y_);
+    charRelW_ = 0.75;
+    charRelH_ = 1.5;
+    charRelative_ = true;
+    applyRelativeSize();
     charSlant_ = 0.0;
     dirCos_ = 1.0; dirSin_ = 0.0;
     labelTerminator_ = 0x03;  // ETX -- see plotter.h's note on DT/DF
+}
+
+void CPlotter::applyRelativeSize() {
+    // SR's size is a share of P1..P2: a new P1/P2 (IP) changes it too
+    if (!charRelative_) return;
+    charWidthUnits_  = charRelW_ / 100.0 * (p2x_ - p1x_);
+    charHeightUnits_ = charRelH_ / 100.0 * (p2y_ - p1y_);
 }
 
 void CPlotter::reset_state() {
@@ -53,19 +62,26 @@ void CPlotter::reset_state() {
     p1x_ = kP1X; p1y_ = kP1Y; p2x_ = kP2X; p2y_ = kP2Y;
     scaling_ = false;
 
-    // IW defaults to the full P1-P2 area -- i.e. no extra clipping beyond
-    // the hard-clip limits already implied by plotter coordinates.
-    iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
+    // IW defaults to the plotter's whole area (as the real one: text from
+    // x=100, left of P1, isn't cut)
+    iw1x_ = 0; iw1y_ = 0; iw2x_ = kMaxX; iw2y_ = kMaxY;
 
     everInitialized_ = true;  // OS's power-on status bit, see plotter.h
     p1p2Changed_ = false;
+    error_ = 0;
+    symbol_ = '\0';
+    lineType_ = -1;
+    patternPct_ = 4.0;
+    patPos_ = 0.0;
     digitizing_ = false;
     pointReady_ = false;
     unsupported_.clear();
 
     reset_defaults();
-    charPosX_ = penX_; charPosY_ = penY_;
     crPosX_ = penX_; crPosY_ = penY_;
+    cpOffX_ = cpOffY_ = 0.0;
+    charSet_ = altSet_ = 0;
+    useAltSet_ = false;
 
     segments_.clear();
 
@@ -220,6 +236,11 @@ void CPlotter::feed_char(char c) {
                 parseState_ = 4;
                 return;
             }
+            if (cmdBuf_ == "SM") {
+                // Symbol Mode's argument is one character too (as DT)
+                parseState_ = 5;
+                return;
+            }
             parseState_ = 2;
             inParam_ = false;
             sawSeparator_ = false;
@@ -238,12 +259,19 @@ void CPlotter::feed_char(char c) {
         // explicitly comma-separated ones ("PA100,200") don't get a
         // second one.
         if (std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == '+' || c == '-') {
+            // A sign right after a number starts the next one ("CP-9.-1" is
+            // -9 and -1)
+            if (inParam_ && (c == '+' || c == '-')) {
+                inParam_ = false;
+                sawSeparator_ = false;
+            }
             if (!inParam_) {
                 inParam_ = true;
-                if (!sawSeparator_) {
-                    if (numParam_ > 0) cmdBuf_ += ',';
-                    ++numParam_;
-                }
+                // A comma already there, or one put in (a space or sign
+                // between numbers); the comma counts for this number only
+                if (!sawSeparator_ && numParam_ > 0) cmdBuf_ += ',';
+                ++numParam_;
+                sawSeparator_ = false;
             }
             cmdBuf_ += c;
             return;
@@ -307,6 +335,15 @@ void CPlotter::feed_char(char c) {
         // whatever it is (no special case for ';' or anything else; see
         // the manual note quoted in plotter.h).
         labelTerminator_ = c;
+        cmdBuf_.clear();
+        parseState_ = 0;
+        break;
+
+    case 5:
+        // SM's character: drawn at every point from now on; ';' (or a
+        // control character / space) turns symbol mode off
+        symbol_ = (c == ';' || static_cast<unsigned char>(c) <= ' ') ? '\0' : c;
+        MTRC_LOGF("SM '%c'", symbol_ ? symbol_ : ' ');
         cmdBuf_.clear();
         parseState_ = 0;
         break;
@@ -398,24 +435,71 @@ void CPlotter::emitSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, st
     if (onDraw_) onDraw_(ix0, iy0, ix1, iy1, currentPen_);
 }
 
+// Line types (LT 1..6), as on the HP 7470A: the pattern in % of its
+// length -- draw, gap, draw, gap ... (a 0 % draw is a dot)
+namespace {
+struct LinePattern { int n; std::uint8_t part[6]; };
+const LinePattern kLinePatterns[7] = {
+    { 0, {} },                                // 0: dots at the points (patternedSegment())
+    { 2, { 0, 100 } },                        // 1: a dot at each pattern's start
+    { 2, { 50, 50 } },                        // 2: half dash
+    { 2, { 70, 30 } },                        // 3: long dash
+    { 4, { 80, 10, 0, 10 } },                 // 4: dash dot
+    { 4, { 70, 10, 10, 10 } },                // 5: long and short dash
+    { 6, { 50, 10, 10, 10, 10, 10 } },        // 6: dash and two short ones
+};
+}
+
+void CPlotter::patternedSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1) {
+    const double dx = x1 - x0, dy = y1 - y0;
+    const double len = std::sqrt(dx * dx + dy * dy);
+    if (lineType_ == 0) {                     // dots at the points only
+        if (patPos_ == 0.0) emitSegment(x0, y0, x0, y0);
+        emitSegment(x1, y1, x1, y1);
+        patPos_ = 1.0;
+        return;
+    }
+    const LinePattern& p = kLinePatterns[lineType_];
+    const double pw = p1x_ - p2x_, ph = p1y_ - p2y_;
+    const double patLen = std::max(1.0, patternPct_ / 100.0 * std::sqrt(pw * pw + ph * ph));
+    // Walk the segment through the pattern; patPos_ (units into the
+    // pattern) carries on into the next segment while the pen stays down
+    double done = 0.0;
+    while (done < len) {
+        double at = 0.0;
+        int part = 0;
+        for (; part < p.n; ++part) {
+            const double partLen = p.part[part] / 100.0 * patLen;
+            if (patPos_ < at + partLen || (partLen == 0.0 && patPos_ == at)) break;
+            at += partLen;
+        }
+        if (part >= p.n) { patPos_ = 0.0; continue; }   // the next pattern
+        const double partLen = p.part[part] / 100.0 * patLen;
+        const double step = std::min(len - done, at + partLen - patPos_);
+        if ((part & 1) == 0) {                // a draw part (a 0 % one: a dot)
+            const double a = done / len, b = (done + step) / len;
+            emitSegment(clamp16(std::floor(x0 + dx * a + 0.5)), clamp16(std::floor(y0 + dy * a + 0.5)),
+                        clamp16(std::floor(x0 + dx * b + 0.5)), clamp16(std::floor(y0 + dy * b + 0.5)));
+        }
+        done += step;
+        patPos_ += step;
+        if (partLen == 0.0) patPos_ += 1e-9;  // (past the dot)
+    }
+}
+
 void CPlotter::doMove(std::int16_t x, std::int16_t y) {
     if (penDown_) {
         MTRC_LOGF("  (pen down move)");
-        emitSegment(penX_, penY_, x, y);
+        if (lineType_ < 0) emitSegment(penX_, penY_, x, y);
+        else patternedSegment(penX_, penY_, x, y);
     } else {
         MTRC_LOGF("  move -> (%d,%d)", x, y);
+        patPos_ = 0.0;                        // (a new line: the pattern starts again)
         if (onMove_) onMove_(x, y);
     }
     penX_ = x;
     penY_ = y;
-    // Keep the label "text cursor" AND its CR "home" position in sync
-    // with every real pen move -- CP (see execute()) is the only thing
-    // that deliberately offsets charPosX_/Y_ away from the actual pen
-    // position afterward, and it does NOT touch crPosX_/Y_ (matches
-    // oo7470A.rx: PA/PU/PD/PR and DI reset the CR home point, CP doesn't).
-    charPosX_ = x;
-    charPosY_ = y;
-    crPosX_ = x;
+    crPosX_ = x;                              // (a move sets the CR point, see drawLabel())
     crPosY_ = y;
 }
 
@@ -469,7 +553,24 @@ void CPlotter::moveThroughParams(const std::vector<double>& params) {
             y += penY_;
         }
         doMove(clamp16(x), clamp16(y));
+        if (symbol_ != '\0') drawSymbol();
     }
+}
+
+void CPlotter::drawSymbol() {
+    // SM: the character centred on the pen (on its strokes' centre, as
+    // the real plotter), in the label size and direction; the pen and the
+    // CR point stay
+    const char* strokes = glyphFor(static_cast<unsigned char>(symbol_));
+    if (strokes == nullptr) return;
+    const std::vector<double> nums = parseParams(strokes, 0);
+    double cx = 0, cy = 0;
+    int n = 0;
+    for (std::size_t i = 0; i + 2 < nums.size(); i += 3, ++n) { cx += nums[i + 1]; cy += nums[i + 2]; }
+    if (n == 0) return;
+    double gx = 0, gy = 0;
+    glyphToPlotter(cx / n, cy / n, gx, gy);    // (the centre's offset from the origin)
+    drawGlyph(strokes, penX_ - gx, penY_ - gy);
 }
 
 // ── Circles and arcs (CI, AA, AR) ───────────────────────────────────────
@@ -510,76 +611,84 @@ void CPlotter::startVector(double cx, double cy, double& vx, double& vy) const {
 }
 
 // ── Label (LB) text rendering ───────────────────────────────────────────
+// As the HP 7470A (and pyILPER's emu7470): characters advance a cell of
+// 1.5 widths, lines are 2 heights. The CR point -- where CR returns to --
+// is set by every pen move (PA/PR/PU/PD, arcs) and DI/DR, and moved by LF,
+// VT and CP's lines; CP's spaces are kept for the next label, counted from
+// the CR point. After a label the pen stands where the next character
+// would go.
 
-void CPlotter::drawLabel(const std::string& text) {
-    MTRC_LOGF("LB \"%s\"", text.c_str());
-    for (char ch : text) {
-        const unsigned char code = static_cast<unsigned char>(ch);
-        if (code == 13) {
-            // Carriage return: snap the text cursor back onto the same
-            // "column" (position along the text direction) it started
-            // at -- crPosX_/crPosY_, the CR home point -- while keeping
-            // whatever offset perpendicular to that direction has built
-            // up since then (e.g. from an embedded LF moving down a
-            // row). This is a vector projection of (crPos - charPos)
-            // onto the (unit) direction vector, ported directly from
-            // oo7470A.rx's CR handling in its LB command. Without this
-            // special case, CR would just fall through to drawLabelChar()
-            // as an unrecognized glyph and merely advance one character
-            // width instead of returning to the line's start column.
-            const double a = (crPosX_ - charPosX_) * dirCos_ + (crPosY_ - charPosY_) * dirSin_;
-            charPosX_ = static_cast<std::int16_t>(charPosX_ + a * dirCos_);
-            charPosY_ = static_cast<std::int16_t>(charPosY_ + a * dirSin_);
-            MTRC_LOGF("  CR -> textpos(%d,%d)", charPosX_, charPosY_);
-            continue;
-        }
-        drawLabelChar(code);
+void CPlotter::glyphToPlotter(double gx, double gy, double& px, double& py) const {
+    double sx = charWidthUnits_ * gx / 32.0;
+    const double sy = charHeightUnits_ * gy / 32.0;
+    sx += charSlant_ * sy;                            // SL: shear x by slant*y
+    px = sx * dirCos_ - sy * dirSin_;                 // DI: rotate into plotter space
+    py = sx * dirSin_ + sy * dirCos_;
+}
+
+const char* CPlotter::glyphFor(unsigned char code) const {
+    const int set = useAltSet_ ? altSet_ : charSet_;
+    if (set >= 1 && set <= 4) {
+        if (const char* g = hpgl_font::nationalGlyph(set, code)) return g;
+    }
+    return code < 128 ? hpgl_font::kGlyphs[code] : nullptr;
+}
+
+void CPlotter::drawGlyph(const char* strokes, double ox, double oy) {
+    const std::vector<double> nums = parseParams(strokes, 0);
+    std::int16_t prevX = 0, prevY = 0;
+    bool first = true;
+    for (std::size_t i = 0; i + 2 < nums.size(); i += 3) {
+        double rx, ry;
+        glyphToPlotter(nums[i + 1], nums[i + 2], rx, ry);
+        const std::int16_t x = clamp16(std::floor(ox + rx + 0.5));
+        const std::int16_t y = clamp16(std::floor(oy + ry + 0.5));
+        if (!first && nums[i] != 0.0) emitSegment(prevX, prevY, x, y);
+        prevX = x; prevY = y;
+        first = false;
     }
 }
 
-void CPlotter::drawLabelChar(unsigned char code) {
-    // Build the full stroke list: the font table (hpgl_font.h) holds each
-    // glyph's own strokes verbatim from oo7470A.rx's chagra. table, which
-    // does NOT yet include the inter-character advance -- that's appended
-    // here exactly like oo7470A.rx's LB handler does (",0, 48, 0", a
-    // final pen-up move to x=48 in the glyph's own coordinate space),
-    // except for control characters (code <= 32, e.g. space/BS/LF/VT)
-    // whose own glyph data already fully encodes their specific advance.
-    std::string strokes;
-    const bool known = (code < 128) && (hpgl_font::kGlyphs[code] != nullptr);
-    if (known) {
-        strokes = hpgl_font::kGlyphs[code];
-        if (code > 32) strokes += ",0, 48,  0";
+void CPlotter::drawLabel(const std::string& text) {
+    MTRC_LOGF("LB \"%s\"", text.c_str());
+    const double sp = 1.5 * charWidthUnits_, ln = 2.0 * charHeightUnits_;
+    const double cdx = sp * dirCos_, cdy = sp * dirSin_;     // one character on
+    const double ldx = ln * dirSin_, ldy = -ln * dirCos_;    // one line down
+    double rx, ry;
+    if (cpOffX_ != 0.0 || cpOffY_ != 0.0) {   // CP's spaces: from the CR point
+        rx = crPosX_ + cpOffX_;
+        ry = crPosY_ + cpOffY_;
+        cpOffX_ = cpOffY_ = 0.0;
     } else {
-        strokes = "0, 48,  0";  // unrecognized glyph -- just advance like a space
+        rx = penX_;
+        ry = penY_;
     }
-
-    const std::vector<double> nums = parseParams(strokes, 0);
-    const std::int16_t originX = charPosX_, originY = charPosY_;
-    std::int16_t prevX = originX, prevY = originY;
-    std::int16_t lastX = originX, lastY = originY;
-    bool first = true;
-
-    for (std::size_t i = 0; i + 2 < nums.size(); i += 3) {
-        const bool penDown = nums[i] != 0.0;
-        double sx = charWidthUnits_  * nums[i + 1] / 32.0;
-        double sy = charHeightUnits_ * nums[i + 2] / 32.0;
-        sx += charSlant_ * sy;                            // SL: shear x by slant*y
-        const double rx = sx * dirCos_ - sy * dirSin_;    // DI: rotate into plotter space
-        const double ry = sx * dirSin_ + sy * dirCos_;
-        const auto x = static_cast<std::int16_t>(originX + rx);
-        const auto y = static_cast<std::int16_t>(originY + ry);
-
-        if (!first && penDown) emitSegment(prevX, prevY, x, y);
-        prevX = x; prevY = y;
-        lastX = x; lastY = y;
-        first = false;
+    for (char ch : text) {
+        const unsigned char code = static_cast<unsigned char>(ch);
+        switch (code) {
+        case ' ':  rx += cdx; ry += cdy; break;
+        case 0x0D: rx = crPosX_; ry = crPosY_; break;                       // CR
+        case 0x0A: crPosX_ += ldx; crPosY_ += ldy; rx += ldx; ry += ldy; break;   // LF
+        case 0x08: rx -= cdx; ry -= cdy; break;                             // BS
+        case 0x09: rx -= 0.5 * cdx; ry -= 0.5 * cdy; break;                 // HT: half a space back
+        case 0x0B: crPosX_ -= ldx; crPosY_ -= ldy; rx -= ldx; ry -= ldy; break;   // VT: a line up
+        case 0x0E: useAltSet_ = true; break;                                // SO: alternate set
+        case 0x0F: useAltSet_ = false; break;                               // SI: standard set
+        default: {
+            const int set = useAltSet_ ? altSet_ : charSet_;
+            if (code > ' ' && hpgl_font::nationalNonSpacing(set, code)) { rx -= cdx; ry -= cdy; }
+            const char* strokes = code > ' ' ? glyphFor(code) : nullptr;
+            if (strokes != nullptr) drawGlyph(strokes, rx, ry);
+            rx += cdx;                        // (other control characters: a space)
+            ry += cdy;
+            break;
+        }
+        }
     }
-
-    // The glyph's final point (after the appended advance move) becomes
-    // the next character's origin.
-    charPosX_ = lastX;
-    charPosY_ = lastY;
+    // The pen ends where the next character would go (pen up)
+    penX_ = clamp16(std::floor(rx + 0.5));
+    penY_ = clamp16(std::floor(ry + 0.5));
+    if (onMove_ && !penDown_) onMove_(penX_, penY_);
 }
 
 void CPlotter::execute(const std::string& cmd) {
@@ -650,10 +759,13 @@ void CPlotter::execute(const std::string& cmd) {
         MTRC_LOGF("OC (output commanded position)");
         queueOutput(buf);
     } else if (mnemonic == "OE") {
-        // Output Error -- we don't track real plotter error conditions
-        // yet, so this always reports "no error".
-        MTRC_LOGF("OE (output error status)");
-        queueOutput("0\r\n");
+        // Output Error: the last error (1 = instruction not recognized),
+        // 0 = none; reading it clears it and OS bit 5
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%d\r\n", error_);
+        MTRC_LOGF("OE (output error) -> %d", error_);
+        error_ = 0;
+        queueOutput(buf);
     } else if (mnemonic == "OI") {
         // Output Identification -- always "7470A" on a real 7470A,
         // regardless of interface (matches the SDI device-id string too).
@@ -684,6 +796,7 @@ void CPlotter::execute(const std::string& cmd) {
         if (penDown_) status |= 1;
         if (p1p2Changed_) { status |= 2; p1p2Changed_ = false; }
         if (pointReady_) status |= 4;
+        if (error_ != 0) status |= 32;
         if (everInitialized_) {
             status |= 8;
             everInitialized_ = false;
@@ -717,7 +830,7 @@ void CPlotter::execute(const std::string& cmd) {
         // line (PD, ticks, label strokes) -- bare "IW" resets it to the
         // full P1-P2 area (i.e. no extra clipping).
         if (params.size() < 4) {
-            iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;   // (the default area, not a changed P1/P2)
+            iw1x_ = 0; iw1y_ = 0; iw2x_ = kMaxX; iw2y_ = kMaxY;   // (the whole area, as after IN)
             MTRC_LOGF("IW reset to P1-P2");
         } else {
             iw1x_ = static_cast<std::int16_t>(params[0]);
@@ -733,8 +846,10 @@ void CPlotter::execute(const std::string& cmd) {
         // resets to the HP-GL default (0.75%, 1.5%).
         const double wPct = params.empty() ? 0.75 : params[0];
         const double hPct = params.size() > 1 ? params[1] : wPct;
-        charWidthUnits_  = wPct / 100.0 * (p2x_ - p1x_);
-        charHeightUnits_ = hPct / 100.0 * (p2y_ - p1y_);
+        charRelW_ = wPct;
+        charRelH_ = hPct;
+        charRelative_ = true;
+        applyRelativeSize();
         if (bTrace) {
             MLOGF("SR w=%.3f%% h=%.3f%% (%.1f x %.1f units)",
                  wPct, hPct, charWidthUnits_, charHeightUnits_);
@@ -746,13 +861,14 @@ void CPlotter::execute(const std::string& cmd) {
         // constant regardless of P1/P2. Bare "SI" defaults to 0.19cm/
         // 0.27cm, matching SR's own no-param default size at standard
         // P1/P2 (per the manual). Negative values mirror the label for
-        // free -- drawLabelChar()'s scaling already flips correctly for a
+        // free -- glyphToPlotter()'s scaling already flips correctly for a
         // negative charWidthUnits_/charHeightUnits_.
         constexpr double kUnitsPerCm = 400.0;  // 10 mm/cm * 40 units/mm
         const double wCm = params.empty() ? 0.19 : params[0];
         const double hCm = params.size() > 1 ? params[1] : 0.27;
         charWidthUnits_  = wCm * kUnitsPerCm;
         charHeightUnits_ = hCm * kUnitsPerCm;
+        charRelative_ = false;               // (a new P1/P2 leaves it alone)
         if (bTrace) {
             MLOGF("SI w=%.3fcm h=%.3fcm (%.1f x %.1f units)",
                  wCm, hCm, charWidthUnits_, charHeightUnits_);
@@ -778,22 +894,24 @@ void CPlotter::execute(const std::string& cmd) {
         crPosX_ = penX_; crPosY_ = penY_;
         MTRC_LOGF("DI cos=%.3f sin=%.3f", dirCos_, dirSin_);
     } else if (mnemonic == "CP") {
-        // Character Plot: reposition the label "text cursor" by dCols
-        // character-widths and dRows character-heights, along the current
-        // text direction (DI), relative to the CURRENT pen position (not
-        // accumulated from a previous CP) -- matches oo7470A.rx, where
-        // each CP is computed fresh from the last real PA/PU/PD position.
-        // Bare "CP" (no params) means "one line down, same column".
+        // Character Plot: dCols spaces, dRows lines (bare CP: CP0,-1). The
+        // lines move the CR point and the pen goes there (the start of
+        // that line); the spaces are kept for the next label, counted from
+        // the CR point (as the 7470A / emu7470: "LBSALES $" "CP-9,-1"
+        // "LB(THOUSANDS)" starts the second label 9 spaces left of where
+        // the first line began, not of where it ended)
+        if (params.size() == 1) { error_ = 2; return; }     // (one number: wrong)
         const double dCols = params.empty() ? 0.0 : params[0];
-        const double dRows = params.size() > 1 ? params[1] : (params.empty() ? -1.0 : 0.0);
-        const double dx = dCols * charWidthUnits_;
-        const double dy = dRows * charHeightUnits_;
-        charPosX_ = static_cast<std::int16_t>(penX_ + dx * dirCos_ - dy * dirSin_);
-        charPosY_ = static_cast<std::int16_t>(penY_ + dx * dirSin_ + dy * dirCos_);
-        if (bTrace) {
-            MLOGF("CP dCols=%.2f dRows=%.2f -> textpos(%d,%d)",
-                 dCols, dRows, charPosX_, charPosY_);
-        }
+        const double dRows = params.empty() ? -1.0 : params[1];
+        const double sp = 1.5 * charWidthUnits_, ln = 2.0 * charHeightUnits_;
+        cpOffX_ = dCols * sp * dirCos_;
+        cpOffY_ = dCols * sp * dirSin_;
+        crPosX_ -= dRows * ln * dirSin_;
+        crPosY_ += dRows * ln * dirCos_;
+        penX_ = clamp16(std::floor(crPosX_ + 0.5));          // (pen up -- nothing drawn)
+        penY_ = clamp16(std::floor(crPosY_ + 0.5));
+        if (onMove_ && !penDown_) onMove_(penX_, penY_);
+        if (bTrace) MLOGF("CP %.2f,%.2f -> pen (%d,%d)", dCols, dRows, penX_, penY_);
     } else if (mnemonic == "CI") {
         // Circle: radius[,chord angle] around the pen -- the pen goes up
         // to the start (0 degrees; a negative radius: 180), down for the
@@ -839,6 +957,10 @@ void CPlotter::execute(const std::string& cmd) {
         // Input P1/P2: the scaling points, in plotter units. Bare "IP":
         // the defaults; two numbers: P1 moves there and P2 with it (same
         // size). User units (SC) follow: they map onto the new P1..P2.
+        if (params.size() != 0 && params.size() != 2 && params.size() != 4) {
+            error_ = 2;                      // (wrong number of parameters: ignored)
+            return;
+        }
         if (params.empty()) {
             p1x_ = kP1X; p1y_ = kP1Y; p2x_ = kP2X; p2y_ = kP2Y;
         } else if (params.size() >= 2) {
@@ -854,12 +976,17 @@ void CPlotter::execute(const std::string& cmd) {
             }
         }
         p1p2Changed_ = true;
+        applyRelativeSize();                 // (SR's size follows P1/P2)
         if (bTrace) MLOGF("IP P1=(%d,%d) P2=(%d,%d)", p1x_, p1y_, p2x_, p2y_);
     } else if (mnemonic == "SC") {
         // Scale: user units xmin,xmax,ymin,ymax -- xmin/ymin at P1, xmax/
         // ymax at P2 -- for PA/PR/PU/PD from now on. Bare "SC" (or a range
         // of zero): back to plotter units.
-        if (params.size() >= 4 && params[1] != params[0] && params[3] != params[2]) {
+        if (params.size() != 0 && params.size() != 4) {
+            error_ = 2;                      // (wrong number of parameters: ignored)
+            return;
+        }
+        if (params.size() == 4 && params[1] != params[0] && params[3] != params[2]) {
             scX1_ = params[0]; scX2_ = params[1];
             scY1_ = params[2]; scY2_ = params[3];
             scaling_ = true;
@@ -875,13 +1002,54 @@ void CPlotter::execute(const std::string& cmd) {
         reset_defaults();
         coordMode_ = CoordMode::Absolute;
         scaling_ = false;
+        lineType_ = -1;
+        patternPct_ = 4.0;
+        symbol_ = '\0';
         MTRC_LOGF("DF (defaults)");
+    } else if (mnemonic == "DR") {
+        // Relative direction: run,rise in % of P1..P2's width/height (the
+        // label slants with P1/P2's shape); bare DR: horizontal
+        const double run = params.empty() ? 1.0 : params[0] / 100.0 * (p2x_ - p1x_);
+        const double rise = params.size() > 1 ? params[1] / 100.0 * (p2y_ - p1y_) : 0.0;
+        const double mag = std::sqrt(run * run + rise * rise);
+        if (mag > 1e-9) { dirCos_ = run / mag; dirSin_ = rise / mag; }
+        crPosX_ = penX_; crPosY_ = penY_;
+        MTRC_LOGF("DR cos=%.3f sin=%.3f", dirCos_, dirSin_);
+    } else if (mnemonic == "VS" || mnemonic == "IM") {
+        // Pen speed / input mask (which errors light the error LED, ask
+        // for service): nothing to do here
+        MTRC_LOGF("%s (accepted, nothing to do)", mnemonic.c_str());
+    } else if (mnemonic == "CS" || mnemonic == "CA") {
+        // Character set 0..4 (standard / alternate); another number: error
+        // 3, ignored. Bare: set 0
+        const int set = params.empty() ? 0 : static_cast<int>(params[0]);
+        if (set < 0 || set > 4) {
+            error_ = 3;
+        } else if (mnemonic == "CS") {
+            charSet_ = set;
+        } else {
+            altSet_ = set;
+        }
+        MTRC_LOGF("%s %d", mnemonic.c_str(), set);
+    } else if (mnemonic == "SS" || mnemonic == "SA") {
+        useAltSet_ = mnemonic == "SA";       // labels from now on in that set
+    } else if (mnemonic == "LT") {
+        // Line type 0..6[,pattern length in % of the P1..P2 diagonal,
+        // default 4]; bare LT: solid
+        if (params.empty() || params[0] < 0 || params[0] > 6) {
+            lineType_ = -1;
+        } else {
+            lineType_ = static_cast<int>(params[0]);
+            if (params.size() > 1 && params[1] > 0) patternPct_ = params[1];
+        }
+        patPos_ = 0.0;
+        MTRC_LOGF("LT %d (%.1f%%)", lineType_, patternPct_);
     } else if (mnemonic == "DP") {
         // Digitize Point: wait for one (see digitize()); a point not yet
         // read is dropped
         digitizing_ = true;
         pointReady_ = false;
-        LOGF("\r\n * %s: DP -- waiting for a point (touch it in the Plotter view)", name());
+        LOGF("\r\n * %s: DP -- waiting for a point (the Plotter view: touch it, arrows, ENTER)", name());
     } else if (mnemonic == "DC") {
         digitizing_ = false;                 // Digitize Clear
         MTRC_LOGF("DC (digitize clear)");
@@ -905,6 +1073,7 @@ void CPlotter::execute(const std::string& cmd) {
     } else {
         // Not implemented (see plotter.h): ignored -- logged once since the
         // last IN, trace or not, so a program's missing pieces show up
+        error_ = 1;                          // OE: instruction not recognized
         if (unsupported_.find(mnemonic + " ") == std::string::npos) {
             unsupported_ += mnemonic + " ";
             LOGF("\r\n * %s: HP-GL '%s' not supported -- ignored (\"%.40s\")", name(), mnemonic.c_str(), cmd.c_str());
@@ -919,9 +1088,9 @@ void CPlotter::show(void) {
          coordMode_ == CoordMode::Absolute ? "ABS" : "REL",
          segments_.size(), cmdBuf_.c_str(), outQueue_.size(),
          outEnd_ ? " (end)" : "");
-    LOGF("\r\n\tIW:(%d,%d)-(%d,%d) charSize:(%.1f,%.1f) textpos:(%d,%d)",
+    LOGF("\r\n\tIW:(%d,%d)-(%d,%d) charSize:(%.1f,%.1f) CRpoint:(%d,%d)",
          iw1x_, iw1y_, iw2x_, iw2y_, charWidthUnits_, charHeightUnits_,
-         charPosX_, charPosY_);
+         static_cast<int>(crPosX_), static_cast<int>(crPosY_));
     LOGF("\r\n\tP1:(%d,%d) P2:(%d,%d) SC:", p1x_, p1y_, p2x_, p2y_);
     if (scaling_) LOGF("%g,%g,%g,%g", scX1_, scX2_, scY1_, scY2_);
     else LOGF("off");

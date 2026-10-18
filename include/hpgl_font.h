@@ -148,4 +148,68 @@ inline const char* const kGlyphs[128] = {
 // x=48) after every ordinary (non-control) character.
 constexpr int kAdvanceWidth = 48;
 
+
+// ── Character sets 1..4 (CS / CA) ──────────────────────────────────────
+// The HP 7470A's other character sets replace a few ASCII codes; these are
+// the glyphs for them, same format as above (own strokes, after the
+// sets' tables in the 7470A documentation / pyILPER's emu7470). Accents
+// sit high (over capitals) or low (over small letters); whether a code
+// overstrikes the previous character is nationalNonSpacing().
+struct NationalGlyph { unsigned char set, code; const char* strokes; };
+inline const NationalGlyph kNationalGlyphs[] = {
+    // Set 1: HP 9825
+    { 1, '\\', "0,0,14,1,6,16,1,13,0,1,22,32,1,32,32" },                       // square root
+    { 1, '^',  "0,16,0,1,16,32,0,6,22,1,16,32,1,26,22" },                       // arrow up
+    { 1, '{',  "0,10,0,1,10,18,0,22,0,1,22,18,0,4,26,1,10,32,1,16,28,1,22,24,1,28,30" },
+    { 1, '|',  "0,16,-4,1,16,36,0,4,22,1,28,22" },                              // dagger
+    { 1, '}',  "0,0,16,1,32,16,0,22,24,1,32,16,1,22,8" },                       // arrow right
+    // Set 2: French / German
+    { 2, '#',  "0,28,2,1,24,0,1,6,0,1,10,4,1,12,10,1,12,24,1,15,30,1,20,32,1,25,31,1,28,28,0,4,16,1,22,16" },  // pound
+    { 2, '\'', "0,16,36,1,26,44" },                                             // acute
+    { 2, '\\', "0,27,4,1,24,1,1,19,0,1,9,0,1,4,1,1,1,4,1,0,8,1,0,16,1,1,20,1,4,23,1,9,24,1,19,24,1,24,23,1,27,20,0,14,0,1,14,-3,1,18,-5,1,18,-7,1,14,-9" },               // c cedilla
+    { 2, '{',  "0,9,38,1,9,42,0,23,38,1,23,42" },                               // umlaut, high
+    { 2, '|',  "0,16,37,1,19,40,1,16,43,1,13,40,1,16,37" },                     // ring, high
+    { 2, '}',  "0,9,27,1,9,31,0,23,27,1,23,31" },                               // umlaut, low
+    { 2, '~',  "0,16,27,1,16,32" },
+    // Set 3: Scandinavian
+    { 3, '#',  "0,28,2,1,24,0,1,6,0,1,10,4,1,12,10,1,12,24,1,15,30,1,20,32,1,25,31,1,28,28,0,4,16,1,22,16" },
+    { 3, '[',  "0,12,0,1,6,1,1,3,3,1,1,6,1,0,12,1,0,20,1,1,26,1,3,29,1,6,31,1,12,32,1,20,32,1,26,31,1,29,29,1,31,26,1,32,20,1,32,12,1,31,6,1,29,3,1,26,1,1,20,0,1,12,0,0,0,-2,1,32,34" },                                        // O slash
+    { 3, '\\', "0,0,0,1,12,32,1,32,32,0,16,32,1,16,0,1,32,0,0,5,12,1,16,12,0,16,17,1,28,17" },  // AE
+    { 3, ']',  "0,9,0,1,19,0,1,24,1,1,27,4,1,28,8,1,28,16,1,27,20,1,24,23,1,19,24,1,9,24,1,4,23,1,1,20,1,0,16,1,0,8,1,1,4,1,4,1,1,9,0,0,0,-2,1,28,26" },                                        // o slash
+    { 3, '^',  "0,14,2,1,11,0,1,4,0,1,0,3,1,0,9,1,4,12,1,14,12,0,1,22,1,5,24,1,11,24,1,14,21,1,14,0,"
+               "0,14,13,1,32,13,1,32,18,1,29,23,1,25,24,1,18,24,1,15,21,0,14,3,1,17,0,1,27,0,1,32,4" },  // ae
+    { 3, '{',  "0,9,38,1,9,42,0,23,38,1,23,42" },
+    { 3, '|',  "0,16,37,1,19,40,1,16,43,1,13,40,1,16,37" },
+    { 3, '}',  "0,9,27,1,9,31,0,23,27,1,23,31" },
+    { 3, '~',  "0,16,26,1,19,29,1,16,32,1,13,29,1,16,26" },                     // ring, low
+    // Set 4: Spanish / Latin American
+    { 4, '#',  "0,19,24,1,16,24,1,16,22,1,19,22,1,19,24,0,18,14,1,17,11,1,15,9,1,7,8,1,2,6,1,0,3,1,0,-3,"
+               "1,2,-6,1,7,-8,1,25,-8,1,30,-6,1,32,-3" },                      // inverted ?
+    { 4, '\'', "0,16,36,1,26,44" },
+    { 4, '\\', "0,0,24,1,2,24,1,2,22,1,0,22,1,0,24,0,1,13,1,1,-8" },          // inverted !
+    { 4, '{',  "0,4,38,1,8,41,1,12,41,1,20,38,1,24,38,1,28,41" },               // tilde, high
+    { 4, '|',  "0,8,38,1,11,41,1,14,41,1,18,38,1,21,38,1,24,41" },
+    { 4, '}',  "0,4,27,1,8,30,1,12,30,1,20,27,1,24,27,1,28,30" },               // tilde, low
+    { 4, '~',  "0,8,27,1,11,30,1,14,30,1,18,27,1,21,27,1,24,30" },
+};
+
+// The glyph for code in character set 1..4, nullptr: the ASCII one
+inline const char* nationalGlyph(int set, unsigned char code) {
+    for (const NationalGlyph& g : kNationalGlyphs)
+        if (g.set == set && g.code == code) return g.strokes;
+    return nullptr;
+}
+
+// Codes that overstrike the previous character (accents, underline ...):
+// drawn one cell back, so the pen doesn't move on (as the 7470A sets)
+inline bool nationalNonSpacing(int set, unsigned char code) {
+    switch (set) {
+    case 1: return code == 95 || code == 96 || code == 126;
+    case 2: return code == 39 || code == 94 || code == 95 || code == 96 || (code >= 123 && code <= 125);
+    case 3: return code == 95 || code >= 123;
+    case 4: return code == 39 || code == 94 || code == 95 || code >= 123;
+    default: return false;
+    }
+}
+
 }  // namespace hpgl_font

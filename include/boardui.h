@@ -102,6 +102,8 @@ void boardui_onMenuClosed();
 // Screen's own text rendering paused, for whatever reason") should use
 // this instead.
 bool boardui_isMenuOpen();
+// The button strip's width (its zone at the right edge), 0 before it's loaded
+std::uint16_t boardui_buttonStripWidth();
 
 // A drawn screen saver (clock, rain, goose) takes over the whole panel:
 // Begin closes the info box and device list and puts the menu and button

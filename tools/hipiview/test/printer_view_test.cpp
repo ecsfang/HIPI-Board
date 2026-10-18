@@ -16,6 +16,7 @@
 #include "LT7683.hpp"
 #include "Screen.hpp"
 #include "plotterview.h"
+#include "hp82163_font.hpp"
 #include "boardui.h"            // (the pvstubs one: counts boardui_closePipBoxes())
 #include "printout.h"
 #include "printer.h"
@@ -120,6 +121,11 @@ int main(int argc, char** argv) {
     ChipTransport t;
     hipi::LT7683 d(t, SCREEN_MAX_X, SCREEN_MAX_Y);
     d.begin();
+    {   // the chip's 8x16 font, for text drawn on the panel (the digitize panel)
+        std::uint8_t f[256][16] = {};
+        for (int c = 32; c < 127; ++c) std::memcpy(f[c], hipi::font[c - 32], 16);
+        chip.setBuiltinFont(f);
+    }
     hipi::Screen screen(&d, 0x07E0, 1, 200, 1024);
 
     plotter = new CPlotter("TFPLOT");
@@ -381,18 +387,83 @@ int main(int argc, char** argv) {
         if (std::system(("rm -rf '" + tmp + "'").c_str()) != 0) ++failures;
     }
 
-    // ── Plotter: DP -- the Plotter view comes up, a touch is the point ──
-    hipi::plotterview_setPlotFit(false);                    // Page: the whole P1..P2 area, known mapping
-    for (char c : std::string("IN;PU;DP;")) plotter->put(c);
+    // ── Plotter: DP -- the digitize panel; a touch sets the marker, the
+    //    arrows move it a pixel, ENTER gives the point, X cancels ─────────
+    hipi::plotterview_setPlotFit(false);                    // Page: the whole paper, known mapping
+    for (char c : std::string("IN;SP1;PA1000,1000;PD;PA9000,1000,9000,6500,1000,6500,1000,1000;"
+                              "PU;PA2000,2000;PD;CI1500;PU;PA5150,3825;")) plotter->put(c);
+    for (char c : std::string("DP;")) plotter->put(c);
     run(100);
-    check(hipi::plotterview_output() == hipi::DisplayOutput::Plotter, "DP: the Plotter view comes up");
-    run(1600);                                              // ("DIGITIZE: TOUCH A POINT" goes away)
-    check(hipi::plotterview_digitizeTap(SCREEN_MAX_X / 2, SCREEN_MAX_Y / 2),
-          "DP: a touch on the view is taken");
-    std::printf("     point %d,%d\n", plotter->penX(), plotter->penY());
-    check(std::abs(plotter->penX() - 5250) <= 12 && std::abs(plotter->penY() - 3879) <= 12 && !plotter->digitizing(),
-          "... the middle of the screen = the middle of P1..P2 (5250,3879)");
+    check(hipi::plotterview_output() == hipi::DisplayOutput::Plotter && hipi::plotterview_digitizing(),
+          "DP: the Plotter view with the digitize panel");
+    int mx = 0, my = 0;
+    hipi::plotterview_digitizeMarker(mx, my);
+    std::printf("     marker at the pen: %d,%d\n", mx, my);
+    check(mx == 367 && my == 300, "... the marker starts at the pen (5150,3825)");
+    check(hipi::plotterview_digitizeTap(200, 400) && plotter->digitizing(), "a touch on the plot: the marker moves, no point yet");
+    hipi::plotterview_digitizeMarker(mx, my);
+    check(mx == 200 && my == 400, "... the marker where the finger was");
+    hipi::plotterview_digitizeTap(72, 501);                 // the frame's corner (1000,1000): in the loupe
+    snapshot("tools/hipiview/digitize_1_white.png");
+    hipi::plotterview_digitizeTap(200, 400);
+    int bx = 0, by = 0;
+    hipi::plotterview_digitizeControl(3, bx, by);           // right
+    for (int i = 0; i < 3; ++i) { hipi::plotterview_digitizeTap(bx, by); hipi::plotterview_digitizeRelease(); }
+    hipi::plotterview_digitizeControl(0, bx, by);           // up
+    hipi::plotterview_digitizeTap(bx, by); hipi::plotterview_digitizeRelease();
+    hipi::plotterview_digitizeMarker(mx, my);
+    check(mx == 203 && my == 399, "arrows: 3 right, 1 up -- a pixel each");
+    hipi::plotterview_digitizeTap(bx, by);                  // up, held: repeats after a moment
+    run(1000);
+    hipi::plotterview_digitizeRelease();
+    hipi::plotterview_digitizeMarker(mx, my);
+    std::printf("     up held 1 s: y %d\n", my);
+    check(my < 399 - 5, "an arrow held: repeats");
+    hipi::plotterview_digitizeTap(200, 400);
+    hipi::plotterview_digitizeButton(3, false);             // the strip's Up
+    hipi::plotterview_digitizeMarker(mx, my);
+    check(mx == 200 && my == 399, "the strip's Up moves it too");
+    // Page in the narrowed area: 734 px wide (1024 - strip 50 - panel 240)
+    const double sc = std::min(734.0 / 10300, 600.0 / 7650), dy = (600 - 7650 * sc) / 2;
+    const int wantX = static_cast<int>(std::lround(200 / sc)), wantY = static_cast<int>(std::lround((dy + 7650 * sc - 399) / sc));
+    hipi::plotterview_digitizeControl(4, bx, by);           // ENTER
+    hipi::plotterview_digitizeTap(bx, by);
+    std::printf("     ENTER: %d,%d (expected %d,%d)\n", plotter->penX(), plotter->penY(), wantX, wantY);
+    check(!plotter->digitizing() && std::abs(plotter->penX() - wantX) <= 2 && std::abs(plotter->penY() - wantY) <= 2,
+          "ENTER: the point under the marker, given to the plotter");
+    check(!hipi::plotterview_digitizing(), "... and the panel gone");
+    run(1500);
+    hipi::plotterview_setPaperBlack(true);
+    for (char c : std::string("DP;")) plotter->put(c);
+    run(100);
+    hipi::plotterview_digitizeTap(185, 327);                // on the circle
+    snapshot("tools/hipiview/digitize_2_black.png");
+    hipi::plotterview_digitizeControl(5, bx, by);           // X
+    hipi::plotterview_digitizeTap(bx, by);
+    check(!plotter->digitizing() && !hipi::plotterview_digitizing(), "X: cancelled, the panel gone");
+    hipi::plotterview_setPaperBlack(false);
     check(!hipi::plotterview_digitizeTap(100, 100), "no DP: a touch isn't a point");
+    // DP right after IN: the pen at 0,0 -- on the Page view that's the
+    // paper's corner: the marker there, its arms cut at the screen's edge
+    // (given to the chip as negative / too large corners they drew magenta
+    // lines along the left and bottom edges on the real panel; the emulator
+    // clips them anyway, so this only shows the case)
+    for (char c : std::string("IN;DP;")) plotter->put(c);
+    run(100);
+    hipi::plotterview_digitizeMarker(mx, my);
+    chip.render(panel.data(), 0.0);
+    long stray = 0;
+    for (int y = 0; y < SCREEN_MAX_Y; ++y)
+        for (int x = 0; x < 734; ++x) {
+            if (std::abs(x - mx) <= 20 && std::abs(y - my) <= 20) continue;   // (the marker itself)
+            const std::uint32_t p = at(x, y);
+            if (((p >> 16) & 0xFF) > 200 && (p & 0xFF) > 200 && ((p >> 8) & 0xFF) < 60) ++stray;
+        }
+    std::printf("     marker %d,%d -- stray magenta pixels: %ld\n", mx, my, stray);
+    snapshot("tools/hipiview/digitize_3_corner.png");
+    check(stray == 0, "DP at the pen 0,0: no magenta outside the marker");
+    hipi::plotterview_digitizeControl(5, bx, by);
+    hipi::plotterview_digitizeTap(bx, by);
 
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;

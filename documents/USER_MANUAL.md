@@ -667,7 +667,9 @@ Two things make plotter commands easy to type on the HP-41:
 lets `PA`, `PR`, `PU` and `PD` use your own units from then on: *xmin,ymin*
 lands on P1, *xmax,ymax* on P2. `IP1000,1000,6000,6000;SC0,25000,0,25000;`
 puts 0..25000 on a 12.5 cm square. `SC` alone (or `DF`, `IN`) goes back to
-plotter units. Fractions are fine (`PA16931.63,13281.42`).
+plotter units. The text size set with `SR` (and the default size) is a share
+of P1..P2, so a new `IP` changes it too; `SI` sizes stay. Drawing isn't cut
+at P1/P2 — only at the paper's edge, or at a window set with `IW`. Fractions are fine (`PA16931.63,13281.42`).
 
 **Circles and arcs:** `CI` *radius*[,*chord angle*] draws a circle around the
 pen (the pen goes back to the centre afterwards), `AA` *x,y,angle* an arc
@@ -676,17 +678,41 @@ positive angle; drawn only with the pen down), `AR` the same with the centre
 relative to the pen. In your own units (`SC`) too. The chord angle (default
 5°) sets how smooth the curve is.
 
-**Digitizing a point:** after `DP` the plotter waits for a point — HIPI
-switches to the Plotter view and shows *DIGITIZE: TOUCH A POINT*; touch the
-spot on the plot (the real plotter: moved with the arrow keys and ENTER).
-`OS` then has bit 2 set (a point is ready), `OD` answers *x,y,pen* in plotter
-units, and `DC` stops waiting.
+**Digitizing a point:** after `DP` the plotter waits for a point. HIPI
+switches to the Plotter view with a panel on the right, like the plotter's
+own front panel:
+
+- a **loupe** — the plot around the marker, four times larger;
+- **X** and **Y** of the marker in plotter units (and in your own units when
+  `SC` is in use);
+- four **arrows** that move the marker one pixel (hold one to keep going);
+- **ENTER**, which gives the point to the plotter, and **X**, which cancels.
+
+Touch the plot to put the marker there, adjust it with the arrows while
+watching the loupe, then press ENTER. The button strip works too: **OK** is
+ENTER, **▲ ▼** move the marker, **X** cancels. The marker is magenta with a
+black outline on white paper and a white one on black paper. After ENTER,
+`OS` has bit 2 set (a point is ready), `OD` answers *x,y,pen* in plotter
+units; `DC` stops waiting.
+
+<a href="images/plotter-digitize.png"><img src="images/plotter-digitize.png" alt="Digitizing a point" width="512"></a>
 
 **Commands HIPI doesn't know** are ignored, and each one is written once to
 the USB log (since the last `IN`), also without trace:
-`* HP7470A: HP-GL 'LT' not supported -- ignored ("LT2")`. Not there yet:
-line types (`LT`), symbol mode (`SM`), character sets (`CS`, `CA`, `SS`,
-`SA`), relative direction (`DR`), `IM` and `VS`.
+`* HP7470A: HP-GL 'ZZ' not supported -- ignored ("ZZ1")`; `OE` then answers
+1 and `OS` has bit 5 set, as on the real plotter. Line types (`LT` 0–6),
+symbol mode (`SM`), relative direction (`DR`) work; `VS` and `IM` are
+accepted. Character sets 0–4 (`CS`, `CA`, `SS`, `SA`, and SO/SI inside a
+label): 0 ASCII, 1 HP 9825, 2 French/German, 3 Scandinavian, 4 Spanish —
+accents are drawn over the character before them, so `CS3;LB35-50 A|R`
+gives *35-50 ÅR*. Errors as on the plotter: `OE` 1 unknown instruction,
+2 wrong number of parameters, 3 parameter out of range.
+
+Labels and `CP` work as on the 7470A (and in pyILPER): a character cell is
+1.5 character widths by 2 heights; CR goes back to where the label's line
+began (set by every pen move), LF a line down. `CP` *spaces,lines* moves the
+pen down/up that many lines to the line's start, and the next label begins
+that many spaces from it.
 
 The following is the result from the example on page 13 in the Plotter Module (82184A) manual.
 

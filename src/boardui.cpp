@@ -858,7 +858,8 @@ void boardui_poll() {
     if (repeatButton != Button::None && pressedButton == repeatButton &&
         time_reached(repeatNext)) {
         repeatNext = make_timeout_time_ms(kRepeatIntervalMs);
-        dialog_->handleButton(repeatButton, /*repeat=*/true);
+        if (dialog_->isOpen() || !plotterview_digitizeButton(static_cast<int>(repeatButton), true))
+            dialog_->handleButton(repeatButton, /*repeat=*/true);
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);  // keep the strip up
     }
     // Auto-hide the info box after kInfoBoxShowMs, same idea as the button
@@ -1028,7 +1029,9 @@ void pressStripButton(Button b) {
     // entirely), so the blinking cursor would otherwise vanish on
     // every single button touch.
     plotterview_refreshCursor();
-    dialog_->handleButton(b);
+    // Digitizing (no menu open): OK = ENTER, Up/Down move the marker, X cancels
+    if (dialog_->isOpen() || !plotterview_digitizeButton(static_cast<int>(b), false))
+        dialog_->handleButton(b);
     if (b == Button::Up || b == Button::Down) {
         repeatButton = b;                       // see boardui_poll()
         repeatNext = make_timeout_time_ms(kRepeatDelayMs);
@@ -1236,6 +1239,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 
 void boardui_handleRelease() {
     repeatButton = Button::None;          // finger lifted: stop auto-repeat
+    plotterview_digitizeRelease();        // (and a digitize arrow)
     if (printerKeyHeld == PrinterHotspot::Print)   plotterview_printerPrint(false);
     if (printerKeyHeld == PrinterHotspot::Advance) plotterview_printerAdvance(false);
     printerKeyHeld = PrinterHotspot::None;
@@ -1416,6 +1420,8 @@ void boardui_remoteButton(std::uint8_t code, bool down) {
     remoteButton = b;
     pressStripButton(b);
 }
+
+std::uint16_t boardui_buttonStripWidth() { return buttonStripWidth; }
 
 bool boardui_isMenuOpen() {
     return dialog_ != nullptr && dialog_->isOpen();
