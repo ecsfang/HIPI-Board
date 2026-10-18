@@ -1141,6 +1141,9 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
                loopmap_tap(x, y)) {
         // Loop map: a card -> its details; the details box -> closed
         // (checked before the corners: cards may sit in them)
+    } else if (!dialog_->isOpen() && !stripZone && plotterview_digitizeTap(x, y)) {
+        // Plotter view while the plotter waits for a point (HP-GL DP): the
+        // touch is that point (checked before the corners: a point may be there)
     } else if (printerHit.spot != PrinterHotspot::None) {
         handlePrinterTouch(printerHit);
     } else if (isInfoCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest &&

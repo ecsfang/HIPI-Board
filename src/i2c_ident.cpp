@@ -9,6 +9,7 @@
 #include "ili2c.h"
 #include "bmp280.h"
 #include "vl53l0x.h"
+#include "rtc_probe.h"        // the clock chips' checks
 #include "touch.h"            // touch_i2c, TOUCH_SDA/SCL: the shared bus
 #include "sd_paths.h"
 #include "usb_serial.h"
@@ -51,46 +52,6 @@ HwBus bus_;
 I2cVerdict probeTouch(I2cBus&, std::uint8_t, std::string&, std::string& detail) {
     detail = "in use";
     return I2cVerdict::Ok;
-}
-
-int bcd(std::uint8_t v) { return (v >> 4) * 10 + (v & 0x0F); }
-bool isBcd(std::uint8_t v, int max) { return (v & 0x0F) <= 9 && bcd(v) <= max; }
-
-// DS3231 / DS1307 real-time clock: the time registers must be valid BCD
-// and the seconds must move between two looks; the DS3231 also has a
-// temperature sensor and an "oscillator stopped" flag (time lost).
-I2cVerdict probeClock(I2cBus& bus, std::uint8_t addr, std::string& name, std::string& detail) {
-    std::uint8_t t[0x13];
-    if (!bus.readRegs(addr, 0x00, t, sizeof(t))) return I2cVerdict::NotIt;
-    const std::uint8_t sec = t[0] & 0x7F, min = t[1] & 0x7F, hr = t[2] & 0x3F;
-    if (!isBcd(sec, 59) || !isBcd(min, 59) || !isBcd(hr, 23) ||
-        !isBcd(t[4] & 0x3F, 31) || !isBcd(t[5] & 0x1F, 12)) return I2cVerdict::NotIt;
-    const int tempQ = static_cast<std::int8_t>(t[0x11]) * 4 + (t[0x12] >> 6);
-    const bool ds3231 = (t[0x12] & 0x3F) == 0 && tempQ > -40 * 4 && tempQ < 85 * 4;
-    name = ds3231 ? "DS3231" : "DS1307";
-    // Ticking? (compared with the last look, at least 1.5 s ago)
-    static int lastSec = -1;
-    static std::uint64_t lastUs = 0;
-    const std::uint64_t now = time_us_64();
-    const int s = bcd(sec) + 60 * bcd(min);
-    bool stopped = false;
-    if (lastSec >= 0 && now - lastUs >= 1500000) {
-        stopped = s == lastSec;
-        lastSec = s;
-        lastUs = now;
-    } else if (lastSec < 0) {
-        lastSec = s;
-        lastUs = now;
-    }
-    const bool lost = ds3231 ? (t[0x0F] & 0x80) != 0 : (t[0] & 0x80) != 0;   // OSF / clock halt
-    char b[40];
-    int n = std::snprintf(b, sizeof(b), "%02d:%02d:%02d", bcd(hr), bcd(min), bcd(sec));
-    if (ds3231) n += std::snprintf(b + n, sizeof(b) - static_cast<std::size_t>(n), "  %d.%02d C",
-                                   tempQ / 4, (tempQ < 0 ? -tempQ : tempQ) % 4 * 25);
-    if (stopped) std::snprintf(b + n, sizeof(b) - static_cast<std::size_t>(n), "  stopped");
-    else if (lost) std::snprintf(b + n, sizeof(b) - static_cast<std::size_t>(n), "  time lost");
-    detail = b;
-    return stopped || lost ? I2cVerdict::Fault : I2cVerdict::Ok;
 }
 
 // The BMP280 driver for a sensor on 0x76 (hipi.cpp's) or 0x77 (SDO high: a
@@ -158,7 +119,8 @@ bool measureBoschP(I2cBus&, std::uint8_t addr, double& v) {
 
 const std::map<std::string, I2cBuiltin>& builtins() {
     static const std::map<std::string, I2cBuiltin> b = {
-        { "touch", probeTouch }, { "clock", probeClock }, { "bosch", probeBosch } };
+        { "touch", probeTouch }, { "clock", rtc_probeDs }, { "pcf85063", rtc_probePcf85063 },
+        { "bosch", probeBosch } };
     return b;
 }
 

@@ -25,7 +25,8 @@
 #                    The bytes from the register are these characters
 #   status <mask> <value>
 #                    One byte read without a register: (byte and mask) = value
-#   probe <name>     A check built into the firmware: touch, clock, bosch
+#   probe <name>     A check built into the firmware: touch, clock, pcf85063,
+#                    bosch
 #
 # optionally a reading for the Hardware test page:
 #
@@ -116,6 +117,21 @@ chip 0x68 DS3231 | real-time clock
   measure T,TEMP | temperature (DS3231)
     read 0x11 2
     value s16 shift=6 scale=0.25 dec=2 unit=C
+
+chip 0x51 PCF85063A | real-time clock
+  probe pcf85063                   # valid time, ticking, time lost (OS flag / STOP)
+  measure TIME | time HH.MMSS (as the HP-41: HMS+, HR ...)
+    read 0x04 3
+    format bcd 2/0x3F text=. 1/0x7F 0/0x7F
+  measure DATE | date YYYY.MMDD
+    read 0x07 4                    # days, weekdays, months, years
+    format bcd text=20 3 text=. 2/0x1F 0/0x3F
+  measure DMY | date DD.MMYYYY (the TIME module with flag 31 set)
+    read 0x07 4
+    format bcd 0/0x3F text=. 2/0x1F text=20 3
+  measure MDY | date MM.DDYYYY (the TIME module, flag 31 clear)
+    read 0x07 4
+    format bcd 2/0x1F text=. 0/0x3F text=20 3
 
 chip 0x68-0x69 MPU-6050 | motion sensor
   id 0x75 0x68=MPU-6050 0x70=MPU-6500 0x71=MPU-9250 0x19=MPU-6886

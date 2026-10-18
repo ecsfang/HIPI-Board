@@ -408,9 +408,25 @@ scripts/ttf_to_glyphs.py resources/fonts/41charset_x.ttf 250 "0123456789: " src/
 scripts/ttf_to_glyphs.py resources/fonts/41charset_x.ttf 50 "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/:,. " src/clock_font_small.cpp kClockFontSmall
 ```
 
-The time comes from a **DS3231** RTC module (`src/rtc.cpp`, address 0x68) on
-the board's I2C bus -- the same bus as the touch controller and the BMP280:
-SDA GPIO 16, SCL GPIO 17, 3.3 V and GND. The clock is shown as the
+The time comes from an RTC module (`src/rtc.cpp`) on the board's I2C bus --
+the same bus as the touch controller and the BMP280: SDA GPIO 16, SCL GPIO
+17, 3.3 V and GND. `CRtc::begin()` finds it: 0x68 first (DS3231 or DS1307,
+told apart by whether register 0x12 is RAM), then 0x51 (PCF85063A: the
+time registers 0x04..0x0A must look like it -- `looksLikePcf85063()`, which
+also turns away a PCF8563 there -- or, when they hold no time, its
+fingerprint must: `pcf85063Fingerprint()`, registers 0x00..0x11 read again
+from 0x20 (5-bit register address) and every unimplemented bit 0. Only
+reads. The datasheet (8.2.1.3) warns that a power-up from a residual
+voltage -- a module plugged in while HIPI runs -- can garble the
+registers; `set()` then starts with a software reset (0x58 to Control_1).
+Something on 0x51 that isn't taken for a PCF85063A gets its registers in
+the log ("Clock: something answers on 0x51 ..."). `-DHIPI_RTC_CHIP=1/2/3`
+forces DS3231/DS1307/PCF85063A. On the PCF85063A, "time not valid" is the
+OS flag (seconds bit 7) or the STOP bit; `set()` switches it to 24-hour
+mode and running (other Control_1 bits, e.g. CAP_SEL, are left as they
+are) and writes the time with OS clear. Its weekday register counts 0 =
+Sunday, as `weekdayOf()`. PC test: `rtc_test` (made-up DS3231, DS1307,
+PCF85063A and PCF8563). The clock is shown as the
 `DisplayOutput::Clock` view (no splash, not in the swipe order) by
 `backlight_poll()` when **Settings → Screen saver → Mode** is Clock and the
 RTC has a valid time (the backlight then fades down to `kDimLevel` over
@@ -418,7 +434,7 @@ RTC has a valid time (the backlight then fades down to `kDimLevel` over
 backlight dims. The time is set with
 `time YYYY-MM-DD HH:MM[:SS]` on the USB debug console (CDC 0).
 
-Until the DS3231 is fitted, `HIPI_FAKE_RTC` (`include/clock.h`, default 1)
+Without an RTC chip, `HIPI_FAKE_RTC` (`include/clock.h`, default 1)
 replaces it with a stand-in clock: it starts at the firmware's build time,
 counts with the Pico's timer, and can be set with the same `time` command
 (lost at every restart). Set it to 0 once the RTC module is connected.
@@ -991,9 +1007,10 @@ there would hide what a newer firmware knows (it once did: the VL53L0X's
 an address range, a name and what it is, then checks -- `id`/`id16` (a
 register's value, optionally renaming the chip), `text`, `status` (a byte
 read without a register), a `show` reading with a `range`, and `probe
-<name>` for the checks that need code, which stay in `i2c_ident.cpp`:
-`touch`, `clock` (DS3231/DS1307: valid BCD time, ticking, temperature,
-"oscillator stopped") and `bosch` (the chip ID; a BMP280 on 0x76 or 0x77
+<name>` for the checks that need code (`i2c_ident.cpp`; the clocks' in
+`rtc_probe.cpp`): `touch`, `clock` (DS3231/DS1307: valid BCD time, ticking,
+temperature, "oscillator stopped"), `pcf85063` (PCF85063A: its time
+registers, ticking, OS flag / STOP bit) and `bosch` (the chip ID; a BMP280 on 0x76 or 0x77
 is read through `CBmp280` for temperature and pressure). Chips with checks are tried before those
 without ("probably"), each group in reading order (files by name).
 `expected` chips (the panel's touch controller, `panel 7`/`panel 5`) show
@@ -1477,7 +1494,19 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   and LF outside LB/DT -- also inside a number, since HP-GL from a file
   with fixed-length lines is broken anywhere; a command still open after a
   line end is carried out by `idle()` once nothing more has come for
-  `kLineEndMs` (300 ms). PC test: `tools/hipiview/test/plotter_test.cpp`.
+  `kLineEndMs` (300 ms). `IP` sets P1/P2 (`p1x_`..`p2y_`, also used by
+  SR/TL/OP), `SC` user units mapped onto them in `moveThroughParams()`
+  (rounded to plotter units; PR deltas only scaled); `DF`/`IN` turn SC off.
+  `CI`/`AA`/`AR` (`arc()`): chords of the chord angle (default 5°, 0.5..180),
+  turned in user units and each end mapped to plotter units (unequal x/y
+  scaling: an ellipse, as on the real plotter). `DP` sets `digitizing()`;
+  `plotterview_poll()` brings up the Plotter view, and a touch there
+  (`plotterview_digitizeTap()`, from `boardui_handleTap()`) is mapped back
+  to plotter units and given with `CPlotter::digitize()` (OS bit 2, `OD`).
+  OS bit 1 = P1/P2 changed by IP. Unknown mnemonics: logged once per `IN`
+  with `LOGF` (not only under trace), listed in `show()`.
+  IW stays in plotter units, its default the factory P1-P2. PC test:
+  `tools/hipiview/test/plotter_test.cpp`.
 - **`plotterview`** (`src/plotterview.cpp`) — owns the display while the
   plotter view is active. `plotterview_init()` registers the callbacks,
   scales plotter coordinates to screen coordinates, and redraws everything

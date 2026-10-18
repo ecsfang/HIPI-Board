@@ -187,7 +187,7 @@ void hipi_init()
     }
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
-    plotter = new CPlotter("TFPLOT");
+    plotter = new CPlotter("HP7470A"); //TFPLOT");
     devices.push_back(plotter);
     // SAI 0x3E matches pyILPER's cls_pilterminal exactly (a real, working
     // reference implementation) -- see terminal.h's constructor comment

@@ -201,8 +201,13 @@ it; that first touch only wakes the screen and doesn't press anything.
 
 <a href="images/screen-clock.png"><img src="images/screen-clock.png" alt="The clock screen saver" width="512"></a>
 
-**The clock needs a clock chip** (a DS3231 real-time clock module) connected
-to HIPI, with its battery. Without it — or before its time has been set —
+**The clock needs a clock chip** — a real-time clock module with a DS3231,
+DS1307 (both on I2C address 0x68) or PCF85063A (0x51) — connected to HIPI,
+with its battery. HIPI finds it by itself, also when it's plugged in while
+HIPI runs; if there are two, the one on 0x68 is used. A PCF85063A that was
+plugged in while HIPI was on may come up with garbled registers: the
+Hardware test page then shows it as a fault, "registers garbled -- set the
+time", and setting the time (below) puts it right. Without it — or before its time has been set —
 the screen saver shows what **No clock** says instead: HP-IL rain, the geese,
 either of them at random, or just dimming.
 
@@ -657,6 +662,32 @@ Two things make plotter commands easy to type on the HP-41:
   at most 15 characters. `⊢` is **APPEND** (in ALPHA mode: shift + K), which
   adds the text to what's already in ALPHA.
 
+**Your own units:** `IP` sets the scaling points P1 and P2 (in plotter units,
+40 per mm; after `IN` 250,279 and 10250,7479), and `SC` *xmin,xmax,ymin,ymax*
+lets `PA`, `PR`, `PU` and `PD` use your own units from then on: *xmin,ymin*
+lands on P1, *xmax,ymax* on P2. `IP1000,1000,6000,6000;SC0,25000,0,25000;`
+puts 0..25000 on a 12.5 cm square. `SC` alone (or `DF`, `IN`) goes back to
+plotter units. Fractions are fine (`PA16931.63,13281.42`).
+
+**Circles and arcs:** `CI` *radius*[,*chord angle*] draws a circle around the
+pen (the pen goes back to the centre afterwards), `AA` *x,y,angle* an arc
+around the centre *x,y* from where the pen is (counter-clockwise for a
+positive angle; drawn only with the pen down), `AR` the same with the centre
+relative to the pen. In your own units (`SC`) too. The chord angle (default
+5°) sets how smooth the curve is.
+
+**Digitizing a point:** after `DP` the plotter waits for a point — HIPI
+switches to the Plotter view and shows *DIGITIZE: TOUCH A POINT*; touch the
+spot on the plot (the real plotter: moved with the arrow keys and ENTER).
+`OS` then has bit 2 set (a point is ready), `OD` answers *x,y,pen* in plotter
+units, and `DC` stops waiting.
+
+**Commands HIPI doesn't know** are ignored, and each one is written once to
+the USB log (since the last `IN`), also without trace:
+`* HP7470A: HP-GL 'LT' not supported -- ignored ("LT2")`. Not there yet:
+line types (`LT`), symbol mode (`SM`), character sets (`CS`, `CA`, `SS`,
+`SA`), relative direction (`DR`), `IM` and `VS`.
+
 The following is the result from the example on page 13 in the Plotter Module (82184A) manual.
 
 <a href="images/example-plotter-box.png"><img src="images/example-plotter-box.png" alt="Plotter example" width="512"></a>
@@ -972,6 +1003,7 @@ chip descriptions in `i2c/` again.
 | BMP280 (0x76 or 0x77) | `T` temperature °C, `P` pressure hPa |
 | VL53L0X | `D` distance in mm (8190: nothing in range); HIPI sets the sensor up itself |
 | DS3231 clock | `TIME` 12.3456 (HH.MMSS), `DATE` 2026.1011 (YYYY.MMDD), `DMY` 11.102026 and `MDY` 10.112026 (the TIME module's forms), `T` temperature |
+| PCF85063A clock | `TIME`, `DATE`, `DMY`, `MDY` as the DS3231 (no temperature) |
 | AHT20, SHT3x, HTU21D | `T` temperature, `H` humidity % |
 | TMP102, LM75, MCP9808 | `T` temperature |
 | BH1750 | `L` light, lux |

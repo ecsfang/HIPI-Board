@@ -574,7 +574,7 @@ int main() {
     hipi::displayMirror_setInputHandlers(
         [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },
         [](std::uint8_t code, bool down) { hipi::boardui_remoteButton(code, down); });
-    hipi::clock_init(display);               // DS3231 clock, clock screen saver
+    hipi::clock_init(display);               // RTC (rtc.h), clock screen saver
     if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
         hipi::plotterview_setTapeFile(d->mediaFile());
     // Project escape sequences from the HP-41 (see

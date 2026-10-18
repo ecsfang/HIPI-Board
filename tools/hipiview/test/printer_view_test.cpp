@@ -381,6 +381,19 @@ int main(int argc, char** argv) {
         if (std::system(("rm -rf '" + tmp + "'").c_str()) != 0) ++failures;
     }
 
+    // ── Plotter: DP -- the Plotter view comes up, a touch is the point ──
+    hipi::plotterview_setPlotFit(false);                    // Page: the whole P1..P2 area, known mapping
+    for (char c : std::string("IN;PU;DP;")) plotter->put(c);
+    run(100);
+    check(hipi::plotterview_output() == hipi::DisplayOutput::Plotter, "DP: the Plotter view comes up");
+    run(1600);                                              // ("DIGITIZE: TOUCH A POINT" goes away)
+    check(hipi::plotterview_digitizeTap(SCREEN_MAX_X / 2, SCREEN_MAX_Y / 2),
+          "DP: a touch on the view is taken");
+    std::printf("     point %d,%d\n", plotter->penX(), plotter->penY());
+    check(std::abs(plotter->penX() - 5250) <= 12 && std::abs(plotter->penY() - 3879) <= 12 && !plotter->digitizing(),
+          "... the middle of the screen = the middle of P1..P2 (5250,3879)");
+    check(!hipi::plotterview_digitizeTap(100, 100), "no DP: a touch isn't a point");
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

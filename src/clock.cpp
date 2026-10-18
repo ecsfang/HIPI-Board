@@ -79,12 +79,26 @@ void fakeStartAtBuildTime() {
 absolute_time_t nextProbe_ = nil_time;
 constexpr int kProbeIntervalMs = 2000;
 
+// Something answers on 0x51 but isn't taken for a PCF85063A: its registers
+// in the log (once, and at every "time" command), to see what it is
+void logUnknownOn51(bool always) {
+    static bool logged = false;
+    std::uint8_t r[11];
+    if (rtc_ == nullptr || rtc_->present() || !rtc_->answeredOnPcfAddress(r) || (logged && !always)) return;
+    logged = true;
+    char b[64];
+    int n = 0;
+    for (int i = 0; i < 11; ++i) n += std::snprintf(b + n, sizeof(b) - static_cast<std::size_t>(n), " %02X", r[i]);
+    LOGF("\r\n * Clock: something answers on 0x51 but doesn't look like a PCF85063A -- registers 00-0A:%s", b);
+}
+
 void rtcProbe(bool force) {
     if (rtc_ == nullptr) return;
     if (!force && !time_reached(nextProbe_)) return;
     nextProbe_ = make_timeout_time_ms(kProbeIntervalMs);
     const bool was = rtc_->present();
     const bool now = rtc_->begin(TOUCH_SDA, TOUCH_SCL);
+    logUnknownOn51(force);
     if (now && !was) {
         LOGF("\r\n * Clock: %s found, %s", rtc_->chipName(),
              rtc_->valid() ? clock_nowText().c_str() : "time not set");
@@ -94,7 +108,7 @@ void rtcProbe(bool force) {
 }
 #endif
 
-// The time source: the DS3231, or the stand-in above (HIPI_FAKE_RTC)
+// The time source: the RTC chip (rtc.h), or the stand-in above (HIPI_FAKE_RTC)
 bool rtcPresent() {
 #if HIPI_FAKE_RTC
     return true;
@@ -287,7 +301,7 @@ bool parseAndSet(const char* arg, std::string& msg) {
         msg = "use: time YYYY-MM-DD HH:MM[:SS]";
         return false;
     }
-    if (!rtcPresent()) { msg = "no clock chip (DS3231/DS1307) found"; return false; }
+    if (!rtcPresent()) { msg = "no clock chip (DS3231/DS1307/PCF85063A) found"; return false; }
     if (!rtcSet(t)) { msg = "writing the clock failed"; return false; }
     shownValid_ = false;                     // redraw with the new time
     msg = "clock set: " + clock_nowText();
@@ -307,7 +321,7 @@ void handleConsoleLine() {
 #endif
     if (*s == '\0') {
         msg = rtcPresent() ? (rtcValid() ? clock_nowText() : "clock not set")
-                           : "no clock chip (DS3231/DS1307) found";
+                           : "no clock chip (DS3231/DS1307/PCF85063A) found";
     } else {
         parseAndSet(s, msg);
     }
@@ -341,7 +355,8 @@ void clock_init(DisplayDriver* display) {
         LOGF("\r\n * Clock: %s found, %s", rtc_->chipName(),
              rtc_->valid() ? clock_nowText().c_str() : "time not set");
     } else {
-        LOGF("\r\n * Clock: no DS3231/DS1307 found (yet) -- looked for again every few seconds");
+        LOGF("\r\n * Clock: no DS3231/DS1307/PCF85063A found (yet) -- looked for again every few seconds");
+        logUnknownOn51(true);
     }
 #endif
 }

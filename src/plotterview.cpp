@@ -44,13 +44,10 @@ DisplayOutput displayOutput() {
     return displayV80_ && video80_ != nullptr ? DisplayOutput::Video80 : DisplayOutput::Display;
 }
 
-// Fixed mapping from plotter units to screen pixels -- fits the whole
-// P1..P2 hard-clip area (see plotter.cpp's OP response: 250,279 /
-// 10250,7479) into the full 800x480 panel, preserving aspect ratio
-// (letterboxed) since we don't yet support IP/SC user-scaling that would
-// move P1/P2 at runtime. If that's ever added, this mapping needs to
-// become dynamic (read the plotter's actual P1/P2 instead of these
-// constants) rather than fixed like this.
+// Page mapping from plotter units to screen pixels -- fits the factory
+// P1..P2 area (250,279 / 10250,7479: the paper) into the panel, keeping
+// the aspect ratio (letterboxed). The plotter's IP only moves where user
+// units (SC) land on that paper, so the page itself stays fixed.
 constexpr double kP1X = 250.0, kP1Y = 279.0, kP2X = 10250.0, kP2Y = 7479.0;
 constexpr double kPlotW = kP2X - kP1X;   // 10000
 constexpr double kPlotH = kP2Y - kP1Y;   // 7200
@@ -2084,7 +2081,34 @@ std::string plotterview_viewTitle(CDevice* dev) {
 
 bool plotterview_isSplashVisible() { return splashVisible_; }
 
+// DP: the Plotter view comes up (once per DP) and says what to do
+static bool digitizeShown_ = false;
+
+static void pollDigitize() {
+    if (plotter_ == nullptr || !plotter_->digitizing()) { digitizeShown_ = false; return; }
+    if (digitizeShown_) return;
+    digitizeShown_ = true;
+    backlight_activity();                    // (a screen saver ends: the touch is wanted)
+    if (output_ != DisplayOutput::Plotter && plotterview_isAvailable(DisplayOutput::Plotter))
+        switchView(DisplayOutput::Plotter, plotter_, /*splash=*/false);
+    showSplashBox("DIGITIZE: TOUCH A POINT", 1, 1500);
+}
+
+bool plotterview_digitizeTap(int x, int y) {
+    if (plotter_ == nullptr || !plotter_->digitizing() || output_ != DisplayOutput::Plotter) return false;
+    // The screen point back to plotter units (mapX()/mapY() the other way)
+    const double px = mapOX_ + (x - mapDX_) / mapScale_;
+    const double py = mapOY_ + (mapDY_ + mapH_ - y) / mapScale_;
+    plotter_->digitize(static_cast<std::int16_t>(std::lround(std::max(0.0, std::min(px, 32767.0)))),
+                       static_cast<std::int16_t>(std::lround(std::max(0.0, std::min(py, 32767.0)))));
+    char b[40];
+    std::snprintf(b, sizeof(b), "POINT %d,%d", plotter_->penX(), plotter_->penY());
+    showSplashBox(b, 1, 1200);
+    return true;
+}
+
 void plotterview_poll() {
+    pollDigitize();
     if (output_ == DisplayOutput::MediaMap && !plotterview_isSplashVisible())
         mediamap_poll(to_ms_since_boot(get_absolute_time()));    // the head, a changed directory
     pollPrinterPanel();     // Printer view: switches, POWER light, keys

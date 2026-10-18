@@ -276,6 +276,7 @@ function(hipi_add_pico_targets PANEL SUFFIX)
         src/backlight.cpp
         src/clock.cpp
         src/rtc.cpp
+        src/rtc_probe.cpp           # the clock chips' checks (Hardware test, TFI2C "I")
         src/glyph_font.cpp
         src/clock_font_big.cpp      # generated, see scripts/ttf_to_glyphs.py
         src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py

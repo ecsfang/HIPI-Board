@@ -2,8 +2,9 @@
 // screen (HH:MM, 24 h or 12 h + AM/PM), the date below (EU yyyy-mm-dd or
 // US mm/dd/yyyy) and the weekday and month in English. White on black, or
 // dark on a light background like an old LCD. Updated every minute, from
-// the DS3231 real-time clock (rtc.h); the font is pre-rendered from the
-// "HP41 Character Set Xtended" TrueType font (glyph_font.h).
+// the real-time clock (rtc.h: DS3231, DS1307 or PCF85063A); the font is
+// pre-rendered from the "HP41 Character Set Xtended" TrueType font
+// (glyph_font.h).
 //
 // Shown by the backlight timer (backlight.h) when Settings -> Screen saver
 // is set to Clock; any activity returns to the previous view.
@@ -13,7 +14,7 @@
 // and Enter; "time" alone shows the current time.
 #pragma once
 
-// No DS3231 yet: 1 = a stand-in clock that starts at the firmware's build
+// No RTC chip yet: 1 = a stand-in clock that starts at the firmware's build
 // time and counts with the Pico's timer ("time ..." still sets it, until
 // the next restart). Set to 0 once the RTC module is connected.
 #ifndef HIPI_FAKE_RTC

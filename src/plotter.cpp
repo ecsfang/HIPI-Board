@@ -3,6 +3,7 @@
 #include "plotter.h"
 #include "hpgl_font.h"
 #include "pico/time.h"
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -10,11 +11,13 @@
 #include <utility>
 
 
-// Real 7475A factory-default hard-clip scaling points (see OP's response
-// in execute() below) -- also used by XT/YT/SR to convert percentages
-// into plotter units, and as IW's default clip window.
+// Real 7475A factory-default scaling points P1/P2 (IN, bare IP) -- also
+// IW's default clip window.
 namespace {
 constexpr int kP1X = 250, kP1Y = 279, kP2X = 10250, kP2Y = 7479;
+std::int16_t clamp16(double v) {
+    return static_cast<std::int16_t>(v < -32768.0 ? -32768.0 : v > 32767.0 ? 32767.0 : v);
+}
 // Safety cap for LB label text accumulation (see feed_char()'s case 3) --
 // well beyond any realistic real-world label, just a backstop against a
 // program that forgets the terminator entirely.
@@ -27,8 +30,8 @@ void CPlotter::reset_defaults() {
     // SR defaults: 0.75%/1.5% of the P1-P2 span (HP-GL default character
     // size), converted to plotter units up front so drawLabelChar() never
     // has to redo the percentage math per character.
-    charWidthUnits_  = 0.75 / 100.0 * (kP2X - kP1X);
-    charHeightUnits_ = 1.5  / 100.0 * (kP2Y - kP1Y);
+    charWidthUnits_  = 0.75 / 100.0 * (p2x_ - p1x_);
+    charHeightUnits_ = 1.5  / 100.0 * (p2y_ - p1y_);
     charSlant_ = 0.0;
     dirCos_ = 1.0; dirSin_ = 0.0;
     labelTerminator_ = 0x03;  // ETX -- see plotter.h's note on DT/DF
@@ -46,11 +49,19 @@ void CPlotter::reset_state() {
     currentPen_ = 1;
     coordMode_ = CoordMode::Absolute;
 
+    // P1/P2 back to the factory default, user units (SC) off
+    p1x_ = kP1X; p1y_ = kP1Y; p2x_ = kP2X; p2y_ = kP2Y;
+    scaling_ = false;
+
     // IW defaults to the full P1-P2 area -- i.e. no extra clipping beyond
     // the hard-clip limits already implied by plotter coordinates.
     iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
 
     everInitialized_ = true;  // OS's power-on status bit, see plotter.h
+    p1p2Changed_ = false;
+    digitizing_ = false;
+    pointReady_ = false;
+    unsupported_.clear();
 
     reset_defaults();
     charPosX_ = penX_; charPosY_ = penY_;
@@ -71,6 +82,19 @@ void CPlotter::idle(void) {
     execute(cmdBuf_);
     cmdBuf_.clear();
     parseState_ = 0;
+}
+
+void CPlotter::digitize(std::int16_t x, std::int16_t y) {
+    if (!digitizing_) return;
+    x = static_cast<std::int16_t>(std::max(0, std::min<int>(x, kMaxX)));
+    y = static_cast<std::int16_t>(std::max(0, std::min<int>(y, kMaxY)));
+    doMove(x, y);                             // the pen goes there (drawing if it's down)
+    digX_ = x;
+    digY_ = y;
+    digPen_ = penDown_;
+    digitizing_ = false;
+    pointReady_ = true;
+    LOGF("\r\n * %s: digitized point %d,%d", name(), x, y);
 }
 
 void CPlotter::clear(void) {
@@ -399,8 +423,8 @@ void CPlotter::drawTick(bool vertical) {
     // tp/tn are percentages of the RELEVANT axis's P1-P2 span: XT (a
     // vertical stroke) uses the Y span, YT (a horizontal stroke) uses the
     // X span -- the tick crosses the axis it's perpendicular to.
-    const int spanY = kP2Y - kP1Y;
-    const int spanX = kP2X - kP1X;
+    const int spanY = p2y_ - p1y_;
+    const int spanX = p2x_ - p1x_;
     std::int16_t x0, y0, x1, y1;
     if (vertical) {
         const int lenPos = static_cast<int>(tickLenPos_ / 100.0 * spanY);
@@ -423,14 +447,66 @@ void CPlotter::drawTick(bool vertical) {
 
 void CPlotter::moveThroughParams(const std::vector<double>& params) {
     // Coordinates come in (x,y) pairs -- an odd trailing value (malformed
-    // input) is ignored.
+    // input) is ignored. With SC they're user units: mapped onto P1..P2
+    // (relative ones: just scaled) and rounded to the nearest plotter unit;
+    // without, plotter units as given (a fraction dropped).
     for (std::size_t i = 0; i + 1 < params.size(); i += 2) {
-        const std::int16_t x = static_cast<std::int16_t>(
-            coordMode_ == CoordMode::Absolute ? params[i] : penX_ + params[i]);
-        const std::int16_t y = static_cast<std::int16_t>(
-            coordMode_ == CoordMode::Absolute ? params[i + 1] : penY_ + params[i + 1]);
-        doMove(x, y);
+        double x = params[i], y = params[i + 1];
+        if (scaling_) {
+            const double fx = (p2x_ - p1x_) / (scX2_ - scX1_), fy = (p2y_ - p1y_) / (scY2_ - scY1_);
+            if (coordMode_ == CoordMode::Absolute) {
+                x = p1x_ + (x - scX1_) * fx;
+                y = p1y_ + (y - scY1_) * fy;
+            } else {
+                x *= fx;
+                y *= fy;
+            }
+            x = std::floor(x + 0.5);
+            y = std::floor(y + 0.5);
+        }
+        if (coordMode_ == CoordMode::Relative) {
+            x += penX_;
+            y += penY_;
+        }
+        doMove(clamp16(x), clamp16(y));
     }
+}
+
+// ── Circles and arcs (CI, AA, AR) ───────────────────────────────────────
+
+void CPlotter::unitFactors(double& fx, double& fy) const {
+    if (scaling_) {
+        fx = (p2x_ - p1x_) / (scX2_ - scX1_);
+        fy = (p2y_ - p1y_) / (scY2_ - scY1_);
+    } else {
+        fx = fy = 1.0;
+    }
+}
+
+void CPlotter::arc(double cx, double cy, double vx, double vy, double sweepDeg, double chordDeg) {
+    // The angle is turned in user units (vx,vy: from the centre to the
+    // start), each chord end mapped to plotter units -- with unequal x/y
+    // scaling a circle comes out as an ellipse, as on the real plotter
+    double fx, fy;
+    unitFactors(fx, fy);
+    chordDeg = std::fabs(chordDeg);
+    if (chordDeg < 0.5) chordDeg = 0.5;              // the plotter's range: 0.5 .. 180
+    if (chordDeg > 180.0) chordDeg = 180.0;
+    const int n = std::max(1, static_cast<int>(std::ceil(std::fabs(sweepDeg) / chordDeg - 1e-9)));
+    const double step = sweepDeg / n * 3.14159265358979323846 / 180.0;
+    for (int i = 1; i <= n; ++i) {
+        const double a = step * i, c = std::cos(a), s = std::sin(a);
+        const double ux = vx * c - vy * s, uy = vx * s + vy * c;
+        doMove(clamp16(std::floor(cx + ux * fx + 0.5)), clamp16(std::floor(cy + uy * fy + 0.5)));
+    }
+}
+
+// The pen's distance from a centre (plotter units) as a user-unit vector
+void CPlotter::startVector(double cx, double cy, double& vx, double& vy) const {
+    double fx, fy;
+    unitFactors(fx, fy);
+    vx = (penX_ - cx) / fx;
+    vy = (penY_ - cy) / fy;
 }
 
 // ── Label (LB) text rendering ───────────────────────────────────────────
@@ -550,12 +626,11 @@ void CPlotter::execute(const std::string& cmd) {
         }
         moveThroughParams(params);
     } else if (mnemonic == "OP") {
-        // Output P1/P2 -- the plotter's hard-clip scaling points. Real
-        // 7475A factory defaults; we don't support IP/user-scaling yet,
-        // so these never change. The HP-41's PINIT ROM routine requires
-        // this response to complete its startup handshake.
+        // Output P1/P2 -- the scaling points (IP; factory defaults after
+        // IN). The HP-41's PINIT ROM routine requires this response to
+        // complete its startup handshake.
         char buf[48];
-        std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d\r\n", kP1X, kP1Y, kP2X, kP2Y);
+        std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d\r\n", p1x_, p1y_, p2x_, p2y_);
         MTRC_LOGF("OP (output P1/P2)");
         queueOutput(buf);
     } else if (mnemonic == "OA") {
@@ -607,6 +682,8 @@ void CPlotter::execute(const std::string& cmd) {
         // the manual.
         int status = 16;
         if (penDown_) status |= 1;
+        if (p1p2Changed_) { status |= 2; p1p2Changed_ = false; }
+        if (pointReady_) status |= 4;
         if (everInitialized_) {
             status |= 8;
             everInitialized_ = false;
@@ -640,7 +717,7 @@ void CPlotter::execute(const std::string& cmd) {
         // line (PD, ticks, label strokes) -- bare "IW" resets it to the
         // full P1-P2 area (i.e. no extra clipping).
         if (params.size() < 4) {
-            iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;
+            iw1x_ = kP1X; iw1y_ = kP1Y; iw2x_ = kP2X; iw2y_ = kP2Y;   // (the default area, not a changed P1/P2)
             MTRC_LOGF("IW reset to P1-P2");
         } else {
             iw1x_ = static_cast<std::int16_t>(params[0]);
@@ -656,8 +733,8 @@ void CPlotter::execute(const std::string& cmd) {
         // resets to the HP-GL default (0.75%, 1.5%).
         const double wPct = params.empty() ? 0.75 : params[0];
         const double hPct = params.size() > 1 ? params[1] : wPct;
-        charWidthUnits_  = wPct / 100.0 * (kP2X - kP1X);
-        charHeightUnits_ = hPct / 100.0 * (kP2Y - kP1Y);
+        charWidthUnits_  = wPct / 100.0 * (p2x_ - p1x_);
+        charHeightUnits_ = hPct / 100.0 * (p2y_ - p1y_);
         if (bTrace) {
             MLOGF("SR w=%.3f%% h=%.3f%% (%.1f x %.1f units)",
                  wPct, hPct, charWidthUnits_, charHeightUnits_);
@@ -717,6 +794,104 @@ void CPlotter::execute(const std::string& cmd) {
             MLOGF("CP dCols=%.2f dRows=%.2f -> textpos(%d,%d)",
                  dCols, dRows, charPosX_, charPosY_);
         }
+    } else if (mnemonic == "CI") {
+        // Circle: radius[,chord angle] around the pen -- the pen goes up
+        // to the start (0 degrees; a negative radius: 180), down for the
+        // circle, up again and back to the centre, then as it was
+        if (params.empty()) return;
+        const double r = params[0];
+        const double chord = params.size() > 1 ? params[1] : 5.0;
+        double fx, fy;
+        unitFactors(fx, fy);
+        const std::int16_t cx = penX_, cy = penY_;
+        const bool wasDown = penDown_;
+        MTRC_LOGF("CI r=%g chord=%g", r, chord);
+        penDown_ = false;
+        doMove(clamp16(std::floor(cx + r * fx + 0.5)), cy);
+        penDown_ = true;
+        arc(cx, cy, r, 0.0, 360.0, chord);
+        penDown_ = false;
+        doMove(cx, cy);
+        penDown_ = wasDown;
+    } else if (mnemonic == "AA" || mnemonic == "AR") {
+        // Arc: centre x,y (AA absolute, AR from the pen), angle (degrees,
+        // positive = counter-clockwise)[,chord angle] -- from the pen,
+        // drawn if the pen is down; the pen ends at the arc's end
+        if (params.size() < 3) return;
+        double fx, fy;
+        unitFactors(fx, fy);
+        double cx, cy;
+        if (mnemonic == "AR") {
+            cx = penX_ + params[0] * fx;
+            cy = penY_ + params[1] * fy;
+        } else if (scaling_) {
+            cx = p1x_ + (params[0] - scX1_) * fx;
+            cy = p1y_ + (params[1] - scY1_) * fy;
+        } else {
+            cx = params[0];
+            cy = params[1];
+        }
+        double vx, vy;
+        startVector(cx, cy, vx, vy);
+        MTRC_LOGF("%s centre (%.0f,%.0f) angle=%g", mnemonic.c_str(), cx, cy, params[2]);
+        arc(cx, cy, vx, vy, params[2], params.size() > 3 ? params[3] : 5.0);
+    } else if (mnemonic == "IP") {
+        // Input P1/P2: the scaling points, in plotter units. Bare "IP":
+        // the defaults; two numbers: P1 moves there and P2 with it (same
+        // size). User units (SC) follow: they map onto the new P1..P2.
+        if (params.empty()) {
+            p1x_ = kP1X; p1y_ = kP1Y; p2x_ = kP2X; p2y_ = kP2Y;
+        } else if (params.size() >= 2) {
+            const int w = p2x_ - p1x_, h = p2y_ - p1y_;
+            p1x_ = clamp16(params[0]);
+            p1y_ = clamp16(params[1]);
+            if (params.size() >= 4) {
+                p2x_ = clamp16(params[2]);
+                p2y_ = clamp16(params[3]);
+            } else {
+                p2x_ = clamp16(p1x_ + w);
+                p2y_ = clamp16(p1y_ + h);
+            }
+        }
+        p1p2Changed_ = true;
+        if (bTrace) MLOGF("IP P1=(%d,%d) P2=(%d,%d)", p1x_, p1y_, p2x_, p2y_);
+    } else if (mnemonic == "SC") {
+        // Scale: user units xmin,xmax,ymin,ymax -- xmin/ymin at P1, xmax/
+        // ymax at P2 -- for PA/PR/PU/PD from now on. Bare "SC" (or a range
+        // of zero): back to plotter units.
+        if (params.size() >= 4 && params[1] != params[0] && params[3] != params[2]) {
+            scX1_ = params[0]; scX2_ = params[1];
+            scY1_ = params[2]; scY2_ = params[3];
+            scaling_ = true;
+            if (bTrace) MLOGF("SC x %g..%g, y %g..%g", scX1_, scX2_, scY1_, scY2_);
+        } else {
+            scaling_ = false;
+            MTRC_LOGF("SC off (plotter units)");
+        }
+    } else if (mnemonic == "DF") {
+        // Default: character size/slant/direction, tick length, label
+        // terminator, absolute plotting, user units off -- pen position,
+        // P1/P2, IW and the plot stay
+        reset_defaults();
+        coordMode_ = CoordMode::Absolute;
+        scaling_ = false;
+        MTRC_LOGF("DF (defaults)");
+    } else if (mnemonic == "DP") {
+        // Digitize Point: wait for one (see digitize()); a point not yet
+        // read is dropped
+        digitizing_ = true;
+        pointReady_ = false;
+        LOGF("\r\n * %s: DP -- waiting for a point (touch it in the Plotter view)", name());
+    } else if (mnemonic == "DC") {
+        digitizing_ = false;                 // Digitize Clear
+        MTRC_LOGF("DC (digitize clear)");
+    } else if (mnemonic == "OD") {
+        // Output Digitized point: x,y,pen -- the last one; clears OS bit 2
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%d,%d,%d\r\n", digX_, digY_, digPen_ ? 1 : 0);
+        pointReady_ = false;
+        MTRC_LOGF("OD (output digitized point)");
+        queueOutput(buf);
     } else if (mnemonic == "UC") {
         // User Defined Character -- explicitly a NOP on a real 7470A with
         // an HP-IL interface (verbatim from the manual: "It is not
@@ -727,12 +902,13 @@ void CPlotter::execute(const std::string& cmd) {
         // through to "unrecognized command" -- this is correct,
         // documented behavior for our interface, not a missing feature.
         MTRC_LOGF("UC (NOP on HP-IL interface, per manual)");
-    } else if (bTrace) {
-        // Remaining v1 gaps (see plotter.h): SC/IP user-scaling,
-        // digitizing, OS/OD/OF/OI/OO/OW, DT -- unrecognized mnemonics are
-        // otherwise silently ignored, but worth seeing while testing
-        // against real programs to know what's not implemented yet.
-        MLOGF("unrecognized command '%s'", cmd.c_str());
+    } else {
+        // Not implemented (see plotter.h): ignored -- logged once since the
+        // last IN, trace or not, so a program's missing pieces show up
+        if (unsupported_.find(mnemonic + " ") == std::string::npos) {
+            unsupported_ += mnemonic + " ";
+            LOGF("\r\n * %s: HP-GL '%s' not supported -- ignored (\"%.40s\")", name(), mnemonic.c_str(), cmd.c_str());
+        }
     }
 }
 
@@ -746,4 +922,9 @@ void CPlotter::show(void) {
     LOGF("\r\n\tIW:(%d,%d)-(%d,%d) charSize:(%.1f,%.1f) textpos:(%d,%d)",
          iw1x_, iw1y_, iw2x_, iw2y_, charWidthUnits_, charHeightUnits_,
          charPosX_, charPosY_);
+    LOGF("\r\n\tP1:(%d,%d) P2:(%d,%d) SC:", p1x_, p1y_, p2x_, p2y_);
+    if (scaling_) LOGF("%g,%g,%g,%g", scX1_, scX2_, scY1_, scY2_);
+    else LOGF("off");
+    if (digitizing_) LOGF(" digitizing");
+    if (!unsupported_.empty()) LOGF(" not supported: %s", unsupported_.c_str());
 }

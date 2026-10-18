@@ -27,11 +27,16 @@
 //         coordinate pairs given (using whichever pen state is current)
 //   PR  - switch to relative coordinates (deltas from the current pen
 //         position), then move/draw the same way
-//   OP  - output P1/P2 (the plotter's hard-clip scaling points) -- required
-//         for the HP-41's PINIT ROM routine to complete its handshake;
-//         responds with the real 7475A factory defaults (250,279 /
-//         10250,7479), since we don't yet support IP/user-scaling that
-//         would change them
+//   OP  - output P1/P2 (the scaling points: IP, factory defaults 250,279 /
+//         10250,7479 after IN) -- required for the HP-41's PINIT ROM
+//         routine to complete its handshake
+//   CI  - circle: radius[,chord angle] around the pen position (pen up to
+//         the start, down for the circle, back to the centre afterwards)
+//   AA  - arc absolute: centre x,y, angle[,chord] -- from the pen, drawn if
+//         the pen is down; AR: the same with the centre relative to the pen
+//   IP  - input P1/P2 (bare: the defaults; two numbers: P1, P2 moves along)
+//   SC  - scale: user units xmin,xmax,ymin,ymax mapped onto P1..P2 for
+//         PA/PR/PU/PD (rounded to plotter units); bare SC: plotter units
 //   OA  - output actual pen position + up/down status
 //   OC  - output commanded pen position + up/down status (same format as
 //         OA -- we don't simulate motor lag, so these never differ here)
@@ -81,8 +86,14 @@
 //         and the label terminator back to their power-on defaults --
 //         unlike IN, does NOT touch pen position, segments, or IW
 //
-// Not yet supported: SC/IP user-scaling, digitizing (OD and the actual
-// digitize action) -- left for a later pass.
+//   DF also turns user units (SC) off and plotting back to absolute.
+//
+//   DP  - digitize: waits for a point -- touched in the Plotter view (the
+//         real plotter: moved with the arrow keys, ENTER); OS bit 2 then
+//         says it's ready, OD outputs it (x,y,pen), DC stops waiting
+//
+// A command that isn't implemented is ignored and logged once (since the
+// last IN), trace or not: "* HP7470A: HP-GL 'LT' not supported -- ignored".
 //
 // Output is exposed two ways, for step two (actual rendering) to use:
 //   - Live callbacks (onMove/onDraw/onPenChange/onClear), fired as each
@@ -152,6 +163,18 @@ public:
     bool penDown() const { return penDown_; }
     std::uint8_t currentPen() const { return currentPen_; }
 
+    // Digitizing (DP): waiting for a point (the Plotter view takes it from
+    // a touch -- plotterview_digitizeTap()); digitize() gives it: the pen
+    // moves there, OD reports it, OS bit 2 says one is ready
+    bool digitizing() const { return digitizing_; }
+    void digitize(std::int16_t x, std::int16_t y);
+    // The plotter's whole area in plotter units (a digitized point stays in it)
+    static constexpr int kMaxX = 10300, kMaxY = 7650;
+    // For the tests: what's waiting to be sent (an O.. answer), and the
+    // commands not implemented seen since IN
+    std::string outputText() const { return std::string(outQueue_.begin(), outQueue_.end()); }
+    const std::string& unsupportedSeen() const { return unsupported_; }
+
 private:
     enum class CoordMode { Absolute, Relative };
 
@@ -166,6 +189,12 @@ private:
     std::vector<double> parseParams(const std::string& cmd, std::size_t from) const;
     void moveThroughParams(const std::vector<double>& params);
     void doMove(std::int16_t x, std::int16_t y);
+    // Plotter units per user unit (1,1 without SC)
+    void unitFactors(double& fx, double& fy) const;
+    // CI/AA/AR: from the pen, around (cx,cy) (plotter units), sweepDeg
+    // degrees in chords of chordDeg; (vx,vy) = centre to pen, user units
+    void arc(double cx, double cy, double vx, double vy, double sweepDeg, double chordDeg);
+    void startVector(double cx, double cy, double& vx, double& vy) const;
     void queueOutput(const std::string& s);
 
     // Draws a short tick mark through the current pen position without
@@ -226,6 +255,12 @@ private:
     // for both.
     double tickLenPos_ = 0.5, tickLenNeg_ = 0.5;
 
+    // Scaling points P1/P2 (IP), plotter units; user units (SC): x
+    // scX1_..scX2_ and y scY1_..scY2_ map onto P1..P2 while scaling_
+    std::int16_t p1x_ = 250, p1y_ = 279, p2x_ = 10250, p2y_ = 7479;
+    bool scaling_ = false;
+    double scX1_ = 0, scX2_ = 1, scY1_ = 0, scY2_ = 1;
+
     // Input window (clip rectangle) -- set by IW, defaults to P1-P2.
     std::int16_t iw1x_ = 0, iw1y_ = 0, iw2x_ = 0, iw2y_ = 0;
 
@@ -233,6 +268,16 @@ private:
     // first OS read clears it (matches the real 7470A: power-on status is
     // 24 = 8+16, and bit 3 clears the moment it's actually read).
     bool everInitialized_ = true;
+    // OS bit 1: P1/P2 changed (IP) since the last OS; bit 2: a digitized
+    // point is ready (cleared by OD)
+    bool p1p2Changed_ = false;
+    bool digitizing_ = false;              // DP .. a point (or DC)
+    bool pointReady_ = false;
+    std::int16_t digX_ = 0, digY_ = 0;
+    bool digPen_ = false;
+    // Commands not implemented, already logged since the last IN (each is
+    // logged once, whether trace is on or not): "LT SM "
+    std::string unsupported_;
 
     // ── Label (LB) text state ────────────────────────────────────────
     // Character size in plotter units (SR, as a percentage of the P1-P2
