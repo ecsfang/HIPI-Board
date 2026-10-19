@@ -493,7 +493,7 @@ std::string headerText(int devices) {
     return s;
 }
 
-// What a card shows -- to redraw only the cards that changed (5")
+// What a card shows -- to redraw only the cards that changed
 std::string cardSignature(int a) {
     const Node& n = nodes_[a];
     char b[32];
@@ -602,7 +602,6 @@ void renderFull() {
 void loopmap_drawAll() {
     if (d_ == nullptr) return;
     dirty_ = false;
-#ifdef DISPLAY_7INCH
     // Flicker-free: the map is drawn in an off-screen layer, then copied
     // to the panel in one go inside the display chip (BTE)
     const std::uint32_t prevAddr = d_->canvasAddr();
@@ -612,45 +611,9 @@ void loopmap_drawAll() {
     if (prevAddr == 0) d_->endOverlayDraw();
     else               d_->beginLayerDraw(prevAddr, prevStride);
     d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
-#else
-    renderFull();
-#endif
     if (!loopOrder().empty()) backlight_activity();  // (only when something changed)
 }
 
-#ifndef DISPLAY_7INCH
-namespace {
-
-// 5" (no off-screen layers): redraw only what changed -- the header text
-// (padded, no clearing), the cards whose content changed, the details box
-void updateChanged() {
-    const std::vector<int> order = loopOrder();
-    if (order != drawnOrder_ || selected_ != drawnSelected_ || order.empty()) {
-        loopmap_drawAll();                   // the layout changed: everything
-        return;
-    }
-    dirty_ = false;
-    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
-    d_->selectBuiltinFont();
-    const std::string header = headerText(static_cast<int>(order.size()));
-    if (header != drawnHeader_) text(200, 5, header.c_str(), 0, kBlack, kYellow);
-    bool any = false;
-    for (std::size_t i = 0; i < cards_.size() && i < order.size(); ++i) {
-        const std::string sig = cardSignature(order[i]);
-        if (i < drawnSigs_.size() && sig == drawnSigs_[i]) continue;
-        if (selected_ == 0) drawCard(cards_[i]);   // (under the details box otherwise)
-        any = true;
-    }
-    const std::string roles = rolesNow();
-    if ((drawnRoles_.empty() || roles[0] != drawnRoles_[0]) && selected_ == 0) drawController();
-    if (selected_ && detailsSignature() != drawnDetails_) drawDetails();
-    rememberDrawn(order);
-    drawnRoles_ = roles;
-    if (any) backlight_activity();
-}
-
-}  // namespace
-#endif
 
 bool loopmap_detailsOpen() { return selected_ != 0; }
 
@@ -695,11 +658,7 @@ void loopmap_poll() {
     if (visible() && rolesNow() != drawnRoles_) dirty_ = true;
     if (dirty_ && visible() && time_reached(nextDraw_)) {
         nextDraw_ = make_timeout_time_ms(500);
-#ifdef DISPLAY_7INCH
         loopmap_drawAll();                   // off-screen + copy: no flicker
-#else
-        updateChanged();                     // only what changed
-#endif
     }
 }
 

@@ -5,8 +5,7 @@
 // touch does is boardui.cpp's. Apart from boardui.cpp so it can be tried
 // on the PC (tools/hipiview/test/devicelist_test.cpp).
 //
-// 7": the 12x24 built-in font, 34 px a row; 5": 8x16, 24 px a row (the
-// RA8875 has no 12x24 font). Nine rows either way; more scroll.
+// The 12x24 built-in font, 34 px a row. Nine rows; more scroll.
 #pragma once
 #include "display_config.h"
 #include "device_info.h"
@@ -15,11 +14,7 @@
 namespace hipi {
 namespace devlist {
 
-#ifdef DISPLAY_7INCH
 constexpr int kX = 60, kW = 640, kRowPitch = 34, kCharW = 12, kCheck = 26;
-#else
-constexpr int kX = 60, kW = 580, kRowPitch = 24, kCharW = 8, kCheck = 18;
-#endif
 constexpr int kRows = 9;
 constexpr int kTitleH = 30;
 constexpr int kRowsTopGap = 14;                 // title band -> first row

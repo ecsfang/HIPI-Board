@@ -10,9 +10,6 @@
 # Flera filer kan anges på kommandoraden, t.ex.:
 #   ./do_all.sh fil1.cpp fil1.h test.zip ALL
 #
-# Panel:
-#   5 eller 7
-#
 # ALL:
 #   gör en komplett build
 #
@@ -36,7 +33,7 @@ PICO_MOUNT="/media/thomas/RP2350"
 # Hur länge vi väntar på BOOTSEL innan vi ger upp (sekunder)
 BOOTSEL_TIMEOUT=300
 
-# Defaults
+# Defaults (HIPI har bara 7"-panelen: hipi_7_pico)
 PANEL="7"
 FULL_BUILD=false
 
@@ -166,7 +163,6 @@ list_similar_files() {
 # Tolka parametrar
 #
 # Kända parametrar:
-#   5 | 7          panelval
 #   ALL            komplett build
 #   NF | NO-FLASH  flasha inte om
 #   *.zip          projektarkiv
@@ -178,14 +174,6 @@ list_similar_files() {
 for ARG in "$@"; do
 
     case "$ARG" in
-
-        5)
-            PANEL="5"
-            ;;
-
-        7)
-            PANEL="7"
-            ;;
 
         ALL)
             FULL_BUILD=true
@@ -215,13 +203,11 @@ for ARG in "$@"; do
             echo "FEL: Okänd parameter: $ARG"
             echo
             echo "Användning:"
-            echo "  $0 [filer...] [5|7] [ALL]"
+            echo "  $0 [filer...] [ALL]"
             echo
             echo "Exempel:"
             echo "  $0"
             echo "  $0 ALL"
-            echo "  $0 5"
-            echo "  $0 5 ALL"
             echo "  $0 test.zip"
             echo "  $0 fil1.cpp"
             echo "  $0 fil1.h"
@@ -451,7 +437,7 @@ if [ "$FULL_BUILD" = true ]; then
 
     rm -rf build
 
-    cmake -DHIPI_BUILD_PANELS="$PANEL" -B build > "$BUILD_LOG" 2>&1
+    cmake -B build > "$BUILD_LOG" 2>&1
 
     CMAKE_RESULT=$?
 

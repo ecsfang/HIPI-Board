@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 //
-// Abstract transport interface for the RA8875 LCD driver.
+// Abstract transport interface for the display driver (LT7683).
 //
 // Implement this for your platform (Linux spidev, ESP-IDF, STM32 HAL,
-// Arduino, etc.) and pass an instance to the RA8875 constructor.
+// Arduino, etc.) and pass an instance to the LT7683 constructor.
 
 #pragma once
 
@@ -12,9 +12,9 @@
 
 namespace hipi {
 
-class RA8875Transport {
+class DisplayTransport {
 public:
-    virtual ~RA8875Transport() = default;
+    virtual ~DisplayTransport() = default;
 
     // Chip-select control.
     virtual void csLow()  = 0;

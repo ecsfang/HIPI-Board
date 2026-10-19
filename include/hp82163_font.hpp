@@ -115,10 +115,10 @@ inline constexpr std::uint8_t font[FONT_CHAR_COUNT][FONT_BYTES_PER_CHAR] = {
 
 // Swedish å/ä/ö (upper + lower), at their standard Latin-1 code points
 // (0xC4/0xC5/0xD6 upper, 0xE4/0xE5/0xF6 lower -- same values as the actual
-// Unicode code points U+00C4 etc, which is what RA8875::txtWrite()'s UTF-8
+// Unicode code points U+00C4 etc, which is what LT7683::txtWrite()'s UTF-8
 // decoding step reconstructs from a 2-byte UTF-8 sequence). Not part of the
 // contiguous ASCII 32..126 `font[]` table above, so they're uploaded
-// separately -- see RA8875::begin().
+// separately -- see LT7683::begin().
 //
 // Lowercase letters already leave rows 0..4 blank (no ascender), so the
 // dots/ring just drop into that existing space above the 'a'/'o' shape.

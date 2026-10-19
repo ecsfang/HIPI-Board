@@ -24,9 +24,7 @@ void drawCheckbox(DisplayDriver* d, int x, int y, bool on) {
 
 void selectRowFont(DisplayDriver* d) {
     d->selectBuiltinFont();
-#ifdef DISPLAY_7INCH
     d->selectBuiltinFontSize(1);                      // 12x24
-#endif
     d->txtSize(0);
 }
 

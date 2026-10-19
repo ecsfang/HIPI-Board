@@ -131,7 +131,6 @@ jobs:
           cmake \
             -G Ninja \
             -DPICO_BOARD=pico2 \
-            -DHIPI_BUILD_PANELS=7 \
             -B build
         # Ninja is used instead of the default Unix Makefiles generator, which CMake could not find
         # on the runner. ninja-build is installed in the step above.

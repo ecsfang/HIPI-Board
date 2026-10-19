@@ -37,7 +37,7 @@ namespace MenuFrame {
     // had to work around before (see git history / prior conversation).
     constexpr std::uint16_t Yellow = 0xEDC0;
 
-    // The RA8875 only has one hardware text-scale register, shared by
+    // The display chip only has one hardware text-scale register, shared by
     // Screen (HP-41 video emulation) and the menu. Screen can change it
     // at any time (font-size menu, or an incoming ESC sequence), so the
     // menu always forces it back to this fixed scale before drawing --
@@ -75,9 +75,7 @@ namespace MenuFrame {
         // filled black). On the 7" panel the box is drawn on the menu
         // layer, shown as a PIP window on top of the panel: what's behind
         // is first copied there from the panel (BTE, inside the display
-        // chip) -- otherwise the corners would show stale layer memory. On
-        // the 5" panel the box is drawn straight onto the screen.
-#ifdef DISPLAY_7INCH
+        // chip) -- otherwise the corners would show stale layer memory.
         if (d->canvasAddr() == LT7683::kMenuLayerAddr) {
             d->copyLayerRegion(0, SCREEN_MAX_X, static_cast<std::int16_t>(x), static_cast<std::int16_t>(y),
                                LT7683::kMenuLayerAddr, SCREEN_MAX_X, static_cast<std::int16_t>(x),
@@ -86,7 +84,6 @@ namespace MenuFrame {
         } else {
             d->fillRect(x, y, w, h, 0x0000);   // (another layer: no panel picture to show)
         }
-#endif
         d->fillRoundRect(x, y, w, h, CornerRadius, Yellow);
         const int innerRadius = CornerRadius > BorderThickness
                                      ? CornerRadius - BorderThickness : 0;

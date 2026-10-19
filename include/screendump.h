@@ -23,7 +23,6 @@ namespace hipi {
 // overlays and never part of it) and writes it as a 24-bit BMP. Takes a few seconds; HP-IL isn't
 // serviced meanwhile. Returns true on success; `message` is then the file
 // name, otherwise a short error text for the user.
-// 7" panel only for now -- the RA8875 (5") has no read-back implemented.
 // withOverlays: also include what's shown in the PIP windows -- menu,
 // info box, device list, message box (PIP-1) and the button strip (PIP-2)
 // -- composited in software, i.e. exactly what's on the screen. Mostly

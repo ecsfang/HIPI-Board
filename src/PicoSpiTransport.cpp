@@ -8,7 +8,7 @@
 //                          rst=Pin(4, mode=Pin.OUT, value=1))
 //
 // Default constructor parameters match that wiring.  Override if your
-// board has the RA8875 on different GPIOs.
+// board has the display controller on different GPIOs.
 
 #include "PicoSpiTransport.hpp"
 
@@ -64,7 +64,7 @@ void PicoSpiTransport::spiTransfer(const std::uint8_t* tx,
         spi_write_blocking(spi_, tx, len);
     } else if (rx != nullptr) {
         spi_read_blocking(spi_, 0, rx, len);
-/*        // RA8875/LT7683 status / data reads: the controller wants a
+/*        // LT7683 status / data reads: the controller wants a
         // dummy byte clocked out (the SPI bus is full-duplex, so
         // reading ANY byte back means clocking something out on MOSI
         // at the same time -- 0xFF is the pad value the MicroPython

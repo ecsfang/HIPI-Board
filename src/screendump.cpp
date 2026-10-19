@@ -30,7 +30,6 @@ bool screendump_takePending(bool& withOverlays) {
     return true;
 }
 
-#ifdef DISPLAY_7INCH
 
 namespace {
 
@@ -151,13 +150,5 @@ bool screendump_save(DisplayDriver* d, std::string& message, bool withOverlays) 
     return true;
 }
 
-#else  // 5" panel
-
-bool screendump_save(DisplayDriver*, std::string& message, bool) {
-    message = "Not supported on this panel";
-    return false;
-}
-
-#endif
 
 }  // namespace hipi

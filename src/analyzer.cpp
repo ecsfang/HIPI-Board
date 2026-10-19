@@ -634,9 +634,6 @@ constexpr int kCols = (SCREEN_MAX_X - 16) / 8;
 
 bool visible() {
     if (plotterview_output() != DisplayOutput::Analyzer || plotterview_isSplashVisible()) return false;
-#ifndef DISPLAY_7INCH
-    if (boardui_isMenuOpen()) return false;    // 5": the menu is drawn on the panel itself
-#endif
     return true;
 }
 

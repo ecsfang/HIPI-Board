@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 //
-// LT7683 (Levetop LT768x family) LCD driver -- mirrors RA8875.hpp's public
-// interface exactly (see display_config.h's DisplayDriver alias), so
-// Screen.hpp/boardui.cpp/uidialog.hpp etc. work unchanged regardless of
-// which chip is actually on the board.
+// LT7683 (Levetop LT768x family) LCD driver for the 7" 1024x600 panel --
+// the display_config.h DisplayDriver that Screen.hpp/boardui.cpp/
+// uidialog.hpp etc. use. Its interface started as a copy of the earlier
+// RA8875 driver's (HIPI's 5" panel, since removed), which is why some
+// comments below compare register use with that chip.
 //
 // Register-level details are taken directly from the LT768x_DS_ENG V4.0
 // datasheet (as supplied) -- specifically:
@@ -38,13 +39,12 @@
 //     produced a corrupted draw (a long streak to the bottom of the
 //     panel) instead of a clipped/adjusted shape. fillRoundRect()/
 //     roundRect() clamp for this correctly now -- see their own comments.
-//   - 2-layer/PIP-equivalent config (RA8875::set2LayerConfig() etc.) --
-//     not yet mapped to LT7683's rather different (Picture-in-Picture,
-//     multi-buffer) model; stubbed out for now, see the .cpp.
+//   - set2LayerConfig() (from the RA8875 interface) is a no-op: the
+//     firmware uses LT7683 layers + PIP windows instead.
 
 #pragma once
 
-#include "RA8875Transport.hpp"   // same transport interface (SPI byte-level) -- shared, not chip-specific
+#include "DisplayTransport.hpp"   // same transport interface (SPI byte-level) -- shared, not chip-specific
 #include "hp82163_font.hpp"
 #include <cstdint>
 #include <cstdio>
@@ -64,7 +64,7 @@ public:
     // SPI command/data bytes (4-wire SPI, per section 7.2's read/write
     // procedure): A0=0/RW#=0 -> write register address; A0=1/RW#=0 -> write
     // data; A0=0/RW#=1 -> read status; A0=1/RW#=1 -> read register data.
-    // Encoded the same way RA8875Transport expects (first byte sent over
+    // Encoded the same way DisplayTransport expects (first byte sent over
     // SPI selects the cycle type) -- see LT7683.cpp's writeReg()/readReg().
     static constexpr std::uint8_t CMDWR = 0x00;  // A0=0, RW#=0: register address write
     static constexpr std::uint8_t DATWR = 0x80;  // A0=1, RW#=0: data write
@@ -248,7 +248,7 @@ public:
     // -----------------------------------------------------------------------
     // Construction / init
     // -----------------------------------------------------------------------
-    LT7683(RA8875Transport& t,
+    LT7683(DisplayTransport& t,
            std::uint16_t     width  = SCREEN_MAX_X,
            std::uint16_t     height = SCREEN_MAX_Y,
            bool              start_on = true);
@@ -858,9 +858,9 @@ public:
                      std::uint16_t x1, std::uint16_t y1);
 
     // -----------------------------------------------------------------------
-    // RA8875-style 2-layer mode -- a no-op here: the 7" build uses its own
+    // RA8875-style 2-layer mode -- a no-op here: the firmware uses its own
     // layers + PIP windows instead (beginLayerDraw(), showPipOverlay()).
-    // Kept only so the Linux demo, which calls it, builds for both panels.
+    // Kept only because the Linux demo calls it.
     // -----------------------------------------------------------------------
     void set2LayerConfig();
 
@@ -991,7 +991,7 @@ private:
     void triangleHelper(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1,
                         std::int16_t x2, std::int16_t y2, std::uint16_t color, bool filled);
 
-    RA8875Transport& t_;
+    DisplayTransport& t_;
     std::uint16_t width_;
     std::uint16_t height_;
     std::uint16_t vertOffset_ = 0;

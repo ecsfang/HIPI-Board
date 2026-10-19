@@ -14,7 +14,7 @@ namespace hipi {
 // Construction & init
 // -----------------------------------------------------------------------
 
-LT7683::LT7683(RA8875Transport& t,
+LT7683::LT7683(DisplayTransport& t,
                std::uint16_t width,
                std::uint16_t height,
                bool start_on)
@@ -59,9 +59,8 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
     writeReg(SDRCR, 0x01);          // SDR_INITDONE: start SDRAM init
     waitStatusSet(STSR_RAM_READY);
 
-    // ---- CGRAM font upload -- mirrors RA8875::begin()'s own upload
-    // loop exactly (same font[]/fontChars source, same per-character
-    // call), now that uploadCgramChar() is actually implemented (see
+    // ---- CGRAM font upload -- the font[]/fontChars source from
+    // hp82163_font.hpp, one call per character, now that uploadCgramChar() is actually implemented (see
     // its own comment) -- must run after SDRAM is confirmed ready
     // above (CGRAM lives in Display RAM, per the datasheet's own
     // section 8.2), and before anything else in this function touches
@@ -241,7 +240,7 @@ void LT7683::begin(const std::uint8_t (*font)[FONT_BYTES_PER_CHAR],
 // Low-level register access -- 4-wire SPI. Confirmed against Figure 2-6
 // (3-Wire SPI Interface Timing): the first byte's bit7=A0, bit6=RW#,
 // bits5-0 don't-care; the second byte is the actual address/data. Same
-// two-byte-transfer shape as RA8875Transport already expects, just with
+// two-byte-transfer shape as DisplayTransport already expects, just with
 // LT7683's own A0/RW# encoding (see CMDWR/DATWR/CMDRD/DATRD in the .hpp).
 // -----------------------------------------------------------------------
 
@@ -1191,8 +1190,7 @@ void LT7683::txtWrite(const char* s) {
         const std::uint8_t b0 = static_cast<std::uint8_t>(*p);
         std::uint8_t out;
         if (b0 == 0xC3 && p[1] != '\0') {
-            // Same 2-byte UTF-8 -> Latin-1 reconstruction as RA8875's own
-            // txtWrite() -- see hp82163_font.hpp's extra_font[].
+            // 2-byte UTF-8 -> Latin-1 reconstruction -- see hp82163_font.hpp's extra_font[].
             const std::uint8_t b1 = static_cast<std::uint8_t>(p[1]);
             out = static_cast<std::uint8_t>(0xC0 | (b1 & 0x3F));
             p += 2;
@@ -1554,9 +1552,7 @@ void LT7683::drawBitmap565Cropped(std::int16_t x, std::int16_t y,
 void LT7683::drawBitmap332(std::int16_t x, std::int16_t y,
                            std::uint16_t w, std::uint16_t h,
                            const std::uint8_t* data) {
-    // Not used anywhere in this project currently (RA8875's own
-    // drawBitmap332() is likewise unused in the codebase as of Step 1) --
-    // left unimplemented rather than guessed at.
+    // Not used anywhere in this project currently -- left unimplemented rather than guessed at.
     (void)x; (void)y; (void)w; (void)h; (void)data;
 }
 
@@ -1873,8 +1869,8 @@ void LT7683::uploadCgramChar(std::uint8_t ascii, const std::uint8_t bitmap[16]) 
     // Target address per the datasheet's own formula (section 8.2.1,
     // "8*16 UCG Data Format"): UCG_ADD = CGRAM_Start_ADD + (UCG_Code *
     // 16). This project maps UCG_Code directly to the ASCII value being
-    // uploaded -- the same convention RA8875::uploadCgramChar() already
-    // uses (CGRAM slot == ASCII code) -- so once CCR0 bit[7:6] selects
+    // uploaded -- the convention this project uses
+    // throughout (CGRAM slot == ASCII code) -- so once CCR0 bit[7:6] selects
     // user-defined-character mode (see selectCustomFont()/
     // selectBuiltinFont() below), Screen's own ASCII-driven txtWrite()
     // calls need no separate lookup or translation anywhere else in
@@ -1946,8 +1942,8 @@ void LT7683::uploadCgramFont(std::uint8_t start, std::uint8_t chars, const std::
     // Target address per the datasheet's own formula (section 8.2.1,
     // "8*16 UCG Data Format"): UCG_ADD = CGRAM_Start_ADD + (UCG_Code *
     // 16). This project maps UCG_Code directly to the ASCII value being
-    // uploaded -- the same convention RA8875::uploadCgramChar() already
-    // uses (CGRAM slot == ASCII code) -- so once CCR0 bit[7:6] selects
+    // uploaded -- the convention this project uses
+    // throughout (CGRAM slot == ASCII code) -- so once CCR0 bit[7:6] selects
     // user-defined-character mode (see selectCustomFont()/
     // selectBuiltinFont() below), Screen's own ASCII-driven txtWrite()
     // calls need no separate lookup or translation anywhere else in

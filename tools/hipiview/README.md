@@ -5,8 +5,6 @@ records it straight to a video file. It's useful for making videos: no
 camera, no reflections, no lighting to get right. Every pixel is exactly
 what the panel shows, at the panel's own 1024 × 600.
 
-It works with the **7" panel** (LT7683) only.
-
 ## How it works
 
 First switch the mirror on in HIPI: **Settings → Screen → Mirror to PC**
@@ -247,7 +245,6 @@ sudo udevadm control --reload-rules
 - **The blinking text cursor** is drawn by the chip itself, outside its
   memory. hipiview draws it as a block in the text colour, blinking at
   the same rate. Its exact look on the real panel may differ slightly.
-- **5" panel:** not supported. The port exists, but stays silent.
 
 ## Testing without HIPI
 

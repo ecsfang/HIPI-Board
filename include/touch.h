@@ -5,10 +5,8 @@
 
 extern char gTouchDevice[];
 
-// The physical I2C bus/pins touchInit() below already configures (see
-// touch.cpp's own comment on why both supported touch controllers --
-// GSL1680 on the 5" board, FT5316 on the 7" -- share the same bus/pins
-// regardless of panel). Exposed here so any OTHER I2C device sharing the
+// The physical I2C bus/pins touchInit() below already configures (the
+// FT5316 touch controller's bus). Exposed here so any OTHER I2C device sharing the
 // same physical bus (see i2c_device.h's own CI2CBus::markInitialized())
 // can reuse it without re-initializing hardware touchInit() already set
 // up -- reused directly rather than adding a second, separate i2c_inst_t
@@ -24,7 +22,7 @@ bool touch_is_down();                                      // lightweight releas
 
 // ── Debounced tap detection ─────────────────────────────────────────────────
 //
-// The GSL1680 only fires one IRQ edge per physical touch (the line stays
+// The touch controller may fire only one IRQ edge per physical touch (the line stays
 // high while held, so there's no second edge to wait for) -- so a single
 // bad reading (capacitive noise/EMI) looks identical to a real tap at the
 // point of the first sample. touch_poll() re-samples a short moment after

@@ -17,12 +17,13 @@ classic HP peripherals at once:
 
 Cassettes are LIF image files on a micro-SD card. Besides the device views
 (display, plotter, tape drive, printer) there is an HP-IL analyzer, a loop map, an
-HP-IL signal view, screen savers, screen dumps, and — on the 7" panel — a
-mirror of the screen to a PC for recording videos.
+HP-IL signal view, screen savers, screen dumps, and a mirror of the screen
+to a PC for recording videos.
 
 The project started as a C++17 port of J. Chilla's MicroPython project
 `JCILD` (HP 82163 video display and HP 82161 drive emulator), including its
-RA8875 display driver.
+RA8875 display driver (HIPI's first, 5" panel; after 1.3.0 HIPI has only
+the 7" LT7683 panel).
 
 ## Documentation
 
@@ -31,7 +32,7 @@ RA8875 display driver.
 | [User Manual](documents/USER_MANUAL.md) | Users | Getting started, views, menus, devices, settings, troubleshooting |
 | [User & Developer Guide](documents/GUIDE.md) | Developers | Setting up, building, flashing, USB interfaces, adding your own HP-IL device |
 | [pcb/README.md](pcb/README.md) | Builders | The circuit board and choice of display; [BOM](pcb/HIPI-BOM.pdf), [schematics](pcb/HIPI-Schematics.pdf) |
-| [tools/hipiview](tools/hipiview/README.md) | Users | Showing and recording the 7" screen on a PC |
+| [tools/hipiview](tools/hipiview/README.md) | Users | Showing and recording the screen on a PC |
 | [tools/ilctrl](tools/ilctrl/README.md) | Users | A command-line HP-IL controller for the PC (PIL-Box CON mode) |
 
 ---
@@ -41,8 +42,7 @@ RA8875 display driver.
 | Part | |
 |------|---|
 | MCU | Raspberry Pi Pico 2 / Pico 2 W (RP2350) |
-| 5" panel | 800 × 480, RA8875, GSL1680 touch — `build/hipi_5_pico.uf2` |
-| 7" panel | 1024 × 600, LT7683, FT5316 touch — `build/hipi_7_pico.uf2` |
+| Display | 7", 1024 × 600, LT7683, FT5316 touch |
 | Storage | micro-SD card (FAT32 recommended, exFAT works) |
 | USB | 4 serial ports (console, PILBOX, terminal, display mirror) and the SD card as a USB drive — see [GUIDE § 7](documents/GUIDE.md#7-usb-interfaces) |
 
@@ -60,9 +60,7 @@ Display SPI wiring (same as the original `share.py`):
 
 ## Building
 
-Both panel variants are built every time: `build/hipi_5_pico.uf2` (5") and
-`build/hipi_7_pico.uf2` (7"). Flash the one that matches your board. The
-details, including the PicoLED library, are in
+The build makes `build/hipi_7_pico.uf2`. The details, including the PicoLED library, are in
 [GUIDE.md § 1–3](documents/GUIDE.md#1-setting-up-the-project).
 
 ### In VS Code (Raspberry Pi Pico extension)
@@ -95,7 +93,7 @@ Hold **BOOTSEL** while plugging in (or resetting) the Pico 2 and drop the
 `.uf2` onto the drive that appears — or use picotool:
 
 ```bash
-picotool load -f build/hipi_7_pico.uf2      # or hipi_5_pico.uf2
+picotool load -f build/hipi_7_pico.uf2
 ```
 
 Later updates can be started from the menu: **More → System → Bootsel mode**.
@@ -178,7 +176,7 @@ string like `"Fänge"` in the source code shows correctly.
 ## Project structure
 
 ```
-CMakeLists.txt   build: one target chain per panel (hipi_5_pico, hipi_7_pico)
+CMakeLists.txt   build: the firmware (hipi_7_pico)
 include/, src/   the firmware (below)
 lib/             no-OS-FatFS (SD card), vendored, unmodified
 PicoLED/         WS2812 library for TFPIXEL, vendored
@@ -199,12 +197,12 @@ The firmware, by area (`.h`/`.hpp` in `include/`, `.cpp` in `src/`):
 | **Start-up** | `pico_main`, `hipi`, `boot_service`, `hipi_features.h` | Boot sequence and main loop; creates the HP-IL devices; build switches |
 | **HP-IL** | `hpil`, `hpil.pio`, `device` | Frames, the PIO physical layer, the `CDevice` base class |
 | **HP-IL devices** | `display`, `drive` + `tape`, `plotter`, `printer`, `illeds`, `ilpixels`, `terminal`, `pilbox`, `ili2c` | `TFDISPLAY` (HP 82163 or HP 92198), `TFDRIVE` (LIF on SD), `TFPLOT` (HP-GL), `TFPRINT` (HP 82162A), `TFLEDS`, `TFPIXEL`, `TFTERM`, `PILBOX`, `TFI2C` (any I2C chip: temperature, pressure, distance, clock ...) |
-| **Display drivers** | `LT7683`, `RA8875`, `*Transport`, `display_config.h` | 7" and 5" controllers; SPI on the Pico (or spidev on Linux) |
+| **Display driver** | `LT7683`, `*Transport`, `display_config.h` | The 7" panel's controller; SPI on the Pico (or spidev on Linux) |
 | **Text display** | `Screen`, `hp82163_font.hpp`, `video80` | HP 82163 emulation: text buffer, escape codes, scroll-back; the HP 92198's 80-column screen |
 | **Views** | `plotterview`, `analyzer`, `loopmap`, `hpil_diag` (+ `.pio`), `chartable` | Display / Plotter / Tape / Printer views and switching; analyzer, loop map, HP-IL signals, character table |
 | **User interface** | `boardui`, `uidialog.hpp`, `ui_buttons.hpp`, `touch`, `bootscreen` | Button strip, menus, info box, device list, touch, start-up screen |
 | **Screen extras** | `backlight`, `clock`, `rtc`, `saver_anim`, `screendump` | Backlight and screen savers, DS3231 clock, screen dumps |
-| **Display mirror** | `display_mirror`, `mirror_*.h(pp)` | 7" screen mirrored to a PC (`tools/hipiview`) |
+| **Display mirror** | `display_mirror`, `mirror_*.h(pp)` | The screen mirrored to a PC (`tools/hipiview`) |
 | **Settings & files** | `config.hpp`, `sd_paths.h`, `bmp_loader.hpp`, `lif_info.hpp`, `hw_config` | `CONFIG.TXT`, SD folders, BMP loading, LIF directories, SD card wiring |
 | **USB** | `usb_serial.h`, `usb_msc`, `my_descriptors.c`, `tusb_config.h` | Serial ports, the SD card as a USB drive, descriptors |
 | **Hardware drivers** | `leds`, `pixels`, `bmp280`, `i2c_device`, `i2c_ident`, `i2c_chips` | LEDs, NeoPixels, pressure sensor, I2C; what's on the I2C bus (chips described in `sdcard/i2c/*.txt`) |
@@ -216,7 +214,7 @@ The firmware, by area (`.h`/`.hpp` in `include/`, `.cpp` in `src/`):
 ## Port notes (vs. the MicroPython original)
 
 - Global state from `share.py` became constructor arguments.
-- `RA8875Transport` is a virtual SPI/GPIO interface, so the platform is easy
+- `DisplayTransport` is a virtual SPI/GPIO interface, so the platform is easy
   to swap (`PicoSpiTransport`, `LinuxSpiDevTransport`).
 - `delayMs()` replaces `time.sleep()`; `_write_reg`/`_write_reg16` became
   the public `writeReg`/`writeReg16`.
@@ -269,7 +267,6 @@ More examples:
 - `\n`, `;` or `flush()` also end the last command.
 - `S` and the `F` commands need PWM (`CLED_NO_PWM` not defined, see
   `leds.h`); without it, brightness does nothing and fades switch at once.
-- Tested on the 5" board.
 
 ---
 
@@ -280,7 +277,6 @@ More examples:
 - HP-IL interface specification: <https://literature.hpcalc.org/community/hp82166-is-en.pdf>
 - *Control the world with HP-IL*: <https://literature.hpcalc.org/community/control-with-hp-il.pdf>
 - RA8875 (CircuitPython driver): <https://github.com/adafruit/Adafruit_CircuitPython_RA8875>
-- 5" panel (RA8875): <https://www.buydisplay.com/5-inch-tft-lcd-module-800x480-display-controller-i2c-serial-spi>
 - 7" panel (LT7683): <https://www.buydisplay.com/spi-7-inch-tft-lcd-dislay-module-1024x600-ra8876-optl-touch-screen-panel>
 - pico-sdk: <https://github.com/raspberrypi/pico-sdk>
 - Pico VS Code extension: <https://github.com/raspberrypi/pico-vscode>

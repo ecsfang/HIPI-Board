@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
-// Minimal, panel-agnostic display bring-up/sanity-check test. Works
-// against whichever DisplayDriver is selected (RA8875 or LT7683 -- see
-// display_config.h), using only the shared public interface both
-// implement, so the same test runs unmodified for either panel.
+// Minimal display bring-up/sanity-check test for the DisplayDriver
+// (LT7683, see display_config.h).
 //
 // Meant to be called once USB CDC logging is actually up (after the CDC
 // connect-wait loops in main()) but still before anything else that
@@ -401,7 +399,6 @@ inline void runFontTest(DisplayDriver* display) {
     LOGF("\r\n\r\n=== Font Test (isolated) ===\r\n");
     display->begin();
 
-#ifdef DISPLAY_7INCH
     // TEMPORARY DIAGNOSTIC: confirms the ONE writeReg32(CGRAM_STR0,
     // kCgramAddr) call inside begin() actually landed -- a SEPARATE
     // register from CVSSA (already confirmed working earlier), so one
@@ -414,7 +411,6 @@ inline void runFontTest(DisplayDriver* display) {
              static_cast<unsigned long>(expected), static_cast<unsigned long>(got),
              (got == expected) ? "MATCH" : "MISMATCH -- CGRAM_STR0 itself never landed");
     }
-#endif
 
     display->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
 
@@ -493,7 +489,6 @@ inline void runFontTest(DisplayDriver* display) {
 
     LOGF("\r\n=== Font test complete -- compare lines on screen NOW ===\r\n\r\n");
 
-#ifdef DISPLAY_7INCH
     // ---- DESTRUCTIVE: empirical SDRAM size detection ----
     // Runs AFTER the font comparison above -- this WILL corrupt the
     // screen (including overwriting address 0, the live main
@@ -573,7 +568,6 @@ inline void runFontTest(DisplayDriver* display) {
         }
     }
     LOGF("=== SDRAM size detection complete ===\r\n\r\n");
-#endif
     sleepMsPumped(10000);
 }
 
@@ -722,8 +716,7 @@ inline void runDisplayBootTest(DisplayDriver* display) {
     // ---- Step 6: splash screen ----
     // Exercises the actual production showSplashScreen() (same function
     // pico_main.cpp calls during a normal boot), not a simplified stand-in
-    // -- so this also verifies the fix to its own hardcoded-800x480 bug
-    // (see boardui.cpp). No SD card needed: logo.bmp is optional and
+    // -- No SD card needed: logo.bmp is optional and
     // gracefully skipped if missing, falling back to text-only.
     LOGF("Showing splash screen ... ");
     showSplashScreen(display, "TEST", 2000);

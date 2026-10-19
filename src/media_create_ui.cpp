@@ -40,10 +40,9 @@ std::string sizeText(std::uint64_t bytes) {
 }  // namespace
 
 MediaCreateUi::MediaCreateUi(DisplayDriver* d) : d_(d) {
-    const bool small = SCREEN_MAX_Y < 600;          // the 5" panel
     const int areaW = SCREEN_MAX_X - kStripW;
-    frame_.x = small ? 8 : 20;
-    frame_.y = small ? 6 : 20;
+    frame_.x = 20;
+    frame_.y = 20;
     frame_.w = areaW - 2 * frame_.x;
     frame_.h = SCREEN_MAX_Y - 2 * frame_.y;
     cx_ = frame_.x + 24;
@@ -52,7 +51,7 @@ MediaCreateUi::MediaCreateUi(DisplayDriver* d) : d_(d) {
 
     // CREATE MEDIA: three rows (a small label, then the control), the
     // numbers, a message line, the buttons
-    rowPitch_ = small ? 70 : 80;
+    rowPitch_ = 80;
     constexpr int kCtlH = 44, kArrowW = 56;
     nameBox_ = { cx_, ty_ + 20, cw_, kCtlH };
     typeL_ = { cx_, ty_ + rowPitch_ + 20, kArrowW, kCtlH };
@@ -61,8 +60,8 @@ MediaCreateUi::MediaCreateUi(DisplayDriver* d) : d_(d) {
     dirR_ = { cx_ + cw_ - kArrowW, dirL_.y, kArrowW, kCtlH };
     infoY_ = ty_ + 3 * rowPitch_ + 8;
     msgY_ = infoY_ + 4 * 22 + 6;
-    const int btnH = small ? 46 : 50, btnW = small ? 150 : 180;
-    const int by = frame_.y + frame_.h - (small ? 12 : 20) - btnH;
+    const int btnH = 50, btnW = 180;
+    const int by = frame_.y + frame_.h - 20 - btnH;
     createBtn_ = { cx_ + cw_ - btnW, by, btnW, btnH };
     cancelBtn_ = { createBtn_.x - 16 - btnW, by, btnW, btnH };
     progress_ = { cx_, by, cancelBtn_.x - 16 - cx_, btnH };

@@ -212,9 +212,8 @@ void plotterview_poll();
 
 // True while the brief "DISPLAY"/"PLOTTER"/"TAPE" switch-announcement
 // splash is showing (see plotterview_showDevice()). Checked by
-// UiDialog::close() (7": don't hide the PIP overlay the splash now owns;
-// 5": don't redraw over the full-screen splash) and by
-// boardui_handleTap() (7": taps are ignored while it's up).
+// UiDialog::close() (don't hide the PIP overlay the splash now owns) and
+// by boardui_handleTap() (taps are ignored while it's up).
 bool plotterview_isSplashVisible();
 
 // Clears the plotter's drawing (both the retained segments() history and,

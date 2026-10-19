@@ -19,7 +19,7 @@ namespace {
 
 LT7683Emu chip;
 
-class ChipTransport : public hipi::RA8875Transport {
+class ChipTransport : public hipi::DisplayTransport {
 public:
     void csLow() override { first_ = true; }
     void csHigh() override {}

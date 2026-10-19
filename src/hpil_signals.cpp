@@ -6,9 +6,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
-#ifdef DISPLAY_7INCH
 #include "LT7683.hpp"
-#endif
 
 namespace hipi {
 namespace signals {
@@ -375,7 +373,6 @@ void draw(DisplayDriver* d, const std::uint32_t* capture, std::uint32_t captureN
     } else {
         buf_ = capture;
     }
-#ifdef DISPLAY_7INCH
     // Off-screen, then copied in one go (no flicker), like the loop map
     const std::uint32_t prevAddr = d_->canvasAddr();
     const std::uint16_t prevStride = d_->canvasStride();
@@ -384,9 +381,6 @@ void draw(DisplayDriver* d, const std::uint32_t* capture, std::uint32_t captureN
     if (prevAddr == 0) d_->endOverlayDraw();
     else               d_->beginLayerDraw(prevAddr, prevStride);
     d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
-#else
-    renderFull();
-#endif
     buf_ = nullptr;
 }
 

@@ -11,8 +11,8 @@ enum class Button : std::uint8_t { None, Shift, Ok, Up, Down, X };
 struct ButtonRect { Button id; std::uint16_t x0, y0, x1, y1; };
 
 // Coordinates are LOCAL to the button-strip bitmap's own top-left corner,
-// at the ORIGINAL 120x480 artwork resolution (resources/buttons.bmp, as
-// designed for the 5" board's panel) -- NOT absolute screen coordinates.
+// at the ORIGINAL 120x480 artwork resolution (resources/buttons.bmp, first
+// made for an 800x480 panel) -- NOT absolute screen coordinates.
 // hitTestButton() below maps an incoming absolute touch into this local,
 // original-resolution space using the strip's CURRENT actual screen
 // position (buttonStripScreenX0, tracked live in boardui.cpp -- shifts
@@ -26,7 +26,7 @@ struct ButtonRect { Button id; std::uint16_t x0, y0, x1, y1; };
 // different design resolution.
 //
 // Local X (24-96) = the original 704-776 minus the OLD strip's own
-// screen offset (680 = 800 - 120 on the 5" board's panel) -- width
+// screen offset (680 = 800 - 120 on that 800x480 panel) -- width
 // itself was never scaled (only height was, see the loader), so these
 // two numbers are still directly correct as-is, just no longer
 // expressed as absolute screen X.
@@ -134,7 +134,7 @@ inline void redrawButtonRegion(DisplayDriver* display,
 
 // ── Status indicator LEDs (USB / HP-IL) ─────────────────────────────────────
 //
-// Drawn directly as filled circles (via RA8875::fillRoundRect() with
+// Drawn directly as filled circles (via fillRoundRect() with
 // radius == half the bounding box, which produces a true circle) rather
 // than being part of the cached button-strip bitmap -- so they can be
 // toggled from code at any time, independent of touch interaction.

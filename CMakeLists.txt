@@ -68,45 +68,11 @@ include("${PICO_SDK_PATH}/pico_sdk_init.cmake")
 project(hipi_pico C CXX)
 
 # ----------------------------------------------------------------------
-# Display panel selection.
-#
-# By default the Pico firmware is built for BOTH panels at once (see
-# hipi_add_pico_targets() below) -- each gets its own fully separate set
-# of libraries and its own executable, named after the panel
-# (hipi_5_pico / hipi_7_pico, and their .uf2/.elf/... outputs), so you can
-# build both in one `cmake --build build` and flash whichever board you
-# actually have on your desk.
-#
-# To build only one panel (faster iteration while working on just one
-# board), set HIPI_BUILD_PANELS to just that panel's number:
-#
-#   cmake -DHIPI_BUILD_PANELS=7 -B build     # only hipi_7_pico
-#   cmake -DHIPI_BUILD_PANELS=5 -B build     # only hipi_5_pico
-#   cmake -DHIPI_BUILD_PANELS=5;7 -B build   # both (the default)
-#
-# This changes which targets get *created*, not just which get built by
-# default -- so after changing it, a plain "cmake -B build" reconfigure
-# picks it up (no need to delete the build directory, unlike changing
-# CMakeLists.txt's own structure -- see the project's own notes on that).
-#
-#   5 -- RA8875 display controller + GSL1680 capacitive touch
-#   7 -- LT7683 display controller + FT5316 capacitive touch
-#
-# HIPI_DISPLAY_PANEL (separate from the above) only controls the
-# *optional* Linux spidev demo (HIPI_BUILD_LINUX_EXAMPLE, off by
-# default) below, since that one runs against whatever single board
-# happens to be wired up locally, e.g.:
-#
-#   cmake -DHIPI_BUILD_LINUX_EXAMPLE=ON -DHIPI_DISPLAY_PANEL=7INCH -B build
+# Display panel: HIPI has one, the 7" 1024x600 panel with an LT7683
+# display controller and FT5316 capacitive touch. The firmware target is
+# hipi_7_pico (hipi_7_pico.uf2/.elf/...); the name is kept so release
+# files stay named as before.
 # ----------------------------------------------------------------------
-set(HIPI_BUILD_PANELS "5;7" CACHE STRING "Which panel(s) to build Pico firmware for: 5, 7, or 5;7 for both")
-
-set(HIPI_DISPLAY_PANEL "5INCH" CACHE STRING "Panel the optional Linux demo targets: 5INCH or 7INCH")
-set_property(CACHE HIPI_DISPLAY_PANEL PROPERTY STRINGS 5INCH 7INCH)
-if(NOT HIPI_DISPLAY_PANEL STREQUAL "5INCH" AND NOT HIPI_DISPLAY_PANEL STREQUAL "7INCH")
-    message(FATAL_ERROR
-        "HIPI_DISPLAY_PANEL must be 5INCH or 7INCH, got: ${HIPI_DISPLAY_PANEL}")
-endif()
 
 # Initialise the Raspberry Pi Pico SDK
 # C++ exceptions: PicoLED (the NeoPixel library) throws them. The SDK reads
@@ -148,25 +114,12 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 ## add_compile_definitions(CFG_TUD_CDC_TX_BUFSIZE=256)
 
 # ----------------------------------------------------------------------
-# Shared support library, built once regardless of panel choice -- the
-# SD-card/FatFS code doesn't depend on which display is attached, and
-# add_subdirectory() can't be called twice for the same source dir.
+# Shared support library: the SD-card/FatFS code.
 # ----------------------------------------------------------------------
 add_subdirectory(lib/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
 
 include("PicoLED/PicoLed.cmake")
 
-# ----------------------------------------------------------------------
-# Defines one full target chain (core lib -> Pico transport lib -> Pico
-# executable) for a given panel. Called once per panel below, so both
-# hipi_5_pico and hipi_7_pico -- and their respective .uf2/.elf/... build
-# outputs, named automatically after the executable target -- exist
-# side by side after a single `cmake --build build`.
-#
-#   PANEL  -- "5INCH" or "7INCH" (becomes -DDISPLAY_<PANEL>, see
-#             include/display_config.h)
-#   SUFFIX -- short tag used in target/output names, e.g. "5" or "7"
-# ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
 # The version, from git: cmake/hipi_version.cmake writes
 # hipi_generated/hipi_version.h (HIPI_VERSION_TEXT / _FULL) -- now, so it's
@@ -184,206 +137,164 @@ add_custom_target(hipi_version ALL
     COMMENT "HIPI version from git"
     VERBATIM)
 
-function(hipi_add_pico_targets PANEL SUFFIX)
-    set(CORE_TARGET      hipi_core_${SUFFIX})
-    set(TRANSPORT_TARGET hipi_pico_transport_${SUFFIX})
-    set(EXE_TARGET       hipi_${SUFFIX}_pico)
+# ----------------------------------------------------------------------
+# The target chain: core lib -> Pico transport lib -> Pico executable.
+# ----------------------------------------------------------------------
+set(CORE_TARGET      hipi_core)
+set(TRANSPORT_TARGET hipi_pico_transport)
+set(EXE_TARGET       hipi_7_pico)
 
-    # ---- Core library — RA8875/LT7683 drivers + HP82163 Screen class
-    # (platform-neutral). Both display drivers are always compiled in;
-    # DISPLAY_${PANEL} only decides which one include/display_config.h's
-    # DisplayDriver alias actually resolves to for this target chain. ----
-    add_library(${CORE_TARGET} STATIC
-        src/RA8875.cpp
-        src/LT7683.cpp
-        src/Screen.cpp
-    )
-    target_include_directories(${CORE_TARGET} PUBLIC include)
-    target_compile_definitions(${CORE_TARGET} PUBLIC DISPLAY_${PANEL})
+# ---- Core library -- LT7683 driver + HP82163 Screen class
+# (platform-neutral). ----
+add_library(${CORE_TARGET} STATIC
+    src/LT7683.cpp
+    src/Screen.cpp
+)
+target_include_directories(${CORE_TARGET} PUBLIC include)
 
-    # ---- Pico-specific transport — links against pico-sdk's SPI/GPIO hw
-    # libs. ----
-    add_library(${TRANSPORT_TARGET} STATIC
-        src/PicoSpiTransport.cpp
-    )
-    target_link_libraries(${TRANSPORT_TARGET} PUBLIC
-        ${CORE_TARGET}
-        pico_stdlib
-        hardware_spi
-        hardware_gpio
-        no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
-    )
-    target_include_directories(${TRANSPORT_TARGET} PUBLIC include)
+# ---- Pico-specific transport — links against pico-sdk's SPI/GPIO hw
+# libs. ----
+add_library(${TRANSPORT_TARGET} STATIC
+    src/PicoSpiTransport.cpp
+)
+target_link_libraries(${TRANSPORT_TARGET} PUBLIC
+    ${CORE_TARGET}
+    pico_stdlib
+    hardware_spi
+    hardware_gpio
+    no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
+)
+target_include_directories(${TRANSPORT_TARGET} PUBLIC include)
 
-    # ---- The built-in I2C chip list: sdcard/i2c/chips.txt as a string ----
-    # (i2c_ident.cpp uses it when the SD card has no i2c/ folder). Changing
-    # chips.txt re-runs CMake by itself.
-    file(READ ${CMAKE_CURRENT_SOURCE_DIR}/sdcard/i2c/chips.txt HIPI_I2C_CHIPS_TEXT)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sdcard/i2c/chips.txt)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/i2c_chips_default.cpp.in
-                   ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp @ONLY)
+# ---- The built-in I2C chip list: sdcard/i2c/chips.txt as a string ----
+# (i2c_ident.cpp uses it when the SD card has no i2c/ folder). Changing
+# chips.txt re-runs CMake by itself.
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/sdcard/i2c/chips.txt HIPI_I2C_CHIPS_TEXT)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sdcard/i2c/chips.txt)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/i2c_chips_default.cpp.in
+               ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp @ONLY)
 
-    # ---- Firmware executable — flashed to the board. ----
-    add_executable(${EXE_TARGET}
-        src/pico_main.cpp
-        src/boardui.cpp
-        src/hipi.cpp
-        src/hpil.cpp
-        src/device.cpp
-        src/drive.cpp
-        src/display.cpp
-        src/illeds.cpp
-        src/ilpixels.cpp
-        src/touch.cpp
-        src/leds.cpp
-        src/pixels.cpp
-        src/i2c_device.cpp
-        src/bmp280.cpp
-        src/pilbox.cpp
-        src/plotter.cpp
-        src/plotterview.cpp
-        src/printer.cpp
-        src/printer_font.cpp
-        src/video80.cpp
-        src/hwtest.cpp
-        src/hwtest_io.cpp
-        src/i2c_ident.cpp
-        src/i2c_chips.cpp
-        src/i2c_command.cpp
-        src/ili2c.cpp
-        src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
-        src/lif_create.cpp          # File picker -> Create media: an empty LIF image
-        src/media_create_ui.cpp     # ... its dialogs (CREATE MEDIA, MEDIA NAME)
-        src/mediamap.cpp            # Tape view -> Media map: the medium as rings
-        src/printout.cpp            # Printer: the torn-off paper saved (BMP + text)
-        ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp
-        src/demo.cpp
-        src/demo_content.cpp
-        src/terminal.cpp
-        src/hw_config.cpp
-        src/my_descriptors.c
-        src/usb_msc.cpp
-        src/screendump.cpp
-        src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
-        src/bootscreen.cpp
-        src/analyzer.cpp
-        src/loopmap.cpp
-        src/chartable.cpp
-        src/chartable_font.cpp      # generated, see scripts/ttf_to_glyphs.py
-        src/hpil_diag.cpp
-        src/hpil_signals.cpp        # the signals view drawing (and its example)
-        src/devicelist.cpp          # the HP-IL DEVICES list (corner touch)
-        src/backlight.cpp
-        src/clock.cpp
-        src/rtc.cpp
-        src/rtc_probe.cpp           # the clock chips' checks (Hardware test, TFI2C "I")
-        src/glyph_font.cpp
-        src/clock_font_big.cpp      # generated, see scripts/ttf_to_glyphs.py
-        src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py
-        src/menu_font_title.cpp     # generated, see scripts/ttf_to_glyphs.py
-        src/saver_anim.cpp
-        src/display_mirror.cpp      # display mirrored to a PC, see tools/hipiview
-        src/saver_font_rain.cpp     # generated, see scripts/ttf_to_glyphs.py
-        src/saver_font_goose40.cpp  # generated (5 goose sizes), see scripts/ttf_to_glyphs.py
-        src/saver_font_goose56.cpp
-        src/saver_font_goose72.cpp
-        src/saver_font_goose92.cpp
-        src/saver_font_goose112.cpp
-        src/logo_image.cpp          # built-in logo, see scripts/bmp_to_rgb565.py
-        src/version.cpp             # the version from git, see cmake/hipi_version.cmake
-    )
-    target_include_directories(${EXE_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated)
-    add_dependencies(${EXE_TARGET} hipi_version)
+# ---- Firmware executable — flashed to the board. ----
+add_executable(${EXE_TARGET}
+    src/pico_main.cpp
+    src/boardui.cpp
+    src/hipi.cpp
+    src/hpil.cpp
+    src/device.cpp
+    src/drive.cpp
+    src/display.cpp
+    src/illeds.cpp
+    src/ilpixels.cpp
+    src/touch.cpp
+    src/leds.cpp
+    src/pixels.cpp
+    src/i2c_device.cpp
+    src/bmp280.cpp
+    src/pilbox.cpp
+    src/plotter.cpp
+    src/plotterview.cpp
+    src/printer.cpp
+    src/printer_font.cpp
+    src/video80.cpp
+    src/hwtest.cpp
+    src/hwtest_io.cpp
+    src/i2c_ident.cpp
+    src/i2c_chips.cpp
+    src/i2c_command.cpp
+    src/ili2c.cpp
+    src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
+    src/lif_create.cpp          # File picker -> Create media: an empty LIF image
+    src/media_create_ui.cpp     # ... its dialogs (CREATE MEDIA, MEDIA NAME)
+    src/mediamap.cpp            # Tape view -> Media map: the medium as rings
+    src/printout.cpp            # Printer: the torn-off paper saved (BMP + text)
+    ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated/i2c_chips_default.cpp
+    src/demo.cpp
+    src/demo_content.cpp
+    src/terminal.cpp
+    src/hw_config.cpp
+    src/my_descriptors.c
+    src/usb_msc.cpp
+    src/screendump.cpp
+    src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
+    src/bootscreen.cpp
+    src/analyzer.cpp
+    src/loopmap.cpp
+    src/chartable.cpp
+    src/chartable_font.cpp      # generated, see scripts/ttf_to_glyphs.py
+    src/hpil_diag.cpp
+    src/hpil_signals.cpp        # the signals view drawing (and its example)
+    src/devicelist.cpp          # the HP-IL DEVICES list (corner touch)
+    src/backlight.cpp
+    src/clock.cpp
+    src/rtc.cpp
+    src/rtc_probe.cpp           # the clock chips' checks (Hardware test, TFI2C "I")
+    src/glyph_font.cpp
+    src/clock_font_big.cpp      # generated, see scripts/ttf_to_glyphs.py
+    src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py
+    src/menu_font_title.cpp     # generated, see scripts/ttf_to_glyphs.py
+    src/saver_anim.cpp
+    src/display_mirror.cpp      # display mirrored to a PC, see tools/hipiview
+    src/saver_font_rain.cpp     # generated, see scripts/ttf_to_glyphs.py
+    src/saver_font_goose40.cpp  # generated (5 goose sizes), see scripts/ttf_to_glyphs.py
+    src/saver_font_goose56.cpp
+    src/saver_font_goose72.cpp
+    src/saver_font_goose92.cpp
+    src/saver_font_goose112.cpp
+    src/logo_image.cpp          # built-in logo, see scripts/bmp_to_rgb565.py
+    src/version.cpp             # the version from git, see cmake/hipi_version.cmake
+)
+target_include_directories(${EXE_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated)
+add_dependencies(${EXE_TARGET} hipi_version)
 
-    target_link_libraries(${EXE_TARGET} PRIVATE
-        ${CORE_TARGET}
-        hardware_i2c
-        hardware_spi
-        hardware_pwm
-        hardware_gpio
-        ${TRANSPORT_TARGET}
-        pico_stdlib
-        pico_rand               # screen saver animations (saver_anim.cpp)
-        hardware_dma            # HP-IL signal scope (hpil_diag.cpp)
-        tinyusb_device          # ← replace pico_stdio_usb with this
-        tinyusb_board
-    #    pico_bootsel_via_double_reset
-        # pico_cyw43_arch_none   # Only needed if targeting a "_w" board
-                                  # variant with the CYW43 wifi/bt chip --
-                                  # not applicable now that PICO_BOARD is
-                                  # correctly set to plain "pico2" above.
-        PicoLed
-    )
+target_link_libraries(${EXE_TARGET} PRIVATE
+    ${CORE_TARGET}
+    hardware_i2c
+    hardware_spi
+    hardware_pwm
+    hardware_gpio
+    ${TRANSPORT_TARGET}
+    pico_stdlib
+    pico_rand               # screen saver animations (saver_anim.cpp)
+    hardware_dma            # HP-IL signal scope (hpil_diag.cpp)
+    tinyusb_device          # ← replace pico_stdio_usb with this
+    tinyusb_board
+#    pico_bootsel_via_double_reset
+    # pico_cyw43_arch_none   # Only needed if targeting a "_w" board
+                              # variant with the CYW43 wifi/bt chip --
+                              # not applicable now that PICO_BOARD is
+                              # correctly set to plain "pico2" above.
+    PicoLed
+)
 
-    target_compile_definitions(${EXE_TARGET} PRIVATE
-        PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR=0
-    )
+target_compile_definitions(${EXE_TARGET} PRIVATE
+    PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR=0
+)
 
-    # Generate header from the .pio file
-    pico_generate_pio_header(${EXE_TARGET}
-        ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
-    )
-    pico_generate_pio_header(${EXE_TARGET}
-        ${CMAKE_CURRENT_LIST_DIR}/src/hpil_diag.pio
-    )
+# Generate header from the .pio file
+pico_generate_pio_header(${EXE_TARGET}
+    ${CMAKE_CURRENT_LIST_DIR}/src/hpil.pio
+)
+pico_generate_pio_header(${EXE_TARGET}
+    ${CMAKE_CURRENT_LIST_DIR}/src/hpil_diag.pio
+)
 
-    pico_enable_stdio_usb(${EXE_TARGET} 0)
-    pico_enable_stdio_uart(${EXE_TARGET} 0)
+pico_enable_stdio_usb(${EXE_TARGET} 0)
+pico_enable_stdio_uart(${EXE_TARGET} 0)
 
-    # Names every generated output (.uf2/.elf/.bin/.hex/.map) after
-    # EXE_TARGET automatically -- this is what makes hipi_5_pico.uf2 /
-    # hipi_7_pico.uf2 (etc.) come out named correctly, with no extra work.
-    pico_add_extra_outputs(${EXE_TARGET})
-endfunction()
-
-if("5" IN_LIST HIPI_BUILD_PANELS)
-    message(STATUS "hipi: building Pico firmware for the 5\" panel (hipi_5_pico)")
-    hipi_add_pico_targets(5INCH 5)
-endif()
-if("7" IN_LIST HIPI_BUILD_PANELS)
-    message(STATUS "hipi: building Pico firmware for the 7\" panel (hipi_7_pico)")
-    hipi_add_pico_targets(7INCH 7)
-endif()
-if(NOT "5" IN_LIST HIPI_BUILD_PANELS AND NOT "7" IN_LIST HIPI_BUILD_PANELS)
-    message(FATAL_ERROR
-        "HIPI_BUILD_PANELS must contain 5, 7, or both -- got: ${HIPI_BUILD_PANELS}")
-endif()
+# Names every generated output (.uf2/.elf/.bin/.hex/.map) after
+# EXE_TARGET automatically -- hipi_7_pico.uf2 and so on.
+pico_add_extra_outputs(${EXE_TARGET})
 
 # ----------------------------------------------------------------------
 # Optional: Linux spidev demo (off by default for Pico-focused work).
-# Links against whichever panel's core library HIPI_DISPLAY_PANEL selects
-# -- which must actually have been built above (i.e. its number must
-# also be in HIPI_BUILD_PANELS), or the link step below would fail on a
-# target that was never created.
 # ----------------------------------------------------------------------
 option(HIPI_BUILD_LINUX_EXAMPLE "Build the Linux spidev demo" OFF)
 if(HIPI_BUILD_LINUX_EXAMPLE)
-    if(HIPI_DISPLAY_PANEL STREQUAL "7INCH")
-        if(NOT "7" IN_LIST HIPI_BUILD_PANELS)
-            message(FATAL_ERROR
-                "HIPI_BUILD_LINUX_EXAMPLE wants the 7\" panel (HIPI_DISPLAY_PANEL=7INCH) "
-                "but HIPI_BUILD_PANELS=${HIPI_BUILD_PANELS} doesn't include 7 -- "
-                "add 7 to HIPI_BUILD_PANELS, or change HIPI_DISPLAY_PANEL.")
-        endif()
-    else()
-        if(NOT "5" IN_LIST HIPI_BUILD_PANELS)
-            message(FATAL_ERROR
-                "HIPI_BUILD_LINUX_EXAMPLE wants the 5\" panel (HIPI_DISPLAY_PANEL=5INCH) "
-                "but HIPI_BUILD_PANELS=${HIPI_BUILD_PANELS} doesn't include 5 -- "
-                "add 5 to HIPI_BUILD_PANELS, or change HIPI_DISPLAY_PANEL.")
-        endif()
-    endif()
-
-    message(STATUS "hipi: Linux demo targets DISPLAY_${HIPI_DISPLAY_PANEL}")
     add_executable(hipi_linux_demo
         src/LinuxSpiDevTransport.cpp
         src/linux_main.cpp
     )
-    if(HIPI_DISPLAY_PANEL STREQUAL "7INCH")
-        target_link_libraries(hipi_linux_demo PRIVATE hipi_core_7)
-    else()
-        target_link_libraries(hipi_linux_demo PRIVATE hipi_core_5)
-    endif()
+    target_link_libraries(hipi_linux_demo PRIVATE ${CORE_TARGET})
 endif()
 
 # ----------------------------------------------------------------------

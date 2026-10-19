@@ -106,7 +106,7 @@ protected:
     // Reads `len` bytes starting at `reg` into `buf` -- writes the
     // register address first (repeated-start, no stop condition) then
     // reads the response, matching this project's own touch.cpp i2c_read()
-    // helpers exactly (see FT5316/GSLX680's own read functions).
+    // helpers exactly (see the FT5316 read function).
     bool readReg(std::uint8_t reg, std::uint8_t* buf, std::size_t len) {
         if (i2c_write_blocking(bus_, address_, &reg, 1, true) != 1) return false;
         return i2c_read_blocking(bus_, address_, buf, static_cast<uint>(len), false)

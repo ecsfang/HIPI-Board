@@ -42,7 +42,6 @@ struct Layout {
     // I2C list columns
     int cAddr, cDot, cName, cWhat, cState, cDetail, cFile;
 };
-#ifdef DISPLAY_7INCH
 constexpr Layout L {
     { 16, 46, 484, 204 }, { 516, 46, 492, 204 }, { 16, 278, 992, 294 },
     36,
@@ -51,16 +50,6 @@ constexpr Layout L {
     132, 680, 728, 780, 814,
     296, 346, 26, 7, 534,
     36, 84, 100, 248, 440, 528, 792 };
-#else
-constexpr Layout L {
-    { 10, 40, 382, 172 }, { 402, 40, 388, 172 }, { 10, 230, 780, 240 },
-    32,
-    56, 98, 142, 36, 50, 58,
-    56, 94, 22, 486, 48, 122, 22, 9, 148, 32, 54, 60, 188,
-    112, 538, 588, 632, 664,
-    244, 286, 22, 7, 444,
-    24, 70, 84, 204, 364, 436, 664 };
-#endif
 constexpr int kTitleH = 26;
 constexpr int kCloseW = 64;              // the close button (title bar, right)
 constexpr int kMaxPixels = 16;           // shown and run on this page
@@ -163,11 +152,7 @@ bool visible() {
 // A small change may be drawn now (not while the menu draws elsewhere / covers it)
 bool canDrawPart() {
     if (!visible() || gridShown_) return false;
-#ifdef DISPLAY_7INCH
     if (d_->canvasAddr() != 0) return false;
-#else
-    if (boardui_isMenuOpen()) return false;
-#endif
     return true;
 }
 
@@ -524,7 +509,6 @@ void hwtest_leave() {
 void hwtest_drawAll() {
     if (d_ == nullptr || !active_) return;
     dirty_ = false;
-#ifdef DISPLAY_7INCH
     // As the loop map: drawn off-screen, then copied to the panel in one go
     const std::uint32_t prevAddr = d_->canvasAddr();
     const std::uint16_t prevStride = d_->canvasStride();
@@ -533,9 +517,6 @@ void hwtest_drawAll() {
     if (prevAddr == 0) d_->endOverlayDraw();
     else               d_->beginLayerDraw(prevAddr, prevStride);
     d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
-#else
-    renderFull();
-#endif
 }
 
 void hwtest_showScan() {
@@ -574,11 +555,7 @@ void hwtest_poll() {
         if (listSignature() != before) part([] { drawI2cHeader(); drawList(); });
     }
     if (dirty_ && visible() && !gridShown_) {
-#ifdef DISPLAY_7INCH
         if (d_->canvasAddr() == 0) hwtest_drawAll();
-#else
-        if (!boardui_isMenuOpen()) hwtest_drawAll();
-#endif
     }
 }
 

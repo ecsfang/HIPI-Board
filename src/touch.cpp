@@ -13,11 +13,7 @@
 #include <utility>
 
 #include "usb_serial.h"
-// DISPLAY_5INCH / DISPLAY_7INCH come from CMakeLists.txt's own
-// target_compile_definitions() on the whole target (same as every other
-// file in this project) -- no need to pull in display_config.h here just
-// for these two macros; this file never touches the DisplayDriver type
-// that header also defines.
+// No display_config.h here: this file never touches the DisplayDriver type.
 
 // Same global trace flag used throughout the project (Config > Trace
 // menu) -- gates the touch-event logging below.
@@ -26,13 +22,10 @@ extern bool bTrace;
 
 
 // -----------------------------------------------------------------------
-// Shared between both touch controllers: pin assignments, the raw touch
-// event format, and the IRQ plumbing that feeds touch_poll()'s debounce
-// logic further down. The two panels use different controller chips
-// (GSL1680 on the 5" board, FT5316 on the 7") but the SAME physical I2C/
-// IRQ pins on this board design, and touch_poll()'s tap/release/swipe
-// state machine only ever calls touch_get_point()/touch_is_down() --
-// it doesn't know or care which chip answers those.
+// Pin assignments, the raw touch event format, and the IRQ plumbing that
+// feeds touch_poll()'s debounce logic further down. touch_poll()'s
+// tap/release/swipe state machine only ever calls touch_get_point()/
+// touch_is_down() -- it doesn't know which chip answers those.
 // -----------------------------------------------------------------------
 // TOUCH_SDA/TOUCH_SCL now defined in touch.h (exported alongside
 // touch_i2c for i2c_device.h's own shared-bus users).
@@ -76,7 +69,6 @@ void setupDataReadyInterrupt() {
         &gpio_irq_handler);
 }
 
-#if defined(DISPLAY_7INCH)
 // =========================================================================
 // FT5316 -- 7" panel (ER-TPC070-6)
 //
@@ -85,8 +77,8 @@ void setupDataReadyInterrupt() {
 // with separate 7" touch panel ER-TPC070-6 with FT5316 controller"):
 // https://github.com/hellange/arduino/blob/master/capacitive_7in_panel/FT5xx6.h
 //
-// Much simpler bring-up than GSL1680 -- no firmware upload needed at
-// all, just a power-on wait and the interrupt pin setup shared above.
+// No firmware upload needed at all, just a power-on wait and the
+// interrupt pin setup above.
 // =========================================================================
 
 char gTouchDevice[] = "FT5316";
@@ -113,7 +105,7 @@ int touchInit() {
     gpio_set_function(TOUCH_SDA, GPIO_FUNC_I2C);
     gpio_set_function(TOUCH_SCL, GPIO_FUNC_I2C);
 
-    // FT5316 needs no firmware upload (unlike GSL1680) -- it's fully
+    // FT5316 needs no firmware upload -- it's fully
     // functional right after its own power-on reset settles.
     sleep_ms(50);
 
@@ -159,9 +151,8 @@ static uint8_t touch_read_silent() {
 //
 // NOTE: FT5316-family controllers are typically factory-calibrated to
 // report coordinates already in the panel's own pixel space (0..1023,
-// 0..599 for this 1024x600 ER-TPC070-6 panel) -- unlike GSL1680's raw
-// 12-bit ADC values, which need scaling (see the DISPLAY_5INCH branch
-// below). No scaling applied here for that reason. If X/Y come out
+// 0..599 for this 1024x600 ER-TPC070-6 panel). No scaling applied here
+// for that reason. If X/Y come out
 // swapped or inverted on real hardware -- a common panel-mounting-
 // orientation gotcha, not something datasheets typically specify -- swap
 // or negate right here rather than touching touch_poll()'s generic
@@ -182,9 +173,7 @@ bool touch_get_point(uint16_t& x, uint16_t& y) {
     //
     // Local constants rather than LT7683.hpp's SCREEN_MAX_X/Y -- this
     // file deliberately doesn't pull in display_config.h (see the note
-    // where usb_serial.h is included above), and this panel's resolution
-    // is already effectively hardcoded throughout this branch anyway
-    // (same as GSL1680's own TOUCH_RAW_MAX_X/Y below).
+    // where usb_serial.h is included above).
     constexpr uint16_t kPanelMaxX = 1024;
     constexpr uint16_t kPanelMaxY = 600;
     x = static_cast<uint16_t>((kPanelMaxX - 1) - ts_event.fingers[0].x);
@@ -196,270 +185,9 @@ bool touch_is_down() {
     return touch_read_silent() > 0;
 }
 
-#else  // DISPLAY_5INCH
-// =========================================================================
-// GSL1680 -- 5" panel
-// Description: https://www.buydisplay.com/download/ic/GSL1680.pdf
-// https://weatherhelge.wordpress.com/2015/02/09/5-capacitive-touch-panel-with-gsl1680-upn-running-with-arduino/
-// https://linux-sunxi.org/GSL1680
-// https://github.com/hellange/GSL1680
-// =========================================================================
-#include "gslX680fw.h"
-
-char gTouchDevice[] = "GSL1680";
-
-#define WAKE_PIN    18
-
-#define GSLX680_I2C_ADDR    0x40
-
-//#define DEBUG
-
-#define GSL_DATA_REG		0x80
-#define GSL_STATUS_REG		0xe0
-#define GSL_PAGE_REG		0xf0
-
-#define I2CBUF_SIZE         0x20
-#define I2CBUF_MASK         ~(I2CBUF_SIZE-1)
-
-int i2c_write(uint8_t val, uint8_t *buf=NULL, uint8_t len=0)
-{
-    uint8_t wBuf[I2CBUF_SIZE+1];
-    wBuf[0] = val;
-    if( buf )
-        memcpy(&wBuf[1], buf, len);
-    return i2c_write_blocking(touch_i2c, GSLX680_I2C_ADDR, wBuf, len+1, false);
-}
-
-// Read byte(s) from specified register. If nbytes > 1, read from consecutive
-// registers.
-int i2c_read(const uint8_t reg, uint8_t *buf, const uint8_t nbytes)
-{
-    // Check to make sure caller is asking for 1 or more bytes
-    if (nbytes < 1) {
-        return 0;
-    }
-
-    // Read data from register(s) over I2C
-    i2c_write_blocking(touch_i2c, GSLX680_I2C_ADDR, &reg, 1, true);
-    return i2c_read_blocking(touch_i2c, GSLX680_I2C_ADDR, buf, nbytes, false);
-}
-
-typedef struct {
-    uint8_t reg;
-    uint8_t data[4];
-    uint8_t len;
-    uint8_t delay;
-} TouchCmd_t;
-
-TouchCmd_t cmdClr[4] = {
-    {
-        GSL_STATUS_REG,
-        { 0x88, 0, 0, 0 },
-        1,
-        20
-    },
-    {
-        GSL_DATA_REG,
-        { 0x01, 0, 0, 0 },
-        1,
-        5
-    },
-    {
-        0xe4,
-        { 0x04, 0, 0, 0 },
-        1,
-        5
-    },
-    {
-        GSL_STATUS_REG,
-        { 0x00, 0, 0, 0 },
-        1,
-        20
-    }
-};
-
-TouchCmd_t cmdStrt[1] = {
-    {
-        GSL_STATUS_REG,
-        { 0x00, 0, 0, 0 },
-        1,
-        0
-    }
-};
-
-TouchCmd_t cmdRst[3] = {
-    {
-        GSL_STATUS_REG,
-        { 0x88, 0, 0, 0 },
-        1,
-        20
-    },
-    {
-        0xe4,
-        { 0x04, 0, 0, 0 },
-        1,
-        10
-    },
-    {
-        0xbc,
-        { 0, 0, 0, 0 },
-        4,
-        10
-    }
-};
-
-void sendCmd(TouchCmd_t *pCmd, int nCmd)
-{
-    for( int i=0; i<nCmd; i++ ) {
-    	i2c_write(pCmd->reg, pCmd->data, pCmd->len);
-        if( pCmd->delay )
-	        sleep_ms(pCmd->delay);
-        pCmd++;
-    }
-}
-
-void clr_reg(void)
-{
-    sendCmd(cmdClr, sizeof(cmdClr)/sizeof(TouchCmd_t));
-}
-
-void start_chip(void)
-{
-    sendCmd(cmdStrt, sizeof(cmdStrt)/sizeof(TouchCmd_t));
-}
-
-void reset_chip()
-{
-    sendCmd(cmdRst, sizeof(cmdRst)/sizeof(TouchCmd_t));
-}
-
-void load_fw(void)
-{
-	uint8_t buf[32];
-	size_t source_len = (sizeof(GSLX680_FW)/sizeof(struct fw_data));
-
-    for(size_t i=0; i<source_len; i++) {
-        if( GSLX680_FW[i].offset == PAGE_REG ) {
-            memcpy(&buf[0], &GSLX680_FW[i].val, 4);
-			i2c_write(GSL_PAGE_REG, buf, 4);    // Select the block
-        } else {
-            int reg = GSLX680_FW[i].offset;     // Register to write to
-            int off = reg & (I2CBUF_SIZE-1);    // 32-byte offset
-            memcpy(&buf[off], &GSLX680_FW[i].val, 4);
-            // Write when buffer is full
-            if( (off+4) == I2CBUF_SIZE ) {
-		        i2c_write(reg & I2CBUF_MASK, buf, I2CBUF_SIZE);
-            }
-        }
-    }
-}
-
-uint8_t touch_read()
-{
-    uint8_t TOUCHRECDATA[24] = {0};
-
-    i2c_read(GSL_DATA_REG, TOUCHRECDATA, 24);
-
-    ts_event.NBfingers = TOUCHRECDATA[0];
-    for(int i = 0; i<ts_event.NBfingers; i++) {
-        ts_event.fingers[i].x = ( (((uint32_t)TOUCHRECDATA[(i*4)+5])<<8) | (uint32_t)TOUCHRECDATA[(i*4)+4] ) & 0x00000FFF; // 12 bits of X coord
-        ts_event.fingers[i].y = ( (((uint32_t)TOUCHRECDATA[(i*4)+7])<<8) | (uint32_t)TOUCHRECDATA[(i*4)+6] ) & 0x00000FFF;
-        ts_event.fingers[i].fingerID = (uint32_t)TOUCHRECDATA[(i*4)+7] >> 4; // finger that did the touch
-    }
-
-    if( ts_event.NBfingers ) {
-        LOGF("Finger event: ");
-        for(int i = 0; i<ts_event.NBfingers; i++) {
-        LOGF("%d(%d): [%d,%d] ",
-            i,
-            ts_event.fingers[i].fingerID,
-            ts_event.fingers[i].x,
-            ts_event.fingers[i].y);
-        }
-        LOGF("\r\n");
-    }
-    return ts_event.NBfingers;
-}
-
-int touchInit() {
-
-    i2c_init(touch_i2c, 400 * 1000);
-    gpio_set_function(TOUCH_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(TOUCH_SCL, GPIO_FUNC_I2C);
-    gpio_init(WAKE_PIN);
-    gpio_set_dir(WAKE_PIN, GPIO_OUT);
-    gpio_pull_up(WAKE_PIN);
-    gpio_init(IRQ_PIN);
-    gpio_set_dir(IRQ_PIN, GPIO_IN);
-    gpio_pull_up(IRQ_PIN);
-
-    // Toggle wake to wake up the controller
-    gpio_put(WAKE_PIN, 1);
-    sleep_ms(50);
-    gpio_put(WAKE_PIN, 0);
-    sleep_ms(50);
-    gpio_put(WAKE_PIN, 1);
-    sleep_ms(30);
-
-    clr_reg();
-    sleep_ms(50);
-
-    reset_chip();
-    sleep_ms(10);
-
-    load_fw();
-    sleep_ms(50);
-
-    reset_chip();
-    sleep_ms(10);
-
-    start_chip();
-
-    setupDataReadyInterrupt();
-
-    return 0;
-}
-
-// Silent variant of the readout - no printf, used for internal
-// state tracking (called often, must not spam the console).
-static uint8_t touch_read_silent() {
-    uint8_t TOUCHRECDATA[24] = {0};
-    i2c_read(GSL_DATA_REG, TOUCHRECDATA, 24);
-
-    ts_event.NBfingers = TOUCHRECDATA[0];
-    for (int i = 0; i < ts_event.NBfingers; i++) {
-        ts_event.fingers[i].x = ((static_cast<uint32_t>(TOUCHRECDATA[(i*4)+5]) << 8) |
-                                  static_cast<uint32_t>(TOUCHRECDATA[(i*4)+4])) & 0x0FFF;
-        ts_event.fingers[i].y = ((static_cast<uint32_t>(TOUCHRECDATA[(i*4)+7]) << 8) |
-                                  static_cast<uint32_t>(TOUCHRECDATA[(i*4)+6])) & 0x0FFF;
-        ts_event.fingers[i].fingerID = static_cast<uint32_t>(TOUCHRECDATA[(i*4)+7]) >> 4;
-    }
-    return ts_event.NBfingers;
-}
-
-// Full-scale raw coordinates from the GSL1680 (12-bit ADC).
-// NOTE: calibrate these against your actual panel - see comment below.
-constexpr uint32_t TOUCH_RAW_MAX_X = 800;
-constexpr uint32_t TOUCH_RAW_MAX_Y = 480;
-
-// Gets the first finger's position, scaled to the screen's pixel resolution
-// (800x480). Returns false if no finger is down.
-bool touch_get_point(uint16_t& x, uint16_t& y) {
-    if (touch_read_silent() == 0) return false;
-    x = static_cast<uint16_t>((ts_event.fingers[0].x * 800) / TOUCH_RAW_MAX_X);
-    y = static_cast<uint16_t>((ts_event.fingers[0].y * 480) / TOUCH_RAW_MAX_Y);
-    return true;
-}
-
-// Lightweight check (no scaling/parsing beyond NBfingers) - for release polling.
-bool touch_is_down() {
-    return touch_read_silent() > 0;
-}
-
-#endif  // DISPLAY_5INCH / DISPLAY_7INCH
 
 // -----------------------------------------------------------------------
-// Debounced tap detection -- shared between both controllers. Only ever
+// Debounced tap detection. Only ever
 // calls touch_get_point()/touch_is_down() (via touch_read_silent() inside
 // those, chip-specific above), so nothing here needs to know which chip
 // is actually answering.

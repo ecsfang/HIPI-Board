@@ -59,7 +59,7 @@ hipi::mirror::Encoder encoder(sink);
 
 // Feeds every SPI cycle to the emulated chip (answering reads like it)
 // and to the mirror encoder, exactly like MirrorTransport does on HIPI
-class LoopTransport : public hipi::RA8875Transport {
+class LoopTransport : public hipi::DisplayTransport {
 public:
     void csLow() override { first_ = true; encoder.onCsLow(); }
     void csHigh() override { encoder.onCsHigh(); }

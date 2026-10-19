@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 //
-// Linux spidev transport for the RA8875 LCD driver.
+// Linux spidev transport for the LT7683 LCD driver.
 //
 // Wire up /dev/spidevX.Y, the CS GPIO, and the RST GPIO and pass this
-// transport to RA8875().
+// transport to LT7683().
 
 #pragma once
 
-#include "RA8875Transport.hpp"
+#include "DisplayTransport.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -15,7 +15,7 @@
 
 namespace hipi {
 
-class LinuxSpiDevTransport : public RA8875Transport {
+class LinuxSpiDevTransport : public DisplayTransport {
 public:
     // Construct over an already-opened spidev file descriptor.
     //   spidev_fd      — open fd returned by ::open("/dev/spidevX.Y", O_RDWR)

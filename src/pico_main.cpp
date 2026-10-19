@@ -175,7 +175,7 @@ void initDisplay()
                                               /*baudrate=*/30'000'000,
                                               /*cs_gpio=*/1,
                                               /*rst_gpio=*/hipi::PicoSpiTransport::NO_RESET_PIN);
-#if defined(DISPLAY_7INCH) && HIPI_MIRROR_TRANSPORT
+#if HIPI_MIRROR_TRANSPORT
     // Everything sent to the display also goes to the display mirror port
     // while a PC viewer has it open (display_mirror.h)
     static hipi::MirrorTransport mirror(*transport);
@@ -206,7 +206,6 @@ FRESULT initSD()
     return fr;
 }
 
-#ifdef DISPLAY_7INCH
 // Start-up screen rows: SD card and settings (right after mounting)
 static void bootRowsSdAndSettings(FRESULT fr) {
     char buf[40];
@@ -274,7 +273,6 @@ static void bootRowsDevices() {
                          config.extTrace() ? "extended" : (config.trace() ? "on" : "off"));
     hipi::bootscreen_devices(devices);
 }
-#endif
 
 int main() {
     board_init(); 
@@ -310,14 +308,10 @@ int main() {
     // Splash screen -- shown as early as possible, stays up for a couple
     // of seconds while the rest of the boot sequence (buttons, SD-card
     // driven config, HP-IL devices) continues below.
-#ifdef DISPLAY_7INCH
     // Start-up screen (bootscreen.h): its STATUS rows are filled in below
     // as start-up gets to each step
     hipi::bootscreen_begin(display, HIPI_VERSION);
     bootRowsSdAndSettings(fr);
-#else
-    hipi::showSplashScreen(display, HIPI_VERSION, 2000);
-#endif
 
     // (USB is connected late, see tud_connect() before the wait loop)
 
@@ -387,9 +381,7 @@ int main() {
     // caught this -- it ran too late, after the info text (and several
     // seconds of HPIL/device init) had already gone by, not before.
     LOGF("\r\n * Init touch sensor ...");
-    // touch.cpp now has a real FT5316 backend for DISPLAY_7INCH (see its
-    // own file header) -- was GSL1680-only before, which would have been
-    // talking the wrong protocol to this board's actual touch chip.
+    // FT5316 touch controller, see touch.cpp.
     touchInit();
     // touchInit() just did the real i2c_init()/gpio_set_function() work
     // for this board's one physical I2C bus (see touch.h's own
@@ -421,33 +413,6 @@ int main() {
 
     screen->pr_char(27);
     screen->pr_char('<'); // Cursor off
-#ifndef DISPLAY_7INCH
-    // 5": the classic text summary (the 7" panel has the start-up screen)
-    screen->pr_str("# HIPI - HP-IL Pico Interface #");
-
-    // (USB connects at the end of start-up -- its state is on the status LED)
-    {
-        char buf[64];
-        for (CDevice* dev : devices) {       // each cassette drive's file
-            if (dev->type() != DRIVE) continue;
-            const std::string& f = static_cast<CDrive*>(dev)->mediaFile();
-            snprintf(buf, sizeof(buf), " * %s: %.32s", dev->name(), f.empty() ? "No media" : f.c_str());
-            screen->pr_str(buf);
-        }
-        int z = sprintf(buf, " * Trace: " );
-        switch( (config.trace() ? 0b10 : 0b00) | (config.extTrace() ? 0b01 : 0b00) ) {
-        case 0b00: sprintf(buf+z, "OFF" ); break;
-        case 0b10: sprintf(buf+z, "ON" ); break;
-        case 0b11: sprintf(buf+z, "Extended" ); break;
-        }
-        screen->pr_str(buf);
-        sprintf(buf, " * Font: %d", config.fontSize() );
-        screen->pr_str(buf);
-        sprintf(buf, " * Columns: %d", config.columns() );
-        screen->pr_str(buf);
-        screen->pr_str("--------------------------------------");
-    }
-#endif
 
     // 10s, not 5 -- gives enough time to actually read the device
     // self-check list (see hipi_test()) that ends up on screen just
@@ -508,7 +473,6 @@ int main() {
         return hipi_loopbackTest(hpil, onProgress);
     });
 
-#ifdef DISPLAY_7INCH
     hipi::bootscreen_row("HP-IL", hipi::BootState::Ok, "loop ready");
 #if HIPI_DEV_SCREENDUMPS
     // Development aid (see screendump.h): the start-up screen halfway
@@ -518,7 +482,6 @@ int main() {
         const bool ok = hipi::screendump_save(display, msg, /*withOverlays=*/true);
         LOGF("\r\n * DEV screendump (start-up screen): %s%s", ok ? "saved " : "FAILED -- ", msg.c_str());
     }
-#endif
 #endif
 
     // TFDISPLAY's HP 92198 screen (its model setting; the device is made
@@ -535,9 +498,7 @@ int main() {
     // plotter all exist (plotter is set inside hipi_init() above). On the
     // 7" panel this also loads the Tape and Printer pictures -- slow, so
     // the start-up screen says so first.
-#ifdef DISPLAY_7INCH
     bitmapsRow = hipi::bootscreen_row("Bitmaps", hipi::BootState::Info, "Loading ...");
-#endif
     hipi::plotterview_init(display, screen, plotter);
     // The media map shows the drive of the Tape view (plotterview_drive())
     hipi::mediamap_setSource(
@@ -594,9 +555,7 @@ int main() {
     video80Term->setExtCommandCallback(extCommand, "V");
     hipi::plotterview_setVideo80(video80Term);
 
-#ifdef DISPLAY_7INCH
     bootRowsDevices();
-#endif
     LOGF("\r\n\t* HP-IL initialized");
     {
         LOGF("\r\n\t* Device self-check");
@@ -623,16 +582,13 @@ int main() {
             if (tud_mounted()) { usb_connected = true; break; }
         }
     }
-#ifdef DISPLAY_7INCH
     hipi::bootscreen_row("USB", usb_connected ? hipi::BootState::Ok : hipi::BootState::Off,
                          usb_connected ? "connected" : "not connected");
     // PILBox: the PC's program usually connects during the countdown, so
     // this row is kept up to date in the wait loop below
     std::string pilboxShown = pilboxStatus();
     const int pilboxRow = hipi::bootscreen_row("PILBox", pilboxState(), pilboxShown.c_str());
-#endif
 
-#ifdef DISPLAY_7INCH
     // The start-up screen stays for kBootScreenMs (a touch skips it), with
     // a countdown bar
     constexpr std::uint32_t kBootScreenMs = 20000;
@@ -641,7 +597,6 @@ int main() {
 #if HIPI_DEV_SCREENDUMPS
     bool devReadyDumped = false;
 #endif
-#endif
     // HP-IL (and with it PILBox, for the PC) runs already while the
     // start-up screen is shown -- the loop must not be dead for that time
     absolute_time_t nextTouchCheck = nil_time;
@@ -649,7 +604,6 @@ int main() {
         hipi_bootService();
         usb_serial_flush_boot_log();
         const bool hadFrame = hipi_loop(hpil);
-#ifdef DISPLAY_7INCH
         {
             const std::string now = pilboxStatus();
             if (now != pilboxShown) {
@@ -673,7 +627,6 @@ int main() {
             infoTimeout = make_timeout_time_ms(kBootScreenMs / 2);
         }
 #endif
-#endif
         // A raw touch check (not the full touch_poll()/tap-callback
         // flow) -- lets someone skip the wait early without also
         // processing this same touch as a real tap, which would show
@@ -686,9 +639,7 @@ int main() {
         if (!hadFrame) sleep_us(200);
     }
 
-#ifdef DISPLAY_7INCH
     hipi::bootscreen_end();
-#endif
     screen->clear();
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());

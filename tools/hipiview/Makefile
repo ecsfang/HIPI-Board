@@ -45,7 +45,7 @@ hipiview.exe: $(SOURCES) $(HEADERS) $(VERSION_H)
 # emulated chip, and checks that the mirror stream reproduces the screen
 host_test: test/host_test.cpp lt7683_emu.cpp lt7683_emu.hpp ../../src/LT7683.cpp ../../src/Screen.cpp \
            ../../include/mirror_encoder.hpp ../../include/mirror_session.hpp
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -I../../include test/host_test.cpp lt7683_emu.cpp \
+	$(CXX) $(CXXFLAGS) -I../../include test/host_test.cpp lt7683_emu.cpp \
 	    ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz
 
 # The Printer view as HIPI draws it (real plotterview.cpp, printer.cpp,
@@ -57,59 +57,59 @@ PV_SRC := test/printer_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../s
           ../../src/hwtest.cpp test/hwio_stub.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp \
           ../../src/printout.cpp ../../src/hpil_signals.cpp ../../src/hpil.cpp
 printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/plotterview.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(PV_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(PV_SRC) -o $@ -lz
 
 # TFDISPLAY as an HP 92198 / MC00701A: the real Video80 screen and the
 # display device against the emulated chip -- saves video80_*.png to look at
 V80_SRC := test/video80_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
            ../../src/video80.cpp ../../src/display.cpp ../../src/device.cpp
 video80_view_test: $(V80_SRC) ../../include/video80.h ../../include/display.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -I../../include $(V80_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -I../../include $(V80_SRC) -o $@ -lz
 
 # The Hardware test page as HIPI draws it (a stand-in for the LEDs,
 # pixels and I2C bus) -- saves hwtest_*.png
 HW_SRC := test/hwtest_view_test.cpp $(filter-out test/printer_view_test.cpp,$(PV_SRC))
 hwtest_view_test: $(HW_SRC) test/hwio_stub.h ../../include/hwtest.h ../../include/hwtest_io.h ../../include/i2c_ident.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(HW_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(HW_SRC) -o $@ -lz
 
 # What the demo shows (demo_content.cpp) -- saves demo_*.png
 DEMO_SRC := test/demo_view_test.cpp ../../src/demo_content.cpp ../../src/logo_image.cpp \
             $(filter-out test/printer_view_test.cpp,$(PV_SRC))
 demo_view_test: $(DEMO_SRC) ../../include/demo_content.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(DEMO_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(DEMO_SRC) -o $@ -lz
 
 # The demo itself, a whole round in fake time -- saves demo_run_*.png
 RUN_SRC := test/demo_run_test.cpp ../../src/demo.cpp ../../src/display.cpp \
            $(filter-out test/demo_view_test.cpp,$(DEMO_SRC))
 demo_run_test: $(RUN_SRC) ../../include/demo.h ../../include/demo_content.h $(wildcard test/pvstubs/*.h test/demostubs/*.hpp)
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(RUN_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(RUN_SRC) -o $@ -lz
 
 # File picker -> Create media...: the dialogs and the LIF image writer
 # (a folder as the SD card) -- saves media_*.png
 MEDIA_SRC := test/media_create_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/media_create_ui.cpp \
              ../../src/lif_create.cpp ../../src/glyph_font.cpp ../../src/menu_font_title.cpp
 media_create_test: $(MEDIA_SRC) ../../include/media_create_ui.h ../../include/lif_create.h ../../include/menu_frame.h test/pvstubs/ff.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(MEDIA_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(MEDIA_SRC) -o $@ -lz
 
 # The Media map view, on LIF images made by the test -- saves mediamap_*.png
 MAP_SRC := test/mediamap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp
 mediamap_test: $(MAP_SRC) ../../include/mediamap.h ../../include/lif_create.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(MAP_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(MAP_SRC) -o $@ -lz
 
 # The HP-IL DEVICES list (devicelist.cpp) -- saves devicelist_*.png
 DL_SRC := test/devicelist_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/devicelist.cpp ../../src/glyph_font.cpp ../../src/menu_font_title.cpp
 devicelist_test: $(DL_SRC) ../../include/devicelist.h ../../include/device_info.h ../../include/menu_frame.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -Itest -I../../include $(DL_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(DL_SRC) -o $@ -lz
 
 # The HP-GL parser (plotter.cpp), no display
 PLOT_SRC := test/plotter_test.cpp ../../src/plotter.cpp ../../src/device.cpp ../../src/hpil.cpp
 plotter_test: $(PLOT_SRC) ../../include/plotter.h
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/pvstubs -I../../include $(PLOT_SRC) -o $@
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -I../../include $(PLOT_SRC) -o $@
 
 # The loop map, fed made-up HP-41 traffic -- saves loopmap_*.png
 LM_SRC := test/loopmap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/loopmap.cpp ../../src/device.cpp ../../src/hpil.cpp
 loopmap_test: $(LM_SRC) ../../include/loopmap.h $(wildcard test/lmstubs/*.h)
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/lmstubs -Itest/pvstubs -I../../include $(LM_SRC) -o $@ -lz
+	$(CXX) $(CXXFLAGS) -Itest/lmstubs -Itest/pvstubs -I../../include $(LM_SRC) -o $@ -lz
 
 # The real-time clock chips (rtc.cpp, rtc_probe.cpp, the chip list's
 # entries) against made-up chips: DS3231, DS1307, PCF85063A, PCF8563
@@ -146,5 +146,5 @@ clean:
 #   ./link_sim [loss-probability] [seconds]
 link_sim: test/link_sim.cpp hipiview lt7683_emu.cpp deframer.hpp ../../src/display_mirror.cpp \
           ../../include/mirror_encoder.hpp ../../include/mirror_session.hpp
-	$(CXX) $(CXXFLAGS) -DDISPLAY_7INCH -Itest/stubs -I../../include test/link_sim.cpp lt7683_emu.cpp \
+	$(CXX) $(CXXFLAGS) -Itest/stubs -I../../include test/link_sim.cpp lt7683_emu.cpp \
 	    ../../src/display_mirror.cpp ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz -lutil

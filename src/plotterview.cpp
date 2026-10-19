@@ -112,7 +112,7 @@ bool plotFit_ = true;                     // Display -> Plot view (config plot_f
 
 std::int16_t mapX(std::int16_t px) {
     // round(), not a truncating cast -- at our scale (the whole 10000x7200
-    // unit P1-P2 page squeezed into 800x480 pixels, ~15 units/pixel), thin
+    // unit P1-P2 page squeezed into about 1024x600 pixels, ~12 units/pixel), thin
     // details like a minus sign or a comma's tail are only 1-2 pixels to
     // begin with, so truncation's systematic downward bias makes it easy
     // to lose them entirely.
@@ -167,7 +167,7 @@ std::uint16_t penColor(std::uint8_t pen) {
 // at our scale -- roughly 15 plotter units per pixel -- for the tightly
 // curved parts of glyphs like the round strokes in "6", "8", "2"), a
 // straight line() call can draw nothing at all: many line-drawing engines
-// (including the RA8875's own hardware one) treat identical start/end
+// (including the LT7683's own hardware one) treat identical start/end
 // points as "zero pixels to step through" rather than drawing a single
 // dot. Since the *plotter-space* segment is real and non-degenerate, it
 // must still show up as something -- so fall back to a single pixel
@@ -190,16 +190,13 @@ void drawMappedSegment(std::int16_t x0, std::int16_t y0,
 // narrowed to the area left of it, which would clip the plot there: fills
 // and lines under the strip were left out, and showed once the strip went
 // away (e.g. still the old paper colour after a Paper change). So widen it
-// before drawing. (5": the strip really covers that area; hiding it
-// redraws the region -- plotterview_redrawRegion().)
+// before drawing.
 void plotWindow() {
     if (plotAreaW_ < SCREEN_MAX_X) {          // digitizing: not over the panel
         display_->setActiveWindow(0, 0, static_cast<std::uint16_t>(plotAreaW_ - 1), SCREEN_MAX_Y - 1);
         return;
     }
-#ifdef DISPLAY_7INCH
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
-#endif
 }
 
 void drawDigitizeMarker();                  // (Digitizing, below)
@@ -217,43 +214,11 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
     if (plotFit_ && (fitX1_ < fitX0_ ||
                      std::min(x0, x1) < fitX0_ || std::max(x0, x1) > fitX1_ ||
                      std::min(y0, y1) < fitY0_ || std::max(y0, y1) > fitY1_)) {
-#ifndef DISPLAY_7INCH
-        if (!boardui_isMenuOpen())                // (5": the menu owns the screen while open)
-#endif
         {
             plotterview_redraw();                 // (refits to all segments, this one included)
             return;
         }
     }
-#ifndef DISPLAY_7INCH
-    // FIXED: was checking screen_->isSuspended() here -- but
-    // switchView() itself calls screen_->suspend() the moment
-    // Plotter output is selected (deliberately, so Screen's own text
-    // rendering doesn't draw over the plot -- see its own comment), so
-    // that flag is ALWAYS true throughout completely normal Plotter
-    // operation, not just while a menu happens to be open. Checking it
-    // here meant this function returned immediately on every single
-    // call once Plotter mode was active -- no plot data ever actually
-    // reached the screen, confirmed as exactly the "tried plotting
-    // something, but it doesn't work" symptom.
-    //
-    // On the 5" panel (no PIP hardware -- see LT7683::beginOverlayDraw()'s
-    // own comment for what that means), the menu genuinely takes over the
-    // one and only framebuffer while open (Screen's suspend() here is a
-    // real, literal pause), so a plot draw landing on top of it WOULD
-    // corrupt both -- boardui_isMenuOpen() still guards that case here.
-    // On the 7" panel, drawing calls made from HP-IL processing (i.e.
-    // from here, never from inside the menu's own beginOverlayDraw()/
-    // endOverlayDraw() bracket) always target canvas address 0 -- the
-    // live main window -- regardless of whether the menu is open, since
-    // only the menu's own drawing code ever redirects the canvas
-    // elsewhere. The menu shows as a PIP overlay on a separate SDRAM
-    // layer instead of actually occupying the main window, so there's
-    // nothing to guard against here at all: the plot keeps drawing
-    // live, right through/around the menu, exactly like Screen's own
-    // text does elsewhere (see uidialog.hpp's PIP work).
-    if (boardui_isMenuOpen()) return;
-#endif
     plotWindow();
     drawMappedSegment(x0, y0, x1, y1, penColor(pen));
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizeMarker();   // (kept on top)
@@ -268,9 +233,6 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
 // Device). Only touches the screen if Plotter output is actually showing.
 void onPlotterClear() {
     if (output_ != DisplayOutput::Plotter) return;
-#ifndef DISPLAY_7INCH
-    if (boardui_isMenuOpen()) return;  // see onPlotterDraw()'s own comment
-#endif
     plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizePanel();
@@ -291,8 +253,6 @@ void onPlotterClear() {
 // switched off. Touch input is
 // ignored while the splash is up (boardui_handleTap()), so nothing else
 // can claim the PIP overlay in the meantime.
-// 5" panel (no PIP): the splash is drawn directly on the panel, and the
-// new view is drawn only once the timer expires, as before.
 bool splashVisible_ = false;
 absolute_time_t splashHideDeadline_;
 constexpr std::uint32_t kSplashMs = 1500;
@@ -320,16 +280,12 @@ const char* outputName(DisplayOutput mode) {
 // scale, shown for `ms` -- plotterview_poll() removes it.
 void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms) {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
-#ifdef DISPLAY_7INCH
     // The box takes PIP-1 (and hides it afterwards): an open info box or
     // device list there would be left "open" but unseen, eating every touch
     boardui_closePipBoxes();
     display_->beginOverlayDraw();        // draw into the PIP layer
-#else
-    display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, 0x0000);
-#endif
 
-    // RA8875/LT7683 hardware font: 8px base glyph width, scaling to
+    // LT7683 hardware font: 8px base glyph width, scaling to
     // 8*(size+1) per the project's own established convention (see
     // MenuFrame's "16px/char at scale 1" comment, i.e. 8*(1+1)).
     const int charW = 8 * (scale + 1);
@@ -357,11 +313,9 @@ void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms) {
     display_->txtSetCursor(splashX + (splashW - textW) / 2, splashY + (splashH - charH) / 2);
     display_->txtWrite(text);
 
-#ifdef DISPLAY_7INCH
     display_->endOverlayDraw();          // canvas back to the live panel
     screen_->reassertRenderState();      // undo the splash's text size/colour
     display_->showPipOverlay(splashX, splashY, splashW, splashH);
-#endif
     splashVisible_ = true;
     splashHideDeadline_ = make_timeout_time_ms(ms);
 }
@@ -389,12 +343,10 @@ bool deviceHasView(CDevice* dev) {
 // (LT7683::kTapeLayerAddr), centered and surrounded by black. Showing the
 // view, or restoring a part of it (e.g. after the button strip hides), is
 // then a single in-chip BTE copy -- no SD card or SPI pixel traffic.
-// The RA8875 (5") has no spare layer at 16bpp, so the view isn't offered
-// there at all (tapeLoaded_ stays false).
 constexpr const char* kTapeBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "hp82161a.bmp");
 bool tapeLoaded_ = false;
 std::int16_t tapeX_ = 0, tapeY_ = 0;     // image's top-left on screen
-[[maybe_unused]] std::uint16_t tapeW_ = 0, tapeH_ = 0;    // image size (unused on 5")
+std::uint16_t tapeW_ = 0, tapeH_ = 0;    // image size
 
 // Touch-sensitive areas, in hp82161a.bmp's OWN pixel coordinates (0,0 = the
 // image's top-left corner), so they stay correct wherever the image is
@@ -412,7 +364,6 @@ constexpr TapeHotspotRect kTapeHotspots[] = {
     { TapeHotspot::Rewind, 540, 448, 612, 525 }, // REWIND button + its label
 };
 
-#ifdef DISPLAY_7INCH
 void loadTapeLayer() {
     std::uint16_t w = 0, h = 0;
     if (!peekBmpDimensions(kTapeBmpPath, w, h)) {
@@ -440,7 +391,6 @@ void loadTapeLayer() {
     screen_->reassertRenderState();      // same as UiDialog after overlay drawing
     LOGF("\r\n\t* Tape view %s", tapeLoaded_ ? "ready" : "disabled (bad BMP)");
 }
-#endif
 
 // ─── Cassette in the Tape view (7" only) ────────────────────────────────
 // tape-in.bmp is a picture of an HP cassette, pre-cut to exactly the
@@ -473,7 +423,7 @@ constexpr const char* kTapeOpenBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "open.bmp
 constexpr std::int16_t kTapeOpenX = 496, kTapeOpenY = 0;
 bool lidOpenLoaded_ = false;
 std::uint16_t lidOpenW_ = 0, lidOpenH_ = 0;
-[[maybe_unused]] std::uint16_t lidOpenStride_ = 0;   // (unused on 5")
+std::uint16_t lidOpenStride_ = 0;
 
 // Status sprites: leds.bmp holds, side by side, the POWER and BUSY LEDs
 // lit (each a 40x40 cut-out of hp82161a.bmp with a red glow added) and
@@ -487,11 +437,11 @@ constexpr LedSprite kPowerLed {257, 455, 40, 40,  0};
 constexpr LedSprite kBusyLed  {454, 455, 40, 40, 40};
 constexpr LedSprite kSwitchOn      {120, 460, 80, 32,  80};
 constexpr LedSprite kSwitchStandby {120, 460, 80, 32, 160};
-[[maybe_unused]] bool switchSpriteLoaded_ = false;   // leds.bmp has the ON switch (unused on 5")
-[[maybe_unused]] bool standbySpriteLoaded_ = false;  // ... and the STANDBY switch
+bool switchSpriteLoaded_ = false;   // leds.bmp has the ON switch
+bool standbySpriteLoaded_ = false;  // ... and the STANDBY switch
 DrivePower switchShown_ = DrivePower::Off;           // switch position currently drawn
 bool ledsLoaded_ = false;
-[[maybe_unused]] std::uint16_t ledsStride_ = 0;  // (unused on 5")
+std::uint16_t ledsStride_ = 0;
 bool powerLit_ = false, busyLit_ = false;
 CDrive* drive_ = nullptr;
 
@@ -508,7 +458,7 @@ constexpr std::uint32_t kReelRewindFrameMs = 25;   // rewind runs ~3x faster
 struct ReelPos { std::int16_t x, y; };               // box position in tape-in.bmp
 constexpr ReelPos kReels[2] = { {17, 38}, {143, 38} };
 bool reelsLoaded_ = false;
-[[maybe_unused]] std::uint16_t reelsStride_ = 0;    // (unused on 5")
+std::uint16_t reelsStride_ = 0;
 int reelFrame_ = 0;
 bool demoTape_ = false;           // the demo: the drive shown working (plotterview_setDemoTape())
 absolute_time_t reelNext_ = nil_time;
@@ -518,11 +468,10 @@ std::uint16_t cassetteW_ = 0, cassetteH_ = 0;
 std::string tapeFile_;          // selected .dat file, "" = none
 bool tapeEjected_ = false;      // true while the file picker is open
 
-[[maybe_unused]] bool cassetteShown() {   // (unused on 5")
+bool cassetteShown() {
     return cassetteLoaded_ && !tapeFile_.empty() && !tapeEjected_;
 }
 
-#ifdef DISPLAY_7INCH
 // Draws into another layer and afterwards restores whatever canvas was
 // active before -- e.g. the menu's layer, when a file is chosen from the
 // menu while it is being drawn.
@@ -724,10 +673,8 @@ void composeCassetteLabel() {
     }
     screen_->reassertRenderState();           // Screen's own text colour/size
 }
-#endif
 
 void drawTapeRegion(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h) {
-#ifdef DISPLAY_7INCH
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     display_->copyLayerToPanel(LT7683::kTapeLayerAddr, x, y,
                                static_cast<std::uint16_t>(w),
@@ -768,9 +715,6 @@ void drawTapeRegion(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t
     }
     screen_->refreshCursor();   // BTE switched the chip to graphics mode --
                                 // same MWCR0 restore as the plotter paths
-#else
-    (void)x; (void)y; (void)w; (void)h;
-#endif
 }
 
 // Redraws one status LED square if the Tape view is showing
@@ -811,9 +755,9 @@ void refreshCassette() {
 constexpr const char* kPrinterBmpPath = HIPI_PATH(HIPI_DIR_RESOURCES, "hp82162a.bmp");
 constexpr const char* kPrinterPartsPath = HIPI_PATH(HIPI_DIR_RESOURCES, "prtparts.bmp");
 bool printerLoaded_ = false;
-[[maybe_unused]] bool printerPartsLoaded_ = false;   // (unused on 5")
+bool printerPartsLoaded_ = false;
 std::int16_t printerX_ = 0, printerY_ = 0;           // picture's top-left on screen
-[[maybe_unused]] std::uint16_t printerPartsStride_ = 0;
+std::uint16_t printerPartsStride_ = 0;
 CPrinter* printer_ = nullptr;
 
 struct Sprite { std::int16_t x, y, w, h, srcX; };   // picture rect, column in prtparts.bmp
@@ -840,7 +784,6 @@ bool prtPrintShown_ = false, prtAdvShown_ = false;
 constexpr std::uint32_t kPrtKeyShowMs = 150;
 absolute_time_t prtPrintUntil_ = nil_time, prtAdvUntil_ = nil_time;
 
-#ifdef DISPLAY_7INCH
 void loadPrinterLayer() {
     std::uint16_t w = 0, h = 0;
     if (!peekBmpDimensions(kPrinterBmpPath, w, h)) {
@@ -891,15 +834,11 @@ void loadPrinterParts() {
         displayMirror_addLayer(LT7683::kPrinterPartsAddr, stride * 2UL * h, 0, 1,
                                displayMirror_fileAssetId(kPrinterPartsPath, stride));
 }
-#endif
 
-#ifdef DISPLAY_7INCH
 void overlayInk(int x, int y, int w, int h);   // (the paper, below)
 void overlayHead(int x, int y, int w, int h);  // (the print head, below)
-#endif
 
 void drawPrinterRegion(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t h) {
-#ifdef DISPLAY_7INCH
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     display_->copyLayerToPanel(LT7683::kPrinterLayerAddr, x, y,
                                static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(h));
@@ -917,9 +856,6 @@ void drawPrinterRegion(std::int16_t x, std::int16_t y, std::int16_t w, std::int1
         if (prtAdvShown_) overlay(kPrtAdvDown);
     }
     screen_->refreshCursor();   // BTE left the chip in graphics mode
-#else
-    (void)x; (void)y; (void)w; (void)h;
-#endif
 }
 
 // Redraws one control's area if the Printer view is showing
@@ -981,7 +917,6 @@ void pollPrinterPanel() {
 // arriving faster than that go onto the paper at once, without the
 // animation (the head jumps to where it would end up); so do lines
 // printed while the view isn't showing.
-#ifdef DISPLAY_7INCH
 constexpr int kPaperY0 = 24, kPaperY1 = 347;               // paper rows in the window (picture)
 constexpr int kBarY0 = 290, kBarY1 = 310;                  // tear-off bar
 constexpr int kInkW = 252, kInkH = kPaperY1 - kPaperY0;    // 168 dots x 1.5
@@ -1394,9 +1329,6 @@ void pollPaper() {
         ++paperShown_;
     }
 }
-#else
-void pollPaper() {}          // (5": no Printer view)
-#endif
 
 // Touch-sensitive areas, in hp82162a.bmp's own coordinates
 struct PrtArea { PrinterHotspot id; std::int16_t x0, y0, x1, y1; };   // inclusive-exclusive
@@ -1428,11 +1360,7 @@ void revealCurrentView() {
 // the plot is fitted into what's left (plotAreaW_). The marker -- and the
 // loupe's cross -- are drawn twice (an outline in the paper's opposite
 // colour, then magenta inside), so they show on white and black paper alike.
-#ifdef DISPLAY_7INCH
 constexpr int kDigiPanelW = 240, kDigiCell = 56, kDigiBtnH = 46;
-#else
-constexpr int kDigiPanelW = 200, kDigiCell = 44, kDigiBtnH = 40;
-#endif
 constexpr int kDigiPad = 12, kDigiMag = 4, kDigiArm = 12, kDigiGap = 4;
 constexpr std::uint16_t kDigiBg = 0x2104, kDigiYellow = 0xEDC0, kDigiMagenta = 0xF81F,
                         kDigiBtn = 0x39E7, kDigiEdge = 0xC618, kDigiGreen = 0x0467, kDigiRed = 0x9104;
@@ -1638,7 +1566,6 @@ void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter)
     mediamap_init(display);
     plotter_->setDrawCallback(onPlotterDraw);
     plotter_->setClearCallback(onPlotterClear);
-#ifdef DISPLAY_7INCH
     loadTapeLayer();
     if (tapeLoaded_) {
         loadCassette();
@@ -1651,14 +1578,11 @@ void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter)
         loadPrinterParts();
         loadPaper();
     }
-#endif
 }
 
 void plotterview_setTapeFile(const std::string& filename) {
     tapeFile_ = filename;
-#ifdef DISPLAY_7INCH
     composeCassetteLabel();
-#endif
     refreshCassette();
 }
 
@@ -1688,9 +1612,7 @@ void plotterview_printerAdvance(bool down) {
     if (printer_ == nullptr) return;
     if (down) {
         prtAdvUntil_ = make_timeout_time_ms(kPrtKeyShowMs);
-#ifdef DISPLAY_7INCH
         advanceRepeat_ = make_timeout_time_ms(500);      // held: keeps feeding after this
-#endif
     }
     printer_->pressAdvance(down);
     pollPrinterPanel();
@@ -1701,17 +1623,14 @@ void plotterview_setDemoTape(bool busy) { demoTape_ = busy; }
 void plotterview_clearPaper() {
     if (printer_ == nullptr) return;
     printer_->clearPaper();
-#ifdef DISPLAY_7INCH
     paperOff_ = 0;
     paperReturn_ = false;
     if (printerLoaded_ && inkReady_) {
         redrawInk();
         if (output_ == DisplayOutput::Printer) drawPrinterRegion(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
     }
-#endif
 }
 
-#ifdef DISPLAY_7INCH
 bool plotterview_paperDragBegin(int x, int y) {
     if (output_ != DisplayOutput::Printer || !inkReady_ || printer_ == nullptr || plotterview_isSplashVisible())
         return false;
@@ -1776,19 +1695,6 @@ void plotterview_paperScrollBy(int lines) {
 int plotterview_paperWindowLines() { return kInkH / kLinePx; }
 bool plotterview_paperScrolled() { return paperOff_ != 0; }
 void plotterview_paperToLive() { if (paperOff_ != 0) paperReturn_ = true; }
-#else
-bool plotterview_paperDragBegin(int, int) { return false; }
-void plotterview_paperDragMove(int, int) {}
-void plotterview_paperDragEnd() {}
-bool plotterview_takeTearGesture(int&) { return false; }
-void plotterview_tearOff(int) { plotterview_clearPaper(); }
-int plotterview_paperLines() { return printer_ != nullptr ? static_cast<int>(printer_->lines().size()) : 0; }
-void plotterview_reloadPaper() {}
-void plotterview_paperScrollBy(int) {}
-int plotterview_paperWindowLines() { return 0; }
-bool plotterview_paperScrolled() { return false; }
-void plotterview_paperToLive() {}
-#endif
 
 void plotterview_setTapeEjected(bool ejected) {
     if (ejected == tapeEjected_) return;
@@ -1806,14 +1712,9 @@ bool plotterview_isAvailable(DisplayOutput mode) {
 void plotterview_setVideo80(Video80* v) {
     video80_ = v;
     if (v == nullptr) return;
-    // It draws only while its view is shown -- and on the 5" panel not
-    // while the menu or the name box covers the panel (no PIP there)
+    // It draws only while its view is shown
     v->setDrawGate([] {
-#ifdef DISPLAY_7INCH
         return output_ == DisplayOutput::Video80;
-#else
-        return output_ == DisplayOutput::Video80 && !splashVisible_ && !boardui_isMenuOpen();
-#endif
     });
     // No blinking cursor while the menu is open: the menu's text moves the
     // chip's one text cursor, so it would jump into (or beside) the menu.
@@ -1843,20 +1744,6 @@ void plotterview_setDisplayModel(bool v80) {
     if (output_ != DisplayOutput::Display && output_ != DisplayOutput::Video80) return;
     const DisplayOutput to = displayOutput();
     if (to == output_) return;
-#ifndef DISPLAY_7INCH
-    if (boardui_isMenuOpen()) {
-        // 5": the menu is on the panel itself -- just hand over; closing
-        // the menu draws the display (UiDialog::close())
-        if (to == DisplayOutput::Display) {
-            video80_->setActive(false);
-        } else {
-            screen_->suspend();
-            screen_->hideCursorHardware();
-        }
-        output_ = to;
-        return;
-    }
-#endif
     switchView(to, viewDevice_, false);
 }
 
@@ -1944,7 +1831,7 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
     if (output_ != DisplayOutput::Plotter) return;
     // Narrow the active window to just this region -- replaying every
     // segment below then only actually draws the parts that fall inside
-    // it (the LT7683/RA8875 clip the rest away in hardware), avoiding the
+    // it (the LT7683 clips the rest away in hardware), avoiding the
     // need to do our own segment/rectangle intersection math for the
     // PIXELS actually drawn.
     display_->setActiveWindow(static_cast<std::uint16_t>(x0), static_cast<std::uint16_t>(y0),
@@ -2018,9 +1905,7 @@ static void switchView(DisplayOutput mode, CDevice* dev, bool splash = true) {
         busyLit_ = powerLit_ && drive_->busyLight();
         switchShown_ = drive_->powerMode();
         reelFrame_ = 0;
-#ifdef DISPLAY_7INCH
         composeCassetteLabel();
-#endif
     }
     // Leaving the Hardware test page: it gives back the LEDs and pixels
     if (output_ == DisplayOutput::HwTest && mode != DisplayOutput::HwTest) hwtest_leave();
@@ -2038,7 +1923,7 @@ static void switchView(DisplayOutput mode, CDevice* dev, bool splash = true) {
     if (mode != DisplayOutput::Display) {
         // Stop Screen from drawing text over the plot, and turn off the
         // hardware cursor explicitly -- suspend() alone doesn't touch
-        // whatever cursor state the RA8875 already had active, which
+        // whatever cursor state the chip already had active, which
         // would otherwise just keep blinking autonomously via the chip's
         // own hardware timer regardless of software suspension.
         screen_->suspend();
@@ -2051,14 +1936,9 @@ static void switchView(DisplayOutput mode, CDevice* dev, bool splash = true) {
     std::string title = dev ? plotterview_viewTitle(dev) : std::string(outputName(mode));
     for (char& c : title) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     showSplashBox(title.c_str(), 2, kSplashMs);
-#ifdef DISPLAY_7INCH
     // Draw the new view now, hidden behind the full-screen splash overlay
     // -- it's already complete when plotterview_poll() removes the overlay.
     revealCurrentView();
-#endif
-    // 5": deliberately do NOT draw the new view (or resume() Screen) here
-    // -- the splash is drawn directly on the panel and would be
-    // overwritten. plotterview_poll() does it once the splash times out.
 }
 
 void plotterview_showDevice(CDevice* dev) {
@@ -2451,11 +2331,7 @@ void plotterview_poll() {
     }
     if (splashVisible_ && time_reached(splashHideDeadline_)) {
         splashVisible_ = false;
-#ifdef DISPLAY_7INCH
         display_->hidePipOverlay();      // view underneath is already drawn
-#else
-        revealCurrentView();
-#endif
     }
 }
 

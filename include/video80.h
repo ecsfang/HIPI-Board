@@ -25,8 +25,8 @@
 //     cursor off, (4) insert mode.
 //
 // On the panel: the chip's own text engine, built-in ISO 8859-1 font --
-// 12x24 on the 7" panel (80 x 24 = 960 x 576 px) unless the small one is
-// chosen, 8x16 on the 5"; the 40-column mode doubles the width. Roman-8 is mapped to the nearest
+// 12x24 (80 x 24 = 960 x 576 px) unless the small 8x16 one is chosen;
+// the 40-column mode doubles the width. Roman-8 is mapped to the nearest
 // Latin-1 character. The view only draws while it's shown (setActive());
 // otherwise only the memory changes, and showing it draws it all.
 //
@@ -52,8 +52,7 @@ public:
     // DCL / SDC, and ESC e: memory cleared, cursor home, defaults
     void hardReset();
 
-    // Settings: the small 8x16 font instead of 12x24 (the 5" panel only
-    // has the small one), and 40 x 20 after a reset instead of 80 x 24
+    // Settings: the small 8x16 font instead of 12x24, and 40 x 20 after a reset instead of 80 x 24
     // (set now too -- the screen is cleared)
     void setSmallFont(bool small);
     bool smallFont() const { return small_; }
@@ -71,11 +70,9 @@ public:
     // puts the cursor back in any case: other drawing (the menu, the
     // button strip, info boxes) moves the chip's one shared text cursor
     void catchUp();
-    // Draws again what lies in the screen region x/y/w/h (e.g. where the
-    // button strip was, on the 5" panel)
+    // Draws again what lies in the screen region x/y/w/h
     void drawRegion(int x, int y, int w, int h);
-    // Drawing can be held off (e.g. while the 5" panel's menu covers the
-    // screen); a held-off change makes the next drawAll() needed
+    // Drawing can be held off (setDrawGate()); a held-off change makes the next drawAll() needed
     void setDrawGate(std::function<bool()> mayDraw) { mayDraw_ = std::move(mayDraw); }
     // The blinking cursor can be held hidden while the text still draws
     // (the 7" menu: its own text moves the chip's one shared text cursor)

@@ -37,7 +37,6 @@ extern const std::uint16_t kLogoImage[];
 
 namespace hipi {
 
-#ifdef DISPLAY_7INCH
 
 namespace {
 
@@ -727,15 +726,5 @@ void demo_poll() {
     }
 }
 
-#else   // 5" panel: no demo
-
-void demo_init(DisplayDriver*, const DemoHooks&, const char*) {}
-void demo_start() {}
-void demo_stop() {}
-bool demo_running() { return false; }
-void demo_poll() {}
-void demo_hpilActivity() {}
-
-#endif
 
 }  // namespace hipi

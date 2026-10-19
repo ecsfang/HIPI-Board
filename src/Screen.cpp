@@ -110,7 +110,7 @@ void Screen::clear() {
     if (!suspended_) {
         // sleep(0.500) in the MicroPython original — keep a shorter delay here
         // since the MCLR_START is synchronous from the controller's perspective.
-        d_->spiDelayMs(500);  // (declared below as a thin RA8875 helper)
+        d_->spiDelayMs(500);  // (a thin display-driver helper)
     }
     set_cur();
 }
@@ -152,7 +152,7 @@ void Screen::full() {
     beginBulkDraw();
     set_cursor(0, 0);
     for (int row = 0; row < ROWS_; ++row) {
-        // Explicit per-row positioning: the RA8875's own auto-wrap kicks in
+        // Explicit per-row positioning: the chip's own auto-wrap kicks in
         // at the active window's full pixel width (i.e. the *max* columns
         // for the current font size), not our possibly-smaller COLS_ (set
         // via the Columns menu). Without this, a full repaint would wrap
@@ -1116,7 +1116,7 @@ void Screen::fon_mode() {
     d_->writeReg(0x21, 0x80);  // FNCR0: CGRAM
     d_->setCharSpacing(0);     // horizontal char spacing -- see txt_size()
     d_->setLineSpacing(4);     // vertical line spacing
-    // We don't expose "fon" via RA8875::mode(); tag it with a no-op write.
+    // We don't expose "fon" via a driver mode(); tag it with a no-op write.
     // (See note in Screen.hpp — we track mode implicitly via size_.)
 }
 

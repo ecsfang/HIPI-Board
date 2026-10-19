@@ -178,15 +178,11 @@ public:
     // usbMscPollHostEject()).
     void refreshUsbMscRow() {
         if (state_ != State::List || title_ != "SYSTEM") return;
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         drawItems();
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         showPip();
-#endif
     }
 
     // A message box (plotterview_showMessage()) was drawn over the open
@@ -195,16 +191,12 @@ public:
     void restoreAfterMessage() {
         if (state_ == State::Closed) return;
         if (state_ != State::List) { close(); return; }
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         drawBox();
         drawItems();
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         showPip();
-#endif
     }
 
     // Opens the .dat file picker directly, without going through the main
@@ -214,19 +206,12 @@ public:
     void openFilePickerFromTape() {
         if (state_ != State::Closed) return;
         pickerFromTape_ = true;
-#ifndef DISPLAY_7INCH
-        screen_.suspend();   // same as menuOpening()
-#endif
         d_->setTextCursorVisible(false, false);
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         openFilePicker();
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         showPip();
-#endif
     }
 
     // Used by boardui.cpp's boardui_handleTap() to detect/dismiss the
@@ -242,13 +227,8 @@ public:
     // another box is open (the warning is in the log anyway).
     void showWarning(const char* title, const char* line1, const char* line2 = "") {
         if (state_ != State::Closed) return;
-#ifndef DISPLAY_7INCH
-        screen_.suspend();
-#endif
         d_->setTextCursorVisible(false, false);
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         state_ = State::Warning;
         title_ = title;
         drawBox();
@@ -261,11 +241,9 @@ public:
         d_->txtColor(0x7BEF, 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + MenuFrame::H - 40);
         d_->txtWrite("Touch the screen to close");
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         showPip();
-#endif
     }
     bool isShowingWarning() const { return state_ == State::Warning; }
     void dismissWarning() {
@@ -282,26 +260,20 @@ public:
     void demoMovePicker(int sel, bool box = false) {
         selected_ = sel;
         fileScrollOffset_ = sel >= kMaxFilesShown ? sel - kMaxFilesShown + 1 : 0;
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         if (box) {
             title_ = "SELECT CASSETTE";
             drawBox();
         }
         drawFileList();
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         if (box) showPip();
-#endif
     }
     void demoHidePicker() {
         files_.clear();
         selected_ = 0;
-#ifdef DISPLAY_7INCH
         d_->hidePipOverlay();
-#endif
     }
 
     // File picker -> Create media...: its dialogs are worked by touch too
@@ -353,15 +325,11 @@ public:
         // the 7" panel) draw straight to the main window's canvas instead
         // of the PIP layer -- confirmed as corrupting the live content
         // underneath rather than showing the Config menu at all.
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         openSystemMenu();
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         showPip();
-#endif
     }
 
 
@@ -393,17 +361,12 @@ public:
     // back to the menu layer afterward so the rest of the calling
     // function (e.g. openSettingsMenu(), called right after
     // applyFontSize() returns) can keep drawing the menu itself
-    // normally. On the 5" panel, where none of this canvas-switching
-    // concept exists, this just calls fn() directly.
+    // normally.
     template <typename F>
     void withMainCanvas(F&& fn) {
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         fn();
         d_->beginOverlayDraw();
-#else
-        fn();
-#endif
     }
 
     // repeat: an auto-repeat of a held ▲/▼ (see boardui_poll()) -- acts
@@ -433,7 +396,6 @@ public:
         // needed here at all any more.
         if (shifted && b == Button::Ok) {
             close();
-#ifdef DISPLAY_7INCH
             // Canvas is still address 0 here (this path returns before
             // ever calling beginOverlayDraw()), so it's safe to restore
             // the cursor directly -- see the end-of-function version of
@@ -441,12 +403,10 @@ public:
             // any earlier than "canvas is definitely back at the main
             // window".
             plotterview_refreshCursor();
-#endif
             if (onExitRequested_) onExitRequested_();
             return;
         }
 
-#ifdef DISPLAY_7INCH
         // Every state OTHER than Closed only ever draws menu content
         // (highlighting a row, opening a sub-menu, closing) -- Closed
         // itself is the one case that can go either way: Ok opens the
@@ -458,7 +418,6 @@ public:
         // case.
         const bool willDrawMenu = !(state_ == State::Closed && b != Button::Ok);
         if (willDrawMenu) d_->beginOverlayDraw();
-#endif
 
         switch (state_) {
             case State::Warning:                // also closed by any touch (boardui.cpp)
@@ -657,7 +616,6 @@ public:
 
         }
 
-#ifdef DISPLAY_7INCH
         if (willDrawMenu) {
             d_->endOverlayDraw();
             // MenuFrame::draw() (called by every open*Menu()) and the
@@ -705,16 +663,9 @@ public:
                 plotterview_refreshCursor();
             }
         }
-#endif
     }
 
 private:
-#ifdef DISPLAY_7INCH
-    static constexpr bool kHasScreendump = true;     // (no read-back on the 5" panel)
-#else
-    static constexpr bool kHasScreendump = false;
-#endif
-
     enum class State {
         Closed, List,                       // List: every menu (see openList())
         FilePicker, ConfirmFile, DeviceList,
@@ -988,7 +939,6 @@ private:
         d_->txtWrite("Drag a new .uf2 onto the");
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20 + 2 * MenuFrame::RowPitch);
         d_->txtWrite("drive that appears.");
-#ifdef DISPLAY_7INCH
         // handleButton()'s own end-of-function overlay show (see its
         // own comment) never runs for this path -- reset_usb_boot()
         // below never returns, so this message needs to be made
@@ -997,7 +947,6 @@ private:
         // was on screen before this button press.
         d_->endOverlayDraw();
         showPip();
-#endif
 #if HIPI_DEV_SCREENDUMPS
         devScreendump("Bootsel message");      // last chance -- we reboot next
 #endif
@@ -1504,9 +1453,6 @@ private:
     // Things every menu needs when it opens from a closed state
     void menuOpening() {
         if (state_ != State::Closed) return;
-#ifndef DISPLAY_7INCH
-        screen_.suspend();          // (5") stops the text drawing over the menu
-#endif
         d_->setTextCursorVisible(false, false);
     }
 
@@ -1633,7 +1579,7 @@ private:
         if (out == DisplayOutput::Plotter) {
             title = "PLOTTER";
             m.push_back(item("Clear plotter", [this] { doAndClose([] { plotterview_clearPlotter(); }); }));
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
             m.push_back(plotViewItem());
             m.push_back(paperItem());
         } else if (out == DisplayOutput::Tape) {
@@ -1655,7 +1601,7 @@ private:
                                       refreshItems();
                                   }));
             }
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::Printer) {
             CPrinter* prt = plotterview_printer();
             title = "PRINTER";
@@ -1685,7 +1631,7 @@ private:
             if (plotterview_paperLines() > 0)
                 m.push_back(item("Tear off paper >", [this] { showTearOff(1); }));
             m.push_back(item("Printouts >", [this] { openPrintouts(); }));
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::Analyzer) {
             title = "ANALYZER";
             m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveAnalyzer(); }); }));
@@ -1705,19 +1651,19 @@ private:
         } else if (out == DisplayOutput::MediaMap) {
             title = "MEDIA MAP";
             m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveMediaMap(); }); }));
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::HwTest) {
             title = "HARDWARE TEST";
             m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveHwTest(); }); }));
             m.push_back(item("Scan I2C", [this] { doAndClose([] { hwtest_showScan(); }); }));
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::LoopMap || out == DisplayOutput::Signals) {
             const bool map = out == DisplayOutput::LoopMap;
             title = map ? "LOOP MAP" : "HP-IL SIGNALS";
             m.push_back(item("Leave view", [this, map] {
                 doAndClose([map] { if (map) plotterview_leaveLoopMap(); else plotterview_leaveSignals(); });
             }));
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
             if (!map) {
                 m.push_back(value("Bit cells", [] { return std::string(hpil_diag_bitCellsName(hpil_diag_bitCells())); },
                                   [this] {
@@ -1732,7 +1678,7 @@ private:
             // The display (Display, or Video80 while it's an HP 92198)
             title = "DISPLAY";
             m.push_back(item("Clear screen", [this] { doAndClose([this] { clearDisplay(); }); }));
-            if (kHasScreendump) m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
             m.push_back(emulateItem());
             m.push_back(fontSizeItem());
         }
@@ -1785,7 +1731,7 @@ private:
                   [this] { applyBrightness((brightnessIndex() + 1) % kBrightnessCount); refreshItems(); }),
             plotViewItem(),
             paperItem(),
-#if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+#if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
             // The display mirror for tools/hipiview (USB CDC3)
             // Off -> View -> Control -> Off
             value("Mirror to PC", [] { return std::string(displayMirror_modeName(displayMirror_mode())); },
@@ -1864,9 +1810,7 @@ private:
                   [this] { toggleConnectToPc(); } },
             item("Loopback test >", [this] { openLoopbackConfirm(); }),
             item("Hardware test >", [this] { doAndClose([] { plotterview_showHwTest(); }); }),
-#ifdef DISPLAY_7INCH
             item("Demo",            [this] { doAndClose([] { demo_start(); }); }),
-#endif
             item("Character table >", [this] { doAndClose([] { plotterview_showCharTable(); }); }),
             item("About >",         [this] { openAbout(); }),
             item("Bootsel mode",    [this] { enterBootselMode(); }),
@@ -1879,11 +1823,7 @@ private:
         auto line = [&](const std::string& s) { m.push_back(item(s, [] {})); };
         line(std::string("HIPI ") + version_);
         line("HP-IL Pico Interface");
-#ifdef DISPLAY_7INCH
         line("7\" display, Pico 2");
-#else
-        line("5\" display, Pico 2");
-#endif
         std::snprintf(b, sizeof(b), "Built %s", __DATE__);
         line(b);
         openList("SYSTEM / ABOUT", std::move(m), [this] { openSystemMenu(4); });
@@ -1923,7 +1863,6 @@ private:
         // X handling entirely.
         if (state_ == State::CreateMedia) {
             media_.cancel();                // a half-written image is deleted
-            eraseBigDialog();
         }
         state_ = State::Closed;
         pickerFromTape_ = false;
@@ -1931,14 +1870,11 @@ private:
         boardui_onMenuClosed();  // shortens the button strip's auto-hide
                                   // countdown -- see its definition in
                                   // boardui.cpp for why
-#ifdef DISPLAY_7INCH
         // The menu was only ever a PIP overlay on top of whatever's
         // actually showing on the main window (text, a plotter view, a
         // splash screen) -- none of that was ever hidden or paused, just
         // visually covered. Disabling the overlay uncovers it again
         // immediately, correct regardless of what it turns out to be --
-        // none of the splash/plotter special-casing the 5" path below
-        // still needs is necessary here.
         // Exception: if this menu action just switched view, the switch
         // splash has taken over the PIP overlay -- leave it
         // up; plotterview_poll() removes it when its timer expires.
@@ -1947,34 +1883,6 @@ private:
         // (it would land in the menu's layer): what it held back, now
         if (plotterview_output() == DisplayOutput::Video80)
             if (Video80* v = plotterview_video80()) v->catchUp();
-#else
-        if (plotterview_isSplashVisible()) {
-            // A view switch just happened (this menu action selected a
-            // new Display/Plotter output) -- the splash announcing it
-            // already covers the whole screen, menu box included, and
-            // its own timeout (see plotterview_poll()) reveals the real
-            // content shortly. Redrawing here now would just prematurely
-            // wipe the splash out early.
-            return;
-        }
-        if (plotterview_output() == DisplayOutput::Plotter ||
-            plotterview_output() == DisplayOutput::Analyzer ||
-            plotterview_output() == DisplayOutput::LoopMap ||
-            plotterview_output() == DisplayOutput::Signals ||
-            plotterview_output() == DisplayOutput::CharTable ||
-            plotterview_output() == DisplayOutput::HwTest ||
-            plotterview_output() == DisplayOutput::MediaMap ||
-            plotterview_output() == DisplayOutput::Video80) {
-            // Screen stays suspended (it's not what's showing) -- just
-            // erase the menu box by redrawing the plot underneath it,
-            // instead of screen_.resume()'s HP-41 text redraw below.
-            plotterview_redraw();
-            return;
-        }
-        screen_.resume();   // re-enables output and redraws the buffer,
-                             // catching up on anything written while the
-                             // dialog was open
-#endif
     }
 
     void moveSelection(int delta, int count) {
@@ -2145,9 +2053,7 @@ private:
     int pipX_ = MenuFrame::X, pipY_ = MenuFrame::MenuTop, pipW_ = MenuFrame::W, pipH_ = MenuFrame::MenuH;
     void setPip(int x, int y, int w, int h) { pipX_ = x; pipY_ = y; pipW_ = w; pipH_ = h; }
     void showPip() {
-#ifdef DISPLAY_7INCH
         d_->showPipOverlay(pipX_, pipY_, pipW_, pipH_);
-#endif
     }
 
     // ── File picker -> Create media... (media_create_ui.h) ──────────────
@@ -2175,27 +2081,16 @@ private:
             LOGF("\r\n * Created %s/%s", HIPI_DIR_LIF, media_.createdFile().c_str());
             applyFile(media_.createdFile());
             if (pickerFromTape_) { close(); return; }
-            eraseBigDialog();
             openSystemMenu();
             return;
         }
         // Cancel: back to the list, on its Create media... row
-        eraseBigDialog();
         openFilePicker();
         for (std::size_t i = 0; i < files_.size(); ++i)
             if (files_[i] == kCreateMediaRow) { selected_ = static_cast<int>(i); break; }
         drawFileList();
     }
 
-    // The 5" panel has no menu layer: the big dialog was drawn on the
-    // screen itself -- what's behind it comes back before a smaller box
-    // is drawn (the 7" panel just shows a smaller PIP window)
-    void eraseBigDialog() {
-#ifndef DISPLAY_7INCH
-        if (viewIsNotText()) plotterview_redraw();
-        else { screen_.resume(); screen_.suspend(); }
-#endif
-    }
     static bool viewIsNotText() {
         const DisplayOutput o = plotterview_output();
         return o == DisplayOutput::Plotter || o == DisplayOutput::Analyzer || o == DisplayOutput::LoopMap ||
@@ -2207,16 +2102,12 @@ private:
     // Draws on the menu layer (7") around fn, then shows it -- or, if fn
     // closed the menu, puts the cursor back (as at the end of handleButton())
     template <typename F> void drawingMenu(F&& fn) {
-#ifdef DISPLAY_7INCH
         d_->beginOverlayDraw();
-#endif
         fn();
-#ifdef DISPLAY_7INCH
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         if (state_ != State::Closed) showPip();
         else plotterview_refreshCursor();
-#endif
     }
 
     // Clears the full width of one menu row's own slot to the given

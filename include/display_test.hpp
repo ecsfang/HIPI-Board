@@ -1,8 +1,7 @@
 // src/display_test.hpp
 //
-// Panel-agnostic hardware diagnostic tests -- works with whichever
-// DisplayDriver this build targets (RA8875 on 5", LT7683 on 7"), via
-// the common API surface both classes implement. Deliberately NEVER
+// Hardware diagnostic tests for the DisplayDriver (LT7683, see
+// display_config.h). Deliberately NEVER
 // wired into the normal boot path (see pico_main.cpp, which doesn't
 // include this header at all) -- call runDisplayTests(display) yourself,
 // temporarily, from wherever's convenient when testing hardware/driver
@@ -72,7 +71,7 @@ inline void runDisplayTests(DisplayDriver* display) {
     // the upload/readback mechanism itself is confirmed working at the
     // SDRAM level; a "custom font shows nothing on screen" issue would
     // then have to be in how the text-display side (selectCustomFont(),
-    // CCR0 bit[7:6]=10b on LT7683 / FNCR0 bit7=1 on RA8875) looks the
+    // CCR0 bit[7:6]=10b on LT7683) looks the
     // data up, not in the upload itself. If any of these DON'T match,
     // the problem is confirmed to still be in the upload/readback
     // mechanism -- the read-back bytes themselves are logged too, to

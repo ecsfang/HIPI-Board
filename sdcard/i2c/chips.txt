@@ -41,7 +41,8 @@
 # and:
 #
 #   expected         It's always there: shown as missing if it doesn't answer
-#   panel 5|7        Only on HIPIs with that panel
+#   panel 5|7        Only on HIPIs with that panel (HIPI has the 7" one;
+#                    chips marked panel 5 are left out)
 #
 # A chip with checks (or a reading) is tried before a chip without; one
 # without is only "probably" that chip. Numbers: 0x.. (hex) or decimal.
@@ -93,11 +94,6 @@ chip 0x38 FT5316 | touch panel
   probe touch
   expected
   panel 7
-
-chip 0x40 GSL1680 | touch panel
-  probe touch
-  expected
-  panel 5
 
 # ── Identified by an ID register or checked values ─────────────────────────
 chip 0x68 DS3231 | real-time clock

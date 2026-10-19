@@ -15,7 +15,7 @@ HP-IL devices:
 10. [Troubleshooting](#10-troubleshooting)
 
 For hardware (schematics, BOM, choice of display) see `pcb/README.md`.
-For the LED command syntax and the RA8875 driver API see `README.md`.
+For the LED command syntax and the display driver API see `README.md`.
 
 ---
 
@@ -193,16 +193,13 @@ stored in CMake's cache.
 
 ## 2. Building the firmware
 
-### 2.1 Panel variants
+### 2.1 The panel
 
-The same source builds for two display panels:
+HIPI has one display panel (the 5" RA8875 panel was dropped after 1.3.0):
 
 | Panel | Controller | Touch   | Output file              |
 |-------|------------|---------|--------------------------|
-| 5"    | RA8875     | GSL1680 | `build/hipi_5_pico.uf2`  |
 | 7"    | LT7683     | FT5316  | `build/hipi_7_pico.uf2`  |
-
-By default **both** are built. Flash the one matching your board.
 
 ### 2.2 From VS Code
 
@@ -215,14 +212,6 @@ first build takes 1–2 minutes.
 export PICO_SDK_PATH=$HOME/.pico-sdk/sdk/2.2.0   # or wherever your SDK is
 cmake -G Ninja -B build -S .
 cmake --build build
-```
-
-To build only one panel (faster when iterating):
-
-```bash
-cmake -DHIPI_BUILD_PANELS=7 -B build      # 7" only
-cmake -DHIPI_BUILD_PANELS=5 -B build      # 5" only
-cmake -DHIPI_BUILD_PANELS="5;7" -B build  # both (default)
 ```
 
 If you change the *structure* of `CMakeLists.txt` (new targets, new
@@ -287,7 +276,7 @@ Choose whichever is convenient:
 
 ### 3.2 Copy the firmware
 
-- **Drag and drop:** copy `build/hipi_7_pico.uf2` (or `hipi_5_pico.uf2`)
+- **Drag and drop:** copy `build/hipi_7_pico.uf2`
   onto the `RP2350` drive. The Pico reboots automatically when the copy is
   complete.
 - **Command line:**
@@ -346,13 +335,13 @@ logs/             analyzer logs -- created on the first Log to file
 
 | File (in `resources/`) | Required | Purpose |
 |------------------------|----------|---------|
-| `hp82161a.bmp`  | No       | 7" panel only: picture for the **Tape** view. The view is left out if missing. |
-| `tape-in.bmp`   | No       | 7" panel only: the cassette shown in the Tape view's lid window when a file is selected. |
-| `open.bmp`      | No       | 7" panel only: the Tape view's lid area with the lid open, shown while the file picker is open. |
-| `leds.bmp`      | No       | 7" panel only: the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions. |
-| `reels.bmp`     | No       | 7" panel only: rotated frames of the cassette's reel hubs, for the spinning-reel animation. |
-| `hp82162a.bmp`  | No       | 7" panel only: picture for the **Printer** view. The view is left out if missing. |
-| `prtparts.bmp`  | No       | 7" panel only: the Printer view's moving parts -- POWER lit, the switches in each position, the keys pressed. |
+| `hp82161a.bmp`  | No       | picture for the **Tape** view. The view is left out if missing. |
+| `tape-in.bmp`   | No       | the cassette shown in the Tape view's lid window when a file is selected. |
+| `open.bmp`      | No       | the Tape view's lid area with the lid open, shown while the file picker is open. |
+| `leds.bmp`      | No       | the lit POWER and BUSY LEDs and the power switch in its STANDBY and ON positions. |
+| `reels.bmp`     | No       | rotated frames of the cassette's reel hubs, for the spinning-reel animation. |
+| `hp82162a.bmp`  | No       | picture for the **Printer** view. The view is left out if missing. |
+| `prtparts.bmp`  | No       | the Printer view's moving parts -- POWER lit, the switches in each position, the keys pressed. |
 
 (`buttons.bmp` and `logo.bmp` stay in the repo's `resources/` only -- they're
 built into the firmware as `src/buttons_image.cpp` and `src/logo_image.cpp`,
@@ -469,7 +458,7 @@ then a `talkEnd` / `listenEnd` of frame time + the hold (`kLoopMapRoleHoldMs`,
 loopmap.h: 1.2 s; the PC test follows it), so a
 role that lasted a few ms is still seen. `loopmap_poll()` compares
 `rolesNow()` with what was drawn and redraws when a role comes or its hold
-runs out (5": the cards whose signature changed, and the controller's box).
+runs out.
 The details box's GO TO … VIEW (a HIPI device with a view,
 `plotterview_viewName()`) calls `plotterview_showDeviceFromLoopMap()`: the
 view without its name box, and X on the strip
@@ -556,9 +545,8 @@ back without leaving the view. PC test:
 `MediaCreateUi` (`include/media_create_ui.h`) draws CREATE MEDIA and the
 MEDIA NAME keyboard left of the button strip, and takes touches
 (`UiDialog::handleTap()`, from `boardui_handleTap()`), buttons and polls
-(`UiDialog::poll()`, from `boardui_poll()`). On the 7" panel the PIP window
-follows the dialog's size (`UiDialog::setPip()`); on the 5" panel what's
-behind it is redrawn before a smaller box (`eraseBigDialog()`). The image
+(`UiDialog::poll()`, from `boardui_poll()`). The PIP window
+follows the dialog's size (`UiDialog::setPip()`). The image
 itself is written by `LifCreator` (`include/lif_create.h`) -- laid out like
 `lifinit -z` from lifutils, 32 kB per main-loop pass; a cancelled or failed
 file is deleted. PC test: `tools/hipiview/test/media_create_test.cpp`
@@ -591,13 +579,12 @@ whole ring. Shown via `plotterview_showAnalyzer()` (`DisplayOutput::Analyzer`,
 not in the swipe order); UiDialog routes OK/arrows to it while shown
 (`AnalyzerMenu`). Logs go to `logs/analyzer_<n>.txt`.
 
-**Start-up screen (7").** At power-up a full-screen overlay (PIP-1, drawn by
+**Start-up screen.** At power-up a full-screen overlay (PIP-1, drawn by
 `src/bootscreen.cpp`) shows the version, a STATUS card whose rows are filled
 in as start-up reaches each step (SD card, settings, USB, HP-IL, Tape images,
 each drive's file, trace -- green = OK, red = missing, grey = off) and the
 devices in loop order. It stays for 6 s (`kBootScreenMs` in `pico_main.cpp`)
-or until the screen is touched. The 5" panel keeps the classic splash and
-text summary.
+or until the screen is touched.
 
 ### 5.1 The button strip
 
@@ -643,14 +630,14 @@ commands sent by the HP-41.
 | Gesture                     | Action |
 |-----------------------------|--------|
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
-| Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (7": 12x24 font, 34 px rows; 5": 8x16, 24 px; nine rows), PC test `devicelist_test` |
+| Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (12x24 font, 34 px rows, nine rows), PC test `devicelist_test` |
 | Vertical swipe              | Scroll the device list (when it is open) |
 | Horizontal swipe            | Switch view: each device with a view (display, plotter, every cassette drive) in loop order -- left = next device, right = previous |
 
 The device list performs a live AAD/SAI/SDI enumeration of the internal
 devices. Avoid opening it while a controller is in the middle of a transfer.
 
-The info box and the device list share PIP-1 (7") with the menu, the
+The info box and the device list share PIP-1 with the menu, the
 view-switch name box and `plotterview_showMessage()`. Whatever else takes
 PIP-1 closes them first (`boardui_closePipBoxes()`, called from
 `showSplashBox()` and `boardui_saverBegin()`), and `boardui_poll()` closes
@@ -684,7 +671,7 @@ Main menu
 │   ├── Connect to PC      Expose the SD card as a USB drive (toggles to "Disconnect from PC")
 │   ├── Loopback test      Physical HP-IL loop test (needs a loop cable)
 │   ├── Hardware test      LEDs, pixels and the I2C bus (System -> Hardware test)
-│   ├── Demo               HIPI shows what it can do (7" only)
+│   ├── Demo               HIPI shows what it can do
 │   └── Bootsel mode       Reboot into BOOTSEL for firmware update
 ├── Settings
 │   ├── Emulate            HP 82163 / HP 92198
@@ -698,12 +685,12 @@ Main menu
 └── Display
     ├── Display            Show the text display
     ├── Plotter            Show the plotter canvas
-    ├── Tape               Show the HP82161A tape drive (7" panel only)
-    ├── Printer            Show the HP82162A printer (7" panel only)
+    ├── Tape               Show the HP82161A tape drive
+    ├── Printer            Show the HP82162A printer
     ├── Clear plotter      Erase the plotter drawing
     ├── Clear screen       Erase the text display
     ├── Analyzer           HP-IL bus analyzer view (own menu on OK)
-    └── Screendump         Save the screen as screendump_<n>.bmp (7" panel only)
+    └── Screendump         Save the screen as screendump_<n>.bmp
 ```
 
 ### 6.1 Config
@@ -763,11 +750,11 @@ unplugged. The setting is saved per device name.
 ### 6.4 Display
 
 Chooses which output fills the screen: the HP82163-style text display, the
-HP7470A-style plotter canvas (`TFPLOT`), or (7" panel only) the Tape view.
+HP7470A-style plotter canvas (`TFPLOT`), or the Tape view.
 Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
-**Screendump** (7" panel only) saves what the panel shows as a 24-bit BMP
+**Screendump** saves what the panel shows as a 24-bit BMP
 file, `screendump_<n>.bmp`, in the SD card's `screenshots/` folder. The menu itself, the
 button strip and message boxes are not included. The number continues
 from `screendump_next` in `CONFIG.TXT` (starting at 0), and numbers whose
@@ -829,9 +816,6 @@ drive then stays busy for 2 to 10 seconds, depending on how far into the
 tape it was (2 s just after the start, 6 s halfway, 10 s at the end): BUSY is
 lit, the reels spin backwards, and the HP-41 gets the drive's Busy status
 until it's done.
-
-The Tape view is not available on the 5" panel, which has no spare display
-memory.
 
 **Printer view.** `TFPRINT` (`printer.h`/`.cpp`) is an HP 82162A thermal
 printer, and its view a picture of one: `hp82162a.bmp`, made to match
@@ -925,8 +909,7 @@ up the loop. On the panel the Display view is `Screen` (output
 `DisplayOutput::Display`) or `Video80` (output `DisplayOutput::Video80`):
 `outputFor(ViewKind::Display)` and the "back to the display" paths ask
 `displayOutput()`, and `plotterview_setDisplayModel()` swaps them while
-the display is showing (on the 5" with the menu open it only hands over
--- closing the menu draws). Text colour applies to both; each keeps its
+the display is showing. Text colour applies to both; each keeps its
 own font and columns settings (`fontsize`/`columns` for the 82163,
 `v80_font`/`v80_columns` for the 92198), and the menu's **Font size** and
 **Columns** show the current model's.
@@ -950,16 +933,16 @@ own font and columns settings (`fontsize`/`columns` for the 82163,
   bytes kept as they are, drawn as the nearest ISO 8859-1 character
   (`kRoman8[]`), the solid block as an inverse space.
 
-It draws with the chip's text engine and its built-in font: 12×24 on the
-7" panel (`selectBuiltinFontSize(1)`, 80×24 = 960×576) unless the small
-one is chosen (`setSmallFont()`), 8×16 on the 5"; 40 columns doubles the
+It draws with the chip's text engine and its built-in font: 12×24
+(`selectBuiltinFontSize(1)`, 80×24 = 960×576) unless the small 8×16
+one is chosen (`setSmallFont()`); 40 columns doubles the
 width (`txtScaleXY(2, 1)`); `setDefaultForty()` is the width after a
 reset. Changes draw only the
 cells or lines that changed; LF at the bottom is one `bteScrollShift()`
-plus the new line (7"). The chip's text cursor is the cursor: a block, or
+plus the new line. The chip's text cursor is the cursor: a block, or
 an underline for the insert cursor (`setTextCursorShape()`). The view only
 draws while it's shown (`setActive()`), and not while something has
-pointed the drawing elsewhere (the 7" menu) or covers it (5" menu/strip):
+pointed the drawing elsewhere (the menu):
 then it remembers to draw everything (`catchUp()`). When it stops it puts
 the 8×16 font and scale back for the other views; the info box and device
 list select the built-in font themselves.
@@ -975,7 +958,7 @@ and columns settings, and saves `video80_*.png`.
 **Hardware test page.** `hwtest.h`/`.cpp` is a full-screen view
 (`DisplayOutput::HwTest`, `plotterview_showHwTest()` from System, X or
 **Leave view** goes back) drawn like the loop map: off-screen in layer 3
-and copied on the 7", directly on the 5"; small changes (a button, a pixel
+and copied; small changes (a button, a pixel
 dot, the I2C rows -- padded text, no clearing) are drawn on the panel when
 nothing else owns the canvas, else the whole page is redrawn later. Touches
 go to `hwtest_tap()` (boardui.cpp), `hwtest_poll()` runs the LED chase
@@ -1050,7 +1033,7 @@ VL53L0X set-up on a made-up chip, every command and the device on the loop.
 hardware and a made-up bus), taps its buttons, checks the LEDs and pixels
 it drives and saves `hwtest_*.png`.
 
-**Demo.** `demo.h`/`.cpp` (System → Demo, 7" only) is a script of steps
+**Demo.** `demo.h`/`.cpp` (System → Demo) is a script of steps
 run from `demo_poll()`: each step is a function called every poll until it
 says it's done (`Step`), built by helpers -- `type()` (characters to
 `Screen` or `Video80`, n ms apart), `hpgl()` (HP-GL to the plotter, n
@@ -1123,7 +1106,7 @@ With USB connected, the board enumerates as a composite device:
 | CDC 1     | `/dev/ttyACM1`    | PILBox link to a PC emulator (e.g. pyILPER) |
 | CDC 2     | `/dev/ttyACM2`    | `TFTERM` terminal bridge (e.g. HP-71B `DISPLAY IS`/`KEYBOARD IS`) |
 | MSC       | USB drive         | SD card, only while **Connect to PC** is active |
-| CDC 3     | `/dev/ttyACM3`    | Display mirror for `tools/hipiview` (7" panel only) |
+| CDC 3     | `/dev/ttyACM3`    | Display mirror for `tools/hipiview` |
 
 Device numbering may differ if other CDC devices are connected. To read the
 debug log:

@@ -8,11 +8,7 @@ namespace hipi {
 namespace {
 
 // The fonts (see video80.h): the chip's 12x24 (7" only) or 8x16
-#ifdef DISPLAY_7INCH
 constexpr bool kHasLargeFont = true;
-#else
-constexpr bool kHasLargeFont = false;
-#endif
 constexpr std::uint16_t kControlColor = 0x07FF;   // control codes shown in monitor mode
 
 // Roman-8 160..255 -> ISO 8859-1 (the panel's font), as in the manual's
@@ -359,11 +355,9 @@ void Video80::escape(std::uint8_t c) {
 
 bool Video80::canDraw() const {
     if (!active_ || (mayDraw_ && !mayDraw_())) return false;
-#ifdef DISPLAY_7INCH
     // Only on the panel itself -- not while something (the menu) has
     // pointed the drawing at another layer
     if (d_->canvasAddr() != 0) return false;
-#endif
     return true;
 }
 
@@ -517,7 +511,6 @@ void Video80::scrolledUp() {
     }
     if (!canDraw()) { needAll_ = true; return; }
     if (needAll_) { drawAll(); return; }
-#ifdef DISPLAY_7INCH
     // Move the picture up a text line in the chip (two BTE copies), then
     // draw only the new bottom line
     d_->setTextCursorShape(false, glyphW_, glyphH_);
@@ -527,9 +520,6 @@ void Video80::scrolledUp() {
     prepareText();
     drawRow(rows_ - 1);
     placeCursor();
-#else
-    drawAll();
-#endif
 }
 
 void Video80::catchUp() {

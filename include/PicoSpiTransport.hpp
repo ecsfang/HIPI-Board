@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Raspberry Pico 2 (RP2350) SPI transport for the RA8875 LCD driver.
+// Raspberry Pico 2 (RP2350) SPI transport for the LT7683 LCD driver.
 //
 // Uses the pico-sdk SPI master + GPIO helpers.  Build with:
 //
@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "RA8875Transport.hpp"
+#include "DisplayTransport.hpp"
 
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
@@ -21,9 +21,9 @@
 
 namespace hipi {
 
-class PicoSpiTransport : public RA8875Transport {
+class PicoSpiTransport : public DisplayTransport {
 public:
-    // Pass NO_RESET_PIN for rst_gpio if the RA8875 module's RST line isn't
+    // Pass NO_RESET_PIN for rst_gpio if the display module's RST line isn't
     // actually wired to the Pico (common -- many breakout boards handle
     // their own power-on reset). rstLow()/rstHigh() become no-ops in that
     // case, so the pin is never touched at all -- freeing it up entirely

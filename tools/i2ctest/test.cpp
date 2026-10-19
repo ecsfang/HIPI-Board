@@ -178,6 +178,14 @@ static void expect(const I2cFound& f, I2cState state, const char* name, const ch
     check(f.state == state && std::string(f.name) == name && (detail == nullptr || std::string(f.detail) == detail), b);
 }
 
+// A chip for another panel (HIPI's removed 5" one), to check "panel":
+// old chips.txt files on SD cards still have it
+static const char* kOtherPanel =
+    "chip 0x40 GSL1680 | touch panel\n"
+    "  probe touch\n"
+    "  expected\n"
+    "  panel 5\n";
+
 int main(int argc, char** argv) {
     const char* file = argc > 1 ? argv[1] : "../../sdcard/i2c/chips.txt";
 
@@ -188,9 +196,10 @@ int main(int argc, char** argv) {
     list.parse(text, "chips.txt");
     for (const std::string& e : list.errors()) std::printf("  %s\n", e.c_str());
     check(list.errors().empty(), "chips.txt: no errors");
+    list.parse(kOtherPanel, "other.txt");
     const std::size_t all = list.chips().size();
     list.finish(7);
-    check(list.chips().size() == all - 1, "panel 7: the 5\" touch panel left out");
+    check(list.chips().size() == all - 1, "panel 7: a panel-5 chip left out");
     check(list.expectedAt(0x38) != nullptr && list.expectedAt(0x40) == nullptr, "the 7\" touch panel is expected on 0x38");
     bool checksFirst = true, seenPlain = false;
     for (const I2cChip& c : list.chips()) {
@@ -240,6 +249,7 @@ int main(int argc, char** argv) {
     // ── Another file: a chip of one's own, and mistakes ─────────────
     I2cChipList two;
     two.parse(text, "chips.txt");
+    two.parse(kOtherPanel, "other.txt");
     two.parse(
         "# my chips\n"
         "chip 0x5C MYSENSOR | my light sensor\n"
@@ -254,7 +264,7 @@ int main(int argc, char** argv) {
     two.finish(5);
     check(two.errors().size() == 4, "mine.txt: 4 errors noted (got " + std::to_string(two.errors().size()) + ")");
     check(!two.errors().empty() && two.errors()[0].rfind("mine.txt:5:", 0) == 0, "errors say file and line");
-    check(two.expectedAt(0x40) != nullptr && two.expectedAt(0x38) == nullptr, "panel 5: the 5\" touch panel expected");
+    check(two.expectedAt(0x40) != nullptr && two.expectedAt(0x38) == nullptr, "panel 5: its own touch panel expected, not the 7\" one");
     bus.regs[0x5C] = { { 0x10, 0x42 }, { 0x11, 21 } };
     expect(find(two, bus, 0x5C), S::Ok, "MYSENSOR", "42 lx", "0x5C my own chip goes before \"probably BH1750\"");
     bus.regs[0x5C][0x10] = 0x00;
@@ -271,7 +281,7 @@ int main(int argc, char** argv) {
         // DS3231: 12:34:56, 26-10-11, 23.75 C
         b.regs[0x68] = { { 0x00, 0x56 }, { 0x01, 0x34 }, { 0x02, 0x12 }, { 0x04, 0x11 }, { 0x05, 0x10 }, { 0x06, 0x26 },
                          { 0x11, 23 }, { 0x12, 0xC0 } };
-        // AHT20 on 0x38 (5" panel list: 0x38 is free): status, H = 50 %, T = 25 C
+        // AHT20 on 0x38 (the panel-5 list: 0x38 is free): status, H = 50 %, T = 25 C
         std::vector<std::uint8_t> aht = { 0x1C, 0x80, 0x00, 0x06, 0x00, 0x00 };
         aht.push_back(crc8(aht, 0, 6, 0xFF));
         b.raw[0x38] = aht;
@@ -287,6 +297,7 @@ int main(int argc, char** argv) {
 
         I2cChipList list5;
         list5.parse(text, "chips.txt");
+        list5.parse(kOtherPanel, "other.txt");
         list5.finish(5);
         auto identifyAll = [&](I2cFound* out, int max, bool found[128]) {
             int n = 0;

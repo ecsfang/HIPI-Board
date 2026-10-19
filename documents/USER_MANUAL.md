@@ -43,7 +43,7 @@ at once:
 | LEDs and colour pixels        | —                         | `TFLEDS`, `TFPIXEL` |
 | Link to a PC (e.g. pyIlPer)   | PILBox                    | `PILBOX`    |
 | Terminal over USB             | —                         | `TFTERM`    |
-| Thermal printer (7" view)     | HP 82162A Thermal Printer | `TFPRINT`   |
+| Thermal printer (view)        | HP 82162A Thermal Printer | `TFPRINT`   |
 
 Cassettes are simply files on a micro-SD card, so you never run out of tape.
 
@@ -255,7 +255,7 @@ It is one of two displays — **Emulate** in its menu (OK) or in
 - **HP 92198** — the 80-column video interface (made by Mountain Computer
   as the MC00701A): 80 × 24 in the panel's own font, see
   [8.7](#87-the-display-as-an-hp-92198). **Font size** is *12x24* (large,
-  the default) or *8x16* (small — the 5" panel only has this one);
+  the default) or *8x16* (small);
   **Columns** is *80* (80 × 24) or *40* (40 × 20, double width) — what
   it starts with and goes back to after a reset. It keeps 48 lines: ▲/▼
   look back through them (Shift: a screen at a time), **X** goes back to
@@ -316,7 +316,7 @@ thing.
 
 ### 5.4 Printer
 
-A picture of the HP 82162A thermal printer (`TFPRINT`, 7" panel) — the
+A picture of the HP 82162A thermal printer (`TFPRINT`) — the
 cassette drive's companion, the same size and look. Its controls work
 like the real ones.
 
@@ -458,7 +458,7 @@ More > — HIPI's menu
 │   ├── Screen >         Emulate < HP 82163 > · Text colour < White > ·
 │   │                    Font size < 0 > · Columns < Auto > ·
 │   │                    Brightness < 100% > · Plot view < Fit > · Paper < White > ·
-│   │                    Mirror to PC < Off >  (7" only: Off / View / Control)
+│   │                    Mirror to PC < Off >  (Off / View / Control)
 │   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
 │   │                    Date < EU > · Time < 24 h > · Show now
 │   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
@@ -467,14 +467,13 @@ More > — HIPI's menu
     ├── Connect to PC    Show the SD card on your computer
     ├── Loopback test >  Test the HP-IL connection
     ├── Hardware test >  Try the LEDs, pixels and I2C chips
-    ├── Demo             Show what HIPI can do (7" only)
+    ├── Demo             Show what HIPI can do
     ├── Character table > The HP-41's character codes 0-127
     ├── About >          Version and hardware
     └── Bootsel mode     Get ready for a software update
 ```
 
-(Screendump is on the 7" panel only.) All settings are remembered, also
-after power off.
+All settings are remembered, also after power off.
 
 ### A few worth knowing
 
@@ -483,7 +482,7 @@ after power off.
   real HP device connected too.
 - **System → Hardware test** — try out what's connected, see
   [11.3](#113-hardware-test).
-- **System → Demo** (7") — HIPI shows what it can do, on its own, see
+- **System → Demo** — HIPI shows what it can do, on its own, see
   [11.4](#114-demo).
 - **System → Character table** — a help page: the HP-41's character codes
   0–127 (decimal), each with the character as the HP-41's display shows it,
@@ -1124,7 +1123,7 @@ You can also take one from e.g. a HP-41 program (with the display device selecte
 To choose which view is in the picture first, see
 [5.5 Choosing the view from the HP-41](#55-choosing-the-view-from-the-hp-41).
 
-### Recording the screen on a PC (7" panel)
+### Recording the screen on a PC
 
 To make a video of HIPI, you don't need a camera. The PC program
 **hipiview** (in `tools/hipiview`) shows HIPI's screen in a window,
@@ -1371,7 +1370,7 @@ that on 0x20–0x27 (a PCF8574 there would take it as its outputs).
 
 ### 11.4 Demo
 
-**System → Demo** (7" panel) — HIPI shows what it can do, by itself, round
+**System → Demo** — HIPI shows what it can do, by itself, round
 after round; handy for showing it to someone. A yellow caption at the
 bottom says what you're looking at:
 
@@ -1451,7 +1450,7 @@ value.
 | `textcolor` | `0`–`65535` | `65535` | Text colour of the display view, as an RGB565 number. The menu's colours: `65535` white, `65504` yellow, `2016` green, `2047` cyan, `63488` red — any other RGB565 value works too. |
 | `fontsize` | `0`–`3` | `0` | Text size of the display view (**Settings → Screen → Font size**). |
 | `display_model` | `82163` / `92198` | `82163` | Which display `TFDISPLAY` is (**Settings → Screen → Emulate**). |
-| `v80_font` | `large` / `small` | `large` | As an HP 92198: the 12 × 24 or the 8 × 16 font (**Font size**; the 5" panel is always small). |
+| `v80_font` | `large` / `small` | `large` | As an HP 92198: the 12 × 24 or the 8 × 16 font (**Font size**). |
 | `v80_columns` | `80` / `40` | `80` | As an HP 92198: 80 × 24 or 40 × 20 at the start and after a reset (**Columns**). |
 | `columns` | `0`, `1`–`100` | `0` | Characters per line; `0` = as many as fit. (The menu offers 25, 32 — the HP 82163's own — 33, 50 and 100.) |
 | `brightness` | `0`–`255` | `255` | Backlight. The menu's steps: `51`, `102`, `153`, `204`, `255` (20–100 %). |
@@ -1465,7 +1464,7 @@ value.
 | `pixel_order` | `RGB` `GRB` `BRG` `RBG` `GBR` `BGR` | `RGB` | The order the colour pixels take their colours in (**Hardware test → Order**). |
 | `printer_mode` | `man` / `trace` / `norm` | `man` | `TFPRINT`: the MODE switch in the Printer view. |
 | `printer_intensity` | `0`–`4` | `2` | `TFPRINT`: the INTENSITY switch, `0` = LIGHT … `4` = DARK. |
-| `display_mirror` | `off` / `view` / `control` | `off` | 7" panel: send the screen to **hipiview** on a PC; `control`: the PC's mouse and keys work HIPI too (**Settings → Screen → Mirror to PC**). See [Recording the screen on a PC](#recording-the-screen-on-a-pc-7-panel). |
+| `display_mirror` | `off` / `view` / `control` | `off` | Send the screen to **hipiview** on a PC; `control`: the PC's mouse and keys work HIPI too (**Settings → Screen → Mirror to PC**). See [Recording the screen on a PC](#recording-the-screen-on-a-pc). |
 
 **Screen saver** (see [4.3](#43-screen-saver-and-clock))
 

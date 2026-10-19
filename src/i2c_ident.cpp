@@ -129,11 +129,7 @@ I2cChipList list_;
 bool loaded_ = false;
 std::string info_;
 
-#ifdef DISPLAY_7INCH
 constexpr int kPanel = 7;
-#else
-constexpr int kPanel = 5;
-#endif
 
 bool readFile(const char* path, std::string& text) {
     FIL f;
@@ -211,11 +207,7 @@ static const I2cChipList& chipList() {
 
 // HIPI's own chips (the touch panel): TFI2C may not write there
 static bool hipiOwns(std::uint8_t addr) {
-#ifdef DISPLAY_7INCH
     if (addr == 0x38) return true;                       // FT5316
-#else
-    if (addr == 0x40) return true;                       // GSL1680
-#endif
     return chipList().expectedAt(addr) != nullptr;
 }
 

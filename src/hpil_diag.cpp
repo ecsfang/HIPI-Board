@@ -114,11 +114,9 @@ void hpil_diag_drawAll() {
 void hpil_diag_setBitCells(BitCells style) {
     if (static_cast<std::uint8_t>(style) > static_cast<std::uint8_t>(BitCells::None)) style = BitCells::Bands;
     bitCells_ = style;
-#ifdef DISPLAY_7INCH
     // Off-screen and copied under the menu's PIP overlay: safe to redraw
-    // now. (5": the next capture, or closing the menu, redraws the view.)
+    // now.
     if (visible()) hpil_diag_drawAll();
-#endif
 }
 
 BitCells hpil_diag_bitCells() { return bitCells_; }

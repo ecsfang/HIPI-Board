@@ -55,7 +55,6 @@ void chartable_init(DisplayDriver* display) { d_ = display; }
 
 void chartable_drawAll() {
     if (d_ == nullptr) return;
-#ifdef DISPLAY_7INCH
     // Off-screen, then copied in one go (no flicker), like the loop map
     const std::uint32_t prevAddr = d_->canvasAddr();
     const std::uint16_t prevStride = d_->canvasStride();
@@ -64,9 +63,6 @@ void chartable_drawAll() {
     if (prevAddr == 0) d_->endOverlayDraw();
     else               d_->beginLayerDraw(prevAddr, prevStride);
     d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
-#else
-    render();
-#endif
 }
 
 }  // namespace hipi

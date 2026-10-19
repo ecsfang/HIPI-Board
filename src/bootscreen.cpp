@@ -16,7 +16,6 @@ extern const std::uint16_t kLogoImageWidth, kLogoImageHeight;
 
 namespace hipi {
 
-#ifdef DISPLAY_7INCH
 
 namespace {
 
@@ -205,15 +204,5 @@ void bootscreen_end() {
     d_ = nullptr;
 }
 
-#else  // 5" panel: start-up keeps the classic splash + text summary
-
-void bootscreen_begin(DisplayDriver*, const char*) {}
-int bootscreen_row(const char*, BootState, const char*) { return -1; }
-void bootscreen_updateRow(int, BootState, const char*) {}
-void bootscreen_devices(const std::vector<CDevice*>&) {}
-void bootscreen_progress(float) {}
-void bootscreen_end() {}
-
-#endif
 
 }  // namespace hipi

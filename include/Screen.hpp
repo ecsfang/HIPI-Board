@@ -4,11 +4,11 @@
 // Ported from MicroPython to C++17.
 //
 // Original MicroPython code: J. Chilla, March 2026.
-// This port targets a C++ program driving an RA8875 LCD.
+// This port targets a C++ program driving the LT7683 LCD controller.
 //
 // Usage (sketch):
 //
-//   #include "display_config.h"   // selects RA8875 or LT7683 -- see its own comment
+//   #include "display_config.h"   // the DisplayDriver (LT7683)
 //   #include "Screen.hpp"
 //   hipi::MySpiTransport t;        // your platform-specific transport
 //   hipi::DisplayDriver  display(t);
@@ -99,7 +99,7 @@ public:
     }
 
     // Re-asserts the cursor's visibility/style/position. Call this after
-    // anything OUTSIDE Screen touches the shared RA8875 in a way that might
+    // anything OUTSIDE Screen touches the shared display chip in a way that might
     // have clobbered the cursor-visible bit in MWCR0 -- e.g. gfxMode()
     // (used internally by drawBitmap565()/drawBitmap332(), which the
     // button press-feedback redraw in pico_main.cpp calls directly on the
@@ -167,7 +167,7 @@ public:
     void up(bool roll = false, bool cmd = true);
     void down(bool cmd = true);
 
-    // Layer-2 helpers (the RA8875 is configured for 2 layers in begin()).
+    // Layer-2 helpers.
     // store()/recall() removed -- were BTE-based off-screen staging
     // helpers only used by the old inschar() implementation, which no
     // longer needs them (see its own comment in Screen.cpp).
@@ -243,7 +243,7 @@ public:
     // shown, full panel width while it's hidden). Recomputes layout and
     // reflows existing text to the new width instead of clearing it --
     // same pattern as setColumns()/setTextSize(). Caller is responsible for
-    // also adjusting the RA8875's own active window to match (Screen has
+    // also adjusting the display's own active window to match (Screen has
     // no knowledge of where the button strip lives on screen).
     std::uint16_t textWidth() const { return textWidth_; }
     void setTextWidth(std::uint16_t w) {
@@ -254,12 +254,12 @@ public:
     }
 
     // Change the screen's own foreground text color (persisted -- survives
-    // a later full() redraw, unlike writing txtColor() on the RA8875
+    // a later full() redraw, unlike writing txtColor() on the display
     // directly, which full() will now override on every redraw).
     void setColor(std::uint16_t c) { color_ = c; d_->txtColor(color_, 0); }
 
     // Change the backlight duty cycle (0..255, straight through to the
-    // RA8875's PWM1 register -- see RA8875::brightness()).
+    // display driver -- see LT7683::brightness()).
     void setBrightness(std::uint8_t level) { brightness_ = level; d_->brightness(level); }
 
     // Change text size at runtime (0..3 -> built-in CGRAM modes). This

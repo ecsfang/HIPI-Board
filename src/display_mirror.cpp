@@ -2,9 +2,7 @@
 #define MODULE "MIRR"
 #include "display_mirror.h"
 #include "mirror_encoder.hpp"
-#ifdef DISPLAY_7INCH
 #include "mirror_session.hpp"
-#endif
 #include "usb_serial.h"
 #include "ff.h"
 #include "tusb.h"
@@ -329,14 +327,12 @@ State state_ = State::Off;
 [[maybe_unused]] bool toldOff_ = false;      // "mirror is off" already logged for this viewer
 [[maybe_unused]] bool viewerSeen_ = false;   // hipiview has asked on this connection
 
-#ifdef DISPLAY_7INCH
 mirror::Session session_(encoder_);
-#endif
 
 }  // namespace
 
 // ── MirrorTransport ─────────────────────────────────────────────────────
-MirrorTransport::MirrorTransport(RA8875Transport& inner) : inner_(inner) {}
+MirrorTransport::MirrorTransport(DisplayTransport& inner) : inner_(inner) {}
 
 void MirrorTransport::csLow() { encoder_.onCsLow(); inner_.csLow(); }
 void MirrorTransport::csHigh() { inner_.csHigh(); encoder_.onCsHigh(); }
@@ -352,13 +348,9 @@ void displayMirror_init(DisplayDriver* display) { display_ = display; }
 
 void displayMirror_addLayer(std::uint32_t addr, std::uint32_t rowBytes, std::uint32_t rowStep,
                             std::uint16_t rows, std::uint32_t assetId) {
-#ifdef DISPLAY_7INCH
     mirror::Layer l;
     l.addr = addr; l.rowBytes = rowBytes; l.rowStep = rowStep; l.rows = rows; l.assetId = assetId;
     session_.addLayer(l);
-#else
-    (void)addr; (void)rowBytes; (void)rowStep; (void)rows; (void)assetId;
-#endif
 }
 
 std::uint32_t displayMirror_fileAssetId(const char* path, std::uint32_t salt) {
@@ -401,7 +393,7 @@ void displayMirror_setInputHandlers(MirrorTouchHandler touch, MirrorButtonHandle
 
 void displayMirror_goodbye(std::uint32_t ms) {
     const absolute_time_t until = make_timeout_time_ms(ms);
-#if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+#if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
     if (state_ != State::Off && encoder_.enabled()) {
         const std::uint8_t bye = mirror::kBye;
         encoder_.emit(&bye, 1);
@@ -429,7 +421,7 @@ void displayMirror_poll() {
 }
 
 static void pollMirror() {
-#if defined(DISPLAY_7INCH) && HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+#if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
     if (display_ == nullptr) return;
     // Ends a running session: no more mirroring, the buffers go back
     auto endSession = [](const char* why) {

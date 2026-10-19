@@ -7,7 +7,7 @@
  *                          (0: the three ports as before)
  *   HIPI_MIRROR_TRANSPORT  the display's SPI traffic passed through the
  *                          mirror encoder (0: straight to the display)
- * Mirroring needs both; the 5" build never mirrors (only the port exists).
+ * Mirroring needs both.
  */
 #ifndef HIPI_FEATURES_H
 #define HIPI_FEATURES_H

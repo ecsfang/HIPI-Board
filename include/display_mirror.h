@@ -22,7 +22,7 @@
 // second); after that the session is restarted from scratch.
 #pragma once
 #include "display_config.h"
-#include "RA8875Transport.hpp"
+#include "DisplayTransport.hpp"
 #include "hipi_features.h"      // HIPI_MIRROR_PORT / HIPI_MIRROR_TRANSPORT
 #include <cstdint>
 #include <functional>
@@ -30,9 +30,9 @@
 namespace hipi {
 
 // Wraps the real transport; give this to the display driver instead
-class MirrorTransport : public RA8875Transport {
+class MirrorTransport : public DisplayTransport {
 public:
-    explicit MirrorTransport(RA8875Transport& inner);
+    explicit MirrorTransport(DisplayTransport& inner);
 
     void csLow() override;
     void csHigh() override;
@@ -43,7 +43,7 @@ public:
     void delayUs(std::uint32_t us) override { inner_.delayUs(us); }
 
 private:
-    RA8875Transport& inner_;
+    DisplayTransport& inner_;
 };
 
 // The display the mirror reads back from (once, after the display is up)
