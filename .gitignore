@@ -99,6 +99,8 @@ tools/hipiview/*_test
 tools/hipiview/link_sim
 tools/hipiview/*.png
 tools/hipiview/*.hvlog
+# printer_view_test's saved printout (printer_view_printout.bmp)
+tools/hipiview/*.bmp
 tools/hipiview/*.mp4
 tools/hipiview/demo_sd/
 
