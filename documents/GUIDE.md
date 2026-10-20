@@ -438,7 +438,10 @@ pass, so HP-IL isn't held up. *Goose* -- flocks of 1..5 of the HP-41 font's goos
 five sizes (`kSaverGoose40` .. `kSaverGoose112`, `src/saver_font_goose*.cpp`),
 flying left to right at random heights (non-overlapping bands) and speeds;
 a new group of 1..5 every 0.4..2.5 s while there's room (up to 8 at once). Clipped at the screen edges with
-`drawBitmap565Cropped()`. *Random* (`SaverRandom`) picks one of `kRandomAnims[]` (`saver_anim.h` --
+a BTE copy (`copyLayerRegion()`) from the display's SDRAM: the five
+pictures are drawn once side by side into `LT7683::kGooseAddr` (~48 kB of
+display memory, told to the mirror with `displayMirror_addLayer()`), none
+in the MCU's RAM (they used to keep 36 kB). PC test: `saver_test`. *Random* (`SaverRandom`) picks one of `kRandomAnims[]` (`saver_anim.h` --
 add new animations there) and Dark/LCD at random each time. In Clock mode
 without a usable RTC,
 `clock_fallback` (Settings → Screen saver → No clock) picks one of them, or Dim.
@@ -448,7 +451,10 @@ cursor (`analyzer_nextFrame()`) and keeps one record per address: AAD passing
 HIPI gives the addresses before HIPI (in-1), HIPI's range and, within it,
 the PC side of PILBOX (addresses that aren't HIPI devices); TAD/LAD to
 other addresses add devices after HIPI; SAI/SDI/SST answers fill in type,
-ID and status. The layout (`layout()`) spreads the cards evenly over the
+ID and status. A device ID is kept on ETO/ETE -- or when the talker
+changes (TAD/UNT, `endTalk()`): a device after HIPI ends with an ETO that
+goes on to the controller without passing HIPI. A device before HIPI
+answers before HIPI sees the question, so its type and ID stay unknown. The layout (`layout()`) spreads the cards evenly over the
 ring's top, right and bottom sides and picks full cards (<= 8), compact
 cards (<= 16) or tiles (<= 30). Taps go to `loopmap_tap()` before the corner
 checks in `boardui_handleTap()`. Talker and listeners are framed (green /
@@ -531,7 +537,16 @@ ink at the live position. `printout_delete()` removes both files.
 view's menu): the LIF directory only (header, then entries up to the end
 mark) becomes extents; a cassette gets its 2 tracks as rings, anything else
 8 rings of `total/8` blocks, at most 400 steps a ring, each step showing the
-most important kind in it (`kPriority`). Arcs are drawn as triangles
+most important kind in it (`kPriority`). File types come from
+`include/lif_types.h` (also used by `lif_info.hpp`, the cassette's
+contents, and through it the demo's DIR) (`kLifTypes`, lifutils' list plus the HP-41's ASCII
+and buffer files): name, description, machine (`LifMachine`), sort
+(`LifSort`), secure/private. A step keeps both its kind and its machine
+(`kinds_`, `machines_`); the card shows BY TYPE or BY MACHINE
+(`byMachine_`, a tap on a tab) and a tap on a row highlights one group
+(`highlight_`, the rest `kDim`). Runs in a ring are cut where kind or
+machine changes (`sameRun()`) -- the same in every mode, so a ring redrawn
+in other colours covers exactly the same pixels. Arcs are drawn as triangles
 (`fillArc()`). The drive is reached through `mediamap_setSource()`
 (pico_main.cpp): `CDrive::headBlock()/lastOp()/blocksWritten()` and
 `CDrive::peekBlock()`, which reads through the drive's own open file and
@@ -593,6 +608,14 @@ gets the full width. **Touch anywhere in the right-hand edge area** to show
 it. That first touch only reveals the strip — it does not press anything.
 The strip hides again after 5 seconds of inactivity (it stays visible while
 a menu is open).
+
+The strip's picture is `kButtonsImage` (built in, `src/buttons_image.cpp`,
+480 rows), stretched to 600 rows into its PIP-2 layer once at start-up. A
+pressed button is drawn again straight from that image in flash, row by
+row (`redrawButtonRegion()`) -- there is no copy in RAM (a stretched copy
+used to keep 144 kB of the heap, and with the demo, the display mirror
+and the printer in use HIPI ran out of memory: *"Out of memory"* in the
+crash log).
 
 ```
  ┌──────┐
@@ -1054,7 +1077,28 @@ name on the label and lets the reels turn (`plotterview_setDemoTape()`);
 on the media map through `mediamap_setDemoSource()` (its blocks read with
 FatFs, a made-up head reading the directory and then the whole medium) and
 `mediamap_clearDemoSource()` puts the drive's source back (also in
-`restore()`). `paperPullUp()` pulls the printer's paper to the tear-off
+`restore()`). Steps that "touch" things are built with `acts()` (calls at
+set times): `createMedia()` works CREATE MEDIA through `DemoHooks`
+(`UiDialog::demoShowCreateMedia()`, `demoCreateMediaControl()` -- never
+Create --, `demoCreateMediaKey()`, `demoHideCreateMedia()`, also in
+`restore()`); `machineMap()` shows a made-up HP 9114B disk on the media map
+(`demoDiskBlock()` builds its header and directory when read, nothing is
+kept) and touches it with `mediamap_tabPoint()` / `mediamap_rowPoint()` /
+`mediamap_blockPoint()`; the loop map's plotter card is touched through
+`loopmap_cardPoint()`; the hardware test page gets `hwtest_demoRun()`
+(Chase and Run) and `hwtest_showScan()`. The Fit plot is
+`demo::hpglFunctionAxes()` (short PD pieces, 1 character per 15 ms) and
+then `hpglFunctionCurves()`. `digitizePoint()` plays a person digitizing after `DP;`
+(the plot in Fit; growing out of the view refits with 15 % room, `fitMargin_`, so a plot drawn in small pieces isn't redrawn whole at every piece): timed calls to
+`plotterview_digitizeTap()` / `plotterview_digitizeRelease()` -- a touch
+beside SIN(X)/X's top (`plotterview_plotToScreen()` of
+`demo::kFunctionPeakX/Y`), left and up tapped -- never held: a held
+arrow repeats in real time while the demo's time stands still for
+hipiview, so the marker would run on --, ENTER (the controls from
+`plotterview_digitizeControl()`); then
+`demo::hpglDigitizedMark()` circles the point the plotter got. A real
+touch stops the demo, and `restore()`'s `plotterview_clearPlotter()`
+ends a digitizing left waiting. `paperPullUp()` pulls the printer's paper to the tear-off
 edge (`plotterview_paperScrollBy(-1)`), then `plotterview_tearOff()`. The
 clock gets its own turn when `clock_available()` (RTC fitted and set); the
 screen saver at the end alternates goose and rain. `session()` sends a made-up
@@ -1062,7 +1106,15 @@ HP-41 session through HIPI's own devices with `hipi_simFrame()` (the same
 path as a real frame, minus PILBOX and the PIO; the analyzer captures it,
 so the analyzer and the loop map show it) -- the devices' addresses are
 saved first and put back when the demo stops. `lightShow()` uses
-`hwtest_io.h`.
+`hwtest_io.h`. The made-up loop is `demo::fakeLoopRound()` /
+`demo::fakeSessionActs()` (`demo_content.cpp`): HIPI's devices through
+`hipi_simFrame(frame, pcDevices)` -- the PC's made-up devices behind PILBOX
+run after them and their answers leave HIPI, as with a real PILBOX --
+and three made-up devices after HIPI (`SimDev`: an address, SAI/SDI/SST/
+SDA answered a byte per round). `loopmap_test` runs it against the real
+loop map (`loopmap_6_demo.png`). `demo::printLines()` is the printout
+(column-mode bytes stay below 0x80 -- the printer's escape codes start
+above).
 
 Stopping (`demo_stop()`): any touch, swipe or hipiview button
 (boardui.cpp), or a real non-idle HP-IL frame (`demo_hpilActivity()` from
@@ -1133,7 +1185,10 @@ register level, so new drawing code needs nothing extra to be mirrored.
   MRWDP (memory) reads. Status reads and other register reads are not sent.
 - USB loses a packet now and then, so the link is reliable. Packets go in
   numbered frames of at most 512 bytes (`0xA5 0x5A sid len pos crc`) into
-  a 32 kB ring buffer. A frame stays there until hipiview acknowledges it
+  a 32 kB ring buffer. The ring and the encoder's 8 kB of packet buffers
+  are allocated when the first viewer connects and then kept: a viewer
+  that falls behind starts a new session again and again, and freeing and
+  taking them each time cut the heap into pieces. A frame stays there until hipiview acknowledges it
   ('K'). hipiview asks for a resend from where something went missing
   ('N'). With no acknowledgement for 300 ms, HIPI sends again from the last
   acknowledged frame, which covers a lost last frame.
@@ -1148,11 +1203,16 @@ register level, so new drawing code needs nothing extra to be mirrored.
   which would stall its main loop against a port nobody reads
   (`./link_sim 0.01 20 stall` tests this). When idle, HIPI sends an empty
   frame every second; hipiview acknowledges it, and asks for a new session
-  if it hears nothing for 3.5 s.
+  if it hears nothing for 3.5 s -- and after 5 s in any case: a session that
+  was busy from its start (the demo running) has shown no empty frame yet,
+  and when HIPI ended it (the link fell behind: "ring full" in the log) the
+  viewer used to wait for ever (`Link::silent()` in `deframer.hpp`,
+  `make deframer_test`). `./link_sim 0.02 16 burst` draws more than the link
+  can carry on a link that loses many packets meanwhile.
 - The setting **Settings → Screen → Mirror to PC** (`display_mirror=off|view|control`,
   off by default, `displayMirror_setMode()`) gates it all: off, requests
-  are ignored (one log line) and a running session ends at once, freeing its
-  buffers. Switched on again while the viewer is still connected, a session
+  are ignored (one log line) and a running session ends at once (its
+  buffers are kept, see above). Switched on again while the viewer is still connected, a session
   starts by itself with the picture ids from the viewer's last request.
 - **Control:** the viewer also sends input -- `'T' sid x y state` (the mouse
   as a finger, panel pixels) and `'B' sid code state` (a button; see
@@ -1563,3 +1623,5 @@ redrawn completely when the user switches back to it.
 | Files copied from the PC not visible | Select **Disconnect from PC** and eject on the PC before using the drive again |
 | Build fails after editing `CMakeLists.txt` | Delete `build/` and configure again |
 | `RP2350` drive does not appear | Use a USB cable that carries data, and hold BOOTSEL *while* connecting |
+| HIPI restarted by itself; the log at start-up says *HIPI CRASHED last time* | A HardFault was caught (`src/crashlog.cpp`): the log gives PC, LR, the fault registers and how deep the stack went. Look the addresses up in the `.elf` of that same build: `arm-none-eabi-addr2line -f -C -e build/hipi_7_pico.elf 0x...` (PC = where it happened, LR = who called) |
+| *Stack: N bytes deep* in the log | The main stack (core 0) has 2 kB of its own; below it lie core 1's unused stack and scratch RAM, 8 kB before the heap. `crashlog_init()` fills that with a pattern and `crashlog_poll()` logs each new depth past 2 kB |

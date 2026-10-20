@@ -1,7 +1,10 @@
 // mediamap.h -- the Media map view: what's on the drive's cassette or
 // disk, drawn as rings, coloured by what is stored where -- programs,
-// data, text, status/keys, other, deleted (space only PACK gives back),
-// free, the directory and the volume label.
+// data, text, status/keys, ROM/LEX, other, deleted (space only PACK gives
+// back), free, the directory and the volume label (BY TYPE), or by the
+// machine a file is for: HP-41, HP-71, HP-75, any (BY MACHINE). The file
+// types are include/lif_types.h's. A tap on a row of the card highlights
+// that group in the rings (the rest dimmed); a tap on a tab switches.
 //
 //   cassette   two rings: its two tracks, outer = track 0, one step per
 //              record (exact)
@@ -56,8 +59,17 @@ void mediamap_poll(std::uint32_t nowMs);
 enum class MediaMapTap { None, Handled, Close };
 MediaMapTap mediamap_tap(int x, int y);
 
-// For the tests: kinds counted (blocks), see mediamap.cpp's Kind
-std::uint32_t mediamap_blocksOf(int kind);
+// Where to touch (the demo, demo.h): a tab of the card, a row of it, the
+// ring step holding a block -- screen pixels; false: not there
+void mediamap_tabPoint(bool machine, int& x, int& y);
+bool mediamap_rowPoint(int row, int& x, int& y);
+bool mediamap_blockPoint(std::uint32_t block, int& x, int& y);
+
+// For the tests: blocks of a group (see mediamap.cpp's Group: 0..9 the
+// kinds, 10..14 the machines), the card shown, the highlighted group
+std::uint32_t mediamap_blocksOf(int group);
 int mediamap_rings();
+bool mediamap_byMachine();
+int mediamap_highlight();
 
 }  // namespace hipi

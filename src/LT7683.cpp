@@ -449,7 +449,7 @@ void LT7683::BTE(std::uint8_t opcode,
 // This function sidesteps the address-collision risk entirely by using
 // BTE's own "MCU Write with ROP" mode (opcode 0000b) instead of "Memory
 // Copy" (0010b): the real pixel data streams directly from MCU RAM (this
-// project's own buttonStripPixels, exactly like drawBitmap565Cropped()
+// project's button strip (kButtonsImage), exactly like drawBitmap565Cropped()
 // already does over plain MRWDP) rather than needing to be pre-loaded
 // into a second SDRAM layer first. S1 still needs a valid, distinct
 // address (see point 1 above) even though ROP 0xC ("DT = S0") means its

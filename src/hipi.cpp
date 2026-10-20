@@ -187,7 +187,7 @@ void hipi_init()
     }
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
-    plotter = new CPlotter("HP7470A"); //TFPLOT");
+    plotter = new CPlotter("TFPLOT");
     devices.push_back(plotter);
     // SAI 0x3E matches pyILPER's cls_pilterminal exactly (a real, working
     // reference implementation) -- see terminal.h's constructor comment
@@ -570,7 +570,7 @@ static void conArrived(HpIlLoop& loop, IL_CMD_t f, int depth, IL_CMD_t sent) {
     if (next != NO_FRAME && depth < 6) conInject(loop, next, depth);
 }
 
-IL_CMD_t hipi_simFrame(IL_CMD_t frame) {
+IL_CMD_t hipi_simFrame(IL_CMD_t frame, IL_CMD_t (*pcDevices)(IL_CMD_t)) {
     const IL_CMD_t arrived = frame;
     bool absorbed = false;
     for (CDevice* dev : devices) {
@@ -579,6 +579,7 @@ IL_CMD_t hipi_simFrame(IL_CMD_t frame) {
         if (rtn == IL_NO_FRAME) { absorbed = true; break; }
         frame = rtn;
     }
+    if (!absorbed && pcDevices != nullptr) frame = pcDevices(frame);
 #if HIPI_ANALYZER
     hipi::analyzer_capture(arrived, absorbed ? static_cast<IL_CMD_t>(IL_NO_FRAME) : frame);
 #else

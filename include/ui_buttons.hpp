@@ -69,19 +69,22 @@ inline Button hitTestButton(std::uint16_t x, std::uint16_t y,
 //                            (so button screen-coordinates can be mapped
 //                            back into the cached bitmap's local coordinates)
 //   margin                -- expands the redrawn rect by this many pixels on
-//                            every side (still sourced from the strip cache,
+//                            every side (still drawn from buttons.bmp in flash,
 //                            so the extra pixels are genuine surrounding
 //                            background, not guesswork). Use a margin >=
 //                            your largest press-shift on the "restore to
 //                            normal" calls, so any overflow from a shifted
 //                            press -- in any direction -- gets cleaned up.
+// srcImage: the strip as stored (buttons.bmp in flash, srcHeight rows of
+// stripWidth); it is drawn stretched to stripHeight, row by row -- no
+// RAM copy (a scaled copy of the strip used to take 144 kB of the heap)
 inline void redrawButtonRegion(DisplayDriver* display,
-                               const std::uint16_t* stripPixels,
+                               const std::uint16_t* srcImage, std::uint16_t srcHeight,
                                std::uint16_t stripWidth, std::uint16_t stripHeight,
                                std::uint16_t stripScreenX0, std::uint16_t stripScreenY0,
                                Button b, std::int16_t dx, std::int16_t dy,
                                std::int16_t margin = 0) {
-    if (!stripPixels) return;
+    if (!srcImage || srcHeight == 0) return;
     for (const auto& r : kButtonRects) {
         if (r.id != b) continue;
 
@@ -122,12 +125,15 @@ inline void redrawButtonRegion(DisplayDriver* display,
         // is exactly what's needed here (stripWidth vs this button's own
         // narrower w) -- one call, letting its own internal row loop
         // handle everything.
-        const std::uint16_t* src = stripPixels + static_cast<std::size_t>(localY0) * stripWidth + localX0;
-        display->drawBitmap565Cropped(
-            static_cast<std::int16_t>(stripScreenX0 + r.x0 - margin + dx),
-            static_cast<std::int16_t>(stripScreenY0 + sy0 - margin + dy),
-            static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(h),
-            stripWidth, src);
+        // Row by row: each screen row from its (nearest) source row
+        for (int j = 0; j < h; ++j) {
+            const std::uint32_t srcY = (static_cast<std::uint32_t>(localY0 + j) * srcHeight) / stripHeight;
+            const std::uint16_t* src = srcImage + static_cast<std::size_t>(srcY) * stripWidth + localX0;
+            display->drawBitmap565Cropped(
+                static_cast<std::int16_t>(stripScreenX0 + r.x0 - margin + dx),
+                static_cast<std::int16_t>(stripScreenY0 + sy0 - margin + dy + j),
+                static_cast<std::uint16_t>(w), 1, stripWidth, src);
+        }
         return;
     }
 }
@@ -136,7 +142,7 @@ inline void redrawButtonRegion(DisplayDriver* display,
 //
 // Drawn directly as filled circles (via fillRoundRect() with
 // radius == half the bounding box, which produces a true circle) rather
-// than being part of the cached button-strip bitmap -- so they can be
+// than being part of the button-strip bitmap -- so they can be
 // toggled from code at any time, independent of touch interaction.
 // resources/buttons.bmp already bakes in the "off" (black) state plus a
 // dark bezel and the "USB"/"PIL" labels; setStatusLed() only needs to

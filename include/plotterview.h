@@ -269,6 +269,9 @@ bool plotterview_digitizeButton(int code, bool repeat);
 // 4 ENTER, 5 X) and the marker, in screen pixels
 bool plotterview_digitizeControl(int id, int& x, int& y);
 void plotterview_digitizeMarker(int& x, int& y);
+// Where a plotter point is on the screen, as the Plotter view draws it now
+// (Page or Fit, narrowed while digitizing) -- the demo's "touch"
+void plotterview_plotToScreen(int px, int py, int& x, int& y);
 
 // Returns which Tape hotspot (if any) contains the given screen point.
 // Always TapeHotspot::None unless the Tape view is showing and its

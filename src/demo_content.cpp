@@ -1,5 +1,6 @@
 // demo_content.cpp -- see demo_content.h
 #include "demo_content.h"
+#include "hpil.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -148,7 +149,20 @@ std::string textDir(const std::string& file, const std::vector<std::string>& lif
             continue;
         }
         if (l.empty() || n >= 11) break;
-        s += l.substr(0, 23) + "\r\n";
+        // lifDescribe()'s columns (name 0..9, type 11..20, size 21..28)
+        // narrowed to the display: the type's first word, 6 wide ("BAS71"
+        // of "BAS71 (SP)"), the size 5 wide
+        auto trim = [](std::string t) {
+            while (!t.empty() && t.front() == ' ') t.erase(t.begin());
+            while (!t.empty() && t.back() == ' ') t.pop_back();
+            return t;
+        };
+        std::string type = trim(l.size() > 11 ? l.substr(11, 10) : "");
+        type = type.substr(0, std::min<std::size_t>(type.find(' '), 6));
+        const std::string size = trim(l.size() > 21 ? l.substr(21, 8) : "");
+        char row[40];
+        std::snprintf(row, sizeof(row), "%-10.10s %-6s %5.5s", l.substr(0, 10).c_str(), type.c_str(), size.c_str());
+        s += std::string(row) + "\r\n";
         ++n;
     }
     if (!table) s += "(NOT A LIF CASSETTE)\r\n";
@@ -231,29 +245,44 @@ std::string hpglSpirograph() {
     return g;
 }
 
-std::string hpglFunctionPlot() {
+namespace {
+constexpr int kFox = 1200, kFoy = 3879, kFx1 = 9800, kFyTop = 6900, kFyBot = 860, kFamp = 2800;
+}
+
+std::string hpglFunctionAxes() {
     std::string g = "IN;";
-    const int ox = 1200, oy = 3879, x1 = 9800, yTop = 6900, yBot = 860;
-    const int amp = 2800;
     pen(g, 1);
-    // Axes with ticks and numbers
-    poly(g, { { ox, yBot }, { ox, yTop } });
-    poly(g, { { ox, oy }, { x1, oy } });
+    // From the origin out, a short piece at a time: up, down, right
+    auto piecewise = [&g](int x0, int y0, int x1, int y1, int pieces) {
+        pu(g, x0, y0);
+        for (int i = 1; i <= pieces; ++i) pd(g, x0 + (x1 - x0) * i / pieces, y0 + (y1 - y0) * i / pieces);
+    };
+    piecewise(kFox, kFoy, kFox, kFyTop, 10);
+    piecewise(kFox, kFoy, kFox, kFyBot, 10);
+    piecewise(kFox, kFoy, kFx1, kFoy, 24);
+    g += "PU;";
+    return g;
+}
+
+std::string hpglFunctionCurves() {
+    std::string g;
+    pen(g, 1);
+    // Ticks and numbers
     g += "TL1.5,1.5;";
     for (int i = 0; i <= 8; ++i) {
-        const int x = ox + (x1 - ox) * i / 8;
-        pu(g, x, oy);
+        const int x = kFox + (kFx1 - kFox) * i / 8;
+        pu(g, x, kFoy);
         g += "XT;";
-        if (i > 0 && i % 2 == 0) label(g, x - 160, oy - 330, 0.25, 0.35, std::to_string(i * 2) + "pi");
+        if (i > 0 && i % 2 == 0) label(g, x - 160, kFoy - 330, 0.25, 0.35, std::to_string(i * 2) + "pi");
     }
     for (int i = -2; i <= 2; ++i) {
-        const int y = oy + amp * i / 2;
-        pu(g, ox, y);
+        const int y = kFoy + kFamp * i / 2;
+        pu(g, kFox, y);
         g += "YT;";
         if (i != 0) {
             char b[8];
             std::snprintf(b, sizeof(b), "%.1f", i / 2.0);
-            label(g, ox - 600, y - 70, 0.25, 0.35, b);
+            label(g, kFox - 600, y - 70, 0.25, 0.35, b);
         }
     }
     // sin(x)/x and a damped cosine
@@ -261,9 +290,9 @@ std::string hpglFunctionPlot() {
     for (int i = 0; i <= 320; ++i) {
         const double x = 16 * kPi * i / 320.0;
         const double sx = i == 0 ? 1.0 : std::sin(x) / x;
-        const int px = ox + (x1 - ox) * i / 320;
-        a.push_back({ px, oy + static_cast<int>(std::lround(amp * sx)) });
-        b.push_back({ px, oy + static_cast<int>(std::lround(amp * 0.9 * std::exp(-x / 18) * std::cos(x))) });
+        const int px = kFox + (kFx1 - kFox) * i / 320;
+        a.push_back({ px, kFoy + static_cast<int>(std::lround(kFamp * sx)) });
+        b.push_back({ px, kFoy + static_cast<int>(std::lround(kFamp * 0.9 * std::exp(-x / 18) * std::cos(x))) });
     }
     pen(g, 2);
     poly(g, a);
@@ -275,6 +304,20 @@ std::string hpglFunctionPlot() {
     label(g, 5200, 6050, 0.3, 0.45, "0.9 EXP(-X/18) COS(X)");
     pen(g, 1);
     label(g, 1300, 7050, 0.4, 0.6, "FUNCTION PLOT");
+    g += "PU;SP0;";
+    return g;
+}
+
+std::string hpglFunctionPlot() { return hpglFunctionAxes() + hpglFunctionCurves(); }
+
+std::string hpglDigitizedMark(int x, int y) {
+    std::string g;
+    pen(g, 4);
+    pu(g, x, y);
+    g += "CI120;";
+    char b[40];
+    std::snprintf(b, sizeof(b), "DP %d,%d", x, y);
+    label(g, x + 200, y - 60, 0.25, 0.35, b);
     g += "PU;SP0;";
     return g;
 }
@@ -331,16 +374,114 @@ std::string hpglLoop() {
     return g;
 }
 
+// ── A made-up HP-IL loop ────────────────────────────────────────────────
+
+namespace {
+
+struct SimDev {
+    SimDev(const char* i, std::uint8_t a, const char* d) : id(i), aid(a), data(d) {}
+    const char* id;
+    std::uint8_t aid;
+    const char* data;          // what it sends for SDA
+    int addr = 0;
+    bool talker = false;
+    std::string out;           // being sent (one byte per round)
+    std::size_t pos = 0;
+};
+// (Accessory IDs: the class in the high nibble -- 1x mass storage, 2x
+// printer, 3x display, 4x interface, 5x instrument, 6x graphics)
+SimDev simPc_[] = { { "HP9114B", 0x10, "" }, { "HP2225B", 0x20, "" }, { "PYILPER", 0x30, "" } };
+SimDev simAfter_[] = { { "HP3468A", 0x52, "+1.23456E+0\r\n" }, { "HP82164A", 0x40, "" },
+                       { "HP7470A", 0x60, "" } };
+
+IL_CMD_t simDevice(SimDev& d, IL_CMD_t f) {
+    if (f == AAU || f == IFC) { if (f == AAU) d.addr = 0; d.talker = false; d.out.clear(); return f; }
+    if (f > AAD && f < AAD + 31) {
+        if (d.addr != 0) return f;
+        d.addr = static_cast<int>(f - AAD);
+        return static_cast<IL_CMD_t>(f + 1);
+    }
+    if (f >= TAD && f < TAD + 31) { d.talker = static_cast<int>(f - TAD) == d.addr; d.out.clear(); return f; }
+    if (f == UNT) { d.talker = false; d.out.clear(); return f; }
+    if (!d.talker) return f;
+    auto send = [&d](const std::string& what) -> IL_CMD_t {
+        d.out = what;
+        d.pos = 1;
+        return static_cast<IL_CMD_t>(static_cast<std::uint8_t>(what[0]));
+    };
+    if (f == SAI) return send(std::string(1, static_cast<char>(d.aid)));
+    if (f == SDI) return send(std::string(d.id) + "\r\n");
+    if (f == SST) return send(std::string(1, '\0'));
+    if (f == SDA && d.data[0]) return send(d.data);
+    // Our byte came round: the next one, or the end
+    if (IS_DATA(f) && !d.out.empty()) {
+        if (d.pos < d.out.size()) return static_cast<IL_CMD_t>(static_cast<std::uint8_t>(d.out[d.pos++]));
+        d.out.clear();
+        return ETO;
+    }
+    return f;
+}
+
+unsigned short simPcDevices(unsigned short f) {
+    for (SimDev& d : simPc_) f = simDevice(d, f);
+    return f;
+}
+
+}  // namespace
+
+unsigned short fakeLoopRound(unsigned short f, HipiRound hipi) {
+    f = hipi(f, simPcDevices);
+    if (f == IL_NO_FRAME) return f;
+    for (SimDev& d : simAfter_) f = simDevice(d, f);
+    return f;
+}
+
+std::vector<LoopAct> fakeSessionActs(int n, int displayAddr, int printerAddr) {
+    std::vector<LoopAct> acts;
+    auto ask = [&acts](int a, IL_CMD_t what) {
+        acts.push_back({ static_cast<IL_CMD_t>(TAD + a), false });
+        acts.push_back({ what, true });
+        acts.push_back({ UNT, false });
+    };
+    auto text = [&acts](int a, const char* t) {
+        acts.push_back({ static_cast<IL_CMD_t>(LAD + a), false });
+        for (const char* p = t; *p; ++p) acts.push_back({ static_cast<IL_CMD_t>(static_cast<std::uint8_t>(*p)), false });
+        acts.push_back({ UNL, false });
+    };
+    for (int a = 1; a <= n && a <= 30; ++a) { ask(a, SAI); ask(a, SDI); }
+    if (displayAddr > 0) {
+        text(displayAddr, "HELLO FROM THE HP-41\r\n");
+        text(displayAddr, "LOOP: HIPI, PILBOX, 3 MORE\r\n");
+    }
+    if (printerAddr > 0) text(printerAddr, "HP-IL DEMO\r");
+    for (int a = 1; a <= n && a <= 30; a += 3) ask(a, SST);
+    for (const SimDev& d : simAfter_)
+        if (d.data[0] && d.addr > 0) ask(d.addr, SDA);
+    return acts;
+}
+
 // ── Printer ─────────────────────────────────────────────────────────────
 
 std::vector<std::string> printLines() {
     std::vector<std::string> v;
     v.push_back("\x1b|" "\xD4" "HIPI DEMO" "\r" "\xD0");      // 8-bit mode; double wide
     v.push_back("\xD1" "HP 82162A PRINTER" "\r" "\xD0");      // lower case
-    v.push_back("01*LBL \"DEMO\"\r");
-    v.push_back("02 FIX 4\r");
-    v.push_back("03 PI\r");
-    v.push_back("04 PRX\r");
+    v.push_back(" \r");                                      // (an empty line: a space)
+    // A program listing, as PRP prints it
+    for (const char* l : { "01*LBL \"SINTAB\"", "02 DEG", "03 FIX 4", "04 0", "05 STO 00",
+                           "06*LBL 01", "07 RCL 00", "08 SIN", "09 RCL 00", "10 ACX", "11 X<>Y",
+                           "12 ACX", "13 PRBUF", "14 15", "15 ST+ 00", "16 90", "17 RCL 00",
+                           "18 X<=Y?", "19 GTO 01", "20 END" })
+        v.push_back(std::string(l) + "\r");
+    v.push_back(" \r");
+    // ... and what it prints: a table, numbers right justified
+    v.push_back("\xD4" "SIN TABLE" "\r" "\xD0");
+    for (int deg = 0; deg <= 90; deg += 15) {
+        char b[32];
+        std::snprintf(b, sizeof(b), "%2d%22.4f\r", deg, std::sin(deg * kPi / 180.0));
+        v.push_back(b);
+    }
+    v.push_back(" \r");
     v.push_back("\xE8" "3.1416  ***\r" "\xE0");               // right justified (as PRX)
     std::string hp;
     for (int c = 0; c < 24; ++c) hp += static_cast<char>(c == 13 ? 'x' : c);   // the HP-41's own characters
@@ -351,6 +492,26 @@ std::vector<std::string> printLines() {
         gr += static_cast<char>(1 << static_cast<int>(y + 0.5));
     }
     v.push_back(gr + "\xD0" "\r");
+    // A bar chart three lines tall (21 dots), a column a dot wide, each bar
+    // under its year (3 characters = 21 columns). Column bytes stay below
+    // 0x80 -- higher ones are the printer's escape codes.
+    v.push_back(" \r");
+    v.push_back("SALES 1981-87\r");
+    const int heights[] = { 6, 9, 14, 11, 16, 19, 21 };
+    for (int line = 0; line < 3; ++line) {
+        std::string bars = "\xD2";
+        for (int col = 0; col < 168; ++col) {
+            const int b = col / 21;
+            const int h = b < 7 && col % 21 < 16 ? heights[b] : 0;
+            int byte = 0;
+            for (int dot = 0; dot < 7; ++dot)
+                if (line * 7 + dot >= 21 - h) byte |= 1 << dot;
+            bars += static_cast<char>(byte);
+        }
+        v.push_back(bars + "\xD0" "\r");
+    }
+    v.push_back("81 82 83 84 85 86 87\r");
+    v.push_back(" \r");
     v.push_back("\xD4" "THE END" "\r" "\xD0");
     return v;
 }

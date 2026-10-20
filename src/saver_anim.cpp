@@ -1,10 +1,12 @@
 #define MODULE "SAVER"
 #include "saver_anim.h"
+#include "display_mirror.h"
 #include "glyph_font.h"
 #include "analyzer.h"
 #include "config.hpp"
 #include "pico/time.h"
 #include "pico/rand.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -151,8 +153,12 @@ constexpr std::uint32_t kGooseFrameMs = 30;     // a goose moves at most this of
 constexpr int kGeesePerStep = 2;                // keeps each anim_step() short
 const char kGoose = static_cast<char>(0xFE);
 
-struct GooseImage { std::vector<std::uint16_t> pix; int w = 0, h = 0; };
-GooseImage images_[kGooseSizes];                // pre-rendered in the current style
+// Pre-rendered in the current style into the display's SDRAM
+// (LT7683::kGooseAddr): every size side by side, x = its column there.
+// (They were kept in the MCU's RAM before: 36 kB, for good.)
+struct GooseImage { int x = 0, w = 0, h = 0; };
+GooseImage images_[kGooseSizes];
+std::uint16_t gooseStride_ = 4;                  // pixels a row of the goose layer
 std::uint16_t gooseBg_ = 0;
 
 struct Goose {
@@ -175,22 +181,47 @@ void renderGooseImages() {
     gooseBg_ = lcd ? 0xBE35 : 0x0000;
     std::uint16_t palette[16];
     for (int a = 0; a < 16; ++a) palette[a] = mix(gooseBg_, fg, a);
+    // Where each goes in the layer, and the layer's size
+    int x = 0, maxH = 1;
     for (int s = 0; s < kGooseSizes; ++s) {
         const GlyphFont& f = *kGooseFonts[s];
         const GlyphFont::Glyph* g = f.find(kGoose);
         GooseImage& im = images_[s];
+        im.x = x;
         im.w = g ? g->width : 1;
         im.h = f.height;
-        im.pix.assign(static_cast<std::size_t>(im.w * im.h), gooseBg_);
-        if (g == nullptr) continue;
+        x += im.w;
+        maxH = std::max(maxH, im.h);
+    }
+    gooseStride_ = static_cast<std::uint16_t>((x + 3) & ~3);
+    if (static_cast<std::uint32_t>(gooseStride_) * 2u * static_cast<std::uint32_t>(maxH) > LT7683::kGooseMaxBytes) return;
+    // Drawn into it a row at a time (one small row buffer)
+    std::uint16_t row[128];
+    d_->beginLayerDraw(LT7683::kGooseAddr, gooseStride_);
+    d_->setActiveWindow(0, 0, static_cast<std::uint16_t>(gooseStride_ - 1), static_cast<std::uint16_t>(maxH - 1));
+    for (int s = 0; s < kGooseSizes; ++s) {
+        const GlyphFont& f = *kGooseFonts[s];
+        const GlyphFont::Glyph* g = f.find(kGoose);
+        const GooseImage& im = images_[s];
+        if (im.w > static_cast<int>(sizeof(row) / sizeof(row[0]))) continue;
         for (int r = 0; r < im.h; ++r) {
-            const std::uint8_t* src = f.data + g->offset + r * ((im.w + 1) / 2);
-            for (int i = 0; i < im.w; ++i) {
-                const std::uint8_t b = src[i / 2];
-                im.pix[static_cast<std::size_t>(r * im.w + i)] = palette[(i & 1) ? (b & 0x0F) : (b >> 4)];
+            for (int i = 0; i < im.w; ++i) row[i] = gooseBg_;
+            if (g != nullptr) {
+                const std::uint8_t* src = f.data + g->offset + r * ((im.w + 1) / 2);
+                for (int i = 0; i < im.w; ++i) {
+                    const std::uint8_t b = src[i / 2];
+                    row[i] = palette[(i & 1) ? (b & 0x0F) : (b >> 4)];
+                }
             }
+            d_->drawBitmap565(static_cast<std::int16_t>(im.x), static_cast<std::int16_t>(r),
+                              static_cast<std::uint16_t>(im.w), 1, row);
         }
     }
+    d_->endOverlayDraw();                        // canvas back to the live panel
+    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    // A PC viewer needs it too (its BTE copies come from there)
+    displayMirror_addLayer(LT7683::kGooseAddr, static_cast<std::uint32_t>(gooseStride_) * 2u * static_cast<std::uint32_t>(maxH),
+                           0, 1, 0);
 }
 
 // Draws the goose image with its left edge at x, clipped to the screen
@@ -198,9 +229,9 @@ void drawGooseAt(const GooseImage& im, int x, int y) {
     const int vx = x < 0 ? 0 : x;
     const int vr = (x + im.w > SCREEN_MAX_X) ? SCREEN_MAX_X : x + im.w;
     if (vr <= vx) return;
-    d_->drawBitmap565Cropped(static_cast<std::int16_t>(vx), static_cast<std::int16_t>(y),
-                             static_cast<std::uint16_t>(vr - vx), static_cast<std::uint16_t>(im.h),
-                             static_cast<std::uint16_t>(im.w), im.pix.data() + (vx - x));
+    d_->copyLayerRegion(LT7683::kGooseAddr, gooseStride_, static_cast<std::int16_t>(im.x + (vx - x)), 0,
+                        0, SCREEN_MAX_X, static_cast<std::int16_t>(vx), static_cast<std::int16_t>(y),
+                        static_cast<std::uint16_t>(vr - vx), static_cast<std::uint16_t>(im.h));
 }
 
 // Clears the columns [x0, x1) of a band, clipped to the screen

@@ -8,6 +8,10 @@ CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 SDL_CFLAGS := $(shell pkg-config --cflags sdl2)
 SDL_LIBS   := $(shell pkg-config --libs sdl2)
 
+# A plain "make" builds hipiview (without this, the first rule below --
+# the version header -- would be all it does)
+.DEFAULT_GOAL := hipiview
+
 SOURCES := hipiview.cpp lt7683_emu.cpp serial_port.cpp
 HEADERS := lt7683_emu.hpp deframer.hpp png.hpp input.hpp serial_port.hpp ../../include/mirror_protocol.h
 
@@ -80,7 +84,8 @@ demo_view_test: $(DEMO_SRC) ../../include/demo_content.h
 
 # The demo itself, a whole round in fake time -- saves demo_run_*.png
 RUN_SRC := test/demo_run_test.cpp ../../src/demo.cpp ../../src/display.cpp \
-           $(filter-out test/demo_view_test.cpp,$(DEMO_SRC))
+           $(filter-out test/demo_view_test.cpp,$(DEMO_SRC)) ../../src/media_create_ui.cpp \
+           ../../src/glyph_font.cpp ../../src/menu_font_title.cpp
 demo_run_test: $(RUN_SRC) ../../include/demo.h ../../include/demo_content.h $(wildcard test/pvstubs/*.h test/demostubs/*.hpp)
 	$(CXX) $(CXXFLAGS) -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(RUN_SRC) -o $@ -lz
 
@@ -107,17 +112,31 @@ plotter_test: $(PLOT_SRC) ../../include/plotter.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -I../../include $(PLOT_SRC) -o $@
 
 # The loop map, fed made-up HP-41 traffic -- saves loopmap_*.png
-LM_SRC := test/loopmap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/loopmap.cpp ../../src/device.cpp ../../src/hpil.cpp
+LM_SRC := test/loopmap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/loopmap.cpp ../../src/device.cpp ../../src/hpil.cpp \
+          ../../src/demo_content.cpp
 loopmap_test: $(LM_SRC) ../../include/loopmap.h $(wildcard test/lmstubs/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/lmstubs -Itest/pvstubs -I../../include $(LM_SRC) -o $@ -lz
 
 # The real-time clock chips (rtc.cpp, rtc_probe.cpp, the chip list's
 # entries) against made-up chips: DS3231, DS1307, PCF85063A, PCF8563
 RTC_SRC := test/rtc_test.cpp ../../src/rtc.cpp ../../src/rtc_probe.cpp ../../src/i2c_device.cpp ../../src/i2c_chips.cpp
+# The viewer's end of the mirror link: when HIPI counts as gone quiet
+deframer_test: test/deframer_test.cpp deframer.hpp ../../include/mirror_protocol.h
+	$(CXX) $(CXXFLAGS) test/deframer_test.cpp -o $@
+
+# The screen saver's geese, drawn from the display's SDRAM -- saves saver_geese.png
+SAVER_SRC := test/saver_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/saver_anim.cpp ../../src/glyph_font.cpp \
+             ../../src/saver_font_rain.cpp ../../src/saver_font_goose40.cpp ../../src/saver_font_goose56.cpp \
+             ../../src/saver_font_goose72.cpp ../../src/saver_font_goose92.cpp ../../src/saver_font_goose112.cpp
+saver_test: $(SAVER_SRC) ../../include/saver_anim.h $(wildcard test/saverstubs/*.h test/saverstubs/*/*.h)
+	$(CXX) $(CXXFLAGS) -Itest/saverstubs -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(SAVER_SRC) -o $@ -lz
+
 rtc_test: $(RTC_SRC) ../../include/rtc.h ../../include/rtc_probe.h ../../sdcard/i2c/chips.txt $(wildcard test/rtcstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/rtcstubs -I../../include $(RTC_SRC) -o $@
 
-test: host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test
+test: deframer_test saver_test host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test
+	./deframer_test
+	./saver_test
 	./host_test
 	./printer_view_test
 	./video80_view_test
@@ -136,7 +155,7 @@ install: hipiview
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog
+	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog
 
 .PHONY: test install clean windows
 

@@ -38,10 +38,14 @@ constexpr std::size_t kDumpBytesPerPoll = 8192;  // SDRAM read-back per main loo
 // missing ('N'). Positions are byte counts in the ring's own stream (they
 // only grow); the ring holds what's between `acked_` and `wr_`.
 //
-// Allocated when a session starts and freed when the viewer leaves, so
-// the mirror costs no RAM otherwise.
+// Allocated when the first session starts, so the mirror costs no RAM
+// until a viewer connects -- then kept (ringMem_): sessions that start over
+// and over (a viewer falling behind) would otherwise cut the heap into
+// pieces with every 32 kB freed and taken again. ring_ is set only while a
+// session runs.
 constexpr std::size_t kRingSize = 32 * 1024;
-std::uint8_t* ring_ = nullptr;
+std::uint8_t* ringMem_ = nullptr;   // allocated once, kept
+std::uint8_t* ring_ = nullptr;      // = ringMem_ while a session runs
 std::uint32_t wr_ = 0;      // written
 std::uint32_t sent_ = 0;    // handed to USB
 std::uint32_t acked_ = 0;   // acknowledged by the viewer
@@ -62,11 +66,12 @@ std::uint32_t ringFree() { return static_cast<std::uint32_t>(kRingSize) - (wr_ -
 }
 std::int64_t msSince(absolute_time_t t) { return absolute_time_diff_us(t, get_absolute_time()) / 1000; }
 [[maybe_unused]] bool ringAlloc() {
-    if (ring_ == nullptr) ring_ = new (std::nothrow) std::uint8_t[kRingSize];
+    if (ringMem_ == nullptr) ringMem_ = new (std::nothrow) std::uint8_t[kRingSize];
+    ring_ = ringMem_;
     ringClear();
     return ring_ != nullptr;
 }
-[[maybe_unused]] void ringFree_() { delete[] ring_; ring_ = nullptr; ringClear(); }
+[[maybe_unused]] void ringFree_() { ring_ = nullptr; ringClear(); }   // (the memory is kept)
 
 // Moves what the USB port can take now from the ring to it
 void pumpUsb() {
@@ -472,7 +477,11 @@ static void pollMirror() {
         const bool gone = !encoder_.enabled() ||
             (msSince(ringIdle_) > kViewerGoneMs && msSince(lastHeard_) > kViewerGoneMs);
         if (gone) {
-            endSession("the viewer stopped reading -- waiting until it asks again");
+            // (The encoder gives up when the ring stays full: more drawing
+            // than the link carried for a while -- the viewer may well be
+            // there, and asks again by itself: hipiview's Link::silent())
+            endSession(encoder_.enabled() ? "the viewer stopped reading -- waiting until it asks again"
+                                          : "the link fell behind (ring full) -- waiting until the viewer asks again");
             viewerSeen_ = false;
             return;
         }

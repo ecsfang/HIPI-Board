@@ -244,6 +244,8 @@ int main() {
     for (const auto& l : lines) all += l + "\n";
     check(all.find("GAMES2") != std::string::npos && all.find("2026-10-13") != std::string::npos,
           "lif_info reads it: label and date");
+    check(hipi::lifdetail::typeName(0xE080) == "PGM41" && hipi::lifdetail::typeName(0xE217) == "BAS71 (SP)" &&
+          hipi::lifdetail::typeName(0xE5A5) == "E5A5", "lif_info: type names from lif_types.h, unknown ones in hex");
     std::printf("%s", all.c_str());
 
     // No clock: an empty date

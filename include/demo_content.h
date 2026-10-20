@@ -26,7 +26,34 @@ std::string textDir(const std::string& file, const std::vector<std::string>& lif
 std::string hpglLogo(const std::uint16_t* logo, int w, int h);
 std::string hpglSpirograph();
 std::string hpglFunctionPlot();
+// ... in two parts: the axes, a short piece at a time from the origin out
+// (a Fit view grows with them), then ticks, numbers, curves and labels
+std::string hpglFunctionAxes();
+std::string hpglFunctionCurves();
 std::string hpglLoop();             // an HP-IL loop: controller and devices
+// The function plot's SIN(X)/X at x = 0 (its top): where the demo digitizes
+constexpr int kFunctionPeakX = 1200, kFunctionPeakY = 3879 + 2800;   // (as in hpglFunctionCurves())
+// The digitized point marked: a circle round it and its coordinates
+std::string hpglDigitizedMark(int x, int y);
+
+// ── A made-up HP-IL loop (analyzer, loop map) ───────────────────────────
+// HIPI's own devices, three of a PC program behind PILBOX, three after
+// HIPI -- made up (not every detail as a real loop would have
+// it: it's for showing). A device takes an address (AAD), and as talker
+// answers SAI, SDI, SST and SDA, a byte each time the last one came round.
+//
+// One frame from the controller once round the loop. hipi: HIPI's own
+// devices (hipi_simFrame(), which also shows the frame to the analyzer),
+// handed the PC's devices to run after them.
+using HipiRound = unsigned short (*)(unsigned short frame, unsigned short (*pcDevices)(unsigned short));
+unsigned short fakeLoopRound(unsigned short frame, HipiRound hipi);
+// The frames of the session after the auto-addressing (n devices in
+// all): every device asked for its accessory and device ID, lines to the
+// display and the printer (address 0: none), the status of a few, the
+// voltmeter read. echo: an answer comes back -- send what returns round
+// again until it's no longer data.
+struct LoopAct { unsigned short frame; bool echo; };
+std::vector<LoopAct> fakeSessionActs(int n, int displayAddr, int printerAddr);
 
 // ── Printer (HP 82162A, 8-bit mode) ─────────────────────────────────────
 // One printed line per entry (each ends with CR)

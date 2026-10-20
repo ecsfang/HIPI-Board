@@ -33,6 +33,9 @@ void loopmap_drawAll();
 // the button strip comes back to the map; X CLOSE or a tap beside the box
 // -> closed. Returns false if the tap hit nothing of the map.
 bool loopmap_tap(int x, int y);
+// The middle of a device's card, as drawn last (the demo's "touch");
+// false: no card for that address
+bool loopmap_cardPoint(int addr, int& x, int& y);
 // The details box from the button strip: OK = its view, X = close
 bool loopmap_detailsOpen();
 void loopmap_detailsOk();

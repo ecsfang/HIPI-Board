@@ -6,6 +6,9 @@
 //   mediamap_1_cassette.png   a cassette: two rings, reading track 0
 //   mediamap_2_disk.png       a 16 MB disk: eight rings, writing
 //   mediamap_3_file.png       a file tapped
+//   mediamap_4_highlight.png  HP-41/71/75 files, programs highlighted
+//   mediamap_5_machine.png    ... BY MACHINE, HP-71 highlighted
+//   mediamap_6_file71.png     ... a secure, private HP-71 file tapped
 //
 //   make mediamap_test && ./mediamap_test   (in tools/hipiview)
 #include "LT7683.hpp"
@@ -229,7 +232,7 @@ int main() {
         check(whiteInRings() == one, "disk: the head leaves nothing behind either (narrow inner steps)");
     }
     std::uint32_t sum = 0;
-    for (int k = 0; k < 9; ++k) sum += hipi::mediamap_blocksOf(k);
+    for (int k = 0; k < 10; ++k) sum += hipi::mediamap_blocksOf(k);   // the kinds (not the machines)
     check(sum == 64000, "every block counted once (64000)");
 
     // Formatting: the header is gone for a while (not LIF), then back
@@ -268,6 +271,73 @@ int main() {
         image = good;
         run(2500);
         check(ringsDrawn(), "LIF again without a write seen: back within a few seconds");
+    }
+
+    // ── HP-41, HP-71 and HP-75 files on one disk ─────────────────────
+    {
+        makeImage(hipi::kLifMediaTypes[1], 64, {
+            { "SECRET", 0xE217, 40 }, { "GAME41", 0xE080, 60 }, { "DATA41", 0xE0D0, 30 }, { "KEYS", 0xE050, 3 },
+            { "MATH71", 0xE214, 80 }, { "HPILLX", 0xE208, 50 }, { "NOTES", 0x0001, 20 }, { "CALC75", 0xE088, 45 },
+            { "SHEET", 0xE08A, 25 }, { "ODD", 0xE5A5, 12 }, { "GONE", 0x0000, 35 }, { "PLOT71", 0xE222, 15 },
+            { "MLDL", 0xE070, 64 }, { "TXT75", 0xE052, 10 } });
+        drive.file = "MIXED.DAT";
+        drive.head = 20; drive.op = hipi::MediaOp::Read; drive.writes += 1;
+        run(300);
+        check(hipi::mediamap_highlight() == -1 && !hipi::mediamap_byMachine(), "another medium: BY TYPE, nothing highlighted");
+        // Kinds: programs 40+60+80+45, ROM/LEX 50+64, other 15+12 (GRA71, unknown)
+        check(hipi::mediamap_blocksOf(2) == 225 && hipi::mediamap_blocksOf(6) == 114 && hipi::mediamap_blocksOf(7) == 27,
+              "by type: HP-71 and HP-75 files sorted in (programs 225, ROM/LEX 114, other 27)");
+        // Machines: HP-41 60+30+3+64, HP-71 40+80+50+15, HP-75 45+25+10, any 20, unknown 12
+        check(hipi::mediamap_blocksOf(10) == 157 && hipi::mediamap_blocksOf(11) == 185 && hipi::mediamap_blocksOf(12) == 80 &&
+              hipi::mediamap_blocksOf(13) == 20 && hipi::mediamap_blocksOf(14) == 12,
+              "by machine: HP-41 157, HP-71 185, HP-75 80, any 20, unknown 12");
+        // The legend's swatch of row i, and how many pixels of a colour the rings have
+        const int cx = 20 + 275, cy = 26 + 14 + 275;
+        auto swatch = [](int i) { return at(598 + 16 + 6, 26 + 20 + 22 + 8 + i * 26); };
+        auto inRings = [&](std::uint32_t col) {
+            chip.render(panel.data(), 0.0, false);
+            int n = 0;
+            for (int y = cy - 276; y < cy + 276; ++y)
+                for (int x = cx - 276; x < cx + 276; ++x) {
+                    const int dx = x - cx, dy = y - cy;
+                    if (dx * dx + dy * dy > 276 * 276) continue;
+                    if ((panel[static_cast<std::size_t>(y) * 1024 + x] & 0xFFFFFF) == col) ++n;
+                }
+            return n;
+        };
+        const std::uint32_t progCol = swatch(0), dataCol = swatch(1);
+        const int prog = inRings(progCol), data = inRings(dataCol);
+        check(prog > 1000 && data > 300, "programs and data in the rings");
+        // A tap on "programs": the rest dimmed
+        const int rowY = 26 + 20 + 22 + 8;
+        check(hipi::mediamap_tap(700, rowY) == hipi::MediaMapTap::Handled && hipi::mediamap_highlight() == 2,
+              "a tap on the programs row: programs highlighted");
+        snapshot("mediamap_4_highlight.png");
+        const std::uint32_t dim = swatch(1);
+        std::printf("     prog %d/%d, data %d, dim %d (data before %d)\n", inRings(progCol), prog, inRings(dataCol), inRings(dim), data);
+        check(dim != dataCol && std::abs(inRings(progCol) - prog) < 20 && inRings(dataCol) == 0 && inRings(dim) > data,
+              "... the programs as they were, everything else dimmed");
+        check(hipi::mediamap_tap(700, rowY) == hipi::MediaMapTap::Handled && hipi::mediamap_highlight() == -1 &&
+              inRings(dataCol) == data, "a tap on it again: all as before");
+        // The BY MACHINE tab
+        check(hipi::mediamap_tap(598 + 20 + 72 + 8 + 30, 26 + 20) == hipi::MediaMapTap::Handled && hipi::mediamap_byMachine(),
+              "a tap on BY MACHINE: by machine");
+        const std::uint32_t c71 = swatch(1);
+        check(inRings(c71) > 1000, "... the HP-71 files in their colour");
+        hipi::mediamap_tap(700, rowY + 26);
+        check(hipi::mediamap_highlight() == 11, "a tap on the HP-71 row: HP-71 highlighted");
+        snapshot("mediamap_5_machine.png");
+        // SECRET (BAS71 (SP)): blocks 10..49 of the outer ring (308 blocks a ring)
+        const double a = -M_PI / 2 + (30.5 / 308) * 2 * M_PI;
+        hipi::mediamap_tap(static_cast<int>(cx + 265 * std::cos(a)), static_cast<int>(cy + 265 * std::sin(a)));
+        snapshot("mediamap_6_file71.png");
+        bool lock = false;                       // the padlock, yellow, after "BAS71 (SP)"
+        const int fy = 26 + 20 + 22 + 9 * 26 + 32 + 22 + 22 + 26;
+        for (int x = 598 + 16 + 112 + 80; x < 598 + 16 + 112 + 80 + 40 && !lock; ++x)
+            for (int y = fy; y < fy + 16 && !lock; ++y) lock = at(x, y) == at(598 + 2, 300);
+        check(lock, "the file's box: BAS71 (SP) with a padlock");
+        check(hipi::mediamap_tap(598 + 30, 26 + 20) == hipi::MediaMapTap::Handled && !hipi::mediamap_byMachine() &&
+              hipi::mediamap_highlight() == -1, "BY TYPE again: nothing highlighted");
     }
 
     // No medium

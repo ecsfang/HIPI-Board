@@ -153,8 +153,9 @@ int main(int argc, char** argv) {
     for (char c : std::string("\x1b" "EHIPI\r\nSIZE 3")) screen.pr_char(static_cast<std::uint8_t>(c));
     snapshot("tools/hipiview/demo_3_size3.png");
     screen.setTextSize(1);
-    std::vector<std::string> lif = { "Volume : HIPI", "", "NAME       TYPE    SIZE  BLOCKS  FLAGS",
-        "FIB        PRGM    45r       2  ", "DATA1      DATA   100r       3  ", "KEYS       KEYS    12r       1  " };
+    std::vector<std::string> lif = { "Volume : HIPI", "", "NAME       TYPE          SIZE  BLOCKS  FLAGS",
+        "FIB        PGM41          45r       2  ", "DATA1      SDATA         100r       3  ",
+        "KEYS       KEY41          12r       1  ", "MATH       BAS71 (SP)    512b       2  " };
     for (char c : hipi::demo::textDir("games.dat", lif)) screen.pr_char(static_cast<std::uint8_t>(c));
     snapshot("tools/hipiview/demo_4_dir.png");
 
@@ -188,6 +189,7 @@ int main(int argc, char** argv) {
         run(900);
     }
     snapshot("tools/hipiview/demo_11_printer.png");
+    std::printf("     lines %zu of %zu\n", static_cast<std::size_t>(printer->lineCount()), hipi::demo::printLines().size());
     check(printer->lineCount() == hipi::demo::printLines().size(), "every printout line printed");
     check(at(0, 0) == at(0, 0), "rendered");
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");

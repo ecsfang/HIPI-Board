@@ -275,6 +275,27 @@ public:
         selected_ = 0;
         d_->hidePipOverlay();
     }
+    // ... and CREATE MEDIA filled in: its controls and keys touched as a
+    // person would -- never Create (nothing is written), then hidden
+    void demoShowCreateMedia() { drawingMenu([&] { openCreateMedia(); }); }
+    void demoCreateMediaControl(MediaCreateUi::Ctl c) {
+        if (state_ != State::CreateMedia || c == MediaCreateUi::Ctl::Create) return;
+        int x = 0, y = 0;
+        media_.center(c, x, y);
+        handleTap(static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y));
+    }
+    void demoCreateMediaKey(char key) {
+        int x = 0, y = 0;
+        if (state_ == State::CreateMedia && media_.keyCenter(key, x, y))
+            handleTap(static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y));
+    }
+    void demoHideCreateMedia() {
+        if (state_ != State::CreateMedia) return;
+        media_.cancel();
+        state_ = State::Closed;
+        d_->hidePipOverlay();
+        plotterview_refreshCursor();
+    }
 
     // File picker -> Create media...: its dialogs are worked by touch too
     // (boardui_handleTap()), and write the new file a piece at a time

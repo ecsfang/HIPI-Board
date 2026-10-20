@@ -165,6 +165,21 @@ void onAutoAddress(int first, int next, std::uint64_t t) {
     LOGF("\r\n * Loop map: auto-address -- %d before HIPI, HIPI %d..%d", first - 1, first, next - 1);
 }
 
+// The talker's device ID, if one came (SDI) -- HIPI's own answer SDI with
+// their device name, they keep the model they emulate as their ID line
+void keepDeviceId() {
+    if (pending_ == SDI && talker_ >= 1 && talker_ <= kMaxAddr && !sdiBuf_.empty() &&
+        nodes_[talker_].src != Src::Hipi) {
+        nodes_[talker_].id = sdiBuf_;
+        dirty_ = true;
+    }
+}
+void endTalk() {
+    keepDeviceId();
+    pending_ = 0;
+    sdiBuf_.clear();
+}
+
 void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
     const bool absorbed = out == IL_NO_FRAME;
     if (lastFrameT_ != 0 && pending_ != 0) roundTripUs_ = t - lastFrameT_;
@@ -210,8 +225,12 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
     const int a = in & 0x1F;
     if (in >= LAD && in < UNL)       { stampRoles(t); listeners_ |= 1u << a; touch(a, t, "listener"); }
     else if (in == UNL)              { stampRoles(t); listeners_ = 0; }
-    else if (in >= TAD && in < UNT)  { stampRoles(t); talker_ = a; touch(a, t, "talker"); }
-    else if (in == UNT)              { stampRoles(t); talker_ = -1; }
+    // A new talker, or none: what was asked of the last one is over. Its
+    // device ID is kept here too -- a device after HIPI ends with ETO,
+    // which goes on to the controller without passing HIPI. (A device
+    // before HIPI answers before HIPI sees the question: unknown.)
+    else if (in >= TAD && in < UNT)  { stampRoles(t); endTalk(); talker_ = a; touch(a, t, "talker"); }
+    else if (in == UNT)              { stampRoles(t); endTalk(); talker_ = -1; }
     else if (in == IFC)              { stampRoles(t); talker_ = -1; listeners_ = 0; pending_ = 0; }
     else if (in == SAI || in == SDI || in == SST || in == SDA) {
         pending_ = in;
@@ -220,13 +239,7 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
         // HIPI's own talker answered in this same frame
         if (!absorbed && in != out && IS_DATA(out)) onFrame(out, out, t);
     } else if (in == ETO || in == ETE || in == NRD || (!absorbed && (out == ETO || out == ETE))) {
-        // (HIPI's own answer SDI with their device name -- they keep the
-        // model they emulate as their ID line instead)
-        if (pending_ == SDI && talker_ >= 1 && talker_ <= kMaxAddr && !sdiBuf_.empty() &&
-            nodes_[talker_].src != Src::Hipi) {
-            nodes_[talker_].id = sdiBuf_;
-            dirty_ = true;
-        }
+        keepDeviceId();
         pending_ = 0;
     } else if (in >= DDL && in < DDL + 32) {
         for (int x = 1; x <= kMaxAddr; ++x)
@@ -660,6 +673,12 @@ void loopmap_poll() {
         nextDraw_ = make_timeout_time_ms(500);
         loopmap_drawAll();                   // off-screen + copy: no flicker
     }
+}
+
+bool loopmap_cardPoint(int addr, int& x, int& y) {
+    for (const Card& c : cards_)
+        if (c.addr == addr) { x = c.x + c.w / 2; y = c.y + c.h / 2; return true; }
+    return false;
 }
 
 bool loopmap_tap(int x, int y) {

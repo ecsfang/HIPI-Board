@@ -14,6 +14,7 @@
 //   make loopmap_test && ./loopmap_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "loopmap.h"
+#include "demo_content.h"
 #include "analyzer.h"
 #include "plotterview.h"
 #include "hp82163_font.hpp"
@@ -103,6 +104,16 @@ void snapshot(const char* png) {
     std::printf("     saved %s\n", png);
 }
 std::uint32_t at(int x, int y) { return panel[static_cast<std::size_t>(y) * 1024 + x] & 0xFFFFFF; }
+
+// HIPI's devices (as hipi_simFrame() runs them), then the PC's behind PILBOX
+unsigned short hipiRound(unsigned short f, unsigned short (*pc)(unsigned short)) {
+    const IL_CMD_t in = f;
+    for (CDevice* d : devices) f = d->hpil(f);
+    if (pc != nullptr) f = pc(f);
+    hipi::analyzer_capture(in, f);
+    fakeNowUs += 1000;
+    return f;
+}
 
 void run(int ms) {
     for (int t = 0; t < ms; t += 10) { fakeNowUs += 10000; hipi::loopmap_poll(); }
@@ -223,6 +234,11 @@ int main() {
     // ── The details box: a tap on a card ────────────────────────────────
     // (three devices: TFPLOT's card at the bottom, about x 380..566)
     hipi::loopmap_drawAll();
+    {
+        int x = 0, y = 0;
+        check(hipi::loopmap_cardPoint(static_cast<int>(plot.addr()), x, y) && x >= 380 && x < 566 && y > 450 &&
+              !hipi::loopmap_cardPoint(29, x, y), "loopmap_cardPoint(): the middle of TFPLOT's card; none for 29");
+    }
     check(hipi::loopmap_tap(470, 510) && hipi::loopmap_detailsOpen(), "a tap on TFPLOT's card: its details box");
     snapshot("loopmap_4_details.png");
     chip.render(panel.data(), 0.0, false);
@@ -258,6 +274,26 @@ int main() {
     check(viewOpened == nullptr && hipi::loopmap_detailsOpen(), "... OK does nothing");
     hipi::loopmap_closeDetails();
     check(!hipi::loopmap_detailsOpen(), "X on the strip: closed");
+
+    // ── The demo's made-up loop (demo_content.h): HIPI's three, 3 behind
+    // PILBOX, 3 after -- all asked for their IDs
+    hipi::loopmap_reset();
+    hipi::analyzer_clear();
+    auto round = [](IL_CMD_t f) { return hipi::demo::fakeLoopRound(f, hipiRound); };
+    round(IFC);
+    round(AAU);
+    const IL_CMD_t aad = round(AAD + 1);
+    const int n = static_cast<int>(aad - AAD) - 1;
+    for (const hipi::demo::LoopAct& a : hipi::demo::fakeSessionActs(n, disp.addr(), prt.addr())) {
+        IL_CMD_t last = round(a.frame);
+        for (int e = 0; a.echo && IS_DATA(last) && e < 40; ++e) last = round(last);
+        fakeNowUs += 30000;
+        hipi::loopmap_poll();
+    }
+    run(600);
+    hipi::loopmap_drawAll();
+    snapshot("loopmap_6_demo.png");
+    check(n == 9, "the demo's loop: 9 devices (HIPI's 3, PILBOX's 3, then 3 after)");
 
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;

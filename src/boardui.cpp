@@ -72,7 +72,7 @@ const char* version_ = "";
 // Filled in (from the built-in image) by
 // boardui_loadButtonStrip() at boot. RGB565 (2 bytes/pixel), matching the
 // display's 16bpp mode.
-std::vector<std::uint16_t> buttonStripPixels;
+std::uint16_t buttonStripSrcHeight = 0;     // buttons.bmp's own height (kButtonsImage, flash)
 }  // namespace (reopened below)
 }  // namespace hipi
 // Built-in button strip image -- see boardui_loadButtonStrip()
@@ -592,34 +592,20 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display) {
     buttonStripWidth = kButtonsImageWidth;
     buttonStripHeight = kButtonsImageHeight;
     buttonStripScreenX0 = static_cast<std::uint16_t>(SCREEN_MAX_X - buttonStripWidth);
-    // Built straight from the image in flash, already scaled to the panel's
-    // height -- ONE heap buffer of the final size. (This used to copy the
-    // image first, then scale into a second buffer, then build a third,
-    // padded copy for the PIP layer: three large blocks of 115-144 kB, and
-    // with the heap fragmented between them the start-up could run out of
-    // memory and stop right here.)
-    //
-    // Scale vertically to fill this panel's real height -- buttons.bmp
-    // is 480px tall; the panel is 600px (SCREEN_MAX_Y). Nearest-neighbor, not interpolated -- keeps
-    // button edges crisp rather than blurring them across a soft
-    // gradient, which matters more here than smooth scaling would.
-    // Width is untouched -- only height needs adapting, since the strip
-    // is already correctly right-aligned regardless of panel width (see
-    // buttonStripScreenX0 above).
+    // Drawn straight from the image in flash, stretched to the panel's
+    // height -- buttons.bmp is 480px tall; the panel is 600px
+    // (SCREEN_MAX_Y). Nearest-neighbor, not interpolated -- keeps button
+    // edges crisp. Width is untouched. No copy in RAM: the strip lives in
+    // its PIP-2 layer, and a pressed button is drawn again from flash
+    // (redrawButtonRegion()). (A scaled copy used to stay on the heap:
+    // 144 kB, a third of it.)
     //
     // NOTE: this scales the BITMAP itself, not the hit-test rectangles
     // in ui_buttons.hpp -- those are in buttons.bmp's own 480px-tall
     // coordinates.
+    buttonStripSrcHeight = buttonStripHeight;
     const std::uint16_t srcHeight = buttonStripHeight;
     if (buttonStripHeight != SCREEN_MAX_Y && buttonStripHeight > 0) buttonStripHeight = SCREEN_MAX_Y;
-    buttonStripPixels.assign(static_cast<std::size_t>(buttonStripWidth) * buttonStripHeight, 0);
-    for (std::uint16_t y = 0; y < buttonStripHeight; ++y) {
-        const std::uint16_t srcY = static_cast<std::uint16_t>(
-            (static_cast<std::uint32_t>(y) * srcHeight) / buttonStripHeight);
-        std::memcpy(buttonStripPixels.data() + static_cast<std::size_t>(y) * buttonStripWidth,
-                    kButtonsImage + static_cast<std::size_t>(srcY) * buttonStripWidth,
-                    static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
-    }
     if (srcHeight != buttonStripHeight) LOGF("(scaled %u -> %u tall) ", srcHeight, buttonStripHeight);
 
     // Copy the strip into its own PIP-2 layer once. The layer's stride
@@ -632,7 +618,9 @@ std::uint16_t boardui_loadButtonStrip(DisplayDriver* display) {
     std::vector<std::uint16_t> row(stripStride);
     drawOnStrip([&](std::uint16_t x0) {
         for (std::uint16_t y = 0; y < buttonStripHeight; ++y) {
-            const std::uint16_t* src = buttonStripPixels.data() + static_cast<std::size_t>(y) * buttonStripWidth;
+            const std::uint16_t srcY = static_cast<std::uint16_t>(
+                (static_cast<std::uint32_t>(y) * srcHeight) / buttonStripHeight);
+            const std::uint16_t* src = kButtonsImage + static_cast<std::size_t>(srcY) * buttonStripWidth;
             std::fill(row.begin(), row.begin() + stripPad, src[0]);
             std::memcpy(row.data() + stripPad, src, static_cast<std::size_t>(buttonStripWidth) * sizeof(std::uint16_t));
             display_->drawBitmap565(0, static_cast<std::int16_t>(y), stripStride, 1, row.data());
@@ -801,7 +789,7 @@ void pressStripButton(Button b) {
     // Visual feedback: redraw just this button's bitmap region
     // shifted, so it looks pressed in. The baseline/restore
     // redraws use a margin larger than the shift, sourced from the
-    // same strip cache, so any overflow outside the button's own
+    // same image (flash), so any overflow outside the button's own
     // rect (e.g. a shift toward the top-right sticks out past the
     // rect's top and right edges) gets cleaned up too -- not just
     // the tight rect itself.
@@ -809,12 +797,12 @@ void pressStripButton(Button b) {
     // active window afterwards.
     drawOnStrip([&](std::uint16_t x0) {
         redrawButtonRegion(
-            display_, buttonStripPixels.data(),
+            display_, kButtonsImage, buttonStripSrcHeight,
             buttonStripWidth, buttonStripHeight,
             x0, /*stripScreenY0=*/0, b, 0, 0,
             kPressMargin);
         redrawButtonRegion(
-            display_, buttonStripPixels.data(),
+            display_, kButtonsImage, buttonStripSrcHeight,
             buttonStripWidth, buttonStripHeight,
             x0, /*stripScreenY0=*/0, b,
             kPressDx, kPressDy);
@@ -1053,7 +1041,7 @@ void boardui_handleRelease() {
     // direction).
     drawOnStrip([&](std::uint16_t x0) {
         redrawButtonRegion(
-            display_, buttonStripPixels.data(),
+            display_, kButtonsImage, buttonStripSrcHeight,
             buttonStripWidth, buttonStripHeight,
             x0, /*stripScreenY0=*/0, pressedButton, 0, 0,
             kPressMargin);

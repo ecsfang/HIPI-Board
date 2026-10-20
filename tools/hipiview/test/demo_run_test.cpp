@@ -16,6 +16,7 @@
 #include "display.h"
 #include "video80.h"
 #include "demo.h"
+#include "demo_content.h"
 #include "hwtest.h"
 #include "hwio_stub.h"
 #include "analyzer.h"
@@ -24,12 +25,15 @@
 #include "clock.h"
 #include "hpil_diag.h"
 #include "mediamap.h"
+#include "media_create_ui.h"
+#include "loopmap.h"
 #include "hp82163_font.hpp"
 #include "../lt7683_emu.hpp"
 #include "../png.hpp"
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unistd.h>
@@ -46,9 +50,10 @@ hipi::Video80* video80Term = nullptr;
 hipi::Config config;
 
 // The loop for the demo's made-up session: HIPI's devices only
-unsigned short hipi_simFrame(unsigned short f) {
+unsigned short hipi_simFrame(unsigned short f, unsigned short (*pcDevices)(unsigned short)) {
     const IL_CMD_t in = f;
     for (CDevice* d : devices) if (d->enabled()) f = d->hpil(f);
+    if (pcDevices != nullptr) f = pcDevices(f);
     hipi::analyzer_capture(in, f);
     return f;
 }
@@ -150,7 +155,7 @@ const char* outName(hipi::DisplayOutput o) {
         case O::Display: return "display"; case O::Video80: return "video80"; case O::Tape: return "tape";
         case O::Plotter: return "plotter"; case O::Printer: return "printer"; case O::Analyzer: return "analyzer";
         case O::LoopMap: return "loopmap"; case O::Signals: return "signals"; case O::Clock: return "saver";
-        case O::MediaMap: return "mediamap";
+        case O::MediaMap: return "mediamap"; case O::HwTest: return "hwtest";
         default: return "other";
     }
 }
@@ -195,6 +200,32 @@ int main(int argc, char** argv) {
     h.showPicker = [&](const std::vector<std::string>& f, int) { ++pickerShows; pickerFiles = f; };
     h.movePicker = [&](int) { ++pickerMoves; };
     h.hidePicker = [&] { ++pickerHides; };
+    // CREATE MEDIA: the real dialog, drawn straight on the panel
+    hipi::MediaCreateUi media(&d);
+    int createShows = 0, createHides = 0;
+    bool createTouched = false, createShot = false;
+    std::string createName;
+    int createType = 0;
+    h.showCreateMedia = [&] { ++createShows; media.open(); media.draw(); };
+    h.createMediaControl = [&](int c) {
+        using Ctl = hipi::MediaCreateUi::Ctl;
+        if (c == static_cast<int>(Ctl::Create)) createTouched = true;
+        if (c == static_cast<int>(Ctl::TypeRight)) ++createType;
+        int x = 0, y = 0;
+        media.poll(0);
+        media.center(static_cast<Ctl>(c), x, y);
+        media.tap(x, y);
+    };
+    h.createMediaKey = [&](char k) {
+        int x = 0, y = 0;
+        media.poll(0);
+        if (media.keyCenter(k, x, y)) media.tap(x, y);
+    };
+    h.hideCreateMedia = [&] {
+        ++createHides;
+        createName = media.name();
+        if (!createShot) { snapshot("../demo_run_create_media.png"); createShot = true; }
+    };
     hipi::demo_init(&d, h, "1.2.3");
     run(2000);
 
@@ -243,6 +274,11 @@ int main(int argc, char** argv) {
     bool plotted = false, printed = false, analyzed = false, wentBack = false;
     bool mapRings = false, signalsExample = false, scrolled = false, tornOff = false, clockShown = false;
     int maxLines = 0;
+    bool fitAxesShot = false, machineSeen = false, typeHighlight = false, machineShot = false, hwtestSeen = false;
+    std::uint64_t machineAt = 0;
+    bool fitSeen = false, digitized = false, digiShot = false, wasDigitizing = false;
+    std::uint64_t digiFrom = 0;
+    int digX = -1, digY = -1;
     std::uint64_t changedAt = fakeNowUs;
     bool shotDone = false;
     for (int ms = 0; ms < 260000; ms += 5) {
@@ -265,6 +301,31 @@ int main(int argc, char** argv) {
             shotDone = true;
         }
         if (!plotter->segments().empty()) plotted = true;
+        if (o == hipi::DisplayOutput::Plotter && hipi::plotterview_plotFit() && plotter->segments().size() > 100) fitSeen = true;
+        // Digitizing: a picture while the panel is up, then where the point went
+        const bool digi = hipi::plotterview_digitizing();
+        if (digi && !wasDigitizing) digiFrom = fakeNowUs;
+        if (digi && !digiShot && fakeNowUs - digiFrom > 3000000) { snapshot("../demo_run_digitize.png"); digiShot = true; }
+        if (!digi && wasDigitizing) { digitized = true; digX = plotter->penX(); digY = plotter->penY(); digiFrom = fakeNowUs; }
+        if (digitized && digY >= 0 && fakeNowUs - digiFrom > 2800000) {      // the point marked
+            snapshot("../demo_run_digitized.png");
+            digY = -digY - 1;                                  // (once)
+        }
+        wasDigitizing = digi;
+        // The Fit view while the axes are drawn, a piece at a time
+        if (!fitAxesShot && o == hipi::DisplayOutput::Plotter && hipi::plotterview_plotFit() &&
+            plotter->segments().size() >= 22 && plotter->segments().size() < 30) {
+            snapshot("../demo_run_fit_axes.png");
+            fitAxesShot = true;
+        }
+        // The made-up disk BY MACHINE, HP-71 highlighted
+        if (o == hipi::DisplayOutput::MediaMap && hipi::mediamap_byMachine()) machineSeen = true;
+        if (o == hipi::DisplayOutput::MediaMap && hipi::mediamap_highlight() == 2) typeHighlight = true;
+        if (o == hipi::DisplayOutput::MediaMap && hipi::mediamap_highlight() == 11 && !machineShot) {
+            if (machineAt == 0) machineAt = fakeNowUs;
+            if (fakeNowUs - machineAt > 3000000) { snapshot("../demo_run_mediamap_machine.png"); machineShot = true; }
+        }
+        if (o == hipi::DisplayOutput::HwTest) hwtestSeen = true;
         if (o == hipi::DisplayOutput::MediaMap && hipi::mediamap_rings() > 0) mapRings = true;
         if (o == hipi::DisplayOutput::Printer && hipi::plotterview_paperScrolled() && !scrolled) {   // (pulled up)
             scrolled = true;
@@ -295,7 +356,20 @@ int main(int argc, char** argv) {
     check(order.find("tape") != std::string::npos && pickerShows == 1 && pickerMoves >= 1 && pickerHides == 1,
           "Tape: the cassette list shown, a cassette picked");
     check(!pickerFiles.empty() && pickerFiles[0].empty() && pickerFiles.size() >= 2, "... from the lif folder");
+    std::printf("     create media: name %s, type steps %d\n", createName.c_str(), createType);
+    check(createShows == 1 && createHides == 1 && createName == "GAMES2" && createType == 2 && !createTouched,
+          "CREATE MEDIA: opened, a name typed, the type stepped, gone again -- never Create");
+    check(hipi::loopmapStubCardTaps() >= 1 && !hipi::loopmapStubDetails(), "the loop map: a card touched, its box closed again");
+    check(fitAxesShot, "Fit: the axes drawn a piece at a time (a picture part way)");
+    check(typeHighlight && machineSeen && machineShot && !hipi::mediamap_byMachine(),
+          "the media map of a made-up disk: a row highlighted, BY MACHINE, HP-71 -- then BY TYPE again");
+    check(hwtestSeen && order.find("hwtest") != std::string::npos, "the hardware test page");
     check(plotted, "the plotter draws");
+    check(fitSeen, "a plot in the Fit view");
+    if (digY < 0) digY = -digY - 1;
+    std::printf("     digitized: %d,%d (the top of SIN(X)/X: %d,%d)\n", digX, digY, hipi::demo::kFunctionPeakX, hipi::demo::kFunctionPeakY);
+    check(digitized && digiShot && std::abs(digX - hipi::demo::kFunctionPeakX) < 60 && std::abs(digY - hipi::demo::kFunctionPeakY) < 60,
+          "digitizing: the panel, a point picked and nudged onto SIN(X)/X's top");
     check(printed, "the printer prints");
     check(analyzed && order.find("loopmap") != std::string::npos && order.find("signals") != std::string::npos,
           "the analyzer (a made-up session), the loop map, the signals");

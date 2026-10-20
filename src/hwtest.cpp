@@ -559,6 +559,13 @@ void hwtest_poll() {
     }
 }
 
+void hwtest_demoRun() {
+    if (!active_) return;
+    // As if Chase and Run were touched (both are off when the page opens)
+    for (Id id : { Id::Chase, Id::Run })
+        if (const TestButton* b = find(id)) hwtest_tap(b->x + b->w / 2, b->y + b->h / 2);
+}
+
 bool hwtest_tap(int x, int y) {
     if (!active_) return false;
     if (gridShown_) {                            // the scan grid: any tap closes it

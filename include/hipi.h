@@ -56,8 +56,10 @@ LoopbackResult hipi_loopbackTest(
 void hipi_init(void);
 // The demo (demo.h): one made-up frame through HIPI's devices, as if it
 // came round the loop (not PILBOX, not the switched-off ones), seen by
-// the analyzer too. Returns what leaves HIPI.
-unsigned short hipi_simFrame(unsigned short frame);   // (IL_CMD_t, hpil.h)
+// the analyzer too. Returns what leaves HIPI. pcDevices (may be null):
+// made-up devices of a PC program behind PILBOX -- they come after HIPI's
+// own, and what they make of the frame leaves HIPI too.
+unsigned short hipi_simFrame(unsigned short frame, unsigned short (*pcDevices)(unsigned short) = nullptr);
 bool hipi_loop(HpIlLoop& loop);
 bool hipi_test();
 

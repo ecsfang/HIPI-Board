@@ -33,5 +33,8 @@ void hwtest_poll();
 bool hwtest_tap(int x, int y);
 // The i2cdetect grid (Scan, also from the view's menu)
 void hwtest_showScan();
+// The demo (demo.h): the LED chase and the pixel run started, as if their
+// buttons were touched (leaving the page stops them)
+void hwtest_demoRun();
 
 }  // namespace hipi

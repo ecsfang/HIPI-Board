@@ -1,6 +1,7 @@
 // mediamap.cpp -- see mediamap.h
 #include "mediamap.h"
 #include "lif_create.h"          // the medium types (names)
+#include "lif_types.h"           // the file types
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -11,24 +12,50 @@ namespace hipi {
 
 namespace {
 
-// What a piece of the medium holds. The order of importance (a ring step
-// covering several shows the most important): see kPriority.
-enum Kind : std::uint8_t { Free, Deleted, Program, Data, Text, Status, Other, Dir, Vol, kKinds };
-constexpr std::uint8_t kPriority[kKinds] = { 0, 1, 3, 2, 2, 2, 2, 4, 4 };
+// What a piece of the medium holds. Kinds (Free .. Vol) are what the map
+// shows BY TYPE; a file also belongs to a machine (Hp41 .. UnknownMachine),
+// what it shows BY MACHINE -- the rest (free, deleted, directory, label)
+// is the same in both. The order of importance (a ring step covering
+// several shows the most important): see kPriority.
+enum Group : std::uint8_t {
+    Free, Deleted, Program, Data, Text, State, RomLex, Other, Dir, Vol,
+    Hp41, Hp71, Hp75, AnyMachine, UnknownMachine, kGroups
+};
+constexpr int kKinds = Vol + 1;
+constexpr std::uint8_t kPriority[kKinds] = { 0, 1, 3, 2, 2, 2, 2, 2, 4, 4 };
 
 constexpr std::uint16_t kBlack = 0x0000, kWhite = 0xFFFF, kYellow = 0xEDC0, kGrey = 0x7BEF;
 constexpr std::uint16_t kGreen = 0x0640, kOrange = 0xF4A5;
-constexpr std::uint16_t kColour[kKinds] = {
+constexpr std::uint16_t kDim = 0x2945;      // not the highlighted group
+constexpr std::uint16_t kColour[kGroups] = {
     0x1AA7,   // free: a dark green
     0x9186,   // deleted
     0x5E4D,   // programs
     0x555C,   // data
     0xE68F,   // text
-    0xE467,   // status, keys, write-all
-    0xB3DB,   // other
+    0xE467,   // status, keys, write all
+    0xB3DB,   // ROM, LEX
+    0x8C71,   // other
     0xEDC0,   // directory
     0x7BEF,   // volume label
+    0x5E4D,   // HP-41
+    0x555C,   // HP-71
+    0xE467,   // HP-75
+    0xE68F,   // any machine (TEXT)
+    0x8C71,   // unknown type
 };
+
+// The rows of the BY TYPE / BY MACHINE card: a group and its name
+struct Row { Group g; const char* label; };
+constexpr Row kTypeRows[] = { { Program, "programs" }, { Data, "data" }, { Text, "text" },
+                              { State, "status, keys, WA" }, { RomLex, "ROM, LEX" }, { Other, "other" },
+                              { Deleted, "deleted" }, { Free, "free" }, { Dir, "directory, label" } };
+constexpr Row kMachineRows[] = { { Hp41, "HP-41" }, { Hp71, "HP-71" }, { Hp75, "HP-75" },
+                                 { AnyMachine, "any machine (TEXT)" }, { UnknownMachine, "unknown type" },
+                                 { Deleted, "deleted" }, { Free, "free" }, { Dir, "directory, label" } };
+constexpr int kTypeRowCount = sizeof(kTypeRows) / sizeof(kTypeRows[0]);
+constexpr int kMachineRowCount = sizeof(kMachineRows) / sizeof(kMachineRows[0]);
+constexpr int kRowH = 26;
 
 constexpr int kTitleH = 26;
 constexpr int kCloseW = 64;
@@ -38,7 +65,8 @@ constexpr double kPi = 3.14159265358979323846;
 
 struct Extent {
     std::uint32_t start = 0, len = 0;
-    Kind kind = Free;
+    Group kind = Free;
+    Group machine = Free;               // a file's machine; else the same as kind
     std::uint16_t type = 0;
     char name[11] = {};
 };
@@ -50,7 +78,7 @@ struct Model {
     std::uint16_t tracks = 0, heads = 0, sectors = 0;
     std::uint32_t dirStart = 0, dirLen = 0, entriesUsed = 0;
     std::vector<Extent> ext;            // the volume header, the directory, the files
-    std::uint32_t blocks[kKinds] = {};
+    std::uint32_t blocks[kGroups] = {};
     std::uint32_t lastEnd = 0;          // after the last file: where new files go
     int files = 0, deleted = 0;
     std::uint32_t deletedBlocks = 0;
@@ -61,27 +89,27 @@ std::uint32_t be32(const std::uint8_t* p) {
     return (static_cast<std::uint32_t>(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
 }
 
-Kind kindOf(std::uint32_t type) {
-    switch (type) {
-        case 0xE080: return Program;
-        case 0xE0D0: case 0xE0F0: case 0xE0F1: return Data;
-        case 0x0001: case 0xE0D5: return Text;
-        case 0xE040: case 0xE050: case 0xE060: return Status;
-        default: return Other;
+Group kindOf(std::uint16_t type) {
+    const LifType* t = lifType(type);
+    if (t == nullptr) return Other;
+    switch (t->sort) {
+        case LifSort::Program: return Program;
+        case LifSort::Data:    return Data;
+        case LifSort::Text:    return Text;
+        case LifSort::State:   return State;
+        case LifSort::RomLex:  return RomLex;
+        default:               return Other;
     }
 }
-
-const char* typeText(const Extent& e) {
-    switch (e.kind) {
-        case Program: return "PR  program";
-        case Data:    return "DA  data";
-        case Text:    return "AS  text";
-        case Status:
-            return e.type == 0xE040 ? "WA  write all" : e.type == 0xE050 ? "KE  key assignments" : "ST  status";
-        case Deleted: return "deleted (PACK frees it)";
-        case Dir:     return "the directory";
-        case Vol:     return "the volume label";
-        default:      return "other";
+Group machineOf(std::uint16_t type) {
+    const LifType* t = lifType(type);
+    if (t == nullptr) return UnknownMachine;
+    switch (t->machine) {
+        case LifMachine::Hp41: return Hp41;
+        case LifMachine::Hp71: return Hp71;
+        case LifMachine::Hp75: return Hp75;
+        case LifMachine::Any:  return AnyMachine;
+        default:               return UnknownMachine;
     }
 }
 
@@ -101,8 +129,8 @@ Model readModel(const std::function<bool(std::uint32_t, std::uint8_t*)>& read) {
     m.dirLen = be32(b + 16);
     if (m.dirStart == 0 || m.dirStart >= m.total) { m.error = "Not a LIF volume"; return m; }
     m.dirLen = std::min(m.dirLen, m.total - m.dirStart);
-    Extent vol; vol.start = 0; vol.len = m.dirStart; vol.kind = Vol;
-    Extent dir; dir.start = m.dirStart; dir.len = m.dirLen; dir.kind = Dir;
+    Extent vol; vol.start = 0; vol.len = m.dirStart; vol.kind = vol.machine = Vol;
+    Extent dir; dir.start = m.dirStart; dir.len = m.dirLen; dir.kind = dir.machine = Dir;
     m.ext.push_back(vol);
     m.ext.push_back(dir);
     m.lastEnd = m.dirStart + m.dirLen;
@@ -122,7 +150,8 @@ Model readModel(const std::function<bool(std::uint32_t, std::uint8_t*)>& read) {
             x.type = static_cast<std::uint16_t>(type);
             std::memcpy(x.name, e, 10);
             for (int k = 9; k >= 0 && x.name[k] == ' '; --k) x.name[k] = 0;
-            x.kind = type == 0 ? Deleted : kindOf(type);
+            x.kind = type == 0 ? Deleted : kindOf(x.type);
+            x.machine = type == 0 ? Deleted : machineOf(x.type);
             if (x.start >= m.total) continue;
             x.len = std::min(x.len, m.total - x.start);
             if (x.kind == Deleted) { ++m.deleted; m.deletedBlocks += x.len; }
@@ -132,7 +161,11 @@ Model readModel(const std::function<bool(std::uint32_t, std::uint8_t*)>& read) {
         }
     }
     std::uint32_t covered = 0;
-    for (const Extent& x : m.ext) { m.blocks[x.kind] += x.len; covered += x.len; }
+    for (const Extent& x : m.ext) {
+        m.blocks[x.kind] += x.len;
+        if (x.machine != x.kind) m.blocks[x.machine] += x.len;
+        covered += x.len;
+    }
     m.blocks[Free] = covered < m.total ? m.total - covered : 0;
     m.ok = true;
     return m;
@@ -150,10 +183,28 @@ Model model_;
 std::string file_;
 bool haveDrive_ = false;
 
-// Rings: rings_ of steps_ steps, bpr_ blocks per ring; kinds_ per step
+// Rings: rings_ of steps_ steps, bpr_ blocks per ring; per step the kind
+// and machine of the most important thing in it
 int rings_ = 2, steps_ = 256;
 std::uint32_t bpr_ = 256;
-std::vector<std::uint8_t> kinds_;
+std::vector<std::uint8_t> kinds_, machines_;
+
+// What the map shows: BY TYPE or BY MACHINE, and one group highlighted
+// (a tap on its row: the rest dimmed), -1 = none
+bool byMachine_ = false;
+int highlight_ = -1;
+
+std::uint8_t stepGroup(std::size_t g) { return byMachine_ ? machines_[g] : kinds_[g]; }
+bool highlighted(std::uint8_t group) {
+    return highlight_ < 0 || group == highlight_ || (highlight_ == Dir && group == Vol);
+}
+std::uint16_t groupColour(std::uint8_t group) { return highlighted(group) ? kColour[group] : kDim; }
+std::uint16_t stepColour(std::size_t g) { return groupColour(stepGroup(g)); }
+// Where one run of a ring ends: the kind or the machine changes. The same
+// in every mode and highlight, so a ring redrawn in other colours covers
+// exactly the same pixels (runs cut elsewhere left old pixels at the
+// triangles' edges)
+bool sameRun(std::size_t a, std::size_t b) { return kinds_[a] == kinds_[b] && machines_[a] == machines_[b]; }
 
 // Layout
 int cx_ = 0, cy_ = 0, rOut_ = 0, rIn_ = 0, band_ = 0, ringGap_ = 6, rCentre_ = 0;
@@ -194,8 +245,7 @@ void layout() {
     cy_ = kTitleH + 14 + rOut_;
     panelX_ = cx_ + rOut_ + 28;
     panelW_ = SCREEN_MAX_X - panelX_ - 12;
-    const int small = SCREEN_MAX_Y < 600;
-    typeCard_ = { panelX_, kTitleH + 20, panelW_, small ? 236 : 256 };
+    typeCard_ = { panelX_, kTitleH + 20, panelW_, 22 + kTypeRowCount * kRowH + 32 };
     mediumCard_ = { panelX_, typeCard_.y + typeCard_.h + 22, panelW_, SCREEN_MAX_Y - (typeCard_.y + typeCard_.h + 22) - 12 };
 }
 
@@ -205,11 +255,15 @@ void buildSteps() {
     bpr_ = (model_.total + static_cast<std::uint32_t>(rings_) - 1) / static_cast<std::uint32_t>(rings_);
     steps_ = static_cast<int>(std::min<std::uint32_t>(bpr_, 400));
     kinds_.assign(static_cast<std::size_t>(rings_ * steps_), Free);
+    machines_.assign(kinds_.size(), Free);
     for (const Extent& x : model_.ext) {
         if (x.len == 0) continue;
         const int g0 = stepOf(x.start), g1 = stepOf(x.start + x.len - 1);
         for (int g = g0; g <= g1 && g < static_cast<int>(kinds_.size()); ++g)
-            if (kPriority[x.kind] > kPriority[kinds_[static_cast<std::size_t>(g)]]) kinds_[static_cast<std::size_t>(g)] = x.kind;
+            if (kPriority[x.kind] > kPriority[kinds_[static_cast<std::size_t>(g)]]) {
+                kinds_[static_cast<std::size_t>(g)] = x.kind;
+                machines_[static_cast<std::size_t>(g)] = x.machine;
+            }
     }
     rIn_ = cassette() ? rOut_ * 45 / 100 : rOut_ * 27 / 100;
     ringGap_ = cassette() ? 10 : 6;
@@ -253,8 +307,8 @@ void drawRing(int ring) {
     std::vector<int> cuts;
     int s0 = 0;
     for (int s = 1; s <= steps_; ++s) {
-        if (s < steps_ && kinds_[base + static_cast<std::size_t>(s)] == kinds_[base + static_cast<std::size_t>(s0)]) continue;
-        fillArc(r0, r1, angleOf(s0), angleOf(s), kColour[kinds_[base + static_cast<std::size_t>(s0)]]);
+        if (s < steps_ && sameRun(base + static_cast<std::size_t>(s), base + static_cast<std::size_t>(s0))) continue;
+        fillArc(r0, r1, angleOf(s0), angleOf(s), stepColour(base + static_cast<std::size_t>(s0)));
         cuts.push_back(s);
         s0 = s;
     }
@@ -352,24 +406,22 @@ void drawHead() {
 void eraseHead() {
     if (!headShown_ || model_.total == 0) return;
     const int g = stepOf(std::min(shown_.head, model_.total - 1));
-    headLine(shown_.head, kColour[kinds_[static_cast<std::size_t>(g)]]);
+    headLine(shown_.head, stepColour(static_cast<std::size_t>(g)));
     rimMarker(headAngle(shown_.head), kBlack);
     // On a narrow step the line reached the steps beside it: those again
     const int ring = g / steps_;
     const int r1 = ringOuter(ring), r0 = ringInner(ring);
-    auto kindAt = [&](int step) {
-        return kinds_[static_cast<std::size_t>(ring * steps_ + (step + steps_) % steps_)];
-    };
+    auto idx = [&](int step) { return static_cast<std::size_t>(ring * steps_ + (step + steps_) % steps_); };
     for (int k = g % steps_ - 1; k <= g % steps_ + 1; ++k) {
-        const std::uint8_t kind = kindAt(k);
-        const double gl = kindAt(k - 1) != kind ? 0.0015 : 0.0, gr = kindAt(k + 1) != kind ? 0.0015 : 0.0;
-        fillArc(r0, r1, angleOf(k) + gl, angleOf(k + 1) - gr, kColour[kind]);
+        const double gl = !sameRun(idx(k - 1), idx(k)) ? 0.0015 : 0.0, gr = !sameRun(idx(k + 1), idx(k)) ? 0.0015 : 0.0;
+        fillArc(r0, r1, angleOf(k) + gl, angleOf(k + 1) - gr, stepColour(idx(k)));
     }
 }
 
 void card(const Box& c, const char* name) {
     d_->roundRect(i16(c.x), i16(c.y), i16(c.w), i16(c.h), 12, kYellow);
     d_->roundRect(i16(c.x + 1), i16(c.y + 1), i16(c.w - 2), i16(c.h - 2), 11, kYellow);
+    if (name == nullptr) return;           // tabs of its own
     const int w = static_cast<int>(std::strlen(name)) * 8 + 16;
     d_->fillRect(i16(c.x + 20), i16(c.y - 9), i16(w), 18, kYellow);
     text(c.x + 28, c.y - 8, name, 0, kBlack, kYellow);
@@ -378,31 +430,58 @@ void clearInside(const Box& c) {
     d_->fillRect(i16(c.x + 6), i16(c.y + 12), i16(c.w - 12), i16(c.h - 18), kBlack);
 }
 
+// The card's two tabs: BY TYPE and BY MACHINE, the one shown filled
+int tabW(const char* name) { return static_cast<int>(std::strlen(name)) * 8 + 16; }
+constexpr const char* kTabType = "BY TYPE";
+constexpr const char* kTabMachine = "BY MACHINE";
+int tabMachineX() { return typeCard_.x + 20 + tabW(kTabType) + 8; }
+void drawTab(int x, const char* name, bool on) {
+    const int y = typeCard_.y - 9, w = tabW(name);
+    d_->fillRect(i16(x), i16(y), i16(w), 18, on ? kYellow : kBlack);
+    if (!on) d_->rect(i16(x), i16(y), i16(w), 18, kYellow);
+    text(x + 8, y + 1, name, 0, on ? kBlack : kYellow, on ? kYellow : kBlack);
+}
+
+int rowCount() { return byMachine_ ? kMachineRowCount : kTypeRowCount; }
+const Row& rowAt(int i) { return byMachine_ ? kMachineRows[i] : kTypeRows[i]; }
+
 void drawTypes() {
     clearInside(typeCard_);
-    struct Row { Kind k; const char* label; };
-    static const Row rows[] = { { Program, "programs" }, { Data, "data" }, { Text, "text (ASCII)" },
-                                { Status, "status, keys, WA" }, { Other, "other (ROM, XM ...)" },
-                                { Deleted, "deleted" }, { Free, "free" }, { Dir, "directory, label" } };
+    drawTab(typeCard_.x + 20, kTabType, !byMachine_);
+    drawTab(tabMachineX(), kTabMachine, byMachine_);
     const int x = typeCard_.x + 16;
     int y = typeCard_.y + 22;
     const int barX = x + 268, barW = typeCard_.x + typeCard_.w - 16 - barX;
-    for (const Row& r : rows) {
-        std::uint32_t n = model_.blocks[r.k] + (r.k == Dir ? model_.blocks[Vol] : 0);
-        d_->fillRect(i16(x), i16(y + 2), 12, 12, kColour[r.k]);
-        if (r.k == Free) d_->rect(i16(x), i16(y + 2), 12, 12, kGrey);
-        text(x + 22, y, r.label, 0, kWhite, kBlack);
+    for (int i = 0; i < rowCount(); ++i) {
+        const Row& r = rowAt(i);
+        const bool marked = highlight_ == r.g;
+        const std::uint32_t n = model_.blocks[r.g] + (r.g == Dir ? model_.blocks[Vol] : 0);
+        if (marked) d_->roundRect(i16(x - 8), i16(y - 5), i16(typeCard_.w - 16), kRowH, 6, kYellow);
+        d_->fillRect(i16(x), i16(y + 2), 12, 12, groupColour(r.g));
+        if (r.g == Free) d_->rect(i16(x), i16(y + 2), 12, 12, kGrey);
+        text(x + 22, y, r.label, 0, marked ? kYellow : highlighted(r.g) ? kWhite : kGrey, kBlack);
         char b[16];
         std::snprintf(b, sizeof(b), "%7lu", static_cast<unsigned long>(n));
-        text(x + 196, y, b, 0, kWhite, kBlack);
-        if (barW > 8 && r.k != Dir) {
+        text(x + 196, y, b, 0, highlighted(r.g) ? kWhite : kGrey, kBlack);
+        if (barW > 8 && r.g != Dir) {
             d_->fillRect(i16(barX), i16(y + 4), i16(barW), 8, 0x2104);
             const int w = static_cast<int>(static_cast<std::uint64_t>(barW) * n / std::max<std::uint32_t>(model_.total, 1));
-            if (w > 0) d_->fillRect(i16(barX), i16(y + 4), i16(w), 8, kColour[r.k]);
+            if (w > 0) d_->fillRect(i16(barX), i16(y + 4), i16(w), 8, highlighted(r.g) ? kColour[r.g] : kGrey);
         }
-        y += 26;
+        y += kRowH;
     }
+    y = typeCard_.y + 22 + kTypeRowCount * kRowH;
     text(x, y + 2, cassette() ? "records of 256 bytes" : "blocks of 256 bytes", 0, kGrey, kBlack);
+    const char* hint = highlight_ >= 0 ? "tap again: all" : "tap a row: find it";
+    text(typeCard_.x + typeCard_.w - 16 - static_cast<int>(std::strlen(hint)) * 8, y + 2, hint, 0, kGrey, kBlack);
+}
+
+// A small padlock (a secure or private file)
+void padlock(int x, int y, std::uint16_t col) {
+    d_->roundRect(i16(x + 2), i16(y), 8, 10, 3, col);
+    d_->roundRect(i16(x + 3), i16(y + 1), 6, 8, 2, col);
+    d_->fillRect(i16(x), i16(y + 6), 12, 9, col);
+    d_->fillRect(i16(x + 5), i16(y + 9), 2, 3, kBlack);
 }
 
 void drawMedium() {
@@ -426,8 +505,30 @@ void drawMedium() {
             return;
         }
         const Extent& e = model_.ext[static_cast<std::size_t>(fileShown_)];
-        if (e.kind != Dir && e.kind != Vol) row("name", e.name[0] ? e.name : "(no name)", kYellow);
-        row("type", typeText(e), kColour[e.kind] == kColour[Free] ? kWhite : kColour[e.kind]);
+        const std::uint8_t g = byMachine_ ? e.machine : e.kind;
+        const std::uint16_t col = g == Deleted || g == Dir || g == Vol ? kWhite : kColour[g];
+        if (e.kind == Dir) row("type", "the directory");
+        else if (e.kind == Vol) row("type", "the volume label");
+        else {
+            row("name", e.name[0] ? e.name : "(no name)", kYellow);
+            if (e.kind == Deleted) {
+                row("type", "deleted (PACK frees it)");
+            } else {
+                // The type's name, a padlock if secure/private, its code
+                const LifType* t = lifType(e.type);
+                const std::string name = t != nullptr ? t->name : "?";
+                text(x, y, "type", 0, kGrey, kBlack);
+                text(x + 112, y, name, 0, col, kBlack);
+                int nx = x + 112 + static_cast<int>(name.size()) * 8 + 12;
+                const bool locked = t != nullptr && (t->secure || t->priv);
+                if (locked) { padlock(nx, y, kYellow); nx += 22; }
+                std::snprintf(b, sizeof(b), "%04X", e.type);
+                text(nx, y, b, 0, kGrey, kBlack);
+                y += 26;
+                row("", t != nullptr ? t->what : "unknown type");
+                if (locked) row("", t->secure && t->priv ? "secure + private" : t->secure ? "secure" : "private");
+            }
+        }
         if (cassette()) std::snprintf(b, sizeof(b), "track %lu record %lu", static_cast<unsigned long>(e.start / model_.sectors),
                                       static_cast<unsigned long>(e.start % model_.sectors));
         else std::snprintf(b, sizeof(b), "block %lu", static_cast<unsigned long>(e.start));
@@ -536,6 +637,7 @@ void mediamap_init(DisplayDriver* display) {
 }
 
 void mediamap_enter() {
+    highlight_ = -1;
     load();
 }
 
@@ -549,7 +651,7 @@ void mediamap_drawAll() {
         return;
     }
     drawRingsAndCentre();
-    card(typeCard_, "BY TYPE");
+    card(typeCard_, nullptr);
     drawTypes();
     drawMedium();
 }
@@ -562,6 +664,7 @@ void mediamap_poll(std::uint32_t nowMs) {
     const bool have = live_ && live_(l);
     // Another medium (or the drive's gone): everything afresh
     if (have != haveDrive_ || (have && l.file != file_)) {
+        highlight_ = -1;
         load();
         mediamap_drawAll();
         return;
@@ -592,7 +695,8 @@ void mediamap_poll(std::uint32_t nowMs) {
         // no flashing), the head on top
         eraseHead();
         headShown_ = false;
-        const std::vector<std::uint8_t> before = kinds_;
+        std::vector<std::uint16_t> before(kinds_.size());
+        for (std::size_t g = 0; g < kinds_.size(); ++g) before[g] = stepColour(g);
         const int ringsBefore = rings_, stepsBefore = steps_;
         load();
         shown_ = l;
@@ -601,9 +705,12 @@ void mediamap_poll(std::uint32_t nowMs) {
             drawRingsAndCentre();
         } else {
             for (int r = 0; r < rings_; ++r) {
-                const auto a = before.cbegin() + r * steps_;
-                const auto b = kinds_.cbegin() + r * steps_;
-                if (!std::equal(a, a + steps_, b)) drawRing(r);
+                bool same = true;
+                for (int k = 0; k < steps_ && same; ++k) {
+                    const std::size_t g = static_cast<std::size_t>(r * steps_ + k);
+                    same = before[g] == stepColour(g);
+                }
+                if (!same) drawRing(r);
             }
             drawCentre();
             drawHead();
@@ -629,9 +736,41 @@ void mediamap_poll(std::uint32_t nowMs) {
     }
 }
 
+namespace {
+// The rings again in their (new) colours, over themselves, the head on top
+void redrawRings() {
+    eraseHead();
+    for (int r = 0; r < rings_; ++r) drawRing(r);
+    drawHead();
+    headShown_ = shown_.op != MediaOp::None;
+}
+}  // namespace
+
 MediaMapTap mediamap_tap(int x, int y) {
     if (x >= SCREEN_MAX_X - kCloseW && y < kTitleH + 12) return MediaMapTap::Close;
     if (!model_.ok) return MediaMapTap::None;
+    // The card: its tabs (BY TYPE / BY MACHINE) and its rows (highlight one)
+    if (x >= typeCard_.x && x < typeCard_.x + typeCard_.w) {
+        if (y >= typeCard_.y - 16 && y < typeCard_.y + 14) {
+            const bool machine = x >= tabMachineX() - 4;
+            if (machine == byMachine_ && highlight_ < 0) return MediaMapTap::Handled;
+            byMachine_ = machine;
+            highlight_ = -1;
+            redrawRings();
+            drawTypes();
+            if (fileShown_ != -1) drawMedium();
+            return MediaMapTap::Handled;
+        }
+        const int row = (y - (typeCard_.y + 22 - 5)) / kRowH;
+        if (y >= typeCard_.y + 22 - 5 && row < rowCount()) {
+            const int g = rowAt(row).g;
+            highlight_ = highlight_ == g ? -1 : g;
+            redrawRings();
+            drawTypes();
+            return MediaMapTap::Handled;
+        }
+        return MediaMapTap::None;
+    }
     const double dx = x - cx_, dy = y - cy_;
     const double r = std::sqrt(dx * dx + dy * dy);
     if (r > rOut_ + 4 || r < rIn_ - 4) return MediaMapTap::None;
@@ -655,7 +794,32 @@ MediaMapTap mediamap_tap(int x, int y) {
     return MediaMapTap::Handled;
 }
 
-std::uint32_t mediamap_blocksOf(int kind) { return kind >= 0 && kind < kKinds ? model_.blocks[kind] : 0; }
+void mediamap_tabPoint(bool machine, int& x, int& y) {
+    x = machine ? tabMachineX() + tabW(kTabMachine) / 2 : typeCard_.x + 20 + tabW(kTabType) / 2;
+    y = typeCard_.y;
+}
+
+bool mediamap_rowPoint(int row, int& x, int& y) {
+    if (row < 0 || row >= rowCount()) return false;
+    x = typeCard_.x + 16 + 80;
+    y = typeCard_.y + 22 + row * kRowH + 8;
+    return true;
+}
+
+bool mediamap_blockPoint(std::uint32_t block, int& x, int& y) {
+    if (!model_.ok || block >= model_.total) return false;
+    const int g = stepOf(block);
+    const double a = angleOf((g % steps_) + 0.5);
+    const int ring = g / steps_;
+    const double r = (ringOuter(ring) + ringInner(ring)) / 2.0;
+    x = static_cast<int>(std::lround(cx_ + r * std::cos(a)));
+    y = static_cast<int>(std::lround(cy_ + r * std::sin(a)));
+    return true;
+}
+
+std::uint32_t mediamap_blocksOf(int group) { return group >= 0 && group < kGroups ? model_.blocks[group] : 0; }
+bool mediamap_byMachine() { return byMachine_; }
+int mediamap_highlight() { return highlight_; }
 int mediamap_rings() { return rings_; }
 
 }  // namespace hipi

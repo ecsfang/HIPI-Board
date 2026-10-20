@@ -242,6 +242,7 @@ add_executable(${EXE_TARGET}
     src/saver_font_goose112.cpp
     src/logo_image.cpp          # built-in logo, see scripts/bmp_to_rgb565.py
     src/version.cpp             # the version from git, see cmake/hipi_version.cmake
+    src/crashlog.cpp            # a HardFault: kept over a restart, logged (crashlog.h)
 )
 target_include_directories(${EXE_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipi_generated)
 add_dependencies(${EXE_TARGET} hipi_version)
@@ -256,6 +257,8 @@ target_link_libraries(${EXE_TARGET} PRIVATE
     pico_stdlib
     pico_rand               # screen saver animations (saver_anim.cpp)
     hardware_dma            # HP-IL signal scope (hpil_diag.cpp)
+    hardware_exception      # the HardFault handler (crashlog.cpp)
+    hardware_watchdog       # ... and the restart after it
     tinyusb_device          # ← replace pico_stdio_usb with this
     tinyusb_board
 #    pico_bootsel_via_double_reset
@@ -268,6 +271,7 @@ target_link_libraries(${EXE_TARGET} PRIVATE
 
 target_compile_definitions(${EXE_TARGET} PRIVATE
     PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR=0
+    PICO_PANIC_FUNCTION=hipi_panic   # a panic is kept and HIPI restarts (crashlog.cpp)
 )
 
 # Generate header from the .pio file

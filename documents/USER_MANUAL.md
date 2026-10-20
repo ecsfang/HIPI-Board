@@ -575,7 +575,10 @@ While **Connect to PC** has the SD card, the row isn't there.
 ### What's on the cassette?
 
 Press **▼** to see the cassette's contents: its name, size, free space and the
-list of files with type and size (in registers, like the HP-41's `DIR`).
+list of files with type and size. The types are named as lifutils names
+them — `PGM41`, `SDATA`, `KEY41`, `BAS71`, `LEX71 (S)`, `BAS75` … (the same
+names as on the Media map); an unknown type shows its code. Sizes are in
+registers for HP-41 files (like the HP-41's `DIR`), in bytes for HP-71 files.
 Scroll with ▲/▼ (Shift for a page), **OK** to use the cassette, **X** to go back.
 
 <a href="images/menu-lif-contents.png"><img src="images/menu-lif-contents.png" alt="Cassette contents" width="512"></a>
@@ -584,8 +587,9 @@ Scroll with ▲/▼ (Shift for a page), **OK** to use the cassette, **X** to go 
 
 **Media map** in the Tape view's menu (OK) shows the drive's cassette or disk
 as rings, coloured by what is stored where: programs, data, text, status /
-key assignments / write-all, other (ROM, extended memory ...), **deleted**
-files, free space, and the directory with the volume label.
+key assignments / write-all, ROM and LEX files, other, **deleted** files,
+free space, and the directory with the volume label. HP-41, HP-71 and HP-75
+files are all known (BASIC, BIN, FORTH, LEX, key and data files ...).
 
 <a href="images/view-mediamap.png"><img src="images/view-mediamap.png" alt="Media map, a cassette" width="512"></a>
 
@@ -604,11 +608,21 @@ files, free space, and the directory with the volume label.
 - **Deleted** files (PURGE) still take their space until the controller packs
   the medium (`PACK` on the HP-41) — MEDIUM says how much that would free.
   New files go after the last one: *free* is the room left there.
-- **Touch a ring** to see that file — its name, type, where it starts and its
-  size — for a few seconds.
+- **BY TYPE / BY MACHINE** — the two tabs on the card at the top right. BY
+  MACHINE colours the files by the machine they are for: HP-41, HP-71,
+  HP-75, *any machine* (plain TEXT files) and *unknown type*.
+- **Touch a row** on that card to find those files: they keep their colour,
+  everything else turns dark grey. Touch the row again (or the other tab)
+  to see everything again.
+- **Touch a ring** to see that file for a few seconds — its name, its type
+  as lifutils names it (`PGM41`, `BAS71 (SP)` ...) with the type code, what
+  it is, where it starts and its size. A padlock marks a *secure* (can't be
+  changed) or *private* (can't be listed) HP-71 file.
 - **X** (on the strip or in the title bar) goes back to the Tape view.
 
 <a href="images/view-mediamap-disk.png"><img src="images/view-mediamap-disk.png" alt="Media map, a 16 MB disk" width="512"></a>
+
+<a href="images/view-mediamap-machine.png"><img src="images/view-mediamap-machine.png" alt="Media map, BY MACHINE with the HP-71 files highlighted, a secure and private BASIC file touched" width="512"></a>
 
 ---
 
@@ -1383,18 +1397,34 @@ bottom says what you're looking at:
    cassette is picked, the lid closes and the reels turn — then **DIR**
    shows on the display what's really on that cassette, and the **media
    map** shows where everything lies on it while a head reads it through.
+   **Create media** is filled in (a name typed, the type and directory
+   size stepped) and left again — nothing is created. Then the media map
+   of a made-up disk with HP-41, HP-71 and HP-75 files: a row touched (the
+   programs found), **BY MACHINE**, the HP-71 files, and a secure, private
+   HP-71 file touched.
 4. **The plotter**: the HIPI logo on black paper, a spirograph (with a
-   screendump, as a flash), a function plot and a drawing of the HP-IL loop.
-5. **The printer** prints a few lines, HP-41 characters and a little graph;
+   screendump, as a flash), a function plot in the **Fit** view — the
+   axes slowly, a piece at a time, so the view is seen growing with them,
+   then the curves — **digitizing** on it (the digitize panel comes up, a point is
+   touched, nudged with the arrows onto the curve's top and taken with
+   ENTER, then circled with its coordinates) and a drawing of the HP-IL
+   loop.
+5. **The printer** prints a program listing, a table of sines, HP-41
+   characters, a sine wave and a bar chart;
    then the paper is pulled up to the tear-off edge and torn off (nothing
    is saved in the demo).
-6. **The analyzer** with a made-up HP-41 session (the loop set up, every
-   device asked who it is, a line sent to the display), the **loop map**
-   learnt from it, and the **HP-IL signals** (the example capture, see
+6. **The analyzer** with a made-up HP-41 session on a made-up loop —
+   HIPI's devices, three of a PC program behind PILBOX and three devices
+   after HIPI (a voltmeter, an RS-232 interface, a plotter): the loop set
+   up, every device asked who it is, lines to the display and the printer,
+   status polls and a voltmeter reading — then the **loop map** learnt from
+   it (the plotter's card touched: its details box), and the **HP-IL signals** (the example capture, see
    [11.2](#112-hp-il-signals-troubleshooting), unless real traffic has
    been seen).
 7. **The clock** — only when the real-time clock is fitted and set.
-8. The start-up box with the version, the LEDs and pixels running (if
+8. **The hardware test page**: the LED chase and the pixel run started,
+   then *Scan I2C* — every address on the bus.
+9. The start-up box with the version, the LEDs and pixels running (if
    fitted, see [11.3](#113-hardware-test)), and a screen saver (the goose
    or the rain, in turn) before the next round.
 
@@ -1566,6 +1596,7 @@ card files, they are in the SD card zip of that download.
 | Files copied from the PC don't show | Eject the drive on the computer first |
 | Screen dump fails | Not possible while **Connect to PC** is on |
 | The controller doesn't find HIPI at all, although the loopback test passes | The HP-IL wires may have + and − swapped on both cables — see [Connecting the HP-IL cables](../pcb/README.md#51-connecting-the-hp-il-cables-jp5) |
+| HIPI restarts by itself, and the USB log says *HIPI CRASHED last time* | Send that part of the log (PC, LR …) with a note of what HIPI was doing — it says where in the software it happened |
 
 Still stuck? Choose **Settings → PC link → Trace: On** and connect HIPI to a computer: the
 log helps whoever looks at the problem.

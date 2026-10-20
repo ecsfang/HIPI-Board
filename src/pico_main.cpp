@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <cstring>
 #include <vector>
+#include "crashlog.h"
 #include "pico/bootrom.h"   // reset_usb_boot()
 #include "version.h"
 #include "pico/stdlib.h"
@@ -275,6 +276,7 @@ static void bootRowsDevices() {
 }
 
 int main() {
+    hipi::crashlog_init();      // first: the fault handler, the stack pattern (crashlog.h)
     board_init(); 
     tusb_init();
     // Stay invisible to the PC until HIPI is ready (tud_connect() just
@@ -296,6 +298,7 @@ int main() {
     // neoTest() here too would have doubly claimed the same PIO state
     // machine/pin.
 
+    hipi::crashlog_report();    // the last crash, if there was one (into the boot log)
     initDisplay();
 
     FRESULT fr = initSD();
@@ -442,6 +445,10 @@ int main() {
         h.showPicker = [](const std::vector<std::string>& files, int sel) { dialog->demoShowPicker(files, sel); };
         h.movePicker = [](int sel) { dialog->demoMovePicker(sel); };
         h.hidePicker = [] { dialog->demoHidePicker(); };
+        h.showCreateMedia = [] { dialog->demoShowCreateMedia(); };
+        h.createMediaControl = [](int c) { dialog->demoCreateMediaControl(static_cast<hipi::MediaCreateUi::Ctl>(c)); };
+        h.createMediaKey = [](char k) { dialog->demoCreateMediaKey(k); };
+        h.hideCreateMedia = [] { dialog->demoHideCreateMedia(); };
         hipi::demo_init(display, h, HIPI_VERSION);
     }
 
@@ -657,6 +664,7 @@ int main() {
         hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
         hipi::backlight_poll();      // screen saver (dim / clock) after a while without use
         hipi::displayMirror_poll();  // the display mirrored to a PC viewer (display_mirror.h)
+        hipi::crashlog_poll();       // a new stack depth, logged (crashlog.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
         pixelStrip.poll();           // TFPIXEL effects (pixels.h)
 #if HIPI_ANALYZER

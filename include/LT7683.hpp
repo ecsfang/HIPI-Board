@@ -642,6 +642,10 @@ public:
     static constexpr std::uint32_t kPrinterInkAddr     = kPrinterPartsAddr + 0x40000UL;
     static constexpr std::uint32_t kPrinterInkStageAddr = kPrinterInkAddr + 0x30000UL;
     static constexpr std::uint32_t kPrinterInkMaxBytes = 0x30000UL;   // 192 kB each
+    // The screen saver's geese (saver_anim.cpp), every size side by side
+    // (~48 kB), drawn from here by BTE -- not kept in the MCU's RAM
+    static constexpr std::uint32_t kGooseAddr = kPrinterInkStageAddr + kPrinterInkMaxBytes;
+    static constexpr std::uint32_t kGooseMaxBytes = 0x10000UL;          // 64 kB
 
     // Memory Copy with ROP: DT = rop(S0, S1) -- bteMemoryCopy() and
     // andLayerRegion() (rop: REG[91h] bits 7:4)

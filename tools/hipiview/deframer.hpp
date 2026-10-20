@@ -55,7 +55,7 @@ public:
                 out(nullptr, 0);
             }
             lastFrame_ = now;
-            if (len == 0) heartbeat_ = true;     // HIPI sends these when idle
+            if (len == 0) heartbeat_ = heartbeats_ = true;     // HIPI sends these when idle
             if (at == expected_) {
                 out(f + mp::kFrameHeader, len);
                 expected_ += static_cast<std::uint32_t>(mp::kFrameHeader + len);
@@ -93,7 +93,15 @@ public:
     // HIPI sends an empty frame every second when idle (newer firmware --
     // only relied on once one has been seen): silence means it ended the
     // session (e.g. we were suspended and it gave up on us)
-    bool silent(double now) const { return sid_ >= 0 && heartbeat_ && now - lastFrame_ > 3.5; }
+    // A session that was busy from its start has shown no heartbeat yet:
+    // once this firmware has sent one at all (any session on this port),
+    // or after a longer silence anyway, it counts as silent too -- else a
+    // session HIPI ended early was waited for for ever
+    bool silent(double now) const {
+        if (sid_ < 0) return false;
+        const double quiet = now - lastFrame_;
+        return ((heartbeat_ || heartbeats_) && quiet > 3.5) || quiet > 5.0;
+    }
     bool inSession() const { return sid_ >= 0; }
     int sid() const { return sid_; }
     unsigned long long recovered() const { return recovered_; }
@@ -116,6 +124,7 @@ private:
     double ackAt_ = 0;
     double lastFrame_ = 0;
     bool heartbeat_ = false, reack_ = false;
+    bool heartbeats_ = false;        // ever seen on this port (kept over sessions)
     bool gap_ = false;
     double gapSince_ = 0, nakAt_ = -1;
     unsigned long long recovered_ = 0, sessions_ = 0;

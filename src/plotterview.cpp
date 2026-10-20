@@ -109,6 +109,7 @@ void setFitMapping(double x0, double y0, double x1, double y1, double margin) {
 }
 
 bool plotFit_ = true;                     // Display -> Plot view (config plot_fit)
+double fitMargin_ = 0.05;                 // Fit: room around the plot (more while it grows)
 
 std::int16_t mapX(std::int16_t px) {
     // round(), not a truncating cast -- at our scale (the whole 10000x7200
@@ -215,7 +216,13 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
                      std::min(x0, x1) < fitX0_ || std::max(x0, x1) > fitX1_ ||
                      std::min(y0, y1) < fitY0_ || std::max(y0, y1) > fitY1_)) {
         {
+            // More room than a fresh fit (15 %): a plot that grows a little
+            // at a time (axes drawn in pieces) is redrawn every few pieces,
+            // not at each one -- every redraw is the whole plot again, also
+            // to hipiview
+            fitMargin_ = 0.15;
             plotterview_redraw();                 // (refits to all segments, this one included)
+            fitMargin_ = 0.05;
             return;
         }
     }
@@ -1544,6 +1551,7 @@ void drawDigitizePanel() {
 void digiMoveTo(int x, int y) {
     x = std::max(0, std::min(x, plotAreaW_ - 1));
     y = std::max(0, std::min(y, SCREEN_MAX_Y - 1));
+    if (x == digiMX_ && y == digiMY_) return;   // (an arrow held at the edge: nothing to draw)
     const int r = kDigiArm + kDigiGap + 2;
     const int ex0 = std::max(0, digiMX_ - r), ey0 = std::max(0, digiMY_ - r);
     const int ex1 = std::min(plotAreaW_, digiMX_ + r + 1), ey1 = std::min(SCREEN_MAX_Y, digiMY_ + r + 1);
@@ -1794,6 +1802,7 @@ void plotterview_redraw() {
     if (output_ != DisplayOutput::Plotter) return;
     // The mapping: the whole page, or (Fit) the plot itself with a margin
     // -- 5 % when fitted afresh here, so it has room to grow a little
+    // (15 % when it grew out of what was shown: fitMargin_)
     setPageMapping();
     if (plotFit_ && !plotter_->segments().empty()) {
         double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -1803,7 +1812,7 @@ void plotterview_redraw() {
             y0 = std::min(y0, static_cast<double>(std::min(seg.y0, seg.y1)));
             y1 = std::max(y1, static_cast<double>(std::max(seg.y0, seg.y1)));
         }
-        setFitMapping(x0, y0, x1, y1, 0.05);
+        setFitMapping(x0, y0, x1, y1, fitMargin_);
     }
     plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
@@ -2292,6 +2301,11 @@ bool plotterview_digitizeControl(int id, int& x, int& y) {
 }
 
 void plotterview_digitizeMarker(int& x, int& y) { x = digiMX_; y = digiMY_; }
+
+void plotterview_plotToScreen(int px, int py, int& x, int& y) {
+    x = mapX(static_cast<std::int16_t>(px));
+    y = mapY(static_cast<std::int16_t>(py));
+}
 
 void plotterview_poll() {
     pollDigitize();

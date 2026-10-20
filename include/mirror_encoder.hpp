@@ -38,8 +38,11 @@ public:
     ~Encoder() { release(); }
 
     // ── Session control ─────────────────────────────────────────────────
-    // The packet buffers (8 kB) are only allocated while enabled, so the
-    // mirror costs no RAM when no viewer is connected. Returns false if
+    // The packet buffers (8 kB) are allocated when first enabled, so the
+    // mirror costs no RAM until a viewer connects -- and then kept: a viewer
+    // that falls behind starts a new session again and again, and freeing
+    // and allocating them each time cut the heap into pieces until a
+    // larger allocation elsewhere failed (HIPI crashed). Returns false if
     // they couldn't be allocated (then it stays disabled).
     bool setEnabled(bool on) {
         if (on && !enabled_) {
@@ -50,7 +53,7 @@ public:
         }
         enabled_ = on;
         suspended_ = false;
-        if (!on) { size_ = 0; openType_ = 0; release(); }
+        if (!on) { size_ = 0; openType_ = 0; }
         return true;
     }
     bool enabled() const { return enabled_; }

@@ -5,6 +5,7 @@
 // header in block 0, directory (32-byte entries) from block 2.
 #pragma once
 #include "ff.h"
+#include "lif_types.h"
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -40,26 +41,13 @@ inline std::string dateTime(const std::uint8_t* p) {
     return buf;
 }
 
-// Short type name, as the HP-41 / HP-71 show them
-inline const char* typeName(std::uint32_t t) {
-    switch (t) {
-        case 0x0001: case 0xE0D5: return "AS";    // LIF text / -41 ASCII
-        case 0xE0D0: return "DA";                 // data
-        case 0xE080: return "PR";                 // FOCAL program
-        case 0xE040: return "WA";                 // write all
-        case 0xE050: return "KE";                 // key assignments
-        case 0xE060: return "ST";                 // status
-        case 0xE070: return "ROM";
-        case 0xE020: return "CA";                 // whole calculator (HOSER)
-        case 0xE030: return "XM";                 // extended memory (HOSER)
-        case 0xE0B0: return "BU";                 // buffer (HOSER)
-        case 0xE214: case 0xE215: case 0xE216: case 0xE217: return "BAS";
-        case 0xE204: case 0xE205: case 0xE206: case 0xE207: return "BIN";
-        case 0xE208: case 0xE209: case 0xE20A: case 0xE20B: return "LEX";
-        case 0xE20C: case 0xE20D: return "KEY";
-        case 0xE0F0: case 0xE0F1: return "DAT";
-        default: return nullptr;
-    }
+// Type name as lifutils shows it (include/lif_types.h: PGM41, BAS71 (S)
+// ...), the code in hex if it isn't known
+inline std::string typeName(std::uint32_t t) {
+    if (const LifType* lt = lifType(static_cast<std::uint16_t>(t))) return lt->name;
+    char b[8];
+    std::snprintf(b, sizeof(b), "%04lX", static_cast<unsigned long>(t));
+    return b;
 }
 
 // Size column: HP-41 files in registers ("35r", as the -41's DIR shows
@@ -126,7 +114,7 @@ inline bool lifDescribe(const char* path, std::vector<std::string>& lines) {
     const std::size_t summaryAt = lines.size();          // filled in below
     lines.push_back("");
     lines.push_back("");
-    lines.push_back("NAME       TYPE    SIZE  BLOCKS  FLAGS");
+    lines.push_back("NAME       TYPE          SIZE  BLOCKS  FLAGS");
 
     if (dirLen > 64) dirLen = 64;                        // sanity cap: 512 entries
     unsigned files = 0;
@@ -141,16 +129,13 @@ inline bool lifDescribe(const char* path, std::vector<std::string>& lines) {
             if (type == 0x0000) continue;                // purged
             const std::uint32_t alloc = be32(d + 16);
             const std::uint8_t* misc = d + 26;
-            const char* tn = typeName(type);
-            char tbuf[12];
-            if (tn == nullptr) { std::snprintf(tbuf, sizeof(tbuf), "%04lX", static_cast<unsigned long>(type)); tn = tbuf; }
             std::string flags;
             if (type >= 0xE020 && type <= 0xE0D0) {      // -41 style secure/private bits
                 if (misc[4] & 0x80) flags += 'S';
                 if (misc[4] & 0x01) flags += 'P';
             }
-            std::snprintf(buf, sizeof(buf), "%-10s %-4s %7s %7lu  %s",
-                          field(d, 10).c_str(), tn, sizeText(type, misc).c_str(),
+            std::snprintf(buf, sizeof(buf), "%-10s %-10s %7s %7lu  %s",
+                          field(d, 10).c_str(), typeName(type).c_str(), sizeText(type, misc).c_str(),
                           static_cast<unsigned long>(alloc), flags.c_str());
             lines.push_back(buf);
             ++files;

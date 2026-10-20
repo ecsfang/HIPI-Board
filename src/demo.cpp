@@ -10,6 +10,7 @@
 #include "printer.h"
 #include "drive.h"
 #include "hwtest_io.h"
+#include "hwtest.h"
 #include "analyzer.h"
 #include "loopmap.h"
 #include "clock.h"
@@ -18,6 +19,7 @@
 #include "config.hpp"
 #include "lif_info.hpp"
 #include "mediamap.h"
+#include "lif_create.h"
 #include "sd_paths.h"
 #include "usb_serial.h"
 #include "display_mirror.h"
@@ -31,7 +33,7 @@ extern hipi::Screen* screen;
 extern hipi::Video80* video80Term;
 extern std::vector<CDevice*> devices;
 extern hipi::Config config;
-unsigned short hipi_simFrame(unsigned short frame);   // hipi.cpp
+unsigned short hipi_simFrame(unsigned short frame, unsigned short (*pcDevices)(unsigned short));   // hipi.cpp (hipi.h)
 extern const std::uint16_t kLogoImageWidth, kLogoImageHeight;
 extern const std::uint16_t kLogoImage[];
 
@@ -62,6 +64,7 @@ std::vector<IL_CMD_t> savedAddr_;
 bool lights_ = false;
 bool tapeShown_ = false;
 bool pickerShown_ = false;
+bool createShown_ = false;                  // CREATE MEDIA up (the same overlay as captions)
 
 // The caption: a yellow band at the bottom, in the menu layer (PIP)
 bool captionShown_ = false;
@@ -94,7 +97,7 @@ void hideOverlay() {
 }
 
 void showCaption(const std::string& text, std::uint32_t ms) {
-    if (pickerShown_) return;                    // (the same overlay)
+    if (pickerShown_ || createShown_) return;    // (the same overlay)
     const int textW = static_cast<int>(text.size()) * 16;
     const int w = std::min((textW + 48 + 3) & ~3, (SCREEN_MAX_X - 32) & ~3);
     const int h = 32 + 20;
@@ -187,6 +190,58 @@ Step hpgl(std::function<std::string()> make, std::size_t n) {
         if (i >= g.size()) { g.clear(); g.shrink_to_fit(); return true; }
         return false;
     };
+}
+
+// Things done at set times (ms after the step starts): the demo's
+// "touches". build() fills the list when the step starts.
+struct Act { std::uint32_t at; std::function<void()> fn; };
+Step acts(std::function<void(std::vector<Act>&)> build) {
+    return [build, list = std::vector<Act>(), i = std::size_t(0), t0 = std::uint32_t(0)](bool first) mutable {
+        if (first) { list.clear(); build(list); i = 0; t0 = nowMs(); }
+        while (i < list.size() && nowMs() - t0 >= list[i].at) list[i++].fn();
+        if (i < list.size()) return false;
+        list.clear();
+        return true;
+    };
+}
+
+// Digitizing, as a person would: the plotter waits for a point (DP), a
+// touch a little off SIN(X)/X's top, the arrows nudge the marker onto it
+// (left held, up tapped), ENTER. The "touches" go to the digitize panel
+// directly -- a real one stops the demo.
+Step digitizePoint() {
+    return acts([](std::vector<Act>& a) {
+        auto press = [](int id) {
+            int x = 0, y = 0;
+            if (plotterview_digitizeControl(id, x, y)) plotterview_digitizeTap(x, y);
+        };
+        std::uint32_t t = 0;
+        a.push_back({ t, [] {
+            int x = 0, y = 0;
+            plotterview_plotToScreen(demo::kFunctionPeakX, demo::kFunctionPeakY, x, y);
+            plotterview_digitizeTap(x + 10, y + 6);
+            plotterview_digitizeRelease();
+        } });
+        // Arrows tapped, never held: a held arrow repeats in real time, and
+        // the demo's time stands still while hipiview catches up -- the
+        // marker would run on (and the mirror fall further behind) until
+        // the release came
+        t += 1500;
+        for (int k = 0; k < 10; ++k) {                             // left
+            t += 220;
+            a.push_back({ t, [press] { press(2); } });
+            a.push_back({ t + 100, [] { plotterview_digitizeRelease(); } });
+        }
+        t += 300;
+        for (int k = 0; k < 6; ++k) {                              // up, tapped
+            t += 450;
+            a.push_back({ t, [press] { press(0); } });
+            a.push_back({ t + 120, [] { plotterview_digitizeRelease(); } });
+        }
+        t += 1500;
+        a.push_back({ t, [press] { press(4); } });                // ENTER
+        a.push_back({ t + 120, [] { plotterview_digitizeRelease(); } });
+    });
 }
 
 // Printer lines, one every ms
@@ -352,6 +407,111 @@ Step mediaMap(std::uint32_t ms) {
     };
 }
 
+// ── File picker -> Create media...: filled in, never created ────────────
+// Name (the keyboard), type and directory size stepped; then it goes --
+// nothing is written. (Ctl numbers: MediaCreateUi::Ctl.)
+
+Step createMedia() {
+    return acts([](std::vector<Act>& a) {
+        enum { Name = 0, TypeLeft, TypeRight, DirLeft, DirRight };
+        const char kDel = 8, kOk = 13;                       // MediaCreateUi's keys
+        auto ctl = [](int c) { return [c] { if (hooks_.createMediaControl) hooks_.createMediaControl(c); }; };
+        auto key = [](char k) { return [k] { if (hooks_.createMediaKey) hooks_.createMediaKey(k); }; };
+        // The caption first: it uses the same overlay as the dialog
+        a.push_back({ 0, [] { showCaption("CREATE MEDIA - A NEW, EMPTY CASSETTE OR DISK", 3000); } });
+        a.push_back({ 3000, [] {
+            if (captionShown_) hideOverlay();
+            if (hooks_.showCreateMedia) { hooks_.showCreateMedia(); createShown_ = true; }
+        } });
+        std::uint32_t t = 5000;
+        a.push_back({ t, ctl(Name) });                           // the keyboard
+        t += 1200;
+        for (int i = 0; i < 6; ++i) { a.push_back({ t, key(kDel) }); t += 180; }
+        for (char c : std::string("GAMES2")) { t += 350; a.push_back({ t, key(c) }); }
+        t += 900;
+        a.push_back({ t, key(kOk) });
+        t += 1500;
+        a.push_back({ t, ctl(TypeRight) });                      // an HP 9114B disk
+        t += 1600;
+        a.push_back({ t, ctl(TypeRight) });                      // a 640 kB disk
+        t += 1600;
+        a.push_back({ t, ctl(DirRight) });                       // a bigger directory
+        t += 1400;
+        t += 2500;
+        a.push_back({ t, [] { if (hooks_.hideCreateMedia) hooks_.hideCreateMedia(); createShown_ = false; } });
+        a.push_back({ t + 100, [] { showCaption("CREATE - NOT IN THE DEMO", 2500); } });
+        a.push_back({ t + 2700, [] {} });
+    });
+}
+
+// ── The media map of a made-up disk with HP-41, HP-71 and HP-75 files ──
+// Built block by block when read (only the header and the directory are):
+// BY TYPE, a row touched (the rest dimmed) and again, BY MACHINE, the
+// HP-71 row, then a secure + private HP-71 file touched.
+
+struct DemoFile { const char* name; std::uint16_t type; std::uint32_t len; };
+constexpr DemoFile kDemoDisk[] = {
+    { "SECRET", 0xE217, 40 }, { "GAME41", 0xE080, 60 }, { "DATA41", 0xE0D0, 30 }, { "KEYS", 0xE050, 3 },
+    { "MATH71", 0xE214, 80 }, { "HPILLX", 0xE208, 50 }, { "NOTES", 0x0001, 20 }, { "CALC75", 0xE088, 45 },
+    { "SHEET", 0xE08A, 25 }, { "OLDPRG", 0x0000, 35 }, { "PLOT71", 0xE222, 15 }, { "MLDL", 0xE070, 64 },
+    { "TXT75", 0xE052, 10 }, { "FORTH", 0xE218, 70 }, { "WALL", 0xE040, 32 }, { "APPTS", 0xE053, 12 } };
+constexpr int kDemoDiskEntries = 64;
+
+bool demoDiskBlock(std::uint32_t blk, std::uint8_t* b) {
+    const LifMediaType& t = kLifMediaTypes[1];                 // an HP 9114B disk
+    std::memset(b, 0, 256);
+    const std::uint32_t dirBlocks = static_cast<std::uint32_t>(lifDirBlocks(kDemoDiskEntries));
+    if (blk == 0) { lifVolumeHeader(b, t, kDemoDiskEntries, "DEMO", nullptr); return true; }
+    if (blk < 2 || blk >= 2 + dirBlocks) return true;
+    std::memset(b, 0xFF, 256);
+    std::uint32_t at = 2 + dirBlocks;
+    const std::size_t n = sizeof(kDemoDisk) / sizeof(kDemoDisk[0]);
+    for (std::size_t i = 0; i < n; ++i) {
+        const DemoFile& f = kDemoDisk[i];
+        if (i / 8 == blk - 2) {
+            std::uint8_t* e = b + (i % 8) * 32;
+            std::memset(e, 0, 32);
+            std::memset(e, ' ', 10);
+            std::memcpy(e, f.name, std::min<std::size_t>(10, std::strlen(f.name)));
+            e[10] = static_cast<std::uint8_t>(f.type >> 8);
+            e[11] = static_cast<std::uint8_t>(f.type);
+            for (int k = 0; k < 4; ++k) {
+                e[12 + k] = static_cast<std::uint8_t>(at >> (24 - 8 * k));
+                e[16 + k] = static_cast<std::uint8_t>(f.len >> (24 - 8 * k));
+            }
+        }
+        at += f.len;
+    }
+    return true;
+}
+std::uint32_t demoDiskFirstFile() { return 2 + static_cast<std::uint32_t>(lifDirBlocks(kDemoDiskEntries)); }
+
+Step machineMap() {
+    return acts([](std::vector<Act>& a) {
+        mediamap_setDemoSource(
+            [](MediaMapLive& l) { l.file = "DEMODISK.DAT"; l.op = MediaOp::None; l.writes = 0; l.busy = false; return true; },
+            demoDiskBlock);
+        demoMap_ = true;
+        plotterview_showView(DisplayOutput::MediaMap, nullptr);
+        auto row = [](int r) { int x = 0, y = 0; if (mediamap_rowPoint(r, x, y)) mediamap_tap(x, y); };
+        auto tab = [](bool m) { int x = 0, y = 0; mediamap_tabPoint(m, x, y); mediamap_tap(x, y); };
+        a.push_back({ 100, [] { showCaption("HP-41, HP-71 AND HP-75 FILES ON ONE DISK", 3500); } });
+        a.push_back({ 3500, [row] { row(0); } });                               // programs
+        a.push_back({ 4000, [] { showCaption("TOUCH A ROW: WHERE ARE THE PROGRAMS?", 3000); } });
+        a.push_back({ 7500, [row] { row(0); } });                               // all again
+        a.push_back({ 9000, [tab] { tab(true); } });                            // BY MACHINE
+        a.push_back({ 9500, [] { showCaption("BY MACHINE", 2500); } });
+        a.push_back({ 12000, [row] { row(1); } });                              // HP-71
+        a.push_back({ 14500, [] {                                                // a secure + private file
+            int x = 0, y = 0;
+            if (mediamap_blockPoint(demoDiskFirstFile() + kDemoDisk[0].len / 2, x, y)) mediamap_tap(x, y);
+        } });
+        a.push_back({ 15000, [] { showCaption("TOUCH A FILE: BAS71 (SP) - SECURE + PRIVATE", 3500); } });
+        a.push_back({ 20000, [tab] { tab(false); } });                          // (as it was)
+        a.push_back({ 20100, [] { mediamap_clearDemoSource(); demoMap_ = false; } });
+    });
+}
+
 // ── The printer's paper: pulled up to the tear-off edge, then torn off ──
 
 Step paperPullUp() {
@@ -365,9 +525,12 @@ Step paperPullUp() {
 }
 
 // ── A made-up HP-41 session (analyzer, loop map) ────────────────────────
-// Through HIPI's own devices (hipi_simFrame()), one frame every 30 ms:
-// auto-addressing, each device asked for its accessory and device ID,
-// then a line printed on the display
+// A whole made-up loop, one frame every 30 ms: two devices before HIPI,
+// HIPI's own (hipi_simFrame()), three of a PC program behind PILBOX, two
+// after HIPI. The HP-41 auto-addresses it, asks every device for its
+// accessory and device ID, prints on the display and the printer, asks a
+// few for their status, and reads the voltmeter. (Not every detail is as
+// a real loop would have it -- it's for showing.)
 
 void saveAddresses() {
     if (!savedAddr_.empty()) return;
@@ -380,41 +543,31 @@ void restoreAddresses() {
 }
 
 Step session() {
-    struct Act { IL_CMD_t frame; bool echo; };
-    return [acts = std::vector<Act>(), i = std::size_t(0), phase = 0, last = IL_CMD_t(0), echoes = 0,
+    return [acts = std::vector<demo::LoopAct>(), i = std::size_t(0), phase = 0, last = IL_CMD_t(0), echoes = 0,
             next = std::uint32_t(0)](bool first) mutable {
         if (first) { phase = 0; i = 0; acts.clear(); echoes = 0; next = nowMs(); saveAddresses(); }
         if (static_cast<std::int32_t>(nowMs() - next) < 0) return false;
         next = nowMs() + 30;
-        if (phase == 0) { last = hipi_simFrame(AAU); phase = 1; return false; }
-        if (phase == 1) {
-            last = hipi_simFrame(AAD + 1);
+        auto round = [](IL_CMD_t f) { return demo::fakeLoopRound(f, hipi_simFrame); };
+        if (phase == 0) { last = round(IFC); phase = 1; return false; }
+        if (phase == 1) { last = round(AAU); phase = 2; return false; }
+        if (phase == 2) {
+            last = round(AAD + 1);
             const int n = inAddrRange(last, AAD) ? static_cast<int>(last - AAD) - 1 : 0;
-            for (int a = 1; a <= n && a <= 30; ++a) {
-                acts.push_back({ static_cast<IL_CMD_t>(TAD + a), false });
-                acts.push_back({ SAI, true });
-                acts.push_back({ UNT, false });
-                acts.push_back({ static_cast<IL_CMD_t>(TAD + a), false });
-                acts.push_back({ SDI, true });
-                acts.push_back({ UNT, false });
-            }
-            if (videoDisplay != nullptr && videoDisplay->enabled() && videoDisplay->addr() >= 1 && videoDisplay->addr() <= 30) {
-                acts.push_back({ static_cast<IL_CMD_t>(LAD + videoDisplay->addr()), false });
-                for (const char* p = "HELLO FROM THE HP-41\r\n"; *p; ++p) acts.push_back({ static_cast<IL_CMD_t>(*p), false });
-                acts.push_back({ UNL, false });
-            }
-            phase = 2;
+            auto addrOf = [](CDevice* d) { return d != nullptr && d->enabled() && d->addr() >= 1 && d->addr() <= 30 ? static_cast<int>(d->addr()) : 0; };
+            acts = demo::fakeSessionActs(n, addrOf(videoDisplay), addrOf(printer));
+            phase = 3;
             return false;
         }
         // An answer travels back round to the controller, and on round
         // the loop again, until the talker ends it (ETO)
         if (echoes > 0) {
-            if (IS_DATA(last) && echoes < 40) { last = hipi_simFrame(last); ++echoes; return false; }
+            if (IS_DATA(last) && echoes < 40) { last = round(last); ++echoes; return false; }
             echoes = 0;
         }
         if (i >= acts.size()) return true;
-        const Act a = acts[i++];
-        last = hipi_simFrame(a.frame);
+        const demo::LoopAct a = acts[i++];
+        last = round(a.frame);
         if (a.echo) echoes = 1;
         return false;
     };
@@ -526,7 +679,13 @@ void buildScript() {
         add(dir());
         add(wait(5000));
         add(mediaMap(8000));
+        add(view(DisplayOutput::Tape, drv));
+        add(wait(1500));
+        add(createMedia());
+        add(wait(1000));
     }
+
+    add(machineMap());
 
     // ── The plotter ─────────────────────────────────────────────────
     add(call([] { plotterview_setPlotFit(false); plotterview_clearPlotter(); plotterview_setPaperBlack(true); }));
@@ -543,9 +702,23 @@ void buildScript() {
     add(wait(400));
     add(caption("SAVED AS A .BMP  (NOT IN THE DEMO)", 2500));
     add(wait(2600));
-    add(call([] { plotterview_clearPlotter(); }));
-    add(hpgl(demo::hpglFunctionPlot, 60));
-    add(wait(2500));
+    // Fit: the plot fills the screen -- the axes slowly, a piece at a time, so
+    // the view is seen growing with them; then the rest, faster
+    add(call([] { plotterview_clearPlotter(); plotterview_setPlotFit(true); }));
+    add(caption("PLOT VIEW: FIT", 2500));
+    add(hpgl(demo::hpglFunctionAxes, 1));            // slowly: the view grows with them
+    add(wait(800));
+    add(hpgl(demo::hpglFunctionCurves, 25));
+    add(wait(2000));
+    // Digitizing on it: DP, a point picked, the plotter has it
+    add(caption("DIGITIZING  (HP-GL DP)", 3000));
+    add(hpgl([] { return std::string("DP;"); }, 3));
+    add(wait(1500));
+    add(digitizePoint());
+    add(wait(1200));
+    add(hpgl([] { return demo::hpglDigitizedMark(plotter->penX(), plotter->penY()); }, 4));
+    add(wait(3500));
+    add(call([] { plotterview_setPlotFit(false); }));
     add(call([] { plotterview_clearPlotter(); }));
     add(caption("THE HP-IL LOOP", 2500));
     add(hpgl(demo::hpglLoop, 60));
@@ -556,7 +729,7 @@ void buildScript() {
         add(view(DisplayOutput::Printer, printer));
         add(caption("HP 82162A THERMAL PRINTER", 2500));
         add(wait(1500));
-        add(print(900));
+        add(print(450));
         add(wait(1500));
         add(caption("PULL THE PAPER UP TO THE TEAR-OFF EDGE", 2500));
         add(paperPullUp());
@@ -576,7 +749,17 @@ void buildScript() {
     add(wait(3000));
     add(view(DisplayOutput::LoopMap, nullptr));
     add(caption("THE LOOP MAP - LEARNT FROM THE TRAFFIC", 3000));
-    add(wait(6000));
+    add(wait(4500));
+    // A card touched: everything known about that device
+    add(acts([](std::vector<Act>& a) {
+        a.push_back({ 0, [] {
+            int x = 0, y = 0;
+            if (plotter != nullptr && loopmap_cardPoint(plotter->addr(), x, y)) loopmap_tap(x, y);
+        } });
+        a.push_back({ 300, [] { if (loopmap_detailsOpen()) showCaption("TOUCH A DEVICE: WHAT'S KNOWN ABOUT IT", 3500); } });
+        a.push_back({ 5500, [] { loopmap_closeDetails(); } });
+    }));
+    add(wait(1500));
 #endif
     add(view(DisplayOutput::Signals, nullptr));
     add(caption("HP-IL SIGNALS - LIKE AN OSCILLOSCOPE", 3000));
@@ -591,6 +774,16 @@ void buildScript() {
         add(caption("THE CLOCK - FROM THE REAL-TIME CLOCK", 3000));
         add(wait(6000));
     }
+
+    // ── The hardware test page: LEDs, pixels, what's on the I2C bus ──
+    add(view(DisplayOutput::HwTest, nullptr));
+    add(caption("HARDWARE TEST - LEDS, PIXELS, I2C", 3000));
+    add(wait(1500));
+    add(call([] { hwtest_demoRun(); }));
+    add(wait(4500));
+    add(call([] { hwtest_showScan(); }));
+    add(caption("SCAN I2C - EVERY ADDRESS ON THE BUS", 3000));
+    add(wait(4000));
 
     // ── The end: name, lights, a screen saver ───────────────────────
     add(call([] { plotterview_clearPlotter(); plotterview_setPaperBlack(true); }));
@@ -613,6 +806,8 @@ void buildScript() {
 void restore() {
     if (pickerShown_ && hooks_.hidePicker) hooks_.hidePicker();
     pickerShown_ = false;
+    if (createShown_ && hooks_.hideCreateMedia) hooks_.hideCreateMedia();
+    createShown_ = false;
     hideOverlay();
     if (lights_) { hwio::end(); lights_ = false; }
     plotterview_setDemoTape(false);

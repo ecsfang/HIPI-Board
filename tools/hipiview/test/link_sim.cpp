@@ -130,6 +130,10 @@ int main(int argc, char** argv) {
     const double seconds = argc > 2 ? std::atof(argv[2]) : 8.0;
     const bool stall = argc > 3 && std::strcmp(argv[3], "stall") == 0;
     const bool inputTest = argc > 3 && std::strcmp(argv[3], "input") == 0;
+    // burst: more drawing than the link can carry, from the very start (so
+    // the viewer sees no heartbeat first): the encoder gives up, and HIPI
+    // must send the screen again by itself -- the viewer is still there
+    const bool burst = argc > 3 && std::strcmp(argv[3], "burst") == 0;
     if (inputTest) {
         // Times in seconds from when hipiview's picture is in step
         std::FILE* f = std::fopen("link_sim_input.txt", "w");
@@ -210,10 +214,16 @@ int main(int argc, char** argv) {
             static bool viewOnly = false;
             if (!viewOnly) for (const auto& e : inputs) if (e.kind == 'B' && e.a == 7) viewOnly = true;
             if (viewOnly) hipi::displayMirror_setMode(hipi::MirrorMode::View);
-        } else if (!stall && now() > seconds * 0.5 && now() < seconds * 0.6) {
+        } else if (!stall && !burst && now() > seconds * 0.5 && now() < seconds * 0.6) {
             hipi::displayMirror_setMode(hipi::MirrorMode::Off);
         } else {
             hipi::displayMirror_setMode(hipi::MirrorMode::View);
+        }
+        if (burst) {
+            // The link worse while HIPI draws too much: the ring stays full
+            // and the encoder gives up; afterwards as usual again
+            static const double normalLoss = lossRate;
+            lossRate = now() > 0.3 && now() < seconds * 0.4 ? 0.3 : normalLoss;
         }
         if (stall && !frozen && now() > seconds * 0.3 && now() < seconds * 0.4) { kill(pid, SIGSTOP); frozen = true; frozenAt = now(); }
         if (stall && frozen && now() > seconds * 0.7) { kill(pid, SIGCONT); frozen = false; }
@@ -230,6 +240,10 @@ int main(int argc, char** argv) {
             nextDraw = now() + 0.03;
             // (input test: big pictures too, so the ring fills up while drawing)
             if (inputTest && line % 20 == 0) d.drawBitmap565(40, 40, 320, 240, bigPicture.data());
+            if (burst && now() > 0.3 && now() < seconds * 0.4) {
+                for (std::size_t k = 0; k < bigPicture.size(); k += 97) bigPicture[k] = static_cast<std::uint16_t>(bigPicture[k] * 31 + line);
+                for (int k = 0; k < 4; ++k) d.drawBitmap565(40 + k * 160, 40 + (line % 5) * 20, 320, 240, bigPicture.data());
+            }
             char buf[64];
             std::snprintf(buf, sizeof buf, "Line %d, time %.2f s", line++, now());
             screen.pr_str(buf);
@@ -354,6 +368,10 @@ int main(int argc, char** argv) {
             for (const auto& e : inputs) std::printf("  %.3f %c %d %d %d\n", e.t, e.kind, e.a, e.b, e.c);
             return 1;
         }
+    }
+    if (burst) {
+        std::printf("burst: %llu sessions seen by the viewer\n", link.sessions());
+        if (link.sessions() < 2) { std::printf("FAIL burst: the encoder never gave up (no test)\n"); return 1; }
     }
     if (stall && lateStalls > 0) {
         std::printf("FAIL HIPI kept stalling while nobody read the port\n");
