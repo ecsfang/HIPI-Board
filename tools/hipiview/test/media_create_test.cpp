@@ -13,6 +13,7 @@
 //   make media_create_test && ./media_create_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "media_create_ui.h"
+#include "menu_frame.h"
 #include "lif_create.h"
 #include "lif_info.hpp"
 #include "hp82163_font.hpp"
@@ -139,6 +140,76 @@ int main() {
     media.setDateSource([](hipi::LifDate& dt) { dt = { 2026, 10, 13, 7, 46, 30 }; return true; });
     using Ctl = hipi::MediaCreateUi::Ctl;
     using A = hipi::MediaAction;
+
+    // ── The menu frame's rounded corners follow what's behind the box ──
+    {
+        namespace MF = hipi::MenuFrame;
+        // A pixel of the menu layer, as RGB565
+        auto layerPx = [&](int x, int y) {
+            const auto& m = chip.memory();
+            const std::size_t a = hipi::LT7683::kMenuLayerAddr + (static_cast<std::size_t>(y) * 1024 + x) * 2;
+            return static_cast<std::uint16_t>(m[a] | (m[a + 1] << 8));
+        };
+        const int x = MF::X, y = MF::MenuTop, w = MF::W, h = MF::MenuH;
+        d.fillRect(0, 0, 1024, 600, 0xFFFF);                  // white "paper"
+        d.beginOverlayDraw();
+        MF::drawTitled(&d, x, y, w, h, "corners");
+        d.endOverlayDraw();
+        check(layerPx(x, y) == 0xFFFF && layerPx(x + w - 1, y + h - 1) == 0xFFFF,
+              "frame: the corners outside it show the white panel");
+        std::vector<std::uint16_t> before;
+        for (int yy = y; yy < y + h; ++yy) for (int xx = x; xx < x + w; ++xx) before.push_back(layerPx(xx, yy));
+        d.fillRect(0, 0, 1024, 600, 0x0000);                  // the paper turns black
+        MF::refreshCorners(&d, x, y, w, h);
+        int changedOutside = 0, changedInCorners = 0, wrong = 0;
+        for (int yy = y, i = 0; yy < y + h; ++yy)
+            for (int xx = x; xx < x + w; ++xx, ++i) {
+                // exactly the panel's pixels (white before) became black; the frame's stayed
+                const std::uint16_t b = before[static_cast<std::size_t>(i)];
+                if (layerPx(xx, yy) != (b == 0xFFFF ? 0x0000 : b)) {
+                    if (++wrong <= 12) std::printf("     (%d,%d) was %04X, now %04X\n", xx - x, yy - y, b, layerPx(xx, yy));
+                }
+            }
+        check(wrong == 0, "refreshCorners: every pixel of the old background changed, nothing of the frame");
+        for (int yy = y, i = 0; yy < y + h; ++yy)
+            for (int xx = x; xx < x + w; ++xx, ++i) {
+                const bool corner = (xx < x + MF::CornerRadius || xx >= x + w - MF::CornerRadius) &&
+                                    (yy < y + MF::CornerRadius || yy >= y + h - MF::CornerRadius);
+                if (layerPx(xx, yy) != before[static_cast<std::size_t>(i)]) ++(corner ? changedInCorners : changedOutside);
+            }
+        std::printf("     refreshCorners: %d pixels changed in the corners, %d elsewhere\n", changedInCorners, changedOutside);
+        check(changedOutside == 0 && changedInCorners > 0 && changedInCorners < 4 * MF::CornerRadius * MF::CornerRadius / 2,
+              "refreshCorners: only the pixels outside the rounding change");
+        check(layerPx(x, y) == 0x0000 && layerPx(x + w - 1, y) == 0x0000 &&
+              layerPx(x, y + h - 1) == 0x0000 && layerPx(x + w - 1, y + h - 1) == 0x0000,
+              "refreshCorners: all four corners now show the black panel");
+        check(layerPx(x + 5, y + 5) == MF::Yellow && layerPx(x + 1, y + h / 2) == MF::Yellow,
+              "refreshCorners: the frame's border stays yellow");
+        check(layerPx(x + 8, y + 8) == MF::Yellow && layerPx(x + 8, y + h - 9) == 0x0000,
+              "refreshCorners: inside, the title band yellow, the bottom black");
+        check(layerPx(x + w / 2, y + h / 2) == 0x0000 && layerPx(x + w - 40, y + 20) == MF::Yellow,
+              "refreshCorners: the rest of the box untouched");
+        {   // the box's top-left and bottom-right corners, 8x, on grey -- to look at
+            d.fillRect(0, 0, 1024, 600, 0x8410);
+            MF::refreshCorners(&d, x, y, w, h);
+            constexpr int Z = 8, S = 24;
+            std::vector<std::uint32_t> img(static_cast<std::size_t>(2 * S * Z) * S * Z);
+            for (int part = 0; part < 2; ++part)
+                for (int yy = 0; yy < S; ++yy)
+                    for (int xx = 0; xx < S; ++xx) {
+                        const int lx = part == 0 ? x + xx : x + w - S + xx;
+                        const int ly = part == 0 ? y + yy : y + h - S + yy;
+                        const std::uint16_t c = layerPx(lx, ly);
+                        const std::uint32_t argb = 0xFF000000u | (((c >> 11) & 0x1F) << 19) |
+                                                   (((c >> 5) & 0x3F) << 10) | ((c & 0x1F) << 3);
+                        for (int dy = 0; dy < Z; ++dy)
+                            for (int dx = 0; dx < Z; ++dx)
+                                img[static_cast<std::size_t>(yy * Z + dy) * (2 * S * Z) + part * S * Z + xx * Z + dx] = argb;
+                    }
+            writePng((outDir + "/media_0_corners.png").c_str(), img.data(), 2 * S * Z, S * Z);
+        }
+        d.fillRect(0, 0, 1024, 600, 0x0000);
+    }
 
     // ── Sizes ──────────────────────────────────────────────────────────
     const hipi::LifMediaType& cass = hipi::kLifMediaTypes[0];

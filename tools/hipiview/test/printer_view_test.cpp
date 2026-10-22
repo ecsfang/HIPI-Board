@@ -465,6 +465,67 @@ int main(int argc, char** argv) {
     hipi::plotterview_digitizeControl(5, bx, by);
     hipi::plotterview_digitizeTap(bx, by);
 
+    // ── Plotter: the pen's tip -- only what's drawn after the change gets
+    //    it: a thin and a wide line in one plot, kept through a redraw ──
+    check(!hipi::plotterview_penWide(), "Pen: thin at start");
+    for (char c : std::string("IN;")) plotter->put(c);
+    run(100);
+    chip.render(panel.data(), 0.0);
+    std::vector<std::uint32_t> blankCol(SCREEN_MAX_Y);
+    for (int y = 0; y < SCREEN_MAX_Y; ++y) blankCol[static_cast<std::size_t>(y)] = at(500, y);
+    // Rows changed in column 500 between two plotter y's (screen rows around each line)
+    auto rowsNear = [&](int yFrom, int yTo) {
+        chip.render(panel.data(), 0.0);
+        int n = 0;
+        for (int y = yFrom; y < yTo; ++y) if (at(500, y) != blankCol[static_cast<std::size_t>(y)]) ++n;
+        return n;
+    };
+    for (char c : std::string("SP1;PU;PA1000,5000;PD;PA9000,5000;PU;")) plotter->put(c);   // thin (upper)
+    hipi::plotterview_setPenWide(true);
+    for (char c : std::string("PA1000,3000;PD;PA9000,3000;PU;")) plotter->put(c);          // wide (lower)
+    hipi::plotterview_setPenWide(false);
+    for (char c : std::string("SP2;PA2000,2000;PD;CI1500;PU;")) plotter->put(c);           // thin again
+    hipi::plotterview_setPenWide(true);
+    for (char c : std::string("PA4000,1500;SI0.4,0.6;LBWIDE PEN\x03;PU;")) plotter->put(c);
+    hipi::plotterview_setPenWide(false);
+    run(100);
+    const int thinRows = rowsNear(0, 300), wideRows = rowsNear(300, 400);
+    std::printf("     column 500: %d row(s) for the thin line, %d for the wide one\n", thinRows, wideRows);
+    check(thinRows == 1 && wideRows == 3, "Pen: the thin line one pixel across, the wide one three");
+    hipi::plotterview_redraw();
+    check(rowsNear(0, 300) == 1 && rowsNear(300, 400) == 3, "Pen: each keeps its own width when the plot is redrawn");
+    snapshot("tools/hipiview/printer_view_wide_pen.png");
+
+    // ── Plotter: Fit after IN -- a new, smaller plot inside the old one's
+    //    area is fitted afresh, not drawn at the old scale ───────────────
+    hipi::plotterview_setPlotFit(true);
+    for (char c : std::string("IN;SP1;PU;PA0,0;PD;PA10000,0,10000,7000,0,7000,0,0;PU;")) plotter->put(c);
+    run(100);
+    for (char c : std::string("IN;SP1;PU;PA3000,2000;PD;PA6000,2000,6000,4000,3000,4000,3000,2000;PU;")) plotter->put(c);
+    run(100);
+    {
+        int ax = 0, ay = 0, bx = 0, by = 0;
+        hipi::plotterview_plotToScreen(3000, 2000, ax, ay);
+        hipi::plotterview_plotToScreen(6000, 4000, bx, by);
+        std::printf("     the small plot after IN: %d x %d pixels\n", bx - ax, ay - by);
+        check(bx - ax > 600, "Fit after IN: the new plot fills the screen (not the old plot's scale)");
+    }
+    hipi::plotterview_setPlotFit(false);
+
+    // A message box ("Saved screendump_3.bmp" ...) writes its text with the
+    // chip's one text cursor: afterwards it's back at the display's cursor
+    hipi::plotterview_showView(hipi::DisplayOutput::Display, nullptr);
+    run(2000);
+    for (char c : std::string("01 LBL \"A\"\r\n02 X")) screen.pr_char(static_cast<std::uint8_t>(c));
+    auto textCursor = [] {
+        return std::vector<std::uint8_t>{ chip.reg(0x63), chip.reg(0x64), chip.reg(0x65), chip.reg(0x66) };
+    };
+    const std::vector<std::uint8_t> cur = textCursor();
+    hipi::plotterview_showMessage("Saved screenshots/screendump_3.bmp");
+    check(textCursor() == cur, "message box: the text cursor is put back where the display has it");
+    run(3000);
+    check(textCursor() == cur, "... and is still there after the box has gone");
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

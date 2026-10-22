@@ -75,6 +75,7 @@ extern void init_spi(void);
 #include "boardui.h"
 #include "plotterview.h"
 #include "screendump.h"
+#include "display_text.h"
 #include "bootscreen.h"
 #include "boot_service.h"
 #include "backlight.h"
@@ -187,6 +188,7 @@ void initDisplay()
 
     display->begin();
     hipi::displayMirror_init(display);
+    hipi::displayText_init(display);         // the display's text log, in its SDRAM (display_text.h)
 }
 
 FRESULT initSD()
@@ -552,14 +554,18 @@ int main() {
     //                          other overlays
     //   "ESC # V <addr>"       show the view of the HIPI device at HP-IL
     //                          address <addr> (one byte, 1..30)
+    //   "ESC # T"              save the display's text (display_text.h)
     auto extCommand = [](std::uint8_t c, std::uint8_t arg) {
         if (c == 'D') hipi::screendump_request(false);
         else if (c == 'M') hipi::screendump_request(true);
         else if (c == 'V') hipi::plotterview_requestViewByAddress(arg);
+        else if (c == 'T') hipi::displayText_request();
     };
-    screen->setExtCommandCallback(extCommand, "V");
-    // ... and the same in the HP 92198 mode
-    video80Term->setExtCommandCallback(extCommand, "V");
+    constexpr const char* kExtArgCmds = "V";   // the commands with an argument byte
+    screen->setExtCommandCallback(extCommand, kExtArgCmds);
+    // ... and the same in the HP 92198 mode, and for the text log's filter
+    video80Term->setExtCommandCallback(extCommand, kExtArgCmds);
+    hipi::displayText().setExtArgCmds(kExtArgCmds);
     hipi::plotterview_setVideo80(video80Term);
 
     bootRowsDevices();

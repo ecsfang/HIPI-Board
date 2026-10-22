@@ -231,6 +231,12 @@ bool plotterview_plotFit();
 // black paper with light pens (inverted). Plotter -> Paper.
 void plotterview_setPaperBlack(bool black);
 bool plotterview_paperBlack();
+// The pen's tip (Plotter -> Pen): thin (1 pixel) or wide (3 pixels, a
+// round tip), like putting a pen with a broader tip in the real plotter:
+// only what's drawn from now on gets it, so thin and wide lines mix in one
+// plot. Thin at start-up (not saved). CPlotter::setWideTip().
+void plotterview_setPenWide(bool wide);
+bool plotterview_penWide();
 
 // Redraws the current full-screen view from scratch: the plotter output
 // (segments() replayed in full) or the Tape image. Called internally when

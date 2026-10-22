@@ -18,6 +18,7 @@
 #include "video80.h"      // the display's HP 92198 mode (80-column screen)
 #include "display.h"      // TFDISPLAY -- Settings -> Screen -> Emulate
 #include "screendump.h"   // Display -> Screendump
+#include "display_text.h" // Display -> Text
 #include "analyzer.h"     // Display -> Analyzer
 #include "backlight.h"    // Settings -> Screen saver
 #include "config.hpp"     // Settings -> Screen saver (saved settings)
@@ -1028,7 +1029,9 @@ private:
         if (f_opendir(&dir, HIPI_DIR_LIF) == FR_OK) {      // cassettes live in lif/
             FILINFO info;
             while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
-                if (!(info.fattrib & AM_DIR) && hasExtension(info.fname, ".dat")) {
+                // Cassettes: LIF images, *.dat or *.lif (any case)
+                if (!(info.fattrib & AM_DIR) &&
+                    (hasExtension(info.fname, ".dat") || hasExtension(info.fname, ".lif"))) {
                     files_.push_back(info.fname);
                 }
             }
@@ -1580,6 +1583,14 @@ private:
                          refreshItems();
                      });
     }
+    Item penItem() {
+        return value("Pen", [] { return std::string(plotterview_penWide() ? "Wide" : "Thin"); },
+                     [this] {
+                         // Only what's drawn from now on; not saved (thin at start-up)
+                         plotterview_setPenWide(!plotterview_penWide());
+                         refreshItems();
+                     });
+    }
     // "Drive at start" as in CONFIG.TXT: OFF if the (first) drive is
     // switched off at start (disabled_devices), else drive_standby
     static const char* driveAtStartName() {
@@ -1603,6 +1614,7 @@ private:
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
             m.push_back(plotViewItem());
             m.push_back(paperItem());
+            m.push_back(penItem());
         } else if (out == DisplayOutput::Tape) {
             CDrive* drv = plotterview_drive();
             title = drv ? std::string("TAPE ") + drv->name() : std::string("TAPE");
@@ -1700,11 +1712,27 @@ private:
             title = "DISPLAY";
             m.push_back(item("Clear screen", [this] { doAndClose([this] { clearDisplay(); }); }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
+            m.push_back(item("Text >", [this] { openDisplayTextMenu(); }));   // (row kDisplayTextRow)
             m.push_back(emulateItem());
             m.push_back(fontSizeItem());
         }
         m.push_back(item("More >", [this] { openHipiMenu(); }));
         openList(title, std::move(m), nullptr, sel);
+    }
+
+    // ── Display > Text: the display's output as plain text ──────────────
+    // (display_text.h). Saved from the main loop, like a screendump.
+    static constexpr int kDisplayTextRow = 2;
+    void openDisplayTextMenu(int sel = 0) {
+        openList("DISPLAY / TEXT", {
+            // How much there is, in the row itself (not a setting)
+            Item{ [] {
+                      const std::uint32_t n = displayText().lines();
+                      return "Save as text (" + std::to_string(n) + (n == 1 ? " line)" : " lines)");
+                  },
+                  [this] { doAndClose([] { displayText_request(); }); } },
+            item("Start anew", [this] { displayText().restart(); refreshItems(); }),
+        }, [this] { openContextMenu(kDisplayTextRow); }, sel);
     }
 
     // ── More: the HIPI menu ─────────────────────────────────────────────
@@ -1904,6 +1932,12 @@ private:
         // (it would land in the menu's layer): what it held back, now
         if (plotterview_output() == DisplayOutput::Video80)
             if (Video80* v = plotterview_video80()) v->catchUp();
+        // The cursor back where the display has it (the menu hid it and
+        // moved it): here for every way of closing -- a touch, a warning
+        // dismissed, the demo -- not just the buttons. Only with the canvas
+        // on the panel (its position is relative to the canvas); from
+        // inside the menu's drawing, handleButton() does it afterwards.
+        if (d_->canvasAddr() == 0) plotterview_refreshCursor();
     }
 
     void moveSelection(int delta, int count) {
@@ -2074,6 +2108,10 @@ private:
     int pipX_ = MenuFrame::X, pipY_ = MenuFrame::MenuTop, pipW_ = MenuFrame::W, pipH_ = MenuFrame::MenuH;
     void setPip(int x, int y, int w, int h) { pipX_ = x; pipY_ = y; pipW_ = w; pipH_ = h; }
     void showPip() {
+        // The corners outside the rounded frame show what's behind it: the
+        // view may have changed under the open menu (Paper, Text colour,
+        // a new view ...), so they're taken again each time
+        MenuFrame::refreshCorners(d_, pipX_, pipY_, pipW_, pipH_);
         d_->showPipOverlay(pipX_, pipY_, pipW_, pipH_);
     }
 

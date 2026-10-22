@@ -34,6 +34,7 @@
 #include "drive.h"     // CDrive -- Tape view power switch
 #include "printer.h"   // CPrinter -- Printer view controls
 #include "screendump.h"
+#include "display_text.h"
 extern std::vector<CDevice*> devices;
 #include "pilbox.h"    // pilbox, CPilBox::isConnected()
 #include "ui_buttons.hpp"
@@ -729,6 +730,14 @@ void boardui_poll() {
         }
         const bool ok = screendump_save(display_, msg, withOverlays);
         if (!ok) LOGF("\r\n * Screendump failed: %s", msg.c_str());
+        plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+        if (dialog_->isOpen()) menuCoveredByMessage = true;
+    }
+    // The display's text saved ("ESC # T" or Display > Text > Save as text)
+    if (displayText_takePending()) {
+        std::string msg;
+        const bool ok = displayText_save(msg);
+        if (!ok) LOGF("\r\n * Saving the display text failed: %s", msg.c_str());
         plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
         if (dialog_->isOpen()) menuCoveredByMessage = true;
     }

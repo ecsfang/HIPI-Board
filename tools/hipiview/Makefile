@@ -66,9 +66,14 @@ printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../
 # TFDISPLAY as an HP 92198 / MC00701A: the real Video80 screen and the
 # display device against the emulated chip -- saves video80_*.png to look at
 V80_SRC := test/video80_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
-           ../../src/video80.cpp ../../src/display.cpp ../../src/device.cpp
+           ../../src/video80.cpp ../../src/display.cpp ../../src/device.cpp ../../src/display_text.cpp
 video80_view_test: $(V80_SRC) ../../include/video80.h ../../include/display.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -I../../include $(V80_SRC) -o $@ -lz
+
+# The display's text log: the filter, the ring, the SDRAM store, HP-IL in
+DT_SRC := test/display_text_test.cpp $(V80_SRC:test/video80_view_test.cpp=)
+display_text_test: $(DT_SRC) ../../include/display_text.h ../../include/roman8.h
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -I../../include $(DT_SRC) -o $@ -lz
 
 # The Hardware test page as HIPI draws it (a stand-in for the LEDs,
 # pixels and I2C bus) -- saves hwtest_*.png
@@ -83,7 +88,7 @@ demo_view_test: $(DEMO_SRC) ../../include/demo_content.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(DEMO_SRC) -o $@ -lz
 
 # The demo itself, a whole round in fake time -- saves demo_run_*.png
-RUN_SRC := test/demo_run_test.cpp ../../src/demo.cpp ../../src/display.cpp \
+RUN_SRC := test/demo_run_test.cpp ../../src/demo.cpp ../../src/display.cpp ../../src/display_text.cpp \
            $(filter-out test/demo_view_test.cpp,$(DEMO_SRC)) ../../src/media_create_ui.cpp \
            ../../src/glyph_font.cpp ../../src/menu_font_title.cpp
 demo_run_test: $(RUN_SRC) ../../include/demo.h ../../include/demo_content.h $(wildcard test/pvstubs/*.h test/demostubs/*.hpp)
@@ -134,12 +139,13 @@ saver_test: $(SAVER_SRC) ../../include/saver_anim.h $(wildcard test/saverstubs/*
 rtc_test: $(RTC_SRC) ../../include/rtc.h ../../include/rtc_probe.h ../../sdcard/i2c/chips.txt $(wildcard test/rtcstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/rtcstubs -I../../include $(RTC_SRC) -o $@
 
-test: deframer_test saver_test host_test printer_view_test video80_view_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test
+test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test
 	./deframer_test
 	./saver_test
 	./host_test
 	./printer_view_test
 	./video80_view_test
+	./display_text_test
 	./hwtest_view_test
 	./demo_view_test
 	./demo_run_test
@@ -155,7 +161,7 @@ install: hipiview
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog
+	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog
 
 .PHONY: test install clean windows
 

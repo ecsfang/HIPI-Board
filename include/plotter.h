@@ -124,6 +124,7 @@ extern bool bTrace;
 struct PlotSegment {
     std::int16_t x0, y0, x1, y1;
     std::uint8_t pen;
+    bool wide;                  // drawn with the wide tip (setWideTip()) -- fits the padding
 };
 
 class CPlotter : public CDevice {
@@ -168,6 +169,12 @@ public:
     std::int16_t penY() const { return penY_; }
     bool penDown() const { return penDown_; }
     std::uint8_t currentPen() const { return currentPen_; }
+    // The pen's tip, as if a pen with a broader tip were put in: only
+    // what's drawn from now on gets it (each segment keeps its own), so
+    // thin and wide lines mix in one plot. Thin at start-up; IN and
+    // clearing don't change it. Only the view uses it (Plotter -> Pen).
+    void setWideTip(bool wide) { wideTip_ = wide; }
+    bool wideTip() const { return wideTip_; }
 
     // Digitizing (DP): waiting for a point (the Plotter view takes it from
     // a touch -- plotterview_digitizeTap()); digitize() gives it: the pen
@@ -271,6 +278,7 @@ private:
     std::int16_t penX_ = 0, penY_ = 0;
     bool penDown_ = false;
     std::uint8_t currentPen_ = 1;
+    bool wideTip_ = false;      // (setWideTip())
     CoordMode coordMode_ = CoordMode::Absolute;
 
     // Tick length as a percentage of the P1-P2 span, in the positive and

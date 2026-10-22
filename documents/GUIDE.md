@@ -328,8 +328,9 @@ SD card layout (folder names in `include/sd_paths.h`):
 CONFIG.TXT        settings -- created with defaults on first boot
 README.txt        from sdcard/ -- what's what, for users
 resources/        Tape and Printer view bitmaps, copied from the repo's resources/ folder
-lif/              cassette images (*.dat, LIF), listed by Select file
+lif/              cassette images (*.dat or *.lif, LIF), listed by Select file
 screenshots/      screen dumps -- created on the first Screendump
+text/             the display's text (display_<n>.txt) -- created on the first Save as text
 logs/             analyzer logs -- created on the first Log to file
 ```
 
@@ -669,6 +670,22 @@ Otherwise the list stayed "open" unseen and took every touch -- only a tap
 on its invisible close button helped. The vertical swipe is wired up in
 `pico_main.cpp` (`touch_set_vertical_swipe_callback()`).
 
+**The menu frame's rounded corners.** The four small corners outside a
+menu box's rounded frame show what's behind it: `MenuFrame::draw()` copies
+them from the panel into the menu layer (BTE) when the box is drawn. The
+view can change under an open menu (Paper black/white, Text colour, a new
+view), so `UiDialog::showPip()` -- after every button -- takes them again
+with `MenuFrame::refreshCorners()`. Only the pixels outside the rounding
+are copied (BTE, one short row per corner row); the frame isn't drawn
+again. Which pixels those are, `MenuFrame::cornerOutside()` measured once
+from the chip itself: a box drawn with `fillRoundRect()` on a scratch layer
+and read back, so it matches the chip's rounding exactly. (Drawing the
+frame again clipped to the corners by the Active Window gave yellow
+squares on the hardware.) The title band is rounded at the top like the
+frame's inside, so nothing of it sticks out past the rounding. Test:
+`media_create_test` (only the old background's pixels change;
+`media_0_corners.png`, 8x).
+
 ### 5.4 Status LEDs
 
 The board's LEDs show HP-IL activity (frame being processed) and idle
@@ -689,7 +706,7 @@ nothing is lost.
 ```
 Main menu
 ├── Config
-│   ├── Select file        .dat picker on the SD card, with "Open file?" confirmation
+│   ├── Select file        .dat / .lif picker on the SD card, with "Open file?" confirmation
 │   ├── Trace              Off / On / Extended
 │   ├── Connect to PC      Expose the SD card as a USB drive (toggles to "Disconnect from PC")
 │   ├── Loopback test      Physical HP-IL loop test (needs a loop cable)
@@ -713,12 +730,13 @@ Main menu
     ├── Clear plotter      Erase the plotter drawing
     ├── Clear screen       Erase the text display
     ├── Analyzer           HP-IL bus analyzer view (own menu on OK)
-    └── Screendump         Save the screen as screendump_<n>.bmp
+    ├── Screendump         Save the screen as screendump_<n>.bmp
+    └── Text >             (Display view) Save as text (<n> lines) · Start anew
 ```
 
 ### 6.1 Config
 
-- **Select file** — lists all `.dat` files in the SD card's `lif/` folder, with **No media**
+- **Select file** — lists all `.dat` and `.lif` files (any case) in the SD card's `lif/` folder, with **No media**
   as the first row. The current file is pre-selected. Choosing **No media**
   deselects the file: the drive reports that no tape is inserted, the Tape
   view shows the drive without a cassette, and the info box and boot
@@ -738,7 +756,7 @@ Main menu
   - *Extended* — additionally dumps the state of every device for every
     frame. Useful for debugging a new device, very verbose.
 - **Connect to PC** — the SD card appears as a USB mass-storage drive on
-  the PC, so you can copy `.dat` files without removing the card. While
+  the PC, so you can copy `.dat` / `.lif` files without removing the card. While
   connected, drive access from HP-IL is paused and `CONFIG.TXT` is not
   written. Always choose **Disconnect from PC** (and eject on the PC side)
   before going back to normal use.
@@ -777,6 +795,19 @@ HP7470A-style plotter canvas (`TFPLOT`), or the Tape view.
 Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
+**Plotter pen.** Plotter -> Pen changes the pen's tip for what's drawn
+from then on, like a pen with a broader tip: `plotterview_setPenWide()` ->
+`CPlotter::setWideTip()`, and every new `PlotSegment` keeps it (`wide`, in
+what was padding -- the struct is still 10 bytes). So thin and wide lines
+mix in one plot, and a redraw keeps each one's width. Thin at start-up,
+not saved; IN and clearing don't change it. `drawMappedSegment()`
+(plotterview.cpp) draws a wide segment as the 1-pixel line once for each
+pixel of a round tip `kWidePenPx` (3) across -- the offsets within its
+radius, a plus shape for 3 pixels: five hardware lines per segment. The
+digitize loupe stays thin (it's exact). Test: `printer_view_test` (a thin
+and a wide line in one plot, before and after a redraw;
+`printer_view_wide_pen.png`).
+
 **Screendump** saves what the panel shows as a 24-bit BMP
 file, `screendump_<n>.bmp`, in the SD card's `screenshots/` folder. The menu itself, the
 button strip and message boxes are not included. The number continues
@@ -794,6 +825,38 @@ documentation). Send it to `TFDISPLAY`, e.g.:
 ```
 
 The dump is taken right after, from the main loop.
+
+**The display's text.** Every byte `TFDISPLAY` takes from the loop goes
+to the screen (`Screen` or `Video80`) and also, from `CDisplay::idle()`,
+through a filter into a text log (`include/display_text.h`,
+`src/display_text.cpp`): plain text, one line per line, with the escape
+sequences (and their argument bytes -- `ESC % c r`, `ESC # V a`) and
+control codes left out. CR, LF and CR LF end a line and trailing spaces go;
+BS takes back the last character; moving the cursor away (`ESC %`,
+`ESC H`, `ESC A/B`) ends the line so far; clearing the screen (`ESC E`,
+`ESC e`, `ESC [`/`]`, `ESC H ESC J`, DCL/SDC) leaves one empty line. Bit 7
+(inverse) is dropped; the 92198's Roman-8 mode (`ESC j`) gives UTF-8 via
+the table in `include/roman8.h` (shared with `video80.cpp`). Lines over
+512 bytes are broken.
+
+The finished text is kept in a 1 MB ring in the display's SDRAM
+(`LT7683::kTextLogAddr`, slot 8, after the geese), written in 256-byte
+pieces with `LT7683::writeSdram()` and read back with `readSdram()`
+(`src/display_text_save.cpp`). Neither is sent to a hipiview viewer
+(`displayMirror_quiet()`), since nothing there is ever shown. Once the
+ring has run over, saving starts at the first whole line. It costs under
+1 kB of the Pico's RAM.
+
+**Display > Text > Save as text** (or `ESC # T` from the HP-41) writes it
+to `text/display_<n>.txt`, the first free number from 1, from the main
+loop (`displayText_request()` / `boardui_poll()`), like a screen dump.
+**Start anew** empties the log (`DisplayText::restart()`); the Save row
+shows the number of lines (`DisplayText::lines()`). Bytes the demo shows don't go through `CDisplay`, so
+they're not in it. Tests: `tools/hipiview/test/display_text_test.cpp`.
+
+```
+27 ACCHR  35 ACCHR  84 ACCHR       ; ESC # T
+```
 
 **Choosing the view from the HP-41.** `ESC # V <addr>` (sent to
 `TFDISPLAY`; `<addr>` is one byte, the HP-IL address 1..30) shows the view
@@ -818,8 +881,8 @@ an argument byte are listed in the second parameter of
 **Tape view.** Shows a picture of an HP82161A cassette drive. It is loaded
 from `hp82161a.bmp` once at boot into a spare display layer, so switching to it
 is instant. Tap the **cassette window** or the **OPEN** button to go
-straight to the `.dat` file picker. Choosing a file, or pressing **X**,
-returns to the Tape view. When a `.dat` file is selected, a cassette with
+straight to the cassette file picker. Choosing a file, or pressing **X**,
+returns to the Tape view. When a `.dat` or `.lif` file is selected, a cassette with
 the file name on its label is seen through the lid window; while the file
 picker is open (from the Tape view or from **Config**) the lid is shown
 open with the drive empty. The **POWER** LED is lit while `TFDRIVE` is
@@ -1275,7 +1338,7 @@ HP-IL loop (see `hipi_init()` in `src/hipi.cpp`):
 | Name        | Class        | SAI  | Function |
 |-------------|--------------|------|----------|
 | `TFDISPLAY` | `CDisplay`   | 0x3E / 0x32 | HP82163 video display, or HP 92198 / MC00701A 80 columns (setting) |
-| `TFDRIVE`   | `CDrive`     | 0x10 | HP82161 cassette drive, backed by a `.dat` on SD |
+| `TFDRIVE`   | `CDrive`     | 0x10 | HP82161 cassette drive, backed by a `.dat` / `.lif` on SD |
 | `TFLEDS`    | `CHipiLed`   | 0xEE | LED control (syntax in `README.md`) |
 | `TFPIXEL`   | `CHipiPixel` | 0xED | Pixel/LED strip control |
 | `TFI2C`     | `CHipiI2c`   | 0x52 | Any I2C chip: registers, or measurements from `i2c/*.txt` (last on the loop) |

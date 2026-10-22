@@ -173,16 +173,26 @@ std::uint16_t penColor(std::uint8_t pen) {
 // dot. Since the *plotter-space* segment is real and non-degenerate, it
 // must still show up as something -- so fall back to a single pixel
 // instead of silently losing it.
+//
+// The pen's tip (Plotter -> Pen, kept per segment): thin is one pixel;
+// wide is kWidePenPx across, a round tip -- drawn as the 1-pixel line (or
+// dot) once for every pixel of the tip (offsets within its radius), so
+// ends and joins come out round.
+constexpr int kWidePenPx = 3;
 void drawMappedSegment(std::int16_t x0, std::int16_t y0,
-                       std::int16_t x1, std::int16_t y1, std::uint16_t color) {
+                       std::int16_t x1, std::int16_t y1, std::uint16_t color, bool wide) {
     const std::int16_t sx0 = mapX(x0), sy0 = mapY(y0);
     const std::int16_t sy1 = mapY(y1);
     const std::int16_t sx1 = mapX(x1);
-    if (sx0 == sx1 && sy0 == sy1) {
-        display_->pixel(sx0, sy0, color);
-    } else {
-        display_->line(sx0, sy0, sx1, sy1, color);
-    }
+    const int r = wide ? kWidePenPx / 2 : 0;
+    for (int dy = -r; dy <= r; ++dy)
+        for (int dx = -r; dx <= r; ++dx) {
+            if (dx * dx + dy * dy > r * r) continue;          // (a round tip)
+            const auto ax = static_cast<std::int16_t>(sx0 + dx), ay = static_cast<std::int16_t>(sy0 + dy);
+            const auto bx = static_cast<std::int16_t>(sx1 + dx), by = static_cast<std::int16_t>(sy1 + dy);
+            if (ax == bx && ay == by) display_->pixel(ax, ay, color);
+            else display_->line(ax, ay, bx, by, color);
+        }
 }
 
 // The plot always covers the whole panel. On the 7" panel the button strip
@@ -227,7 +237,7 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
         }
     }
     plotWindow();
-    drawMappedSegment(x0, y0, x1, y1, penColor(pen));
+    drawMappedSegment(x0, y0, x1, y1, penColor(pen), plotter_->wideTip());   // (this segment's tip)
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizeMarker();   // (kept on top)
     // line()/pixel() go through gfxMode(), which blindly zeros MWCR0 (the
     // same text-mode/cursor-visible register Screen owns) -- same fix
@@ -239,6 +249,10 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
 // Fired when the plotter is reset (IN command, or a real HP-IL Clear
 // Device). Only touches the screen if Plotter output is actually showing.
 void onPlotterClear() {
+    // Forget the old plot's Fit area: else a new, smaller plot inside it
+    // would be drawn at the old scale, never fitted (the first segment now
+    // fits afresh -- see onPlotterDraw())
+    setPageMapping();
     if (output_ != DisplayOutput::Plotter) return;
     plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
@@ -325,6 +339,10 @@ void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms) {
     display_->showPipOverlay(splashX, splashY, splashW, splashH);
     splashVisible_ = true;
     splashHideDeadline_ = make_timeout_time_ms(ms);
+    // The text above moved the chip's one text cursor into the box: back
+    // to where the display has it. (With a menu open the cursor is hidden,
+    // and closing the menu puts it back.)
+    if (!boardui_isMenuOpen()) plotterview_refreshCursor();
 }
 
 DisplayOutput outputFor(ViewKind k) {
@@ -1817,7 +1835,7 @@ void plotterview_redraw() {
     plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     for (const PlotSegment& seg : plotter_->segments()) {
-        drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
+        drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen), seg.wide);
     }
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizePanel();      // (and the marker)
     screen_->refreshCursor();
@@ -1885,7 +1903,7 @@ void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
             segBottom < y0 || segTop > regionBottom) {
             continue;  // bounding box entirely outside the region -- skip
         }
-        drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen));
+        drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen), seg.wide);
     }
     // Restore the full-screen active window Plotter mode normally runs
     // with -- the caller (boardui.cpp's hideButtonStrip()) already leaves
@@ -2387,6 +2405,11 @@ void plotterview_setPlotFit(bool fit) {
     if (output_ == DisplayOutput::Plotter) plotterview_redraw();
 }
 bool plotterview_plotFit() { return plotFit_; }
+
+void plotterview_setPenWide(bool wide) {
+    if (plotter_ != nullptr) plotter_->setWideTip(wide);   // (what's drawn from now on)
+}
+bool plotterview_penWide() { return plotter_ != nullptr && plotter_->wideTip(); }
 
 void plotterview_setPaperBlack(bool black) {
     paperBlack_ = black;

@@ -646,6 +646,10 @@ public:
     // (~48 kB), drawn from here by BTE -- not kept in the MCU's RAM
     static constexpr std::uint32_t kGooseAddr = kPrinterInkStageAddr + kPrinterInkMaxBytes;
     static constexpr std::uint32_t kGooseMaxBytes = 0x10000UL;          // 64 kB
+    // The display's text log (display_text.h): plain text, never shown --
+    // written and read with writeSdram() / readSdram(). Slot 8, 1 MB.
+    static constexpr std::uint32_t kTextLogAddr = 1024UL * 600UL * 2UL * 8UL;
+    static constexpr std::uint32_t kTextLogBytes = 0x100000UL;
 
     // Memory Copy with ROP: DT = rop(S0, S1) -- bteMemoryCopy() and
     // andLayerRegion() (rop: REG[91h] bits 7:4)
@@ -791,6 +795,9 @@ public:
     // contents. Same mechanism as readSdramByte(), for many bytes at once.
     // Leaves the canvas, the Active Window and the mode as they were.
     void readSdram(std::uint32_t addr, std::uint8_t* buf, std::size_t len);
+    // ... and the other way: `len` bytes to SDRAM at `addr`, in FIFO-sized
+    // pieces. The same addressing; canvas, Active Window and mode as they were.
+    void writeSdram(std::uint32_t addr, const std::uint8_t* buf, std::size_t len);
 
     // Captures the chip's built-in 8x16 font (CGROM, ISO 8859-1): draws
     // all 256 characters into the off-screen kBteLayer2Addr layer (never

@@ -105,7 +105,7 @@ folder (and with every release):
 
 1. Format a micro-SD card as FAT32 (exFAT works too).
 2. Unzip `HIPI-SD-card.zip` onto it, keeping the folders.
-3. Put your own cassettes (`.dat` files) in `lif/`.
+3. Put your own cassettes (`.dat` or `.lif` files) in `lif/`.
 
 The card then holds:
 
@@ -113,9 +113,10 @@ The card then holds:
 README.txt      what's what
 resources/      Tape view pictures: hp82161a.bmp, tape-in.bmp, open.bmp, leds.bmp, reels.bmp
                 Printer view pictures: hp82162a.bmp, prtparts.bmp
-lif/            cassettes (*.dat, LIF) — one example to start with
+lif/            cassettes (*.dat or *.lif, LIF) — one example to start with
 CONFIG.TXT      settings — created by HIPI on first start
 screenshots/    screen dumps — created by the first Screendump
+text/           the display's text (display_<n>.txt) — created by the first "Save as text"
 logs/           analyzer logs — created by the first "Log to file"
 ```
 

@@ -428,7 +428,7 @@ void CPlotter::emitSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, st
     const auto ix1 = static_cast<std::int16_t>(cx1);
     const auto iy1 = static_cast<std::int16_t>(cy1);
 
-    segments_.push_back({ix0, iy0, ix1, iy1, currentPen_});
+    segments_.push_back({ix0, iy0, ix1, iy1, currentPen_, wideTip_});
     if (bTrace) {
         MLOGF("  draw (%d,%d) -> (%d,%d) pen=%u", ix0, iy0, ix1, iy1, currentPen_);
     }

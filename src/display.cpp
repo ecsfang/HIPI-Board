@@ -6,6 +6,7 @@
 #include "display_config.h"
 #include "Screen.hpp"
 #include "video80.h"
+#include "display_text.h"
 
 extern hipi::Screen *screen;
 
@@ -29,6 +30,7 @@ void CDisplay::clear(void)
     // Clear device (DCL / SDC): the 92198 also goes back to its defaults
     if (isVideo80()) video80_->hardReset();
     else screen->clear();
+    hipi::displayText().cleared();          // the text log: a new block
     fifo = std::queue<unsigned char>();
     statusLeft_ = 0;
 }
@@ -37,8 +39,12 @@ void CDisplay::idle(void)
 {
     if( !fifo.empty() ) {
         hipi::backlight_activity();     // new output: screen in use (backlight.h)
-        if (isVideo80()) video80_->put(fifo.front());
-        else screen->pr_char(fifo.front());
+        const unsigned char c = fifo.front();
+        if (isVideo80()) video80_->put(c);
+        else screen->pr_char(c);
+        // ... and as text, to be saved (display_text.h)
+        hipi::displayText().put(c, isVideo80() ? hipi::DisplayText::Model::Hp92198
+                                               : hipi::DisplayText::Model::Hp82163);
         fifo.pop();
     }
 }

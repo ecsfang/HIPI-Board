@@ -215,6 +215,8 @@ add_executable(${EXE_TARGET}
     src/my_descriptors.c
     src/usb_msc.cpp
     src/screendump.cpp
+    src/display_text.cpp        # Display: its output kept as plain text
+    src/display_text_save.cpp   # ... in the SDRAM, saved to the SD card
     src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
     src/bootscreen.cpp
     src/analyzer.cpp

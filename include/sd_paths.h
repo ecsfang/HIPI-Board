@@ -11,6 +11,8 @@
 #define HIPI_DIR_LIF         "lif"
 // Torn-off printer paper (printout_<n>.bmp + .txt) -- created when the first is saved
 #define HIPI_DIR_PRINTOUTS   "printouts"
+// The display's text, saved (display_<n>.txt) -- created when the first is saved
+#define HIPI_DIR_TEXT        "text"
 // Analyzer logs (analyzer_<n>.txt) -- created when the first is started
 #define HIPI_DIR_LOGS        "logs"
 // I2C chip descriptions (*.txt) for System -> Hardware test -- optional

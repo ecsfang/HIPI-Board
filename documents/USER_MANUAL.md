@@ -79,7 +79,7 @@ everything the SD card needs. (In the HIPI project it's in the main folder.)
 
 1. Use a micro-SD card formatted as FAT32 (exFAT works too).
 2. Unzip `HIPI-SD-card.zip` onto the card, keeping the folders.
-3. Put your own cassettes (`.dat` files) in the `lif` folder — see
+3. Put your own cassettes (`.dat` or `.lif` files) in the `lif` folder — see
    [chapter 7](#7-cassette-files). There's one example cassette to start with.
 
 The SD card then looks like this:
@@ -89,8 +89,9 @@ README.txt        a short note on what's what
 CONFIG.TXT        HIPI's settings (created by HIPI itself)
 resources/        the cassette drive's pictures: hp82161a.bmp,
                   tape-in.bmp, open.bmp, leds.bmp, reels.bmp
-lif/              your cassettes (.dat files)
+lif/              your cassettes (.dat or .lif files)
 screenshots/      screen dumps (created by HIPI when you save the first)
+text/             the display's text, saved (created by HIPI when you save the first)
 logs/             analyzer logs (created when you start the first)
 ```
 
@@ -276,7 +277,8 @@ while you look at other views. Clear it with **Clear plotter** in its menu (OK).
 **Plot view** in its menu (OK) — or **Settings → Screen** — chooses how the drawing is placed on the screen:
 
 - **Fit** (the default) — the drawing itself, with a small margin, as large
-  as the screen allows and centred. It grows along as more is drawn.
+  as the screen allows and centred. It grows along as more is drawn, and
+  starts afresh with the next plot after `IN` (or **Clear plotter**).
 - **Page** — the plotter's whole drawing area, like the paper. The
   plots don't sit in the middle of it (e.g. the plotter module leaves room for
   the axis labels), so they look shifted up and to the right.
@@ -292,6 +294,22 @@ Both keep the proportions: circles stay round and text undistorted.
   that show up well on black.
 
 The drawing is redrawn at once in the new colours; nothing is lost.
+
+**Pen** in the Plotter view's menu changes the pen's tip — like putting a
+pen with a broader tip in the real plotter:
+
+- **Thin** — one pixel, the finest the screen can show.
+- **Wide** — three pixels, with a round tip.
+
+Only what's drawn **after** the change gets the new tip; what's already
+on the paper stays as it was. So you can mix thin and wide lines in one
+plot: e.g. **Wide** for the curve, then back to **Thin** for the grid and
+the labels. Each line keeps its width when the plot is redrawn (Fit,
+Paper, switching views).
+
+HIPI always starts with **Thin**; the choice isn't saved. It's only how
+HIPI draws: the plotter itself, and what a program reads back from it,
+stay the same.
 
 <a href="images/view-plotter.png"><img src="images/view-plotter.png" alt="Plotter view" width="512"></a>
 
@@ -441,10 +459,11 @@ Every menu has the same order: where to go, what to do, settings, then
 
 ```
 OK in a view — that view's menu
-├── DISPLAY          Clear screen · Screendump · Emulate < HP 82163 > ·
+├── DISPLAY          Clear screen · Screendump · Text > · Emulate < HP 82163 > ·
 │                    Font size < 0 > · More >
+│   └── Text >       Save as text (120 lines) · Start anew
 ├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > ·
-│                    Paper < White > · More >
+│                    Paper < White > · Pen < Thin > · More >
 ├── TAPE TFDRIVE     Select cassette > · Media map > · Rewind · Power < ON > · Screendump · More >
 ├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
 │                    Time < Relative > · Idle frames < Hidden > · More >
@@ -515,11 +534,14 @@ All settings are remembered, also after power off.
 
 ## 7. Cassette files
 
-Each `.dat` file on the SD card is one cassette.
+Each `.dat` or `.lif` file on the SD card is one cassette. Both are the same
+thing — a LIF image, the contents of the cassette — just with different
+names; HIPI lists both (upper or lower case doesn't matter), and new ones
+made with **Create media** get `.DAT`.
 
 ### Adding cassettes
 
-Copy your `.dat` files to the `lif` folder on the SD card — either with a
+Copy your `.dat` or `.lif` files to the `lif` folder on the SD card — either with a
 card reader, or straight from HIPI with **Connect to PC** (see
 [chapter 9](#9-connecting-to-a-pc)).
 
@@ -1137,6 +1159,39 @@ You can also take one from e.g. a HP-41 program (with the display device selecte
 To choose which view is in the picture first, see
 [5.5 Choosing the view from the HP-41](#55-choosing-the-view-from-the-hp-41).
 
+### Saving the display's text
+
+Everything the display has shown since HIPI started is also kept as
+**plain text** — a program listing, a `CAT`, whatever a program wrote. In
+the Display view, press OK and choose **Text > Save as text**. The text is
+saved in the `text` folder on the SD card: `display_1.txt`,
+`display_2.txt` and so on, and a yellow box tells you the name.
+
+- It works for both displays (**Emulate** HP 82163 or HP 92198).
+- One line in the file for each line the display got. A line the 92198
+  wraps on the screen is still one line in the file.
+- Only the characters are kept: escape sequences and control codes are
+  left out. Inverse characters are saved as ordinary ones; the 92198's
+  Roman-8 characters (Å, Ä, Ö, é …) are saved as such (UTF-8).
+- When the screen is cleared, the file gets an empty line there.
+- Text placed with the cursor (forms, menus) ends up as its pieces, one per
+  line.
+- It doesn't matter which view is shown, or whether the text has scrolled
+  off the screen long ago: all of it is kept, up to 1 MB (some 25 000
+  lines). After that the oldest lines go.
+
+**Save as text** also shows how many lines there are, e.g. *Save as text
+(120 lines)*. **Start anew** forgets them, so
+the next file only has what comes after — like a "record" button.
+Clearing the screen doesn't forget anything, and the text is gone when HIPI
+restarts.
+
+From a program (with the display device selected):
+
+| Keys | Saves |
+|------|-------|
+| `27 ACCHR  35 ACCHR  84 ACCHR` | The display's text (`ESC # T`) |
+
 ### Recording the screen on a PC
 
 To make a video of HIPI, you don't need a camera. The PC program
@@ -1610,7 +1665,7 @@ log helps whoever looks at the problem.
   calculator.
 - **Address** — the number the controller uses to reach each device. It hands them
   out by itself.
-- **LIF** — the file system used on HP cassettes; `.dat` files contain it.
+- **LIF** — the file system used on HP cassettes; `.dat` and `.lif` files contain it.
 - **SD card** — the small memory card holding HIPI's cassettes, pictures and
   settings.
 - **UF2 file** — a software update for HIPI.

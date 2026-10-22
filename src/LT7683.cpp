@@ -1336,6 +1336,34 @@ void LT7683::readSdram(std::uint32_t addr, std::uint8_t* buf, std::size_t len) {
     restoreActiveWindow(savedX0, savedY0, savedW, savedH);
 }
 
+void LT7683::writeSdram(std::uint32_t addr, const std::uint8_t* buf, std::size_t len) {
+    if (len == 0) return;
+    // readSdram()'s addressing (see its comment), writing; in pieces with
+    // the write FIFO polled between them (see drawBitmap565Cropped())
+    const std::uint32_t savedCanvas = canvasAddr_;
+    const std::uint16_t savedStride = canvasStride_;
+    std::uint16_t savedX0, savedY0, savedW, savedH;
+    widenActiveWindowForLinearAccess(&savedX0, &savedY0, &savedW, &savedH);
+
+    gfxMode();
+    writeReg32(CVSSA0, addr);
+    writeReg(AW_COLOR, 0x04);           // linear addressing
+    writeReg32(CURH0, addr);
+    writeCmd(MRWDP);
+    constexpr std::size_t kChunkBytes = 64;
+    for (std::size_t off = 0; off < len; off += kChunkBytes) {
+        waitStatus(STSR_WR_FIFO_FULL);
+        writeData(buf + off, std::min(kChunkBytes, len - off));
+    }
+    waitStatusSet(STSR_WR_FIFO_EMPTY);
+    waitStatus(STSR_CORE_BUSY);
+    writeReg(AW_COLOR, 0x01);           // back to 16bpp block mode
+
+    if (savedCanvas == 0 && savedStride == width_) endOverlayDraw();
+    else beginLayerDraw(savedCanvas, savedStride);
+    restoreActiveWindow(savedX0, savedY0, savedW, savedH);
+}
+
 void LT7683::captureBuiltinFont(std::uint8_t out[256][16]) {
     // Everything this changes, to put back afterwards
     const std::uint32_t savedCanvas = canvasAddr_;

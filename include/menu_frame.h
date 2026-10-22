@@ -6,6 +6,7 @@
 #pragma once
 #include "display_config.h"
 #include "glyph_font.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
@@ -92,12 +93,89 @@ namespace MenuFrame {
                          innerRadius, 0x0000);
     }
 
+    // How the chip's own fillRoundRect() rounds a corner: out[c][row] =
+    // how many pixels of that row of the CornerRadius-square corner are
+    // OUTSIDE the box, counted from the box's side (c: 0 top-left, 1
+    // top-right, 2 bottom-left, 3 bottom-right; rows from the corner's
+    // top). Measured once -- a box drawn on a scratch layer (never shown)
+    // and read back -- so it matches what draw() drew, pixel for pixel.
+    // Canvas and Active Window as they were.
+    struct CornerShape {
+        std::uint8_t outside[4][CornerRadius];
+        int dx = 0, dy = 0;     // the chip's box ends this many pixels right / below x+w-1 / y+h-1
+    };
+    inline const CornerShape& cornerOutside(DisplayDriver* d) {
+        static CornerShape cs;
+        static bool known = false;
+        if (known) return cs;
+        constexpr int r = CornerRadius, size = 4 * CornerRadius, area = size + 8;
+        constexpr std::uint16_t kMark = 0x0821;               // (not Yellow)
+        const std::uint32_t canvas = d->canvasAddr();
+        const std::uint16_t stride = d->canvasStride();
+        std::uint16_t awX, awY, awW, awH;
+        d->widenActiveWindowForLinearAccess(&awX, &awY, &awW, &awH);
+        d->beginLayerDraw(LT7683::kBteLayer2Addr);
+        d->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+        d->fillRect(0, 0, area, area, kMark);
+        d->fillRoundRect(0, 0, size, size, r, Yellow);
+        static std::uint16_t px[area][area];
+        for (int y = 0; y < area; ++y) d->readRow565(0, static_cast<std::int16_t>(y), area, px[y]);
+        // Where the box really ends (in case the chip draws one more row or column)
+        int right = 0, bottom = 0;
+        for (int y = 0; y < area; ++y)
+            for (int x = 0; x < area; ++x)
+                if (px[y][x] != kMark) { right = std::max(right, x); bottom = std::max(bottom, y); }
+        cs.dx = right - (size - 1);
+        cs.dy = bottom - (size - 1);
+        for (int row = 0; row < r; ++row) {
+            const std::uint16_t* top = px[row];
+            const std::uint16_t* bot = px[bottom - r + 1 + row];
+            int n[4] = { 0, 0, 0, 0 };
+            while (n[0] < r && top[n[0]] == kMark) ++n[0];
+            while (n[1] < r && top[right - n[1]] == kMark) ++n[1];
+            while (n[2] < r && bot[n[2]] == kMark) ++n[2];
+            while (n[3] < r && bot[right - n[3]] == kMark) ++n[3];
+            for (int c = 0; c < 4; ++c) cs.outside[c][row] = static_cast<std::uint8_t>(n[c]);
+        }
+        if (canvas == 0) d->endOverlayDraw();
+        else d->beginLayerDraw(canvas, stride);
+        d->restoreActiveWindow(awX, awY, awW, awH);
+        known = true;
+        return cs;
+    }
+
+    // The four corners outside the rounded shape show what's behind the box
+    // (see draw()) -- copied when the box was drawn. When that changes with
+    // the box still open (Paper black/white, the text colour ...), this
+    // copies just those pixels again from the panel (BTE, one short row
+    // at a time, as cornerOutside() says): the frame itself isn't drawn
+    // again, so nothing of it can change. For a box on the menu layer.
+    inline void refreshCorners(DisplayDriver* d, int x, int y, int w, int h) {
+        const CornerShape& cs = cornerOutside(d);
+        const int r = CornerRadius;
+        for (int c = 0; c < 4; ++c)
+            for (int row = 0; row < r; ++row) {
+                const int len = cs.outside[c][row];
+                if (len == 0) continue;
+                const auto px = static_cast<std::int16_t>((c & 1) ? x + w + cs.dx - len : x);
+                const auto py = static_cast<std::int16_t>((c & 2) ? y + h + cs.dy - r + row : y + row);
+                d->copyLayerRegion(0, SCREEN_MAX_X, px, py, LT7683::kMenuLayerAddr, SCREEN_MAX_X, px, py,
+                                   static_cast<std::uint16_t>(len), 1);
+            }
+    }
+
     // A box with its title band (title upper-cased), at any place and size
     // -- drawBox() in UiDialog is this at the standard place
     inline void drawTitled(DisplayDriver* d, int x, int y, int w, int h, const std::string& title) {
         draw(d, x, y, w, h);
-        d->fillRect(x + BorderThickness, y + BorderThickness, w - 2 * BorderThickness,
-                    TitleH - BorderThickness, Yellow);
+        // The band follows the frame's inner rounding at the top (a plain
+        // rectangle stuck out past the outer rounding there, a few yellow
+        // pixels in the corners): rounded, then its lower rounding filled
+        // back black (the rows start well below it)
+        const int innerRadius = CornerRadius > BorderThickness ? CornerRadius - BorderThickness : 0;
+        d->fillRoundRect(x + BorderThickness, y + BorderThickness, w - 2 * BorderThickness,
+                         TitleH - BorderThickness + innerRadius, innerRadius, Yellow);
+        d->fillRect(x + BorderThickness, y + TitleH, w - 2 * BorderThickness, innerRadius, 0x0000);
         std::string t = title.empty() ? std::string("HIPI") : title;
         for (char& c : t) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
 #if HIPI_MENU_TITLE_HP41FONT

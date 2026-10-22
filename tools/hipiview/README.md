@@ -280,6 +280,7 @@ as touches and buttons with **Control** — and nothing with **View**.
 | `test/link_sim.cpp`, `test/stubs/` | The lossy-USB test (`make link_sim`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures (part of `make test`; saves `printer_view_*.png`) |
 | `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
+| `test/display_text_test.cpp` | The display's text log: the filter for both models (escapes, CR/LF, BS, Roman-8 as UTF-8), the ring running over, `writeSdram`/`readSdram` on the emulated chip, bytes from HP-IL through the display device (part of `make test`) |
 | `test/hwtest_view_test.cpp`, `test/hwio_stub.*` | The Hardware test page as HIPI draws it, with stand-in LEDs, pixels and I2C bus (part of `make test`; saves `hwtest_*.png`) |
 | `test/demo_view_test.cpp` | What the demo shows (`demo_content.cpp`): texts, plots, printout (part of `make test`; saves `demo_*.png`) |
 | `test/demo_run_test.cpp`, `test/demostubs/` | The demo itself, a whole round in fake time, then stopped and checked (part of `make test`; saves `demo_run_*.png`) |

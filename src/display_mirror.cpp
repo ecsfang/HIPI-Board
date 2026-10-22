@@ -369,6 +369,11 @@ std::uint32_t displayMirror_fileAssetId(const char* path, std::uint32_t salt) {
 
 bool displayMirror_active() { return state_ != State::Off; }
 
+void displayMirror_quiet(bool quiet) {
+    if (quiet) encoder_.suspend();
+    else encoder_.resume();
+}
+
 // Tells the viewer the setting (mirror_protocol.h, kMode)
 static void sendMode() {
     if (state_ == State::Off || !encoder_.enabled()) return;

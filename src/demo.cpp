@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <strings.h>
 
 extern hipi::Screen* screen;
 extern hipi::Video80* video80Term;
@@ -115,6 +116,7 @@ void showCaption(const std::string& text, std::uint32_t ms) {
     d_->endOverlayDraw();
     screen->reassertRenderState();
     d_->showPipOverlay(x, y, w, h);
+    plotterview_refreshCursor();        // (the caption's text moved the chip's text cursor)
     captionShown_ = true;
     captionUntil_ = nowMs() + ms;
 }
@@ -268,8 +270,9 @@ std::vector<std::string> cassettes() {
         FILINFO info;
         while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
             if (info.fattrib & AM_DIR) continue;
+            // LIF images: *.dat or *.lif (any case), as in the file picker
             const char* dot = std::strrchr(info.fname, '.');
-            if (dot != nullptr && (std::strcmp(dot, ".dat") == 0 || std::strcmp(dot, ".DAT") == 0)) v.push_back(info.fname);
+            if (dot != nullptr && (strcasecmp(dot, ".dat") == 0 || strcasecmp(dot, ".lif") == 0)) v.push_back(info.fname);
         }
         f_closedir(&dir);
     }

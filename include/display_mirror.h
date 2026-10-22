@@ -84,6 +84,11 @@ void displayMirror_setInputHandlers(MirrorTouchHandler touch, MirrorButtonHandle
 // viewer is not acted on meanwhile.
 void displayMirror_goodbye(std::uint32_t ms);
 
+// Between displayMirror_quiet(true) and (false) the display traffic isn't
+// sent to the viewer (the registers are put right afterwards): for SDRAM
+// the viewer never shows -- the display's text log (display_text.h)
+void displayMirror_quiet(bool quiet);
+
 // Tells the mirror about an off-screen layer a newly connected viewer
 // needs: rows x rowBytes from addr, rowStep bytes apart (0: one block).
 // assetId != 0 marks a layer filled once from a fixed source (e.g. a
