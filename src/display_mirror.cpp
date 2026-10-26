@@ -59,6 +59,9 @@ absolute_time_t ackProgress_;
 absolute_time_t lastHeard_;     // the viewer's last message (any)
 absolute_time_t ringIdle_;      // when everything was last acknowledged
 absolute_time_t lastWrite_;     // when the ring was last written
+absolute_time_t lastPoll_;      // when displayMirror_poll() last ran (HIPI's own pauses)
+bool polled_ = false;           // (lastPoll_ is set)
+bool pingAsked_ = false;        // the viewer asked "still there?": a heartbeat at once
 
 std::uint32_t ringFree() { return static_cast<std::uint32_t>(kRingSize) - (wr_ - acked_); }
 [[maybe_unused]] void ringClear() {
@@ -145,6 +148,7 @@ constexpr int kFileQueue = 8;
 QueuedFileMsg fileQueue_[kFileQueue];
 int fileQueueHead_ = 0, fileQueueCount_ = 0;
 std::unique_ptr<UploadReceiver> upload_;
+std::unique_ptr<MediaSender> download_;
 
 MirrorMode mode_ = MirrorMode::Off;   // the setting (config display_mirror)
 MirrorTouchHandler touchHandler_;
@@ -247,6 +251,9 @@ void handleAck(const std::uint8_t* m) {
     if (static_cast<std::int32_t>(pos - acked_) < 0 || static_cast<std::int32_t>(sent_ - pos) < 0) return;
     if (pos != acked_ || m[0] == 'N') ackProgress_ = get_absolute_time();
     acked_ = pos;
+    // "Still there?" (hipiview, after a quiet while): nothing to resend --
+    // a heartbeat at once says yes
+    if (m[0] == 'N' && pos == wr_) { pingAsked_ = true; return; }
     if (m[0] == 'N') {
         // Resend from pos: drop what's still queued in the USB port (the
         // viewer throws away anything that doesn't fit anyway)
@@ -348,9 +355,15 @@ public:
             // going meanwhile. Only between SPI transactions (mayBlock),
             // so nothing else on the bus is interrupted.
             const absolute_time_t giveUp = make_timeout_time_ms(kStallTimeoutMs);
+            // "Nobody's reading": no word from the viewer for a while *while
+            // waiting*. Its last word before can be up to a second old when
+            // HIPI was idle (it only acknowledges the empty frame once a
+            // second): counting that ended the session at the first burst
+            // after idling -- opening the button strip and a menu
+            const absolute_time_t waitFrom = get_absolute_time();
             while (ringFree() < n) {
                 if (!tud_cdc_n_connected(kItf) || time_reached(giveUp)) return false;
-                if (msSince(lastHeard_) > kStallSilentMs) return false;   // nobody's reading
+                if (msSince(lastHeard_) > kStallSilentMs && msSince(waitFrom) > kStallSilentMs) return false;
                 serviceRx();
                 pumpUsb();
                 tud_task();
@@ -461,6 +474,7 @@ void displayMirror_goodbye(std::uint32_t ms) {
         serviceRx();              // acknowledgements (input is only queued)
         pumpUsb();
     }
+    lastPoll_ = get_absolute_time();   // (not "HIPI was busy")
 #else
     while (!time_reached(until)) tud_task();
 #endif
@@ -483,11 +497,39 @@ void uploadReply(std::uint8_t kind, const std::uint8_t* p, std::size_t n) {
     encoder_.emit(b, 4 + n);
 }
 
-// The queued file messages, to the receiver (only in Control)
+// A piece of a cassette for the viewer, in the stream (kDownload)
+void downloadPacket(std::uint8_t kind, const std::uint8_t* p, std::size_t n) {
+    if (state_ == State::Off || !encoder_.enabled()) return;
+    n = std::min<std::size_t>(n, 4 + mirror::kDlChunk);
+    static std::uint8_t b[4 + 4 + mirror::kDlChunk];
+    b[0] = mirror::kDownload;
+    b[1] = kind;
+    b[2] = static_cast<std::uint8_t>(n);
+    b[3] = static_cast<std::uint8_t>(n >> 8);
+    std::memcpy(b + 4, p, n);
+    encoder_.emit(b, 4 + n);
+}
+// Room for a piece: only in a running session, and only while the ring
+// keeps plenty for the screen -- the cassette goes in the gaps
+bool downloadRoom(std::size_t n) {
+    return state_ == State::Live && encoder_.enabled() && ringFree() >= n + kRingSize / 2;
+}
+
+// The queued file messages: a file from the viewer to the receiver (only in
+// Control), the viewer asking for a cassette (View too)
 void deliverFiles() {
     while (fileQueueCount_ > 0) {
         const QueuedFileMsg& q = fileQueue_[fileQueueHead_];
-        if (mode_ != MirrorMode::Control || !upload_) {
+        if (q.kind == mirror::kDlAsk || q.kind == mirror::kDlAbort) {
+            if (!download_) {
+                static const char kNo[] = "this HIPI can't send cassettes";
+                downloadPacket(mirror::kDlError, reinterpret_cast<const std::uint8_t*>(kNo), std::strlen(kNo));
+            } else if (q.kind == mirror::kDlAsk) {
+                download_->ask();
+            } else {
+                download_->abort();
+            }
+        } else if (mode_ != MirrorMode::Control || !upload_) {
             static const char kOff[] = "set Settings > Screen > Mirror to PC to Control on HIPI";
             static const char kNo[] = "this HIPI can't take files";
             if (q.kind == mirror::kUpAsk || q.kind == mirror::kUpBegin)
@@ -500,6 +542,7 @@ void deliverFiles() {
         --fileQueueCount_;
     }
     if (upload_) upload_->poll();
+    if (download_) download_->poll();
 }
 
 }  // namespace
@@ -516,6 +559,16 @@ void displayMirror_setUploadEnv(UploadEnv env) {
     upload_ = std::make_unique<UploadReceiver>(std::move(env), uploadReply);
 }
 
+void displayMirror_setDownloadEnv(DownloadEnv env) {
+    download_ = std::make_unique<MediaSender>(std::move(env), downloadPacket, downloadRoom);
+}
+
+bool displayMirror_sendMedia(std::string& why) {
+    if (state_ == State::Off) { why = "hipiview isn't connected"; return false; }
+    if (!download_) { why = "this HIPI can't send cassettes"; return false; }
+    return download_->start(why);
+}
+
 static void pollMirror() {
 #if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
     if (display_ == nullptr) return;
@@ -525,6 +578,7 @@ static void pollMirror() {
         releaseInput();                      // nobody's finger on the panel any more
         fileQueueCount_ = 0;
         if (upload_) upload_->viewerGone();  // (a file half-way is dropped)
+        if (download_) download_->viewerGone();
         encoder_.setEnabled(false);
         ringFree_();
         tud_cdc_n_write_clear(kItf);         // nothing stale for the next viewer
@@ -539,6 +593,20 @@ static void pollMirror() {
         toldOff_ = false;
         viewerSeen_ = false;
         return;
+    }
+    // HIPI itself was held up (the main loop didn't come here for a while:
+    // a long SD card access ...): the viewer couldn't answer meanwhile, so
+    // that silence doesn't count against it -- the session goes on, the
+    // viewer asks "still there?" and gets the rest
+    {
+        const absolute_time_t now = get_absolute_time();
+        const std::int64_t pausedMs = absolute_time_diff_us(lastPoll_, now) / 1000;
+        if (state_ != State::Off && polled_ && pausedMs > 1000) {
+            lastHeard_ = ringIdle_ = ackProgress_ = now;
+            LOGF("\r\n * Display mirror: HIPI was busy for %ld ms -- the session goes on", static_cast<long>(pausedMs));
+        }
+        lastPoll_ = now;
+        polled_ = true;
     }
     serviceRx();
     // A (new) request from the viewer starts a session from scratch
@@ -606,7 +674,8 @@ static void pollMirror() {
     encoder_.flush();
     // Nothing to send for a while: an empty frame, so both ends know the
     // other is still there
-    if (state_ == State::Live && wr_ == acked_ && msSince(lastWrite_) > kHeartbeatMs) {
+    if (state_ == State::Live && wr_ == acked_ && (msSince(lastWrite_) > kHeartbeatMs || pingAsked_)) {
+        pingAsked_ = false;
         std::uint8_t hdr[mirror::kFrameHeader];
         mirror::frameHeader(hdr, sid_, wr_, nullptr, 0);
         ringWrite(hdr, sizeof(hdr));

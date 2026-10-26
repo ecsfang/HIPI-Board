@@ -1318,13 +1318,32 @@ register level, so new drawing code needs nothing extra to be mirrored.
   mirroring and waits for a new request; it never starts over by itself,
   which would stall its main loop against a port nobody reads
   (`./link_sim 0.01 20 stall` tests this). When idle, HIPI sends an empty
-  frame every second; hipiview acknowledges it, and asks for a new session
-  if it hears nothing for 3.5 s -- and after 5 s in any case: a session that
-  was busy from its start (the demo running) has shown no empty frame yet,
-  and when HIPI ended it (the link fell behind: "ring full" in the log) the
-  viewer used to wait for ever (`Link::silent()` in `deframer.hpp`,
-  `make deframer_test`). `./link_sim 0.02 16 burst` draws more than the link
-  can carry on a link that loses many packets meanwhile.
+  frame every second; hipiview acknowledges it. Hearing nothing for 2.5 s,
+  it asks "still there?" once a second (an `'N'` from where it is; HIPI
+  answers with an empty frame at once), and only after 7 s does it ask for
+  a new session -- 5 s if no empty frame was ever seen: a session that was
+  busy from its start (the demo running) has shown none yet, and when HIPI
+  ended it (the link fell behind: "ring full" in the log) the viewer used
+  to wait for ever (`Link::silent()` in `deframer.hpp`, `make
+  deframer_test`). `./link_sim 0.02 16 burst` draws more than the link can
+  carry on a link that loses many packets meanwhile.
+- With the ring full, drawing waits for the viewer (`RingSink::put()`) and
+  gives up the session if the viewer says nothing for 0.5 s *while it
+  waits*. It used to count from the viewer's last word before the wait --
+  up to a second old when HIPI had been idle (the empty frame is only
+  acknowledged once a second) -- so the first burst after idling (the
+  button strip and a menu opened) often ended the session at once ("the
+  link fell behind (ring full)"), and the viewer read the whole picture
+  again (the panel, ~1.2 MB -- pictures in its cache aren't sent again).
+  `./link_sim 0.0 10 idleburst` idles, then draws 150 kB at once, three
+  times: one session only.
+- HIPI's own main loop held up for a while: the viewer waits (above), and
+  HIPI doesn't count its own pause against the viewer: more than 1 s
+  between two `displayMirror_poll()` resets the "nothing heard" timers and
+  is logged ("HIPI was busy for N ms -- the session goes on").
+  `./link_sim 0.02 14 busy` holds HIPI up 4 s right after drawing: one
+  session only. The main loop also logs any of its steps that takes more
+  than 0.5 s ("Main loop: HP-IL took N ms"), to find such pauses.
 - The setting **Settings → Screen → Mirror to PC** (`display_mirror=off|view|control`,
   off by default, `displayMirror_setMode()`) gates it all: off, requests
   are ignored (one log line) and a running session ends at once (its
@@ -1388,6 +1407,27 @@ register level, so new drawing code needs nothing extra to be mirrored.
   `make upload_test` runs hipiview's `Uploader` against the receiver
   directly (losses, damage, a busy drive, cancel, refusals);
   `./link_sim 0.02 10 upload` drops a file on the real hipiview.
+- **A cassette to the viewer** (View or Control): the Tape view's menu
+  **Save media on PC** (`displayMirror_sendMedia()`, only while a session
+  runs) or the viewer's `'F'` *kDlAsk* (hipiview's **M** key) starts
+  `MediaSender` (`mirror_download.h/.cpp`) for the drive shown. The stream
+  to the viewer is reliable already, so it needs no acks of its own:
+  `kDownload` packets -- *Begin* (size, `drive|name`), *Data* (offset and up
+  to 1 kB), *End* (CRC-32), or *Wait* / *Error* -- go into the stream from
+  `displayMirror_poll()`, a few per pass and only while the ring has more
+  than half its room free (`downloadRoom()`), so the picture comes first.
+  The file is read through the drive (`CDrive::peekBlock()`: its own open
+  file, its position put back; `mediaFileSize()` with what's been written)
+  and only while `CDrive::quiet()`. If `blocksWritten()` changes meanwhile
+  (formatting counts too), it starts over with a new *Begin*, at most 5
+  times; a busy drive is waited for 30 s. A new session drops it on both
+  sides. The glue is `DriveForDownload` in `pico_main.cpp`; hipiview's side
+  is `download.hpp`, its *Save as* dialog `save_dialog.cpp` (GTK 3 through a few
+  lines of Python -- zenity 4 ignores a proposed name --, else zenity /
+  kdialog; `GetSaveFileNameW`; osascript -- in a thread of its own).
+  `make download_test` runs both sides directly (a full ring, a busy drive,
+  writes meanwhile, refusals, 2 MB); `./link_sim 0.02 10 download` asks
+  with the real hipiview's M key and from "the menu", in View.
 - A session starts when the viewer sends `HIPIVIEW` plus the ids of the
   pictures in its cache. Just opening the port (ModemManager, terminals)
   starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a

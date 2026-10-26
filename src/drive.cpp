@@ -131,6 +131,7 @@ void CDrive::preProc(IL_CMD_t cmd)
         if( check() ) {
             LOGF("$$$ Formatting ... (%d)\r\n", tape->tell());
             markBusy();
+            blocksWritten_ = blocksWritten_ + 1;     // (a cassette sent to the PC starts over)
             tape->write(buffer[0]);
             if( tape->tell() >= mediaBytes() ) {
                 end = true;
@@ -385,6 +386,15 @@ IL_CMD_t CDrive::doNextListener(IL_CMD_t cmd) {
 // One block of the medium for a look at it (the media map), the drive's
 // own position kept: through the drive's open file if it has one (it's
 // opened for writing, so it can't be opened twice), else read-only
+std::uint32_t CDrive::mediaFileSize()
+{
+    if( mediaFile_.empty() || ejected_ ) return 0;
+    if( tape->ok() ) return tape->fileSize();
+    FILINFO fi;
+    if( f_stat(lifPath(mediaFile_).c_str(), &fi) != FR_OK ) return 0;
+    return static_cast<std::uint32_t>(fi.fsize);
+}
+
 bool CDrive::peekBlock(std::uint32_t block, std::uint8_t* out)
 {
     if( mediaFile_.empty() || ejected_ ) return false;

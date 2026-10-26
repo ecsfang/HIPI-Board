@@ -50,7 +50,10 @@ cd tools/hipiview
 make
 ```
 
-`ffmpeg` is only needed for recording.
+`ffmpeg` is only needed for recording. The *Save as* dialog for a cassette
+from HIPI is GTK's own, through Python (`python3-gi` and `gir1.2-gtk-3.0`,
+already there on Ubuntu's desktop); else `zenity` or KDE's `kdialog` (then
+the name may have to be typed in: zenity 4 doesn't fill it in).
 
 ### Windows
 
@@ -120,6 +123,7 @@ include/zlib.h, include/zconf.h, lib/libz.a>`.
 | **F** | Full screen on/off (**Esc** leaves it too) |
 | **B** | Backlight dimming on/off (see below) |
 | **T** | Touch rings on/off (see below) |
+| **M** | Save the cassette of the drive HIPI's Tape view shows on the PC (see below) |
 | **Q** | Quit (a recording in progress is saved) |
 
 The window can be resized; the picture keeps its proportions.
@@ -172,6 +176,21 @@ a message box says why. It needs HIPI firmware 1.6.0 or newer (protocol
 version 7). The protocol: `mirror_protocol.h` (FILES); the details: GUIDE.md
 §7.1.
 
+### Saving a cassette on the PC
+
+The other way round, with **View** or **Control**: **Save media on PC** in
+the Tape view's menu on HIPI, or **M** here, sends the cassette of the drive
+whose Tape view is shown — everything the HP-41 has saved on it. The title
+bar shows how far it is; then the *Save as* dialog opens, in the folder used
+last time (at first *Downloads*), with the cassette's name filled in.
+
+HIPI reads the cassette only while the drive is idle, so the HP-41 is never
+held up, and starts over if it writes to it meanwhile. The dialog is GTK's
+own on Linux (else `zenity` or `kdialog`; without any: the usual folder, a
+free name, and a message), the system's own on Windows and macOS. With
+`--save-to DIR` cassettes go to DIR without asking. Needs HIPI firmware
+1.6.0 or newer.
+
 ### Options
 
 | Option | Meaning |
@@ -184,6 +203,7 @@ version 7). The protocol: `mirror_protocol.h` (FILES); the details: GUIDE.md
 | `--render FILE` | With `--replay`: turn the saved stream into a video, as fast as possible, with no window |
 | `--scale X` | Window size factor, e.g. `0.75` or `1.5` |
 | `--backlight` | Dim the picture like the real backlight |
+| `--save-to DIR` | Save cassettes from HIPI in DIR, without the *Save as* dialog (a free name: `GAMES (2).DAT` ...) |
 | `--version` | Show the version (from git, like the firmware's: `1.2.0`, or `1.2.0-beta.5` after the tag) |
 | `--test-input FILE` | For tests: play mouse and key events from FILE (see `test/link_sim.cpp`) |
 
@@ -275,7 +295,10 @@ stood in by the test, talks to the real hipiview through a
 pseudo-terminal. Afterwards it checks that the picture came out exactly
 right. It does up to about 5 % loss. `./link_sim 0.01 20 stall` freezes hipiview
 for a while midway and checks that HIPI keeps running smoothly and that
-the picture comes back afterwards. `./link_sim 0.01 18 input` has hipiview
+the picture comes back afterwards. `./link_sim 0.02 14 busy` holds HIPI's own
+main loop up for 4 s and checks that the session simply goes on (no whole new
+picture); `./link_sim 0.0 10 idleburst` draws a big picture at once after
+idling, three times -- the same session throughout. `./link_sim 0.01 18 input` has hipiview
 click, swipe and press keys (`--test-input`) and checks that HIPI gets them
 as touches and buttons with **Control** — and nothing with **View**.
 `./link_sim 0.02 10 upload` drops a LIF volume on hipiview (a `drop` and an
@@ -283,11 +306,19 @@ as touches and buttons with **Control** — and nothing with **View**.
 whole and goes into a stand-in drive, the old cassette taken out first
 (HIPI's SD card is `link_sim_sd/` meanwhile).
 
+`./link_sim 0.02 10 download` asks for a cassette with the M key and once
+more from "HIPI's menu", with **View**, and checks both files hipiview saved
+(`--save-to link_sim_saved`).
+
 `make upload_test` (part of `make test`) runs hipiview's side of sending a
 file (`upload.hpp`) against HIPI's (`mirror_upload.cpp`) in one program,
 in simulated time: an empty drive, replacing while the drive is busy, the
 same name, cancel, HIPI's refusals, 20 % of the messages lost, a damaged
-piece, a drive busy for too long, the viewer going away.
+piece, a drive busy for too long, the viewer going away. `make
+download_test` does the same for a cassette to the PC (`download.hpp`
+against `mirror_download.cpp`): asked for here or from HIPI's menu, a full
+ring, a busy drive, the cassette written to meanwhile (it starts over) or all
+the time (given up), refusals, the session ending, 2 MB.
 
 ## Files
 
@@ -299,12 +330,14 @@ piece, a drive busy for too long, the viewer going away.
 | `png.hpp` | Screenshots |
 | `input.hpp` | Mouse and keys to HIPI; the touch rings |
 | `upload.hpp` | Sending a dropped LIF volume to HIPI |
+| `download.hpp`, `save_dialog.hpp/.cpp` | A cassette from HIPI, and the *Save as* dialog for it |
 | `serial_port.hpp/.cpp` | The serial port and finding it: POSIX (Linux, macOS) and Win32 |
 | `CMakeLists.txt` | Building with CMake (Windows, Linux, macOS); the `Makefile` does Linux and the tests |
 | `ci/build-windows.sh` | The Windows build, as GitHub (and you) run it |
 | `test/host_test.cpp` | The test (`make test`) |
 | `test/link_sim.cpp`, `test/stubs/` | The lossy-USB test (`make link_sim`) |
 | `test/upload_test.cpp` | Sending a file: hipiview's side against HIPI's receiver (part of `make test`) |
+| `test/download_test.cpp` | A cassette to the PC: HIPI's sender against hipiview's side (part of `make test`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures (part of `make test`; saves `printer_view_*.png`) |
 | `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
 | `test/display_text_test.cpp` | The display's text log: the filter for both models (escapes, CR/LF, BS, Roman-8 as UTF-8), the ring running over, `writeSdram`/`readSdram` on the emulated chip, bytes from HP-IL through the display device (part of `make test`) |
@@ -315,3 +348,4 @@ piece, a drive busy for too long, the viewer going away.
 | `../../include/mirror_encoder.hpp`, `mirror_session.hpp` | Firmware side, also used by the test |
 | `../../src/display_mirror.cpp` | Firmware: the mirror port |
 | `../../include/mirror_upload.h`, `../../src/mirror_upload.cpp`, `../../include/lif_check.h` | Firmware: a file from the viewer into a drive; the LIF check, shared |
+| `../../include/mirror_download.h`, `../../src/mirror_download.cpp` | Firmware: a drive's cassette to the viewer |

@@ -18,6 +18,21 @@
 // "SD card" (link_sim_sd/lif/) must be the one dropped, the old cassette
 // taken out first.
 //
+// "download": a drive's cassette to the PC, with Mirror to PC < View >:
+// asked for with hipiview's M key, then once more from "HIPI's menu"
+// (displayMirror_sendMedia()); hipiview saves them (--save-to
+// link_sim_saved/) -- both must be the drive's file, byte for byte.
+//
+// "busy": HIPI's own main loop held up for 4 s midway (a long SD card
+// access ...), right after drawing something: the viewer must ask "still
+// there?" and go on with the same session -- one session only, no whole
+// new picture.
+//
+// "idleburst": idle a while (only empty frames, acknowledged once a
+// second), then a picture bigger than the ring at once: HIPI must wait for
+// the viewer, not take the last ack (up to a second old) for "nobody's
+// reading" and end the session -- one session only.
+//
 // "stall": hipiview is frozen (SIGSTOP) for a while midway -- the port
 // stays open but nobody reads it, as when hipiview is suspended. HIPI
 // must notice, stop mirroring (no stalls of its main loop beyond the
@@ -26,6 +41,7 @@
 #include "Screen.hpp"
 #include "display_mirror.h"
 #include "mirror_upload.h"
+#include "mirror_download.h"
 #include "tusb.h"
 #include "pico/time.h"
 #include "../lt7683_emu.hpp"
@@ -141,11 +157,17 @@ int main(int argc, char** argv) {
     const double seconds = argc > 2 ? std::atof(argv[2]) : 8.0;
     const bool stall = argc > 3 && std::strcmp(argv[3], "stall") == 0;
     const bool uploadTest = argc > 3 && std::strcmp(argv[3], "upload") == 0;
-    const bool inputTest = (argc > 3 && std::strcmp(argv[3], "input") == 0) || uploadTest;
+    const bool downloadTest = argc > 3 && std::strcmp(argv[3], "download") == 0;
+    const bool inputTest = (argc > 3 && std::strcmp(argv[3], "input") == 0) || uploadTest || downloadTest;
     // burst: more drawing than the link can carry, from the very start (so
     // the viewer sees no heartbeat first): the encoder gives up, and HIPI
     // must send the screen again by itself -- the viewer is still there
     const bool burst = argc > 3 && std::strcmp(argv[3], "burst") == 0;
+    const bool busy = argc > 3 && std::strcmp(argv[3], "busy") == 0;
+    const bool idleBurst = argc > 3 && std::strcmp(argv[3], "idleburst") == 0;
+    int idleBursts = 0;
+    double nextIdleBurst = seconds * 0.3;
+    bool busyDone = false;
     // upload: the file dropped -- a LIF volume of 96 kB
     std::vector<std::uint8_t> tape(96 * 1024);
     for (std::size_t k = 0; k < tape.size(); ++k) tape[k] = static_cast<std::uint8_t>(k * 2654435761u >> 13);
@@ -153,7 +175,13 @@ int main(int argc, char** argv) {
     for (int k = 8; k < 20; ++k) tape[k] = 0;
     tape[11] = 2;                                            // directory at block 2,
     tape[19] = 4;                                            // 4 blocks long
-    if (uploadTest) {
+    if (downloadTest) {
+        std::filesystem::remove_all("link_sim_saved");
+        std::filesystem::create_directories("link_sim_saved");
+        std::FILE* f = std::fopen("link_sim_input.txt", "w");
+        std::fputs("2.0 key m\n", f);
+        std::fclose(f);
+    } else if (uploadTest) {
         std::FILE* tf = std::fopen("link_sim_tape.dat", "wb");
         std::fwrite(tape.data(), 1, tape.size(), tf);
         std::fclose(tf);
@@ -189,7 +217,10 @@ int main(int argc, char** argv) {
     if (pid == 0) {
         setenv("SDL_VIDEODRIVER", "dummy", 1);
         setenv("HOME", "/tmp", 1);
-        if (inputTest)
+        if (downloadTest)
+            execl("./hipiview", "hipiview", name, "--log", "link_sim.hvlog", "--test-input", "link_sim_input.txt",
+                  "--save-to", "link_sim_saved", static_cast<char*>(nullptr));
+        else if (inputTest)
             execl("./hipiview", "hipiview", name, "--log", "link_sim.hvlog", "--test-input", "link_sim_input.txt",
                   static_cast<char*>(nullptr));
         else
@@ -222,7 +253,30 @@ int main(int argc, char** argv) {
     hipi::LT7683 d(mirror, SCREEN_MAX_X, SCREEN_MAX_Y);
     d.begin();
     hipi::displayMirror_init(&d);
-    hipi::displayMirror_setMode(inputTest ? hipi::MirrorMode::Control : hipi::MirrorMode::View);
+    hipi::displayMirror_setMode(inputTest && !downloadTest ? hipi::MirrorMode::Control : hipi::MirrorMode::View);
+    // download: the drive whose cassette goes to the PC (its file: `tape`)
+    struct SimDownDrive : hipi::DownloadDrive {
+        const std::vector<std::uint8_t>* file = nullptr;
+        std::string name() const override { return "TFDRIVE"; }
+        std::string mediaFile() const override { return "SIMTAPE.DAT"; }
+        bool quiet() const override { return true; }
+        std::uint32_t changes() const override { return 0; }
+        std::uint32_t fileSize() const override { return static_cast<std::uint32_t>(file->size()); }
+        bool readBlock(std::uint32_t block, std::uint8_t* out) override {
+            for (std::uint32_t i = 0; i < 256; ++i) out[i] = block * 256 + i < file->size() ? (*file)[block * 256 + i] : 0xFF;
+            return true;
+        }
+    };
+    if (downloadTest) {
+        auto drive = std::make_shared<SimDownDrive>();
+        drive->file = &tape;
+        hipi::DownloadEnv env;
+        env.drive = [drive]() -> std::shared_ptr<hipi::DownloadDrive> { return drive; };
+        env.notNow = [] { return std::string(); };
+        env.nowMs = [] { return static_cast<std::uint64_t>(now() * 1000); };
+        hipi::displayMirror_setDownloadEnv(env);
+    }
+    bool menuSent = false;
     if (uploadTest) {
         hipi::UploadEnv env;
         env.drive = [&]() -> std::shared_ptr<hipi::UploadDrive> { return simDrive; };
@@ -265,12 +319,19 @@ int main(int argc, char** argv) {
         // stop, and start again by itself (hipiview is still connected)
         if (uploadTest) {
             // (Control all the time)
+        } else if (downloadTest) {
+            // (View all the time.) Later, once more from "HIPI's menu"
+            if (!menuSent && now() > seconds * 0.6) {
+                std::string why;
+                menuSent = true;
+                if (!hipi::displayMirror_sendMedia(why)) std::printf("FAIL download: Save media on PC: %s\n", why.c_str());
+            }
         } else if (inputTest) {
             // After "previous view" (the last key before the View part): View
             static bool viewOnly = false;
             if (!viewOnly) for (const auto& e : inputs) if (e.kind == 'B' && e.a == 7) viewOnly = true;
             if (viewOnly) hipi::displayMirror_setMode(hipi::MirrorMode::View);
-        } else if (!stall && !burst && now() > seconds * 0.5 && now() < seconds * 0.6) {
+        } else if (!stall && !burst && !busy && !idleBurst && now() > seconds * 0.5 && now() < seconds * 0.6) {
             hipi::displayMirror_setMode(hipi::MirrorMode::Off);
         } else {
             hipi::displayMirror_setMode(hipi::MirrorMode::View);
@@ -280,6 +341,21 @@ int main(int argc, char** argv) {
             // and the encoder gives up; afterwards as usual again
             static const double normalLoss = lossRate;
             lossRate = now() > 0.3 && now() < seconds * 0.4 ? 0.3 : normalLoss;
+        }
+        if (idleBurst && idleBursts < 3 && now() > nextIdleBurst) {
+            // (nothing else is drawn in this mode: idle in between)
+            ++idleBursts;
+            nextIdleBurst = now() + 2.5;
+            for (std::size_t k = 0; k < bigPicture.size(); k += 31) bigPicture[k] = static_cast<std::uint16_t>(bigPicture[k] + 977);
+            d.drawBitmap565(200, 100, 320, 240, bigPicture.data());   // 150 kB at once
+        }
+        if (busy && !busyDone && now() > seconds * 0.4) {
+            // Drawing, then HIPI held up 4 s: nothing read, nothing sent
+            busyDone = true;
+            d.fillRect(100, 100, 600, 300, 0x1234);
+            d.drawBitmap565(40, 120, 64, 64, bigPicture.data());   // (8 kB: some of it still unsent)
+            const double until = now() + 4.0;
+            while (now() < until) usleep(1000);
         }
         if (stall && !frozen && now() > seconds * 0.3 && now() < seconds * 0.4) { kill(pid, SIGSTOP); frozen = true; frozenAt = now(); }
         if (stall && frozen && now() > seconds * 0.7) { kill(pid, SIGCONT); frozen = false; }
@@ -291,11 +367,12 @@ int main(int argc, char** argv) {
         maxLoopGap = std::max(maxLoopGap, t - lastLoop);
         lastLoop = t;
         hipi::displayMirror_poll();
-        if (now() > nextDraw) {
+        // idleburst: nothing drawn but the bursts -- idle in between
+        if (now() > nextDraw && !idleBurst) {
             drawing = true;
             nextDraw = now() + 0.03;
             // (input test: big pictures too, so the ring fills up while drawing)
-            if (inputTest && !uploadTest && line % 20 == 0) d.drawBitmap565(40, 40, 320, 240, bigPicture.data());
+            if (inputTest && !uploadTest && !downloadTest && line % 20 == 0) d.drawBitmap565(40, 40, 320, 240, bigPicture.data());
             if (burst && now() > 0.3 && now() < seconds * 0.4) {
                 for (std::size_t k = 0; k < bigPicture.size(); k += 97) bigPicture[k] = static_cast<std::uint16_t>(bigPicture[k] * 31 + line);
                 for (int k = 0; k < 4; ++k) d.drawBitmap565(40 + k * 160, 40 + (line % 5) * 20, 320, 240, bigPicture.data());
@@ -374,7 +451,22 @@ int main(int argc, char** argv) {
     writePng("link_sim_viewer.png", b.data(), 1024, 600);
     std::printf("main loop: longest pause %.0f ms, %d pauses over 100 ms (%d of them > 3 s into the freeze)\n",
                 maxLoopGap * 1000, longStalls, lateStalls);
-    if (uploadTest) {
+    if (downloadTest) {
+        int fails = 0;
+        auto fail = [&](const std::string& what) { std::printf("FAIL download: %s\n", what.c_str()); ++fails; };
+        auto read = [](const char* p) {
+            std::ifstream in(p, std::ios::binary);
+            return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        };
+        const auto first = read("link_sim_saved/SIMTAPE.DAT");
+        const auto second = read("link_sim_saved/SIMTAPE (2).DAT");
+        if (first.empty()) fail("M key: link_sim_saved/SIMTAPE.DAT not saved");
+        else if (first != tape) fail("M key: SIMTAPE.DAT differs from the drive's file");
+        if (second.empty()) fail("Save media on PC: link_sim_saved/SIMTAPE (2).DAT not saved");
+        else if (second != tape) fail("Save media on PC: SIMTAPE (2).DAT differs from the drive's file");
+        if (fails) return 1;
+        std::printf("ok   download: twice %zu bytes over the lossy link (M key, HIPI's menu), saved whole\n", tape.size());
+    } else if (uploadTest) {
         int fails = 0;
         auto fail = [&](const std::string& what) { std::printf("FAIL upload: %s\n", what.c_str()); ++fails; };
         std::ifstream in("link_sim_sd/lif/link_sim_tape.dat", std::ios::binary);
@@ -442,6 +534,14 @@ int main(int argc, char** argv) {
             for (const auto& e : inputs) std::printf("  %.3f %c %d %d %d\n", e.t, e.kind, e.a, e.b, e.c);
             return 1;
         }
+    }
+    if (idleBurst) {
+        std::printf("idleburst: %d bursts after idling, %llu session(s) seen by the viewer\n", idleBursts, link.sessions());
+        if (link.sessions() != 1) { std::printf("FAIL idleburst: a burst after idling ended the session\n"); return 1; }
+    }
+    if (busy) {
+        std::printf("busy: %llu session(s) seen by the viewer\n", link.sessions());
+        if (link.sessions() != 1) { std::printf("FAIL busy: HIPI held up 4 s cost a new session\n"); return 1; }
     }
     if (burst) {
         std::printf("burst: %llu sessions seen by the viewer\n", link.sessions());

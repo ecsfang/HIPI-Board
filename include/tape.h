@@ -54,6 +54,8 @@ public:
     virtual void seek(unsigned int s) = 0;
     virtual void open(void) = 0;
     virtual void close(void) = 0;
+    // The open file's size in bytes (0: not open, or can't tell)
+    virtual unsigned int fileSize() { return 0; }
     bool ok(void) {
         return _open;
     }
@@ -95,6 +97,9 @@ public:
     }
     unsigned int tell(void) {
         return _open ? f_tell(&_tape) : 0;
+    }
+    unsigned int fileSize() override {
+        return _open ? static_cast<unsigned int>(f_size(&_tape)) : 0;
     }
     void read(unsigned char *buf) {
         unsigned int n = 0;

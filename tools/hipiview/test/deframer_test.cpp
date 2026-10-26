@@ -47,7 +47,31 @@ int main() {
         link.reset();                                   // a new session asked for
         const auto f = frame(2, 0, 100);
         link.feed(f.data(), f.size(), 1.0, out, nullptr);
-        check(!link.silent(4.0) && link.silent(4.6), "heartbeats known from before: silent after 3.5 s");
+        check(!link.silent(7.9) && link.silent(8.1), "heartbeats known from before: silent after 7 s");
+    }
+    // HIPI busy for a while (no frame): "still there?" ('N' from where we
+    // are) from 2.5 s, once a second; its answer keeps the session
+    {
+        Link link;
+        link.reset();
+        std::vector<std::vector<std::uint8_t>> sent;
+        // (the 'N's only -- the acknowledgements go too)
+        const Link::Send send = [&](const std::uint8_t* p, std::size_t n) { if (p[0] == 'N') sent.emplace_back(p, p + n); };
+        auto hb = frame(4, 0, 0);
+        link.feed(hb.data(), hb.size(), 0.0, out, send);
+        sent.clear();
+        for (double t = 0.1; t < 2.4; t += 0.1) link.tick(t, send);
+        check(sent.empty(), "quiet 2.4 s: nothing asked yet");
+        for (double t = 2.5; t < 4.65; t += 0.1) link.tick(t, send);
+        const std::uint32_t at = static_cast<std::uint32_t>(hb.size());
+        bool allN = !sent.empty();
+        for (const auto& m : sent)
+            allN = allN && m.size() == 6 && m[0] == 'N' && m[1] == 4 &&
+                   (m[2] | (m[3] << 8) | (m[4] << 16) | (static_cast<std::uint32_t>(m[5]) << 24)) == at;
+        check(allN && sent.size() == 2, "... then 'N' from where we are, once a second (2 by 4.6 s)");
+        auto hb2 = frame(4, at, 0);                     // HIPI answers: same session
+        link.feed(hb2.data(), hb2.size(), 4.7, out, send);
+        check(!link.silent(11.0) && link.inSession() && link.sid() == 4, "... HIPI answers: the same session goes on");
     }
     // Idle with heartbeats: never silent
     {

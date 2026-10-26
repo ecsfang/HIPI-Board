@@ -97,9 +97,10 @@ tools/hipiview/hipiview
 tools/hipiview/hipiview.exe
 tools/hipiview/*_test
 tools/hipiview/link_sim
-# link_sim upload: the file dropped, HIPI's SD card, the test input
+# link_sim upload/download: the file dropped, HIPI's SD card, the cassettes saved, the test input
 tools/hipiview/link_sim_tape.dat
 tools/hipiview/link_sim_sd/
+tools/hipiview/link_sim_saved/
 tools/hipiview/link_sim_input.txt
 tools/hipiview/*.png
 tools/hipiview/*.hvlog

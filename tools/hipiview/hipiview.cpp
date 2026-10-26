@@ -19,6 +19,8 @@
 #include "png.hpp"
 #include "input.hpp"
 #include "upload.hpp"
+#include "download.hpp"
+#include "save_dialog.hpp"
 #include "serial_port.hpp"
 #include "hipiview_version.h"   // generated from git (cmake/hipi_version.cmake)
 #include <zlib.h>
@@ -67,6 +69,7 @@ struct Options {
     bool backlight = false;      // dim the picture like the PWM backlight
     bool marks = true;           // touch rings (T)
     std::string testInput;       // tests: mouse/key events from a file (see TestInput)
+    std::string saveTo;          // cassettes from HIPI saved here, without asking
 };
 
 void usage() {
@@ -83,9 +86,10 @@ void usage() {
         "  --render FILE       with --replay: make a video, as fast as possible, no window\n"
         "  --scale X           window size factor (default 1)\n"
         "  --backlight         dim the picture like the real backlight (screen saver)\n"
+        "  --save-to DIR       save cassettes from HIPI in DIR, without the Save dialog\n"
         "  --version           show the version\n\n"
         "keys: R record, S screenshot, F full screen (Esc leaves it), B backlight,\n"
-        "      T touch rings on/off, Q quit\n"
+        "      T touch rings on/off, M save the cassette of HIPI's Tape view, Q quit\n"
         "with Mirror to PC < Control > on HIPI: the mouse is a finger on the screen;\n"
         "      Enter OK, Up/Down, Backspace X, Tab Shift (or hold Shift), Left/Right\n"
         "      previous/next view, mouse wheel Up/Down;\n"
@@ -113,6 +117,7 @@ bool parseArgs(int argc, char** argv, Options& o) {
         else if (a == "--scale") { if (!next(v)) return false; o.scale = std::max(0.25f, static_cast<float>(std::atof(v.c_str()))); }
         else if (a == "--backlight") o.backlight = true;
         else if (a == "--test-input") { if (!next(o.testInput)) return false; }
+        else if (a == "--save-to") { if (!next(o.saveTo)) return false; }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return false; }
         else o.device = a;
     }
@@ -759,6 +764,33 @@ int main(int argc, char** argv) {
         SDL_ShowSimpleMessageBox(flags, "hipiview", text.c_str(), win);
     };
 
+    // A cassette from HIPI (download.hpp; HIPI's side: mirror_download.h):
+    // from the Tape view's menu (Save media on PC) or the M key; saved
+    // where the user says (save_dialog.hpp)
+    Downloader download([&](std::vector<std::uint8_t> m) { if (reader) reader->sendInput(std::move(m)); });
+    Downloader::Step downloadSeen = Downloader::Step::Idle;
+    double downloadShowUntil = -1;
+    std::string downloadStatus;               // the result (saved where ...) once it's over
+    SaveDialog saveDialog;
+    struct Cassette { std::string name, drive; std::vector<std::uint8_t> data; };
+    Cassette cassette;                        // waiting for the Save dialog
+    // Writes it; "" or why not
+    auto writeCassette = [](const std::string& path, const std::vector<std::uint8_t>& data) -> std::string {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        if (!f) return "can't write " + path;
+        f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        return f ? std::string() : "writing " + path + " failed";
+    };
+    auto cassetteSaved = [&](const std::string& path, const std::string& why, double now) {
+        downloadStatus = why.empty() ? cassette.name + " saved: " + path : why;
+        downloadShowUntil = now + 10;
+        std::printf("hipiview: %s\n", downloadStatus.c_str());
+        std::fflush(stdout);
+        lastTitle = Clock::time_point();
+        if (why.empty()) rememberSaveFolder(cacheDir(), path);
+        cassette = Cassette();
+    };
+
     TestInput testInput;
     if (!o.testInput.empty() && !testInput.load(o.testInput)) {
         std::fprintf(stderr, "hipiview: can't read %s\n", o.testInput.c_str());
@@ -865,6 +897,13 @@ int main(int argc, char** argv) {
                 SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
                 break;
             case SDLK_b: o.backlight = !o.backlight; break;
+            case SDLK_m:                      // the cassette of HIPI's Tape view to the PC
+                if (!reader || !emu.connected()) fileBox(SDL_MESSAGEBOX_WARNING, "hipiview isn't connected to HIPI.");
+                else if (emu.version() < 7) fileBox(SDL_MESSAGEBOX_WARNING, "HIPI's firmware is too old to send cassettes (1.6.0 or newer).");
+                else if (download.busy() || saveDialog.running() || !cassette.data.empty())
+                    fileBox(SDL_MESSAGEBOX_INFORMATION, "A cassette is on its way already.");
+                else { download.ask(tnow); downloadShowUntil = 1e18; }
+                break;
             default: break;
             }
         }
@@ -916,6 +955,75 @@ int main(int argc, char** argv) {
             if (SDL_ShowMessageBox(&box, &pressed) != 0) pressed = 0;
             upload.answer(pressed == 1, secsNow());
         }
+        // A cassette from HIPI: the pieces, then where to save it
+        for (const auto& r : emu.takeDownloads()) {
+            if (r.kind == 0) download.onNewSession();
+            else download.onPacket(r.kind, r.data.data(), r.data.size(), sec);
+        }
+        download.tick(sec, emu.connected() && !emu.syncing());
+        if (download.step() != downloadSeen) {
+            downloadSeen = download.step();
+            if (downloadSeen != Downloader::Step::Idle) {
+                std::printf("hipiview: %s\n", download.status().c_str());
+                std::fflush(stdout);
+            }
+            if (downloadSeen == Downloader::Step::Receiving) downloadShowUntil = 1e18;
+            if (downloadSeen == Downloader::Step::Failed) {
+                downloadStatus = download.status();
+                downloadShowUntil = sec + 10;
+                if (download.askedHere()) fileBox(SDL_MESSAGEBOX_ERROR, "The cassette wasn't saved:\n" + download.status());
+            }
+            lastTitle = Clock::time_point();
+        }
+        if (download.step() == Downloader::Step::Ready && cassette.data.empty() && !saveDialog.running()) {
+            download.take(cassette.name, cassette.drive, cassette.data);
+            if (!o.saveTo.empty()) {
+                // --save-to: there, without asking (a free name)
+                const std::string path = freePath((fs::path(o.saveTo) / cassette.name).string());
+                cassetteSaved(path, writeCassette(path, cassette.data), sec);
+            } else {
+                downloadStatus = cassette.name + " from " + cassette.drive + ": where to save it?";
+                downloadShowUntil = 1e18;
+                lastTitle = Clock::time_point();
+                saveDialog.open("Save " + cassette.name + " from HIPI's " + cassette.drive, saveFolder(cacheDir()), cassette.name);
+            }
+        }
+        {
+            std::string path;
+            bool available = true;
+            if (!cassette.data.empty() && saveDialog.finished(path, available)) {
+                if (!available) {
+                    // No dialog program here: the usual folder, a free name
+                    path = freePath((fs::path(saveFolder(cacheDir())) / cassette.name).string());
+                    const std::string why = writeCassette(path, cassette.data);
+                    fileBox(why.empty() ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR,
+                            why.empty() ? "No Save dialog here (zenity or kdialog):\n" + cassette.name + " saved as " + path : why);
+                    cassetteSaved(path, why, sec);
+                } else if (path.empty()) {
+                    cassetteSaved("", cassette.name + " not saved", sec);
+                } else {
+                    std::error_code ec;
+                    int choice = 1;                       // 0 cancel, 1 replace, 2 keep both
+                    if (!saveDialog.askedBeforeOverwriting() && fs::exists(path, ec)) {
+                        const SDL_MessageBoxButtonData buttons[] = {
+                            { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel" },
+                            { 0, 2, "Keep both" },
+                            { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Replace" },
+                        };
+                        const std::string q = fs::path(path).filename().string() + " is there already. Replace it?";
+                        const SDL_MessageBoxData box = { SDL_MESSAGEBOX_WARNING, win, "hipiview - save the cassette",
+                                                         q.c_str(), 3, buttons, nullptr };
+                        if (SDL_ShowMessageBox(&box, &choice) != 0) choice = 0;
+                    }
+                    if (choice == 0) cassetteSaved("", cassette.name + " not saved", sec);
+                    else {
+                        if (choice == 2) path = freePath(path);
+                        cassetteSaved(path, writeCassette(path, cassette.data), sec);
+                    }
+                }
+            }
+        }
+
         // (a test: how it goes, once a second)
         static double uploadSaid = 0;
         if (!o.testInput.empty() && upload.busy() && sec - uploadSaid >= 1.0) {
@@ -977,6 +1085,8 @@ int main(int argc, char** argv) {
             if (!o.marks) state += "  |  no touch rings";
             if (reader && emu.connected() && emu.mirrorMode() == 2) state += "  |  control";
             if (upload.busy() || uploadShowUntil > sec) state = upload.status() + "  |  " + state;
+            if (download.busy()) state = download.status() + "  |  " + state;
+            else if (!cassette.data.empty() || downloadShowUntil > sec) state = downloadStatus + "  |  " + state;
             if (viewOnlyHintUntil > sec)
                 state = "VIEW ONLY - set Mirror to PC to Control on HIPI to use the mouse and keys  |  " + state;
             SDL_SetWindowTitle(win, ("hipiview " HIPIVIEW_VERSION_TEXT " - " + state).c_str());

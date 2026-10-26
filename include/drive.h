@@ -252,6 +252,9 @@ public:
     std::uint8_t lastOp() const { return lastOp_; }
     std::uint32_t blocksWritten() const { return blocksWritten_; }
     bool peekBlock(std::uint32_t block, std::uint8_t* out);
+    // The cassette file's size in bytes (the open file's, with what's been
+    // written; else from the SD card), 0 = none
+    std::uint32_t mediaFileSize();
     // The file on the SD card: lif/<name> ("" stays "" = no media)
     static std::string lifPath(const std::string& file) {
         return file.empty() ? file : std::string(HIPI_DIR_LIF "/") + file;

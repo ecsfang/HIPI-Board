@@ -20,7 +20,7 @@ find_package(SDL2 REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(hipiview hipiview.cpp lt7683_emu.cpp serial_port.cpp)
+add_executable(hipiview hipiview.cpp lt7683_emu.cpp serial_port.cpp save_dialog.cpp)
 
 # The version, from git (../../cmake/hipi_version.cmake): now, and again at
 # every build; gen/hipiview_version.h only changes with the version
@@ -50,8 +50,8 @@ else()
 endif()
 
 if(WIN32)
-    # Finding the COM port (SetupAPI) and its name (registry)
-    target_link_libraries(hipiview PRIVATE setupapi advapi32)
+    # Finding the COM port (SetupAPI) and its name (registry); the Save dialog (comdlg32)
+    target_link_libraries(hipiview PRIVATE setupapi advapi32 comdlg32)
     if(MINGW)
         target_link_options(hipiview PRIVATE -mconsole)   # messages in the console window
     endif()

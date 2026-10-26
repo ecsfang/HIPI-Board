@@ -77,6 +77,11 @@ public:
     void tick(double now, const Send& send) {
         if (sid_ < 0) return;
         if (gap_ && now - nakAt_ > 0.15) { message('N', send); nakAt_ = now; }
+        // Nothing for a while: "still there?" -- a resend request from where
+        // we are, once a second. HIPI answers at once (a heartbeat, or what
+        // it has); one that was only busy for a few seconds (the SD card ...)
+        // goes on with the same session: no whole new picture
+        if (!gap_ && now - lastFrame_ > kNudgeAfter && now - nudgeAt_ > 1.0) { message('N', send); nudgeAt_ = now; }
         const bool fresh = expected_ != acked_ && (expected_ - acked_ >= 2048 || now - ackAt_ > 0.02);
         const bool again = reack_ && now - ackAt_ > 0.05;      // a resend of what we have
         if (fresh || again) {
@@ -97,10 +102,16 @@ public:
     // once this firmware has sent one at all (any session on this port),
     // or after a longer silence anyway, it counts as silent too -- else a
     // session HIPI ended early was waited for for ever
+    // HIPI busy for a few seconds without a frame (its main loop held up)
+    // keeps its session: we ask "still there?" from kNudgeAfter, and only
+    // after kSilentAfter is the session given up -- it costs the whole
+    // picture again
+    static constexpr double kNudgeAfter = 2.5;
+    static constexpr double kSilentAfter = 7.0;
     bool silent(double now) const {
         if (sid_ < 0) return false;
         const double quiet = now - lastFrame_;
-        return ((heartbeat_ || heartbeats_) && quiet > 3.5) || quiet > 5.0;
+        return quiet > kSilentAfter || (!(heartbeat_ || heartbeats_) && quiet > 5.0);
     }
     bool inSession() const { return sid_ >= 0; }
     int sid() const { return sid_; }
@@ -122,6 +133,7 @@ private:
     std::uint32_t expected_ = 0;     // where the next frame must start
     std::uint32_t acked_ = 0;        // last position acknowledged
     double ackAt_ = 0;
+    double nudgeAt_ = -10;
     double lastFrame_ = 0;
     bool heartbeat_ = false, reack_ = false;
     bool heartbeats_ = false;        // ever seen on this port (kept over sessions)

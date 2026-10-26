@@ -25,6 +25,8 @@
 #include "DisplayTransport.hpp"
 #include "hipi_features.h"      // HIPI_MIRROR_PORT / HIPI_MIRROR_TRANSPORT
 #include "mirror_upload.h"
+#include "mirror_download.h"
+#include <string>
 #include <cstdint>
 #include <functional>
 
@@ -82,6 +84,13 @@ void displayMirror_setInputHandlers(MirrorTouchHandler touch, MirrorButtonHandle
 // Files from the viewer (mirror_upload.h): what the receiver needs to know
 // about the drives. Without it, files are refused.
 void displayMirror_setUploadEnv(UploadEnv env);
+
+// A drive's cassette to the viewer, to save on the PC (mirror_download.h):
+// what the sender needs to know about the drives. sendMedia(): the
+// cassette of the drive shown (Tape view menu -> Save media on PC); false
+// and why if it can't. The viewer can ask for it too.
+void displayMirror_setDownloadEnv(DownloadEnv env);
+bool displayMirror_sendMedia(std::string& why);
 
 // HIPI is about to restart (Bootsel mode): tells the viewer (kBye) and
 // keeps the mirror going for `ms` instead of a plain sleep, so the viewer

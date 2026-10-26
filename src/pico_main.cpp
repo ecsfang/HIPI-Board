@@ -596,6 +596,35 @@ int main() {
         env.nowMs = [] { return static_cast<std::uint64_t>(to_ms_since_boot(get_absolute_time())); };
         hipi::displayMirror_setUploadEnv(std::move(env));
     }
+    // ... and the other way (mirror_download.h): the cassette of the drive
+    // shown, saved on the PC (Tape view menu -> Save media on PC, or asked
+    // for by hipiview)
+    {
+        class DriveForDownload : public hipi::DownloadDrive {
+        public:
+            explicit DriveForDownload(CDrive* d) : d_(d) {}
+            std::string name() const override { return d_->name(); }
+            std::string mediaFile() const override { return d_->ejected() ? std::string() : d_->mediaFile(); }
+            bool quiet() const override { return d_->quiet(); }
+            std::uint32_t changes() const override { return d_->blocksWritten(); }
+            std::uint32_t fileSize() const override { return d_->mediaFileSize(); }
+            bool readBlock(std::uint32_t block, std::uint8_t* out) override { return d_->peekBlock(block, out); }
+        private:
+            CDrive* d_;
+        };
+        hipi::DownloadEnv env;
+        env.drive = []() -> std::shared_ptr<hipi::DownloadDrive> {
+            if (hipi::plotterview_output() != hipi::DisplayOutput::Tape) return nullptr;
+            CDrive* d = hipi::plotterview_drive();
+            return d != nullptr ? std::make_shared<DriveForDownload>(d) : nullptr;
+        };
+        env.notNow = []() -> std::string {
+            if (usbMscModeActive()) return "the SD card is lent to the PC (Connect to PC)";
+            return "";
+        };
+        env.nowMs = [] { return static_cast<std::uint64_t>(to_ms_since_boot(get_absolute_time())); };
+        hipi::displayMirror_setDownloadEnv(std::move(env));
+    }
     hipi::displayMirror_setInputHandlers(
         [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },
         [](std::uint8_t code, bool down) { hipi::boardui_remoteButton(code, down); });
@@ -716,15 +745,24 @@ int main() {
 
     hipi::backlight_init(screen);   // the screen saver timer starts now (backlight.h)
     hipi_bootServiceDone();   // the main loop handles USB and PILBox from here
+    // A step of the main loop that holds everything up for a long while
+    // (the HP-IL loop, USB, the mirror to hipiview) is logged with its name,
+    // to find what did it
+    auto timed = [](const char* what, auto&& step) {
+        const std::uint64_t t0 = time_us_64();
+        step();
+        const std::uint64_t us = time_us_64() - t0;
+        if (us > 500000) LOGF("\r\n * Main loop: %s took %lu ms", what, static_cast<unsigned long>(us / 1000));
+    };
     while (bRunning) {
         tud_task();                     // TinyUSB background task
         usb_serial_flush_boot_log();    // flush buffered boot messages once a terminal connects
-        hipi_loop(hpil);                // Check IL for any instruction to send through the loop!
-        touch_poll();                   // debounced tap/release detection (touch.h)
-        hipi::boardui_poll();        // auto-hide timers + status LED poll
-        hipi::plotterview_poll();    // view-switch splash auto-dismiss timer
+        timed("HP-IL", [&] { hipi_loop(hpil); });        // Check IL for any instruction to send through the loop!
+        timed("touch", [] { touch_poll(); });             // debounced tap/release detection (touch.h)
+        timed("buttons/menus", [] { hipi::boardui_poll(); });   // auto-hide timers + status LED poll
+        timed("views", [] { hipi::plotterview_poll(); });  // view-switch splash auto-dismiss timer
         hipi::backlight_poll();      // screen saver (dim / clock) after a while without use
-        hipi::displayMirror_poll();  // the display mirrored to a PC viewer (display_mirror.h)
+        timed("mirror", [] { hipi::displayMirror_poll(); });   // the display mirrored to a PC viewer (display_mirror.h)
         hipi::crashlog_poll();       // a new stack depth, logged (crashlog.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
         pixelStrip.poll();           // TFPIXEL effects (pixels.h)

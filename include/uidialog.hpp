@@ -1634,6 +1634,15 @@ private:
             }));
             if (drv && !drv->mediaFile().empty())
                 m.push_back(item("Media map >", [this] { doAndClose([] { plotterview_showMediaMap(); }); }));
+            // The cassette to hipiview, which asks where to save it on the PC
+            // (mirror_download.h) -- only with hipiview connected
+            if (drv && !drv->mediaFile().empty() && displayMirror_active())
+                m.push_back(item("Save media on PC", [this, drv] {
+                    std::string why;
+                    const bool ok = displayMirror_sendMedia(why);
+                    close();
+                    pendingMessage_ = ok ? drv->mediaFile() + " goes to hipiview" : "Not sent: " + why;
+                }));
             if (drv) {
                 m.push_back(item("Rewind", [this, drv] { drv->manualRewind(); close(); }));
                 m.push_back(value("Power", [drv] { return std::string(powerName(drv->powerMode())); },

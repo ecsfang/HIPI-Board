@@ -37,7 +37,7 @@
 //                              5 X, 6 next view, 7 previous view; state
 //                              1 = pressed, 0 = released. Repeated every
 //                              200 ms while held, like 'T'.
-// FILES (also Control only): the viewer sends a file to HIPI -- a LIF
+// FILES: the viewer sends a file to HIPI (Control only) -- a LIF
 // volume dropped on the Tape view goes into lif/ and into the drive shown
 // (mirror_upload.h):
 //   'F' sid kind len(2) payload(len) crc(2)   crc: CRC-16/CCITT over kind,
@@ -61,6 +61,19 @@
 // from it when nothing comes for a while; HIPI ignores a piece that isn't
 // the next one and acks again. A repeated kUpBegin for the same file
 // resumes; a repeated kUpEnd after kUpDone gets kUpDone again.
+// ... and the other way (View and Control): a drive's cassette saved on the
+// PC (mirror_download.h). Asked for from HIPI's Tape view menu ("Save media
+// on PC") or by the viewer:
+//   'F' kind kDlAsk                        the cassette of the drive shown, please
+//        kDlAbort                          stop sending it
+// HIPI sends it in the stream (reliable already: no acks of its own):
+//   kDownload kind(1) len(2) payload(len)
+//   kind kDlBegin  size(4) "drive|name"    a file comes (again from the start,
+//                                          if the drive wrote to it meanwhile)
+//        kDlData   offset(4) bytes         the next piece (kDlChunk at most)
+//        kDlEnd    crc32(4)                that's all
+//        kDlWait   text                    waiting (the drive is busy ...)
+//        kDlError  text                    refused / failed (it's over)
 // HIPI tells the viewer the setting -- kMode 0x1A mode(1), 1 = View,
 // 2 = Control -- at the start of a session and whenever it changes, so the
 // viewer can say when its clicks are going nowhere.
@@ -169,6 +182,7 @@ constexpr std::uint8_t kBye       = 0x1B;   // HIPI restarts now (Bootsel mode):
                                             // picture is final, a new HIPI comes later
 constexpr std::uint8_t kFont24    = 0x1C;
 constexpr std::uint8_t kUpload    = 0x1D;   // kind(1) len(2) payload: an answer about a file (FILES)
+constexpr std::uint8_t kDownload  = 0x1E;   // kind(1) len(2) payload: a cassette for the PC (FILES)
 constexpr int kMaxViewerAssets = 32;     // ids a request may list
 
 constexpr std::uint8_t kVersion   = 7;      // 7: files from the viewer (FILES)
@@ -185,6 +199,10 @@ constexpr std::uint8_t kUpAsk = 1, kUpBegin = 2, kUpData = 3, kUpEnd = 4, kUpAbo
 constexpr std::uint8_t kUpInfo = 1, kUpAck = 2, kUpWait = 3, kUpDone = 4, kUpError = 5;
 constexpr std::uint8_t kUpVolume = 1, kUpFile = 2;
 constexpr std::uint8_t kUpHasMedia = 1, kUpExists = 2;
+// A cassette to the PC (FILES above)
+constexpr std::uint8_t kDlAsk = 6, kDlAbort = 7;                       // 'F' kinds
+constexpr std::uint8_t kDlBegin = 1, kDlData = 2, kDlEnd = 3, kDlWait = 4, kDlError = 5;   // kDownload kinds
+constexpr std::size_t  kDlChunk = 1024;     // bytes in a kDlData piece, at most
 
 // CRC-32 (IEEE, as zip), for a whole file
 inline std::uint32_t crc32(const std::uint8_t* p, std::size_t n, std::uint32_t crc = 0) {

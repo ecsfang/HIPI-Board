@@ -570,7 +570,8 @@ made with **Create media** get `.DAT`.
 
 Copy your `.dat` or `.lif` files to the `lif` folder on the SD card — either with a
 card reader, or straight from HIPI with **Connect to PC** (see
-[chapter 9](#9-connecting-to-a-pc)).
+[chapter 9](#9-connecting-to-a-pc)). With **hipiview** running you can
+also drag a file onto its window ([A cassette from the PC](#recording-the-screen-on-a-pc)).
 
 ### Choosing a cassette
 
@@ -672,6 +673,15 @@ files are all known (BASIC, BIN, FORTH, LEX, key and data files ...).
 <a href="images/view-mediamap-disk.png"><img src="images/view-mediamap-disk.png" alt="Media map, a 16 MB disk" width="512"></a>
 
 <a href="images/view-mediamap-machine.png"><img src="images/view-mediamap-machine.png" alt="Media map, BY MACHINE with the HP-71 files highlighted, a secure and private BASIC file touched" width="512"></a>
+
+### Saving a cassette on the PC
+
+With **hipiview** connected ([Recording the screen on a PC](#recording-the-screen-on-a-pc),
+**Mirror to PC** *View* or *Control*), the Tape view's menu has **Save media
+on PC**: the drive's cassette — with everything the HP-41 has saved on it —
+goes to hipiview, which opens a *Save as* dialog on the PC to choose the
+folder and name. **M** in hipiview does the same for the drive shown. See
+[A cassette to the PC](#recording-the-screen-on-a-pc).
 
 ---
 
@@ -1267,6 +1277,24 @@ shows how it goes; if something is wrong (not a LIF volume, another view
 shown, a menu open, the SD card lent to the PC as a USB drive, the file in
 another drive), a message says why and nothing changes on HIPI. Only the
 drive whose Tape view is shown gets it. Needs HIPI firmware 1.6.0 or newer.
+
+**A cassette to the PC.** The other way round, with **Mirror to PC** *View*
+or *Control*: **Save media on PC** in the Tape view's menu (it's there while
+hipiview is connected), or **M** in hipiview, sends the cassette of the
+drive whose Tape view is shown. hipiview then opens the PC's *Save as*
+dialog — in the folder used last time, the cassette's name filled in.
+
+- The cassette is read only while the drive is idle, a little at a time, so
+  the HP-41 is never held up. If it writes to the cassette meanwhile, the
+  copy starts over: the PC always gets the cassette as one whole.
+- The title bar shows how far it is. On HIPI the screen keeps going; the
+  copy goes in between.
+- On Linux the dialog is GTK's own (through `python3-gi`, which Ubuntu's
+  desktop has), else `zenity` or `kdialog` (KDE) — with those two the name
+  may have to be typed in. Without any of them, the file goes to the folder
+  used last (at first *Downloads*) with a free name, and a message says
+  where.
+  `hipiview --save-to DIR` saves there every time, without asking.
 
 How to build and use it: see `tools/hipiview/README.md`.
 
