@@ -32,7 +32,7 @@ struct Card { int x, y, w, h; };
 struct Layout {
     Card leds, pix, i2c;
     int headH;                   // the buttons on a card's first row
-    // LEDS: first row (Fitted, HP-IL), LED buttons, Chase/Off
+    // LEDS: first row (Fitted, HP-IL), LED buttons, Chase/Off/Plotter, the status line
     int ledHead, ledRow, ledRow2, ledH, ledW, ledGap;
     // PIXELS: first row (Fitted, Count), colour order, dots, colour buttons, hint
     int pixHead, order, orderH, orderX, orderGap, dots, dotGap, dotR, pixRow, pixH, colW, colGap, hint;
@@ -95,7 +95,7 @@ constexpr const char* kOrderNames[6] = { "RGB", "GRB", "BRG", "RBG", "GBR", "BGR
 
 // ── Buttons ─────────────────────────────────────────────────────────────
 enum class Id : std::uint8_t {
-    LedFitted, HpilLeds, Led1, Led2, Led3, Led4, Led5, Chase, LedOff,
+    LedFitted, HpilLeds, PlotterLed, Led1, Led2, Led3, Led4, Led5, Chase, LedOff,
     PixFitted, Minus, Plus, Run, Red, Green, Blue, White, PixOff,
     Order0, Order1, Order2, Order3, Order4, Order5,      // the colour byte order (radio buttons)
     Scan,
@@ -113,6 +113,7 @@ const std::vector<TestButton>& buttons() {
         b.push_back({ static_cast<Id>(static_cast<int>(Id::Led1) + i), lx + i * L.ledGap, L.ledRow, L.ledW, L.ledH });
     b.push_back({ Id::Chase, lx, L.ledRow2, 96, L.ledH });
     b.push_back({ Id::LedOff, lx + 96 + 12, L.ledRow2, 72, L.ledH });
+    b.push_back({ Id::PlotterLed, lx + 96 + 12 + 72 + 12, L.ledRow2, L.leds.x + L.leds.w - 16 - (lx + 96 + 12 + 72 + 12), L.ledH });
     b.push_back({ Id::PixFitted, px, L.pixHead, L.fitW, L.headH });
     b.push_back({ Id::Minus, L.minusX, L.pixHead, 40, L.headH });
     b.push_back({ Id::Plus, L.plusX, L.pixHead, 40, L.headH });
@@ -183,7 +184,12 @@ std::string label(Id id) {
     switch (id) {
         case Id::LedFitted: return hwio::ledsFitted() ? "Fitted: YES" : "Fitted: NO";
         case Id::PixFitted: return hwio::pixelsFitted() ? "Fitted: YES" : "Fitted: NO";
-        case Id::HpilLeds:  return hwio::hpilLeds() ? "HP-IL on LED 4: ON" : "HP-IL on LED 4: OFF";
+        case Id::HpilLeds: {
+            static const char* const kMode[] = { "HP-IL on LED 4: OFF", "HP-IL on LED 4: ALL", "HP-IL on LED 4: MESSAGES" };
+            const int m = hwio::hpilLeds();
+            return kMode[m >= 0 && m <= 2 ? m : 2];
+        }
+        case Id::PlotterLed: return hwio::plotterLed() ? "Plotter error on LED 3: ON" : "Plotter error on LED 3: OFF";
         case Id::Chase:     return "Chase";
         case Id::LedOff:
         case Id::PixOff:    return "Off";
@@ -325,12 +331,13 @@ const char* hintText() {
     }
 }
 
-// LEDS: whose the LEDs are, beside Off
+// LEDS: whose the LEDs are, under Chase / Off
 void drawLedStatus() {
-    const int x = L.leds.x + 16 + 96 + 12 + 72 + 16;
-    const std::size_t n = static_cast<std::size_t>((L.leds.x + L.leds.w - 16 - x) / 8);
-    const char* t = !hwio::ledsFitted() ? "" : ledsTest_ ? "Test -- Off: back to TFLEDS" : "Shows what TFLEDS sends";
-    text(x, L.ledRow2 + (L.ledH - 16) / 2, pad(t, n).c_str(), 0, kGrey, kBlack);
+    const int x = L.leds.x + 16;
+    const std::size_t n = static_cast<std::size_t>((L.leds.w - 32) / 8);
+    const char* t = !hwio::ledsFitted() ? "" : ledsTest_ ? "Test -- Off: back to TFLEDS, HP-IL and the plotter"
+                                                         : "Shows what TFLEDS, HP-IL and the plotter send";
+    text(x, L.ledRow2 + L.ledH + 10, pad(t, n).c_str(), 0, kGrey, kBlack);
 }
 
 void drawHint() {
@@ -667,8 +674,13 @@ bool hwtest_tap(int x, int y) {
             watchLeds();
             part([] { drawButton(*find(Id::LedFitted)); drawButtons(inLeds); drawLedStatus(); });
             break;
+        case Id::PlotterLed:
+            hwio::setPlotterLed(!hwio::plotterLed());
+            part([hit] { drawButton(*hit); });
+            break;
         case Id::HpilLeds:
-            hwio::setHpilLeds(!hwio::hpilLeds());
+            // Off -> All -> Messages -> Off ...
+            hwio::setHpilLeds((hwio::hpilLeds() + 1) % 3);
             part([hit] { drawButton(*hit); });
             break;
         case Id::Chase:

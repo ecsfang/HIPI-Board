@@ -224,6 +224,7 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
         if (width_ <= 0 || width_ > 2048) width_ = 1024;
         if (height_ <= 0 || height_ > 2048) height_ = 600;
         hello_ = true;
+        version_ = p[8];
         mirrorMode_ = -1;                  // (the session says it again)
         bye_ = false;
         syncing_ = false;
@@ -269,6 +270,13 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
     case mp::kBye:
         bye_ = true;
         return 1;
+    case mp::kUpload: {
+        if (n < 4) return 0;
+        const std::size_t len = static_cast<std::size_t>(p[2] | (p[3] << 8));
+        if (n < 4 + len) return 0;
+        if (uploads_.size() < 256) uploads_.push_back(UploadReply{ p[1], std::vector<std::uint8_t>(p + 4, p + 4 + len) });
+        return 4 + len;
+    }
     default:
         ++errors_;
         return 1;

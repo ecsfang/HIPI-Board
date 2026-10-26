@@ -42,9 +42,13 @@ void setPixelCount(int n);
 int pixelOrder();
 void setPixelOrder(int order);
 
-// HP-IL activity on LED 4 (hpil_leds, saved)
-bool hpilLeds();
-void setHpilLeds(bool on);
+// HP-IL activity on LED 4 (hpil_leds, saved): 0 off, 1 all frames,
+// 2 messages (IDY frames ignored) -- leds.h kHpilLed...
+int hpilLeds();
+void setHpilLeds(int mode);
+// The plotter's ERROR light on LED 3 (plotter_led, saved)
+bool plotterLed();
+void setPlotterLed(bool on);
 
 // Whether LEDs / pixels are fitted (saved; only the test page uses it)
 bool ledsFitted();

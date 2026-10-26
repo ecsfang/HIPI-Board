@@ -278,6 +278,13 @@ public:
         return on;
     }
     bool disablePending() const { return disablePending_; }
+    // Between HP-IL messages and not reading or writing: no file access
+    // going on and no message frame for kQuietMs -- a safe moment to take
+    // the cassette out (servicePendingDisable(), a file from hipiview)
+    bool quiet() const {
+        return !isBusy() && absolute_time_diff_us(lastFrame_, get_absolute_time()) >=
+                                static_cast<std::int64_t>(kQuietMs) * 1000;
+    }
     // Enabled and not about to be switched off
     bool wantedEnabled() const { return enabled() && !disablePending_; }
     // Call from the main loop (never from inside frame processing).

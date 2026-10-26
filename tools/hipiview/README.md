@@ -157,6 +157,21 @@ With **View** the mouse and keys do nothing on HIPI (the window keys above
 still work): the title bar then says "VIEW ONLY" for a moment when you click
 or press a key, and with **Control** it shows "control".
 
+### Putting a cassette into HIPI
+
+Also with **Control**: show the Tape view of a drive on HIPI and drag a
+LIF volume (`.dat` / `.lif`) from the file manager onto the window.
+hipiview checks the file first (a LIF header, a name HIPI can use, at most
+32 MB), asks HIPI, and then asks you: **Put in** (the drive is empty) or
+**Replace** (the cassette in it goes out; its file stays on the SD card).
+Then it sends the file, with the progress in the title bar. HIPI writes it
+to `lif/` on its SD card and, once the drive is idle (an HP-IL command
+going on is never cut), puts it in as if OPEN had been pressed and the
+file chosen. Nothing changes on HIPI if anything goes wrong or you cancel;
+a message box says why. It needs HIPI firmware 1.6.0 or newer (protocol
+version 7). The protocol: `mirror_protocol.h` (FILES); the details: GUIDE.md
+§7.1.
+
 ### Options
 
 | Option | Meaning |
@@ -263,6 +278,16 @@ for a while midway and checks that HIPI keeps running smoothly and that
 the picture comes back afterwards. `./link_sim 0.01 18 input` has hipiview
 click, swipe and press keys (`--test-input`) and checks that HIPI gets them
 as touches and buttons with **Control** — and nothing with **View**.
+`./link_sim 0.02 10 upload` drops a LIF volume on hipiview (a `drop` and an
+`answer yes` in `--test-input`) and checks that it reaches HIPI's receiver
+whole and goes into a stand-in drive, the old cassette taken out first
+(HIPI's SD card is `link_sim_sd/` meanwhile).
+
+`make upload_test` (part of `make test`) runs hipiview's side of sending a
+file (`upload.hpp`) against HIPI's (`mirror_upload.cpp`) in one program,
+in simulated time: an empty drive, replacing while the drive is busy, the
+same name, cancel, HIPI's refusals, 20 % of the messages lost, a damaged
+piece, a drive busy for too long, the viewer going away.
 
 ## Files
 
@@ -273,11 +298,13 @@ as touches and buttons with **Control** — and nothing with **View**.
 | `lt7683_emu.hpp/.cpp` | The emulated LT7683 |
 | `png.hpp` | Screenshots |
 | `input.hpp` | Mouse and keys to HIPI; the touch rings |
+| `upload.hpp` | Sending a dropped LIF volume to HIPI |
 | `serial_port.hpp/.cpp` | The serial port and finding it: POSIX (Linux, macOS) and Win32 |
 | `CMakeLists.txt` | Building with CMake (Windows, Linux, macOS); the `Makefile` does Linux and the tests |
 | `ci/build-windows.sh` | The Windows build, as GitHub (and you) run it |
 | `test/host_test.cpp` | The test (`make test`) |
 | `test/link_sim.cpp`, `test/stubs/` | The lossy-USB test (`make link_sim`) |
+| `test/upload_test.cpp` | Sending a file: hipiview's side against HIPI's receiver (part of `make test`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures (part of `make test`; saves `printer_view_*.png`) |
 | `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
 | `test/display_text_test.cpp` | The display's text log: the filter for both models (escapes, CR/LF, BS, Roman-8 as UTF-8), the ring running over, `writeSdram`/`readSdram` on the emulated chip, bytes from HP-IL through the display device (part of `make test`) |
@@ -287,3 +314,4 @@ as touches and buttons with **Control** — and nothing with **View**.
 | `../../include/mirror_protocol.h` | The stream format, shared with the firmware |
 | `../../include/mirror_encoder.hpp`, `mirror_session.hpp` | Firmware side, also used by the test |
 | `../../src/display_mirror.cpp` | Firmware: the mirror port |
+| `../../include/mirror_upload.h`, `../../src/mirror_upload.cpp`, `../../include/lif_check.h` | Firmware: a file from the viewer into a drive; the LIF check, shared |

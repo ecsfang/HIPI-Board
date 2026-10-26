@@ -153,14 +153,15 @@ CLedParser  parser(leds, 5);
 
 // ─── HP-IL activity LED (see leds.h) ──────────────────────────────────────
 namespace {
-bool hpilLedsOn_ = true;
+int hpilLedMode_ = kHpilLedMessages;
 bool hpilLedsHeld_ = false;
 std::uint64_t hpilLastUs_ = 0;
 constexpr std::uint32_t kHpilLitMs = 30;    // lit this long after a frame
 }  // namespace
 
-void hpil_led_activity() {
-    if (!hpilLedsOn_ || hpilLedsHeld_) return;
+void hpil_led_activity(bool idle) {
+    if (hpilLedMode_ == kHpilLedOff || hpilLedsHeld_) return;
+    if (idle && hpilLedMode_ == kHpilLedMessages) return;      // (IDY: the loop only idling)
     // At most one (re)start every 10 ms: a frame costs only a time read
     const std::uint64_t now = time_us_64();
     if (now - hpilLastUs_ < 10000) return;
@@ -168,15 +169,42 @@ void hpil_led_activity() {
     leds[HPIL_ACT_LED]->blink(kHpilLitMs, 1, 1);   // indicate a frame
 }
 
-void hpil_leds_setEnabled(bool on) {
-    if (on == hpilLedsOn_) return;
-    hpilLedsOn_ = on;
-    if (!on && !hpilLedsHeld_) {
-        leds[HPIL_ACT_LED]->off();
-    }
+void hpil_leds_setMode(int mode) {
+    if (mode < kHpilLedOff || mode > kHpilLedMessages) mode = kHpilLedMessages;
+    if (mode == hpilLedMode_) return;
+    const bool wasOn = hpilLedMode_ != kHpilLedOff;
+    hpilLedMode_ = mode;
+    // Off: LED 4 given back dark (it may be in the middle of a flash)
+    if (wasOn && mode == kHpilLedOff && !hpilLedsHeld_) leds[HPIL_ACT_LED]->off();
 }
 
-bool hpil_leds_enabled() { return hpilLedsOn_; }
+int hpil_leds_mode() { return hpilLedMode_; }
+
+// ─── The plotter's ERROR light on LED 3 (see leds.h) ──────────────────────
+namespace {
+bool plotLedOn_ = true;
+int plotLedShown_ = -1;                    // as last written: 0 / 1, -1 = not yet (write it)
+}  // namespace
+
+void plotter_led_setOn(bool on) {
+    if (on == plotLedOn_) return;
+    plotLedOn_ = on;
+    // Off: given back dark; on: written at the next poll
+    if (!on && plotLedShown_ == 1 && !hpilLedsHeld_) leds[PLOT_ERR_LED]->off();
+    plotLedShown_ = -1;
+}
+
+bool plotter_led_on() { return plotLedOn_; }
+
+void plotter_led_poll(bool error) {
+    if (!plotLedOn_) return;
+    if (hpilLedsHeld_) { plotLedShown_ = -1; return; }    // (written again once given back)
+    const int want = error ? 1 : 0;
+    if (want == plotLedShown_) return;
+    plotLedShown_ = want;
+    if (error) leds[PLOT_ERR_LED]->on();
+    else leds[PLOT_ERR_LED]->off();
+}
 
 void hpil_leds_hold(bool held) { hpilLedsHeld_ = held; }
 

@@ -34,6 +34,11 @@ inline FRESULT f_write(FIL* fp, const void* buf, UINT n, UINT* bw) {
     return FR_OK;
 }
 inline FRESULT f_unlink(const char* path) { return std::remove(path) == 0 ? FR_OK : FR_NO_FILE; }
+// (as FatFs: the new name must not exist)
+inline FRESULT f_rename(const char* from, const char* to) {
+    if (std::filesystem::exists(to)) return FR_EXIST;
+    return std::rename(from, to) == 0 ? FR_OK : FR_NO_FILE;
+}
 inline FRESULT f_mkdir(const char* path) {
     std::error_code ec;
     return std::filesystem::create_directory(path, ec) ? FR_OK : FR_EXIST;
@@ -60,12 +65,14 @@ inline FSIZE_t f_size(FIL* fp) {
 }
 // Directories (std::filesystem: no clash with POSIX's DIR)
 #define AM_DIR 0x10
-struct FILINFO { char fname[256]; unsigned char fattrib; };
+struct FILINFO { char fname[256]; unsigned char fattrib; std::uint32_t fsize; std::uint16_t fdate, ftime; };
 inline FRESULT f_stat(const char* path, FILINFO* fi) {
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) return FR_NO_FILE;
     std::snprintf(fi->fname, sizeof(fi->fname), "%s", std::filesystem::path(path).filename().string().c_str());
     fi->fattrib = std::filesystem::is_directory(path, ec) ? 0x10 : 0;
+    fi->fsize = fi->fattrib ? 0 : static_cast<std::uint32_t>(std::filesystem::file_size(path, ec));
+    fi->fdate = fi->ftime = 0;
     return FR_OK;
 }
 struct DIR { std::vector<std::string> names; std::vector<bool> dirs; std::size_t at = 0; };

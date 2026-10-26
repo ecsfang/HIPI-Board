@@ -12,6 +12,12 @@
 // Mirror to PC < Control >; checks that HIPI gets them as touches and
 // buttons -- and none while the setting is View.
 //
+// "upload": a LIF volume dropped on hipiview's window (--test-input: a
+// "drop", the "Replace?" answered yes) goes over the lossy link into HIPI's
+// receiver (mirror_upload.cpp) and a stand-in drive; the file on the
+// "SD card" (link_sim_sd/lif/) must be the one dropped, the old cassette
+// taken out first.
+//
 // "stall": hipiview is frozen (SIGSTOP) for a while midway -- the port
 // stays open but nobody reads it, as when hipiview is suspended. HIPI
 // must notice, stop mirroring (no stalls of its main loop beyond the
@@ -19,6 +25,7 @@
 #include "LT7683.hpp"
 #include "Screen.hpp"
 #include "display_mirror.h"
+#include "mirror_upload.h"
 #include "tusb.h"
 #include "pico/time.h"
 #include "../lt7683_emu.hpp"
@@ -30,6 +37,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
 #include <fcntl.h>
 #include <pty.h>
 #include <random>
@@ -129,12 +140,27 @@ int main(int argc, char** argv) {
     if (argc > 1) lossRate = std::atof(argv[1]);
     const double seconds = argc > 2 ? std::atof(argv[2]) : 8.0;
     const bool stall = argc > 3 && std::strcmp(argv[3], "stall") == 0;
-    const bool inputTest = argc > 3 && std::strcmp(argv[3], "input") == 0;
+    const bool uploadTest = argc > 3 && std::strcmp(argv[3], "upload") == 0;
+    const bool inputTest = (argc > 3 && std::strcmp(argv[3], "input") == 0) || uploadTest;
     // burst: more drawing than the link can carry, from the very start (so
     // the viewer sees no heartbeat first): the encoder gives up, and HIPI
     // must send the screen again by itself -- the viewer is still there
     const bool burst = argc > 3 && std::strcmp(argv[3], "burst") == 0;
-    if (inputTest) {
+    // upload: the file dropped -- a LIF volume of 96 kB
+    std::vector<std::uint8_t> tape(96 * 1024);
+    for (std::size_t k = 0; k < tape.size(); ++k) tape[k] = static_cast<std::uint8_t>(k * 2654435761u >> 13);
+    tape[0] = 0x80; tape[1] = 0x00;
+    for (int k = 8; k < 20; ++k) tape[k] = 0;
+    tape[11] = 2;                                            // directory at block 2,
+    tape[19] = 4;                                            // 4 blocks long
+    if (uploadTest) {
+        std::FILE* tf = std::fopen("link_sim_tape.dat", "wb");
+        std::fwrite(tape.data(), 1, tape.size(), tf);
+        std::fclose(tf);
+        std::FILE* f = std::fopen("link_sim_input.txt", "w");
+        std::fputs("2.0 answer yes\n2.0 drop link_sim_tape.dat\n", f);
+        std::fclose(f);
+    } else if (inputTest) {
         // Times in seconds from when hipiview's picture is in step
         std::FILE* f = std::fopen("link_sim_input.txt", "w");
         std::fputs("0.5 down 100 200\n0.52 up\n"                       // a quick click
@@ -171,12 +197,40 @@ int main(int argc, char** argv) {
         std::_Exit(127);
     }
 
+    // upload: HIPI's SD card is link_sim_sd/ (hipiview, forked above, stays here)
+    if (uploadTest) {
+        std::filesystem::remove_all("link_sim_sd");
+        std::filesystem::create_directories("link_sim_sd/lif");
+        if (chdir("link_sim_sd") != 0) { std::perror("link_sim_sd"); return 1; }
+        std::FILE* old = std::fopen("lif/OLD.DAT", "wb");
+        std::fputs("the old cassette", old);
+        std::fclose(old);
+    }
+    struct SimDrive : hipi::UploadDrive {
+        std::string media = "OLD.DAT";
+        std::vector<std::string> calls;
+        std::string name() const override { return "TFDRIVE"; }
+        std::string mediaFile() const override { return media; }
+        bool quiet() const override { return true; }
+        void open() override { calls.push_back("open " + media); }
+        void insert(const std::string& f) override { media = f; calls.push_back("insert " + f); }
+    };
+    auto simDrive = std::make_shared<SimDrive>();
+
     ChipTransport inner;
     hipi::MirrorTransport mirror(inner);
     hipi::LT7683 d(mirror, SCREEN_MAX_X, SCREEN_MAX_Y);
     d.begin();
     hipi::displayMirror_init(&d);
     hipi::displayMirror_setMode(inputTest ? hipi::MirrorMode::Control : hipi::MirrorMode::View);
+    if (uploadTest) {
+        hipi::UploadEnv env;
+        env.drive = [&]() -> std::shared_ptr<hipi::UploadDrive> { return simDrive; };
+        env.notNow = [] { return std::string(); };
+        env.inOtherDrive = [](const std::string&) { return std::string(); };
+        env.nowMs = [] { return static_cast<std::uint64_t>(now() * 1000); };
+        hipi::displayMirror_setUploadEnv(env);
+    }
     // What arrives from the viewer's mouse and keys
     struct InputEvent { double t; char kind; int a, b, c; };
     std::vector<InputEvent> inputs;
@@ -209,7 +263,9 @@ int main(int argc, char** argv) {
         tud_task();                      // like HIPI's main loop
         // The setting switched off and on again midway: the session must
         // stop, and start again by itself (hipiview is still connected)
-        if (inputTest) {
+        if (uploadTest) {
+            // (Control all the time)
+        } else if (inputTest) {
             // After "previous view" (the last key before the View part): View
             static bool viewOnly = false;
             if (!viewOnly) for (const auto& e : inputs) if (e.kind == 'B' && e.a == 7) viewOnly = true;
@@ -239,7 +295,7 @@ int main(int argc, char** argv) {
             drawing = true;
             nextDraw = now() + 0.03;
             // (input test: big pictures too, so the ring fills up while drawing)
-            if (inputTest && line % 20 == 0) d.drawBitmap565(40, 40, 320, 240, bigPicture.data());
+            if (inputTest && !uploadTest && line % 20 == 0) d.drawBitmap565(40, 40, 320, 240, bigPicture.data());
             if (burst && now() > 0.3 && now() < seconds * 0.4) {
                 for (std::size_t k = 0; k < bigPicture.size(); k += 97) bigPicture[k] = static_cast<std::uint16_t>(bigPicture[k] * 31 + line);
                 for (int k = 0; k < 4; ++k) d.drawBitmap565(40 + k * 160, 40 + (line % 5) * 20, 320, 240, bigPicture.data());
@@ -265,6 +321,7 @@ int main(int argc, char** argv) {
     const double end = now() + 0.5;
     while (now() < end) { tud_task(); hipi::displayMirror_poll(); usleep(100); }
     kill(pid, SIGINT);
+    if (uploadTest && chdir("..") != 0) return 1;
     int st = 0;
     waitpid(pid, &st, 0);
 
@@ -317,7 +374,24 @@ int main(int argc, char** argv) {
     writePng("link_sim_viewer.png", b.data(), 1024, 600);
     std::printf("main loop: longest pause %.0f ms, %d pauses over 100 ms (%d of them > 3 s into the freeze)\n",
                 maxLoopGap * 1000, longStalls, lateStalls);
-    if (inputTest) {
+    if (uploadTest) {
+        int fails = 0;
+        auto fail = [&](const std::string& what) { std::printf("FAIL upload: %s\n", what.c_str()); ++fails; };
+        std::ifstream in("link_sim_sd/lif/link_sim_tape.dat", std::ios::binary);
+        const std::vector<std::uint8_t> got((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (got.empty()) fail("lif/link_sim_tape.dat not on the SD card");
+        else if (got != tape) fail("lif/link_sim_tape.dat differs from the file dropped");
+        if (std::filesystem::exists("link_sim_sd/lif/.upload.tmp")) fail("the temporary file left behind");
+        if (!std::filesystem::exists("link_sim_sd/lif/OLD.DAT")) fail("the old cassette's file gone");
+        const std::vector<std::string> want = { "open OLD.DAT", "insert link_sim_tape.dat" };
+        if (simDrive->calls != want) {
+            std::string c;
+            for (const auto& x : simDrive->calls) c += " [" + x + "]";
+            fail("the drive: expected [open OLD.DAT] [insert link_sim_tape.dat], got" + c);
+        }
+        if (fails) return 1;
+        std::printf("ok   upload: %zu bytes over the lossy link, in the drive, the old cassette out first\n", tape.size());
+    } else if (inputTest) {
         int fails = 0;
         auto fail = [&](const char* what) { std::printf("FAIL input: %s\n", what); ++fails; };
         auto find = [&](std::size_t from, char kind, int a, int b) -> std::size_t {

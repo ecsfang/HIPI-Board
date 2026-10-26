@@ -62,10 +62,16 @@ void setPixelOrder(int order) {
     config.setPixelOrder(kPixelOrders[order]);
 }
 
-bool hpilLeds() { return hpil_leds_enabled(); }
-void setHpilLeds(bool on) {
-    hpil_leds_setEnabled(on);
-    config.setHpilLeds(on);
+int hpilLeds() { return hpil_leds_mode(); }
+void setHpilLeds(int mode) {
+    hpil_leds_setMode(mode);
+    config.setHpilLeds(hpil_leds_mode());
+}
+
+bool plotterLed() { return plotter_led_on(); }
+void setPlotterLed(bool on) {
+    plotter_led_setOn(on);
+    config.setPlotterLed(on);
 }
 
 bool ledsFitted() { return config.ledsFitted(); }

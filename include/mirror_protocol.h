@@ -37,6 +37,30 @@
 //                              5 X, 6 next view, 7 previous view; state
 //                              1 = pressed, 0 = released. Repeated every
 //                              200 ms while held, like 'T'.
+// FILES (also Control only): the viewer sends a file to HIPI -- a LIF
+// volume dropped on the Tape view goes into lif/ and into the drive shown
+// (mirror_upload.h):
+//   'F' sid kind len(2) payload(len) crc(2)   crc: CRC-16/CCITT over kind,
+//                              len and the payload; len <= kUpChunk + 8
+//   kind kUpAsk    what(1) size(4) name    may it? (HIPI answers kUpInfo)
+//        kUpBegin  what(1) size(4) crc32(4) name    the user said yes
+//        kUpData   offset(4) bytes         a piece (in order; HIPI acks
+//                                          the next offset it wants)
+//        kUpEnd                            all sent: check it, use it
+//        kUpAbort                          forget it
+//   what: kUpVolume (replace the drive's cassette); kUpFile (a file added
+//   to the cassette -- not yet: an error)
+// HIPI answers in the stream: kUpload kind(1) len(2) payload(len)
+//   kind kUpInfo   flags(1) "drive|cassette"   flags: kUpHasMedia,
+//                                          kUpExists (lif/<name> is there)
+//        kUpAck    offset(4)               everything before it written
+//        kUpWait   text                    waiting (the drive is busy ...)
+//        kUpDone   name                    in the drive now
+//        kUpError  text                    refused / failed (it's over)
+// The viewer sends a few pieces ahead of the last ack and starts again
+// from it when nothing comes for a while; HIPI ignores a piece that isn't
+// the next one and acks again. A repeated kUpBegin for the same file
+// resumes; a repeated kUpEnd after kUpDone gets kUpDone again.
 // HIPI tells the viewer the setting -- kMode 0x1A mode(1), 1 = View,
 // 2 = Control -- at the start of a session and whenever it changes, so the
 // viewer can say when its clicks are going nowhere.
@@ -144,14 +168,33 @@ constexpr std::uint8_t kMode      = 0x1A;   // mode(1): the Mirror to PC setting
 constexpr std::uint8_t kBye       = 0x1B;   // HIPI restarts now (Bootsel mode): the
                                             // picture is final, a new HIPI comes later
 constexpr std::uint8_t kFont24    = 0x1C;
+constexpr std::uint8_t kUpload    = 0x1D;   // kind(1) len(2) payload: an answer about a file (FILES)
 constexpr int kMaxViewerAssets = 32;     // ids a request may list
 
-constexpr std::uint8_t kVersion   = 6;
+constexpr std::uint8_t kVersion   = 7;      // 7: files from the viewer (FILES)
 // Input from the viewer (see INPUT above)
 constexpr std::uint8_t kMsgTouch  = 'T';
 constexpr std::uint8_t kMsgButton = 'B';
 constexpr std::size_t  kMsgTouchLen  = 7;
 constexpr std::size_t  kMsgButtonLen = 4;
+// Files from the viewer (FILES above)
+constexpr std::uint8_t kMsgFile   = 'F';
+constexpr std::size_t  kUpChunk   = 512;      // bytes in a kUpData piece, at most
+constexpr std::size_t  kMsgFileMax = 6 + kUpChunk + 8 + 2;   // 'F' sid kind len(2) payload crc(2)
+constexpr std::uint8_t kUpAsk = 1, kUpBegin = 2, kUpData = 3, kUpEnd = 4, kUpAbort = 5;
+constexpr std::uint8_t kUpInfo = 1, kUpAck = 2, kUpWait = 3, kUpDone = 4, kUpError = 5;
+constexpr std::uint8_t kUpVolume = 1, kUpFile = 2;
+constexpr std::uint8_t kUpHasMedia = 1, kUpExists = 2;
+
+// CRC-32 (IEEE, as zip), for a whole file
+inline std::uint32_t crc32(const std::uint8_t* p, std::size_t n, std::uint32_t crc = 0) {
+    crc = ~crc;
+    for (std::size_t i = 0; i < n; ++i) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
 constexpr std::uint8_t kFrame0    = 0xA5;
 constexpr std::uint8_t kFrame1    = 0x5A;
 constexpr std::size_t  kFrameHeader = 11;

@@ -5,6 +5,7 @@
 // to the page's buttons, the main loop is run, and the panel is saved:
 //
 //   hwtest_1_page.png      the page, with a made-up I2C bus
+//   hwtest_5_hpil_all.png  HP-IL on LED 4: ALL
 //   hwtest_2_running.png   a pixel running along, LED buttons
 //   hwtest_3_scan.png      the i2cdetect grid (Scan I2C)
 //
@@ -235,6 +236,27 @@ int main(int argc, char** argv) {
     tap(kLedFitted);
     check(!hwstub::ledsFitted && tap(ledButton(2)) && !hwstub::led[2], "Fitted: NO -- the LED buttons do nothing");
     tap(kLedFitted);
+    // HP-IL on LED 4: Messages -> Off -> All -> Messages
+    {
+        const Pt kHpil { 32 + 132 + 12 + 104, 64 + 18 };
+        hwstub::hpilLeds = 2;
+        tap(kHpil);
+        check(hwstub::hpilLeds == 0, "HP-IL on LED 4: MESSAGES -> OFF");
+        tap(kHpil);
+        check(hwstub::hpilLeds == 1, "... -> ALL");
+        snapshot("tools/hipiview/hwtest_5_hpil_all.png");
+        tap(kHpil);
+        check(hwstub::hpilLeds == 2, "... -> MESSAGES");
+    }
+    // Plotter error on LED 3: ON -> OFF -> ON (beside Off, on the Chase row)
+    {
+        const Pt kPlot { 32 + 96 + 12 + 72 + 12 + 60, 170 + 21 };
+        hwstub::plotterLed = true;
+        tap(kPlot);
+        check(!hwstub::plotterLed, "Plotter error on LED 3: ON -> OFF");
+        tap(kPlot);
+        check(hwstub::plotterLed, "... -> ON");
+    }
 
     // ── Pixels ───────────────────────────────────────────────────────
     tap(kRed);

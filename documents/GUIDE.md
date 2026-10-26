@@ -1094,11 +1094,21 @@ FIFO, and a frame sent straight after was taken as more bits of the first
 -- the page's first colour, right after `takePixels()`'s clear, stayed
 dark. The
 pixel count is `pixelStrip.setActiveCount()` -- TFPIXEL's saved
-`pixel_count`. HP-IL activity (`hpil_led_activity()`, leds.cpp) flashes
+`pixel_count`. HP-IL activity (`hpil_led_activity(idle)`, leds.cpp, called from
+`hipi_loop()` / `conLoop()` for every frame with `IS_IDLE()`) flashes
 LED 4 (D8, `HPIL_ACT_LED`) for 30 ms per frame (restarted at most every
 10 ms) through the PWM LED drivers -- the old `led_on(gpio)` did nothing
-on those pins since they are PWM outputs. A quiet loop leaves it dark
-(there is no idle LED any more). `hpil_leds=0` leaves it alone.
+on those pins since they are PWM outputs. `hpil_leds_setMode()`:
+`messages` (`kHpilLedMessages`, the default) skips IDY frames -- an
+HP-71B, and an HP-41 that's on, send them round the loop all the time, so
+with `all` (`kHpilLedAll`, every frame) the LED looked lit permanently;
+`off` leaves LED 4 alone. The config reads the old `0` / `1` as `off` /
+`all`. LED 3 (`PLOT_ERR_LED`) is the plotter's ERROR light
+(`plotter_led=plotter|off`): `plotter_led_poll()` in the main loop lights
+it while `CPlotter::errorCode() != 0`. It writes the LED only when that
+changes (and once after the setting is switched on, or the Hardware test
+page gives the LEDs back -- `hpil_leds_hold()` holds it too), so `TFLEDS`
+can still use LED 3 otherwise.
 
 The I2C list is `i2c_identify()` (`i2c_ident.h`/`.cpp`): every address
 0x08-0x77 is probed with a one-byte read (3 ms timeout), then each one that
@@ -1336,6 +1346,48 @@ register level, so new drawing code needs nothing extra to be mirrored.
   (`RingSink::put()`), and a handler that draws (a button opening a menu)
   must not run there -- it did once, and HIPI crashed.
   `./link_sim 0.01 18 input` tests the whole chain, that too.
+- The setting itself is told to the viewer (`kMode`) at the start of every
+  session and whenever it changes -- hipiview needs it before it offers to
+  send a file. (Until 1.6.0 the first session of a connection didn't say
+  it: `sendMode()` checked for `State::Off`, which the session is still in
+  at that moment.)
+- **Files from the viewer** (Control only, protocol version 7): a LIF
+  volume (`.dat` / `.lif`) dropped on hipiview's window goes into `lif/` and
+  into the drive whose Tape view is shown. hipiview sends `'F' sid kind
+  len(2) payload crc16(2)` messages (`mirror_protocol.h`, FILES); HIPI
+  answers with `kUpload` packets in the normal stream. `display_mirror.cpp`
+  only checks and queues them (8 deep -- the viewer keeps at most 8 pieces
+  of 512 bytes unacknowledged); `UploadReceiver` (`mirror_upload.h/.cpp`)
+  gets them from the top of `displayMirror_poll()`, like the input:
+  1. *Ask* -- refused unless a Tape view is shown, the SD card isn't lent
+     to the PC, no menu is open, the demo isn't running, the name is a
+     sensible `.dat` / `.lif` (`lifVolumeNameOk()`, `lif_check.h`) and the
+     file isn't in another drive. *Info* says which drive, what's in it
+     and whether `lif/<name>` exists; hipiview asks the user ("Put in" /
+     "Replace" / Cancel) before anything is sent.
+  2. *Begin* -- written to `lif/.upload.tmp` as the pieces (*Data*, with
+     their offset) come in order; each is acknowledged with the bytes so
+     far. hipiview goes back to the last ack after two equal acks or 0.5 s
+     without progress, and sends *Begin* again then too: a receiver that
+     lost the file (a new session) starts over and says 0.
+  3. *End* -- CRC-32 and the LIF header (`lifCheckVolume()`) checked, then
+     the change waits until the drive is quiet: `CDrive::quiet()`, no file
+     access and no HP-IL frame for 200 ms, so an HP-IL command going on is
+     never cut (*Wait* every 2 s, given up after 30 s). Then
+     `UploadDrive::open()` (as if OPEN was pressed: the lid opens, the old
+     file is closed), `lif/<name>` replaced by the temporary file, and
+     `insert()`: `setMediaFile()` (saved, the label redrawn, as the file
+     picker does) and the lid closed. *Done* to the viewer.
+  
+  Anything wrong: *Error* with a text for hipiview's message box, the
+  temporary file deleted, the old cassette left as it was. The session
+  ending (the viewer gone) drops a file half-way. The glue to the drives
+  is `DriveForUpload` in `pico_main.cpp`. Prepared for the next step -- a
+  single HP-41 file added to the cassette that's in: *Ask* / *Begin* carry
+  `what` (`kUpVolume`, `kUpFile`); `kUpFile` is refused for now.
+  `make upload_test` runs hipiview's `Uploader` against the receiver
+  directly (losses, damage, a busy drive, cancel, refusals);
+  `./link_sim 0.02 10 upload` drops a file on the real hipiview.
 - A session starts when the viewer sends `HIPIVIEW` plus the ids of the
   pictures in its cache. Just opening the port (ModemManager, terminals)
   starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a

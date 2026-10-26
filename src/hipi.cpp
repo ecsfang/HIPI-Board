@@ -187,7 +187,7 @@ void hipi_init()
     }
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
-    plotter = new CPlotter("HP7470A");
+    plotter = new CPlotter("TFPLOT");
     devices.push_back(plotter);
     // SAI 0x3E matches pyILPER's cls_pilterminal exactly (a real, working
     // reference implementation) -- see terminal.h's constructor comment
@@ -591,7 +591,7 @@ IL_CMD_t hipi_simFrame(IL_CMD_t frame, IL_CMD_t (*pcDevices)(IL_CMD_t)) {
 static bool conLoop(HpIlLoop& loop) {
     uint32_t rx;
     if (loop.receiveFrame(rx)) {
-        hpil_led_activity();        // HP-IL activity on LED 4 (if chosen, leds.h)
+        hpil_led_activity(IS_IDLE(static_cast<IL_CMD_t>(rx)));   // HP-IL activity on LED 4 (as chosen, leds.h)
         if (!conInFlight) {
             // Nothing of ours is out there: someone else controls the loop
             conWarn("Another controller is on the loop.", "Only one may control it (PC or HP-41).");
@@ -614,7 +614,7 @@ static bool conLoop(HpIlLoop& loop) {
     }
     const IL_CMD_t f = pilbox->conFromPc();
     if (f != NO_FRAME) {
-        hpil_led_activity();        // HP-IL activity on LED 4 (if chosen, leds.h)
+        hpil_led_activity(IS_IDLE(f));   // HP-IL activity on LED 4 (as chosen, leds.h)
         conInject(loop, f, 0);
         return true;
     }
@@ -636,8 +636,8 @@ bool hipi_loop(HpIlLoop& loop) {
     uint32_t rx_frame;
     // Check if any HP-IL frame from the PIO interface is available
     if( loop.receiveFrame(rx_frame) ) {
-        // Turn on HPIL-active led
-        hpil_led_activity();        // HP-IL activity on LED 4 (if chosen, leds.h)
+        // HP-IL activity on LED 4 (as chosen, leds.h: IDY frames only with All)
+        hpil_led_activity(IS_IDLE(static_cast<IL_CMD_t>(rx_frame)));
         // Real traffic: the demo stops (demo.h)
         if (!IS_IDLE(static_cast<IL_CMD_t>(rx_frame))) hipi::demo_hpilActivity();
         // Got a frame, send to all devices in the loop

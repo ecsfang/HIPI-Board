@@ -1248,6 +1248,26 @@ dragging is a swipe, **Enter** is OK, the arrow keys are ▲/▼ and the views,
 **Backspace** is X and **Tab** is Shift. HIPI can then be used from its own
 screen and from the PC alike. In a video, a ring shows where was clicked.
 
+**A cassette from the PC.** Also with **Mirror to PC < Control >**: show
+the Tape view of the drive on HIPI, and drag a LIF volume (`.dat` or
+`.lif`, for example an HP-41 program collection from the net) onto the
+hipiview window. hipiview checks that it is a LIF volume and asks:
+
+- the drive empty (*No media*): **Put in** — the file becomes the drive's
+  cassette;
+- a cassette in: **Replace** — the dropped file goes in instead. The old
+  file stays on the SD card (unless it has the same name: then it's
+  overwritten, and hipiview says so).
+
+The file is copied to the SD card's `lif` folder and then put in as if
+**OPEN** had been pressed and the new cassette chosen: HIPI waits until the
+drive is idle, so a command from the HP-41 that is going on is never cut.
+It's the drive's cassette from then on, also after a restart. The title bar
+shows how it goes; if something is wrong (not a LIF volume, another view
+shown, a menu open, the SD card lent to the PC as a USB drive, the file in
+another drive), a message says why and nothing changes on HIPI. Only the
+drive whose Tape view is shown gets it. Needs HIPI firmware 1.6.0 or newer.
+
 How to build and use it: see `tools/hipiview/README.md`.
 
 ---
@@ -1398,10 +1418,23 @@ them itself. **Off** ends the test — all off — and the page shows
 **LEDS**
 
 - **Fitted** — are the LEDs there? With *NO* the LED buttons do nothing.
-- **HP-IL on LED 4** — *ON*: LED 4 (D8) flickers with HP-IL traffic and is
-  dark while the loop is quiet. *OFF*: LED 4 is free, for `TFLEDS` or
-  whatever else you wire to that pin. Remembered. LED 1–3 and 5 are never
-  used for HP-IL activity.
+- **HP-IL on LED 4** — tap to step through the three choices (remembered):
+  - *MESSAGES* (the default): LED 4 (D8) flashes with real HP-IL messages —
+    commands, addressing, data — and stays dark while the loop only idles.
+    A controller that is on keeps sending IDY frames round the loop
+    (the HP-71B all the time, an HP-41 too); those are ignored.
+  - *ALL*: every frame, IDY included. With such a controller on, LED 4
+    looks lit all the time.
+  - *OFF*: LED 4 is free, for `TFLEDS` or whatever else you wire to that pin.
+
+  LED 1–3 and 5 are never used for HP-IL activity.
+- **Plotter error on LED 3** — *ON* (the default): LED 3 is the plotter's
+  ERROR light, as on the HP 7470A's front panel — fit a yellow LED there.
+  It lights when the plotter finds an HP-GL error and goes out when the
+  error is read (`OE`), cleared (`IN`) or cleared in the Plotter menu
+  (**Errors → Clear error**), just like the ERROR light in the Plotter view.
+  *OFF*: LED 3 is free for `TFLEDS`. Remembered. (With *ON*, `TFLEDS` can
+  still use LED 3; only an error coming or going switches it.)
 - **1** – **5** switch each LED on and off. **Chase** runs a light from 1
   to 5 over and over; **Off** switches them all off and goes back to
   showing `TFLEDS`. LED 5 shares its pin
@@ -1586,7 +1619,8 @@ value.
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
 | `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
-| `hpil_leds` | `0` / `1` | `1` | HP-IL traffic on LED 4 (**Hardware test → HP-IL on LED 4**). `0` leaves it to `TFLEDS`. |
+| `plotter_led` | `plotter` / `off` | `plotter` | The plotter's ERROR light on LED 3 (**Hardware test → Plotter error on LED 3**). `off` leaves LED 3 to `TFLEDS`. |
+| `hpil_leds` | `messages` / `all` / `off` | `messages` | HP-IL traffic on LED 4 (**Hardware test → HP-IL on LED 4**): `messages` ignores IDY (idle) frames, `all` shows every frame, `off` leaves LED 4 to `TFLEDS`. The old values `1` (= `all`) and `0` (= `off`) are still read. |
 | `leds_fitted` | `0` / `1` | `1` | **Hardware test**: the LEDs are fitted. (Only the test page uses it, for now.) |
 | `pixels_fitted` | `0` / `1` | `1` | **Hardware test**: colour pixels are connected. GPIO26 drives the pixels with `1`, LED 5 with `0`. |
 | `pixel_count` | `1`–`32` | `5` | `TFPIXEL`: how many colour pixels are connected — set by the HP-41 with `0N<n>` (see [8.3](#83-colour-pixels--tfpixel)). |

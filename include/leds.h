@@ -40,6 +40,7 @@
 
 // ─── LED usage (index 0-4 = LED 1-5) ──────────────────────────────────────────
 #define HPIL_ACT_LED    3   // LED 4 (D8): HP-IL activity, if chosen (hpil_leds)
+#define PLOT_ERR_LED    2   // LED 3: the plotter's ERROR light, if chosen (plotter_led)
 
 class PicoPwmBaseException : public std::exception {
    protected:
@@ -86,16 +87,34 @@ class PicoPwm {
 
 
 
-// HP-IL activity on LED 4 (D8), if chosen (config hpil_leds, the Hardware
-// test page): call it for every frame received; it flashes the LED for a
-// short while, so traffic is visible (a quiet loop: the LED is off).
-// enabled = false leaves LED 4 to TFLEDS (or whatever else is wired
-// there); held = true while the Hardware test page drives the LEDs itself.
+// HP-IL activity on LED 4 (D8), as chosen (config hpil_leds, the Hardware
+// test page): call it for every frame received (idle: an IDY frame); it
+// flashes the LED for a short while, so traffic is visible.
+//   kHpilLedAll       every frame, IDY too: with a controller that polls
+//                     with IDY all the time (HP-71B, an HP-41 that's on)
+//                     the LED looks lit
+//   kHpilLedMessages  IDY frames ignored: commands, addressing, data --
+//                     a loop that only idles leaves it dark
+//   kHpilLedOff       LED 4 is left to TFLEDS (or whatever else is wired there)
+// held = true while the Hardware test page drives the LEDs itself.
 // LED 1-3 and 5 are never touched by this.
-void hpil_led_activity();
-void hpil_leds_setEnabled(bool on);
-bool hpil_leds_enabled();
-void hpil_leds_hold(bool held);
+constexpr int kHpilLedOff = 0;
+constexpr int kHpilLedAll = 1;
+constexpr int kHpilLedMessages = 2;
+void hpil_led_activity(bool idle);
+void hpil_leds_setMode(int mode);
+int hpil_leds_mode();
+void hpil_leds_hold(bool held);     // (LED 3's plotter error too)
+
+// The plotter's ERROR light on LED 3 (a yellow LED), as the HP 7470A's
+// front panel: lit while the plotter has an HP-GL error (CPlotter::
+// errorCode() != 0), out once it's read (OE) or cleared (IN, the menu).
+// Off: LED 3 is left to TFLEDS. Only a change is written to the LED, so
+// TFLEDS can still use LED 3 in between when no error comes or goes.
+// plotter_led_poll() from the main loop.
+void plotter_led_setOn(bool on);
+bool plotter_led_on();
+void plotter_led_poll(bool error);
 
 extern void led_on(int n);
 extern void led_off(int n);

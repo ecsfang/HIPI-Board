@@ -92,6 +92,9 @@ extern void init_spi(void);
 #include "display_mirror.h"   // the display mirrored to a PC (tools/hipiview)
 #include "config.hpp"
 #include "drive.h"
+#include "usb_msc.h"
+#include <cctype>
+#include <memory>
 #include "mediamap.h"     // the media map: the drive it shows
 extern std::vector<CDevice*> devices;   // hipi.cpp -- the HP-IL devices, loop order
 
@@ -537,10 +540,62 @@ int main() {
     pixelStrip.setActiveCount(config.pixelCount(), /*notify=*/false);
     pixelStrip.setColorOrder(pixelOrderIndex(config.pixelOrder().c_str()));   // its colour byte order (saved)
     pixels_setFitted(config.pixelsFitted());  // GPIO26: the pixel strip, or LED 5 (saved)
-    hpil_leds_setEnabled(config.hpilLeds());  // HP-IL activity on LED 4 (Hardware test page, saved)
+    hpil_leds_setMode(config.hpilLeds());     // HP-IL activity on LED 4: off / all / messages (Hardware test page, saved)
+    plotter_led_setOn(config.plotterLed());   // the plotter's ERROR light on LED 3 (Hardware test page, saved)
     pixelStrip.setCountChangedCallback([](uint32_t n) { config.setPixelCount(static_cast<std::uint8_t>(n)); });
     hipi::displayMirror_setMode(static_cast<hipi::MirrorMode>(config.displayMirror()));   // Settings -> Screen -> Mirror to PC (saved)
     // Mirror to PC < Control >: the mouse and keys in hipiview
+    // Files from hipiview (mirror_upload.h): a LIF volume dropped on the
+    // Tape view goes into that drive, as if OPEN were pressed and the new
+    // cassette put in
+    {
+        class DriveForUpload : public hipi::UploadDrive {
+        public:
+            explicit DriveForUpload(CDrive* d) : d_(d) {}
+            std::string name() const override { return d_->name(); }
+            std::string mediaFile() const override { return d_->mediaFile(); }
+            bool quiet() const override { return d_->quiet(); }
+            void open() override {
+                if (d_ == hipi::plotterview_drive()) hipi::plotterview_setTapeEjected(true);   // the lid opens
+                d_->setEjected(true);
+            }
+            void insert(const std::string& file) override {
+                d_->setMediaFile(file);              // (saved, the label: see hipi.cpp)
+                d_->setEjected(false);
+                if (d_ == hipi::plotterview_drive()) hipi::plotterview_setTapeEjected(false);
+            }
+        private:
+            CDrive* d_;
+        };
+        hipi::UploadEnv env;
+        env.drive = []() -> std::shared_ptr<hipi::UploadDrive> {
+            if (hipi::plotterview_output() != hipi::DisplayOutput::Tape) return nullptr;
+            CDrive* d = hipi::plotterview_drive();
+            return d != nullptr ? std::make_shared<DriveForUpload>(d) : nullptr;
+        };
+        env.notNow = []() -> std::string {
+            if (usbMscModeActive()) return "the SD card is lent to the PC (Connect to PC)";
+            if (hipi::boardui_isMenuOpen()) return "HIPI's menu is open -- close it first";
+            if (hipi::demo_running()) return "the demo is running";
+            return "";
+        };
+        env.inOtherDrive = [](const std::string& file) -> std::string {
+            auto same = [](const std::string& a, const std::string& b) {
+                if (a.size() != b.size()) return false;
+                for (std::size_t i = 0; i < a.size(); ++i)
+                    if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+                        return false;
+                return true;
+            };
+            for (CDevice* dev : devices) {
+                if (dev->type() != DRIVE || dev == hipi::plotterview_drive()) continue;
+                if (same(static_cast<CDrive*>(dev)->mediaFile(), file)) return dev->name();
+            }
+            return "";
+        };
+        env.nowMs = [] { return static_cast<std::uint64_t>(to_ms_since_boot(get_absolute_time())); };
+        hipi::displayMirror_setUploadEnv(std::move(env));
+    }
     hipi::displayMirror_setInputHandlers(
         [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },
         [](std::uint8_t code, bool down) { hipi::boardui_remoteButton(code, down); });
@@ -673,6 +728,7 @@ int main() {
         hipi::crashlog_poll();       // a new stack depth, logged (crashlog.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
         pixelStrip.poll();           // TFPIXEL effects (pixels.h)
+        plotter_led_poll(plotter != nullptr && plotter->errorCode() != 0);   // ERROR light on LED 3 (leds.h)
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
         hipi::hwtest_poll();         // Hardware test: running lights, I2C list (while open)

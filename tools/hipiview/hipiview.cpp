@@ -18,6 +18,7 @@
 #include "deframer.hpp"
 #include "png.hpp"
 #include "input.hpp"
+#include "upload.hpp"
 #include "serial_port.hpp"
 #include "hipiview_version.h"   // generated from git (cmake/hipi_version.cmake)
 #include <zlib.h>
@@ -87,7 +88,9 @@ void usage() {
         "      T touch rings on/off, Q quit\n"
         "with Mirror to PC < Control > on HIPI: the mouse is a finger on the screen;\n"
         "      Enter OK, Up/Down, Backspace X, Tab Shift (or hold Shift), Left/Right\n"
-        "      previous/next view, mouse wheel Up/Down\n");
+        "      previous/next view, mouse wheel Up/Down;\n"
+        "      a LIF volume (.dat/.lif) dropped on the window goes into the drive\n"
+        "      whose Tape view HIPI shows\n");
 }
 
 bool parseArgs(int argc, char** argv, Options& o) {
@@ -557,7 +560,10 @@ private:
 // event queue as if they came from the user, timed from when the screen is
 // in step ("live"). One per line:
 //   <seconds> down <x> <y> | move <x> <y> | up | key <name> | keyup <name> | wheel <n>
-// (key names as SDL_GetKeyFromName() knows them, e.g. Return, Up, Tab)
+//             | drop <file> | answer yes|no
+// (key names as SDL_GetKeyFromName() knows them, e.g. Return, Up, Tab;
+// drop: a file dropped on the window; answer: for the next question asked
+// -- no message box is shown in a test)
 class TestInput {
 public:
     bool load(const std::string& path) {
@@ -597,6 +603,12 @@ public:
             } else if (it.what == "wheel") {
                 e.type = SDL_MOUSEWHEEL;
                 e.wheel.y = it.a;
+            } else if (it.what == "drop") {              // a file dropped on the window
+                e.type = SDL_DROPFILE;
+                e.drop.file = SDL_strdup(it.arg.c_str());
+            } else if (it.what == "answer") {            // the next question's answer (yes / no)
+                answers_.push_back(it.arg == "yes");
+                continue;
             } else {
                 continue;
             }
@@ -604,7 +616,16 @@ public:
         }
     }
     bool done() const { return next_ >= items_.size(); }
+    // The answer given for a question (a message box isn't shown in a test);
+    // none given yet: false
+    bool takeAnswer(bool& yes) {
+        if (answers_.empty()) return false;
+        yes = answers_.front();
+        answers_.erase(answers_.begin());
+        return true;
+    }
 private:
+    std::vector<bool> answers_;
     struct Item { double t = 0; std::string what, arg; int a = 0, b = 0; };
     std::vector<Item> items_;
     std::size_t next_ = 0;
@@ -728,6 +749,16 @@ int main(int argc, char** argv) {
     auto clampX = [&](int x) { return std::max(0, std::min(W - 1, x)); };
     auto clampY = [&](int y) { return std::max(0, std::min(H - 1, y)); };
 
+    // A file dropped on the window: a LIF volume for the drive whose Tape
+    // view HIPI shows (upload.hpp; HIPI's side: mirror_upload.h)
+    Uploader upload([&](std::vector<std::uint8_t> m) { if (reader) reader->sendInput(std::move(m)); });
+    Uploader::Step uploadSeen = Uploader::Step::Idle;
+    double uploadShowUntil = -1;              // the result in the title bar until then
+    auto fileBox = [&](Uint32 flags, const std::string& text) {
+        if (!o.testInput.empty()) { std::printf("hipiview: [box] %s\n", text.c_str()); std::fflush(stdout); return; }
+        SDL_ShowSimpleMessageBox(flags, "hipiview", text.c_str(), win);
+    };
+
     TestInput testInput;
     if (!o.testInput.empty() && !testInput.load(o.testInput)) {
         std::fprintf(stderr, "hipiview: can't read %s\n", o.testInput.c_str());
@@ -746,6 +777,20 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) running = false;
             const double tnow = secsNow();
+            // A file dropped on the window: to HIPI's drive (Tape view)
+            if (ev.type == SDL_DROPFILE) {
+                const std::string path = ev.drop.file;
+                SDL_free(ev.drop.file);
+                const std::size_t slash = path.find_last_of("/\\");
+                const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+                std::string why;
+                if (!reader || !emu.connected()) why = "hipiview isn't connected to HIPI.";
+                else if (emu.mirrorMode() != 2) why = "Set Settings > Screen > Mirror to PC to Control on HIPI first.";
+                else if (emu.version() < 7) why = "HIPI's firmware is too old to take files (1.6.0 or newer).";
+                else if (upload.start(path, tnow, why)) { uploadShowUntil = 1e18; continue; }
+                fileBox(SDL_MESSAGEBOX_WARNING, "Can't send " + base + " to HIPI:\n" + why);
+                continue;
+            }
             // The mouse: a finger on the panel (coordinates are the
             // picture's own, SDL_RenderSetLogicalSize() scales them)
             if (ev.type == SDL_MOUSEBUTTONDOWN && ev.button.button == SDL_BUTTON_LEFT && reader &&
@@ -850,6 +895,46 @@ int main(int argc, char** argv) {
         }
 
         input.tick(sec);
+        // The file on its way: HIPI's answers, resends, the user's "Replace?"
+        for (const auto& r : emu.takeUploadReplies()) upload.onReply(r.kind, r.data.data(), r.data.size(), sec);
+        upload.tick(sec, emu.connected() && !emu.syncing());
+        bool testAnswer = false;
+        if (upload.step() == Uploader::Step::Confirm && !o.testInput.empty()) {
+            // (a test: the answer from the test input, when it's there)
+            if (testInput.takeAnswer(testAnswer)) {
+                std::printf("hipiview: [question] %s -> %s\n", upload.question().c_str(), testAnswer ? "yes" : "no");
+                upload.answer(testAnswer, secsNow());
+            }
+        } else if (upload.step() == Uploader::Step::Confirm) {
+            const SDL_MessageBoxButtonData buttons[] = {
+                { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel" },
+                { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, upload.yesText().c_str() },
+            };
+            const SDL_MessageBoxData box = { SDL_MESSAGEBOX_INFORMATION, win, "hipiview - a cassette for HIPI",
+                                             upload.question().c_str(), 2, buttons, nullptr };
+            int pressed = 0;
+            if (SDL_ShowMessageBox(&box, &pressed) != 0) pressed = 0;
+            upload.answer(pressed == 1, secsNow());
+        }
+        // (a test: how it goes, once a second)
+        static double uploadSaid = 0;
+        if (!o.testInput.empty() && upload.busy() && sec - uploadSaid >= 1.0) {
+            uploadSaid = sec;
+            std::printf("hipiview: %s\n", upload.status().c_str());
+            std::fflush(stdout);
+        }
+        if (upload.step() != uploadSeen) {
+            uploadSeen = upload.step();
+            std::printf("hipiview: %s\n", upload.status().c_str());
+            std::fflush(stdout);
+            if (uploadSeen == Uploader::Step::Done) uploadShowUntil = sec + 8;
+            if (uploadSeen == Uploader::Step::Failed) {
+                uploadShowUntil = sec + 8;
+                if (upload.status().rfind("cancelled", 0) != 0)
+                    fileBox(SDL_MESSAGEBOX_ERROR, upload.name() + " wasn't put in:\n" + upload.status());
+            }
+            lastTitle = Clock::time_point();             // the title at once
+        }
         emu.render(px.data(), sec, o.backlight);
         if (o.marks) marks.draw(px.data(), W, H, sec);
         SDL_UpdateTexture(tex, nullptr, px.data(), W * 4);
@@ -891,6 +976,7 @@ int main(int argc, char** argv) {
             if (o.backlight) state += "  |  backlight";
             if (!o.marks) state += "  |  no touch rings";
             if (reader && emu.connected() && emu.mirrorMode() == 2) state += "  |  control";
+            if (upload.busy() || uploadShowUntil > sec) state = upload.status() + "  |  " + state;
             if (viewOnlyHintUntil > sec)
                 state = "VIEW ONLY - set Mirror to PC to Control on HIPI to use the mouse and keys  |  " + state;
             SDL_SetWindowTitle(win, ("hipiview " HIPIVIEW_VERSION_TEXT " - " + state).c_str());

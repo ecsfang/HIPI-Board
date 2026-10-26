@@ -17,7 +17,9 @@ extern bool led[5];
 extern std::vector<Rgb> pixels;     // as last shown
 extern int pixelCount;
 extern int pixelOrder;            // 0..5 = RGB GRB BRG RBG GBR BGR
-extern bool hpilLeds, ledsFitted, pixelsFitted;
+extern int hpilLeds;
+extern bool plotterLed;
+extern bool ledsFitted, pixelsFitted;
 extern int scans;                   // scanI2c() calls
 // The I2C bus the page sees
 extern std::vector<hipi::I2cFound> bus;

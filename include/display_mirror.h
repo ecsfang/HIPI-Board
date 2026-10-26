@@ -24,6 +24,7 @@
 #include "display_config.h"
 #include "DisplayTransport.hpp"
 #include "hipi_features.h"      // HIPI_MIRROR_PORT / HIPI_MIRROR_TRANSPORT
+#include "mirror_upload.h"
 #include <cstdint>
 #include <functional>
 
@@ -77,6 +78,10 @@ const char* displayMirror_modeName(MirrorMode m);    // "Off", "View", "Control"
 using MirrorTouchHandler  = std::function<void(bool down, std::uint16_t x, std::uint16_t y)>;
 using MirrorButtonHandler = std::function<void(std::uint8_t code, bool down)>;
 void displayMirror_setInputHandlers(MirrorTouchHandler touch, MirrorButtonHandler button);
+
+// Files from the viewer (mirror_upload.h): what the receiver needs to know
+// about the drives. Without it, files are refused.
+void displayMirror_setUploadEnv(UploadEnv env);
 
 // HIPI is about to restart (Bootsel mode): tells the viewer (kBye) and
 // keeps the mirror going for `ms` instead of a plain sleep, so the viewer

@@ -9,6 +9,7 @@
 #include "pico/time.h"
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <new>
 
 namespace hipi {
@@ -120,7 +121,7 @@ void ringWrite(const std::uint8_t* data, std::size_t n) {
 // programs) never set off a session.
 constexpr char kRequest[] = "HIPIVIEW";
 std::size_t requestMatch_ = 0;
-enum class Req { Magic, Count, Ids, Ack, Input };
+enum class Req { Magic, Count, Ids, Ack, Input, File };
 Req req_ = Req::Magic;
 int idsWanted_ = 0, idBytes_ = 0;
 std::uint32_t ids_[mirror::kMaxViewerAssets];
@@ -130,6 +131,20 @@ std::uint8_t ackMsg_[6];
 int ackLen_ = 0;
 std::uint8_t inMsg_[8];               // 'T' / 'B' from the viewer
 std::size_t inLen_ = 0, inWant_ = 0;
+
+// Files from the viewer ('F', mirror_upload.h): a message is collected
+// here, checked (CRC) and queued; the queue is handed to the receiver from
+// displayMirror_poll() -- never from serviceRx(), which may run in the
+// middle of a drawing (see queueInput()) while the receiver writes to the
+// SD card and changes cassettes. A full queue drops it: the viewer sends
+// it again.
+std::uint8_t fileMsg_[mirror::kMsgFileMax];
+std::size_t fileLen_ = 0, fileWant_ = 0;
+struct QueuedFileMsg { std::uint8_t kind; std::uint16_t len; std::uint8_t data[mirror::kUpChunk + 8]; };
+constexpr int kFileQueue = 8;
+QueuedFileMsg fileQueue_[kFileQueue];
+int fileQueueHead_ = 0, fileQueueCount_ = 0;
+std::unique_ptr<UploadReceiver> upload_;
 
 MirrorMode mode_ = MirrorMode::Off;   // the setting (config display_mirror)
 MirrorTouchHandler touchHandler_;
@@ -208,6 +223,21 @@ void handleInput(const std::uint8_t* m) {
     }
 }
 
+// A whole 'F' message: sid kind len(2) payload crc(2)
+void handleFileMsg(const std::uint8_t* m, std::size_t n) {
+    if (ring_ == nullptr || m[1] != sid_ || n < 7) return;
+    const std::size_t len = static_cast<std::size_t>(m[3] | (m[4] << 8));
+    if (len > mirror::kUpChunk + 8 || n != 5 + len + 2) return;
+    const std::uint16_t crc = mirror::crc16(m + 2, 3 + len);
+    if (crc != static_cast<std::uint16_t>(m[5 + len] | (m[6 + len] << 8))) return;   // damaged: sent again
+    if (fileQueueCount_ == kFileQueue) return;                                       // (likewise)
+    QueuedFileMsg& q = fileQueue_[(fileQueueHead_ + fileQueueCount_) % kFileQueue];
+    q.kind = m[2];
+    q.len = static_cast<std::uint16_t>(len);
+    std::memcpy(q.data, m + 5, len);
+    ++fileQueueCount_;
+}
+
 void handleAck(const std::uint8_t* m) {
     if (ring_ == nullptr || m[1] != sid_) return;          // another session's
     lastHeard_ = get_absolute_time();
@@ -240,6 +270,11 @@ void serviceRx() {
                     ackMsg_[0] = b;
                     ackLen_ = 1;
                     req_ = Req::Ack;
+                } else if (requestMatch_ == 0 && b == mirror::kMsgFile) {
+                    fileMsg_[0] = b;
+                    fileLen_ = 1;
+                    fileWant_ = 5;                   // until the length is known
+                    req_ = Req::File;
                 } else if (requestMatch_ == 0 && (b == mirror::kMsgTouch || b == mirror::kMsgButton)) {
                     inMsg_[0] = b;
                     inLen_ = 1;
@@ -262,6 +297,15 @@ void serviceRx() {
             case Req::Input:
                 inMsg_[inLen_++] = b;
                 if (inLen_ == inWant_) { handleInput(inMsg_); req_ = Req::Magic; }
+                break;
+            case Req::File:
+                fileMsg_[fileLen_++] = b;
+                if (fileLen_ == 5) {
+                    const std::size_t len = static_cast<std::size_t>(fileMsg_[3] | (fileMsg_[4] << 8));
+                    if (len > mirror::kUpChunk + 8) { req_ = Req::Magic; break; }   // not one of ours
+                    fileWant_ = 5 + len + 2;
+                }
+                if (fileLen_ == fileWant_) { handleFileMsg(fileMsg_, fileLen_); req_ = Req::Magic; }
                 break;
             case Req::Count:
                 idsWanted_ = std::min<int>(b, mirror::kMaxViewerAssets);
@@ -375,8 +419,10 @@ void displayMirror_quiet(bool quiet) {
 }
 
 // Tells the viewer the setting (mirror_protocol.h, kMode)
+// (Also at the very start of a session, while state_ is still Off: only
+// the encoder decides -- it's on for exactly as long as a session runs)
 static void sendMode() {
-    if (state_ == State::Off || !encoder_.enabled()) return;
+    if (!encoder_.enabled()) return;
     const std::uint8_t p[2] = { mirror::kMode, static_cast<std::uint8_t>(mode_) };
     encoder_.emit(p, sizeof p);
 }
@@ -423,11 +469,51 @@ void displayMirror_goodbye(std::uint32_t ms) {
 bool displayMirror_syncing() { return state_ == State::Dump; }
 std::uint32_t displayMirror_backlog() { return state_ == State::Live ? wr_ - acked_ : 0; }
 
+namespace {
+// An answer about a file, in the stream (kUpload)
+void uploadReply(std::uint8_t kind, const std::uint8_t* p, std::size_t n) {
+    if (state_ == State::Off || !encoder_.enabled()) return;
+    n = std::min<std::size_t>(n, 200);
+    std::uint8_t b[4 + 200];
+    b[0] = mirror::kUpload;
+    b[1] = kind;
+    b[2] = static_cast<std::uint8_t>(n);
+    b[3] = static_cast<std::uint8_t>(n >> 8);
+    std::memcpy(b + 4, p, n);
+    encoder_.emit(b, 4 + n);
+}
+
+// The queued file messages, to the receiver (only in Control)
+void deliverFiles() {
+    while (fileQueueCount_ > 0) {
+        const QueuedFileMsg& q = fileQueue_[fileQueueHead_];
+        if (mode_ != MirrorMode::Control || !upload_) {
+            static const char kOff[] = "set Settings > Screen > Mirror to PC to Control on HIPI";
+            static const char kNo[] = "this HIPI can't take files";
+            if (q.kind == mirror::kUpAsk || q.kind == mirror::kUpBegin)
+                uploadReply(mirror::kUpError, reinterpret_cast<const std::uint8_t*>(upload_ ? kOff : kNo),
+                            std::strlen(upload_ ? kOff : kNo));
+        } else {
+            upload_->handle(q.kind, q.data, q.len);
+        }
+        fileQueueHead_ = (fileQueueHead_ + 1) % kFileQueue;
+        --fileQueueCount_;
+    }
+    if (upload_) upload_->poll();
+}
+
+}  // namespace
+
 static void pollMirror();
 
 void displayMirror_poll() {
     pollMirror();
     deliverInput();          // here, at the top level -- see queueInput()
+    deliverFiles();          // ... and the files' messages
+}
+
+void displayMirror_setUploadEnv(UploadEnv env) {
+    upload_ = std::make_unique<UploadReceiver>(std::move(env), uploadReply);
 }
 
 static void pollMirror() {
@@ -437,6 +523,8 @@ static void pollMirror() {
     auto endSession = [](const char* why) {
         if (state_ == State::Off) return;
         releaseInput();                      // nobody's finger on the panel any more
+        fileQueueCount_ = 0;
+        if (upload_) upload_->viewerGone();  // (a file half-way is dropped)
         encoder_.setEnabled(false);
         ringFree_();
         tud_cdc_n_write_clear(kItf);         // nothing stale for the next viewer

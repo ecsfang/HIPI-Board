@@ -10,7 +10,9 @@ std::vector<Rgb> pixels(32, Rgb{ 0, 0, 0 });
 std::vector<Rgb> buffer(32, Rgb{ 0, 0, 0 });
 int pixelCount = 5;
 int pixelOrder = 0;
-bool hpilLeds = true, ledsFitted = true, pixelsFitted = true;
+int hpilLeds = 2;
+bool plotterLed = true;
+bool ledsFitted = true, pixelsFitted = true;
 int scans = 0;
 std::vector<hipi::I2cFound> bus;
 
@@ -62,8 +64,10 @@ int pixelCount() { return hwstub::pixelCount; }
 void setPixelCount(int n) { hwstub::pixelCount = n; }
 int pixelOrder() { return hwstub::pixelOrder; }
 void setPixelOrder(int order) { hwstub::pixelOrder = order; }
-bool hpilLeds() { return hwstub::hpilLeds; }
-void setHpilLeds(bool on) { hwstub::hpilLeds = on; }
+int hpilLeds() { return hwstub::hpilLeds; }
+void setHpilLeds(int mode) { hwstub::hpilLeds = mode; }
+bool plotterLed() { return hwstub::plotterLed; }
+void setPlotterLed(bool on) { hwstub::plotterLed = on; }
 bool ledsFitted() { return hwstub::ledsFitted; }
 void setLedsFitted(bool f) { hwstub::ledsFitted = f; }
 bool pixelsFitted() { return hwstub::pixelsFitted; }

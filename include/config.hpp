@@ -103,8 +103,12 @@ public:
         n = std::snprintf(line, sizeof(line), "v80_columns=%d\n", v80Forty_ ? 40 : 80);
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
-        n = std::snprintf(line, sizeof(line), "hpil_leds=%d\nleds_fitted=%d\npixels_fitted=%d\n",
-                           hpilLeds_ ? 1 : 0, ledsFitted_ ? 1 : 0, pixelsFitted_ ? 1 : 0);
+        n = std::snprintf(line, sizeof(line), "hpil_leds=%s\nleds_fitted=%d\npixels_fitted=%d\n",
+                           hpilLeds_ == 0 ? "off" : hpilLeds_ == 1 ? "all" : "messages",
+                           ledsFitted_ ? 1 : 0, pixelsFitted_ ? 1 : 0);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
+        n = std::snprintf(line, sizeof(line), "plotter_led=%s\n", plotterLed_ ? "plotter" : "off");
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
         n = std::snprintf(line, sizeof(line), "brightness=%u\n",
@@ -201,11 +205,15 @@ public:
     bool v80Forty() const { return v80Forty_; }
     void setV80Forty(bool f) { v80Forty_ = f; save(); }
 
-    // Hardware test page: HP-IL activity on LED 4 (else it's free
-    // for TFLEDS), and whether the LEDs / pixels are fitted (for now only
-    // used by the test page)
-    bool hpilLeds() const { return hpilLeds_; }
-    void setHpilLeds(bool on) { hpilLeds_ = on; save(); }
+    // Hardware test page: HP-IL activity on LED 4 -- 0 off (it's free for
+    // TFLEDS), 1 all frames, 2 messages (IDY ignored; leds.h) -- and
+    // whether the LEDs / pixels are fitted (for now only used by the test
+    // page)
+    int hpilLeds() const { return hpilLeds_; }
+    void setHpilLeds(int mode) { hpilLeds_ = static_cast<std::uint8_t>(mode); save(); }
+    // ... and the plotter's ERROR light on LED 3 (else it's free for TFLEDS)
+    bool plotterLed() const { return plotterLed_; }
+    void setPlotterLed(bool on) { plotterLed_ = on; save(); }
     bool ledsFitted() const { return ledsFitted_; }
     void setLedsFitted(bool f) { ledsFitted_ = f; save(); }
     bool pixelsFitted() const { return pixelsFitted_; }
@@ -384,7 +392,12 @@ private:
                 } else if (std::strcmp(key, "v80_columns") == 0) {
                     v80Forty_ = std::atoi(value) == 40;
                 } else if (std::strcmp(key, "hpil_leds") == 0) {
-                    hpilLeds_ = std::atoi(value) != 0;
+                    // off / all / messages (before 1.6.0: 0 / 1 -- 1 was all)
+                    if (std::strcmp(value, "off") == 0 || std::strcmp(value, "0") == 0) hpilLeds_ = 0;
+                    else if (std::strcmp(value, "all") == 0 || std::strcmp(value, "1") == 0) hpilLeds_ = 1;
+                    else hpilLeds_ = 2;
+                } else if (std::strcmp(key, "plotter_led") == 0) {
+                    plotterLed_ = !(std::strcmp(value, "off") == 0 || std::strcmp(value, "0") == 0);
                 } else if (std::strcmp(key, "leds_fitted") == 0) {
                     ledsFitted_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "pixels_fitted") == 0) {
@@ -466,7 +479,8 @@ private:
     std::uint8_t  displayModel_ = 0;   // 82163
     bool          v80Small_   = false;
     bool          v80Forty_   = false;
-    bool          hpilLeds_   = true;
+    std::uint8_t  hpilLeds_   = 2;      // messages (leds.h kHpilLedMessages)
+    bool          plotterLed_ = true;   // LED 3: the plotter's ERROR light
     bool          ledsFitted_ = true;
     bool          pixelsFitted_ = true;
     std::uint8_t  brightness_ = 0xFF;
