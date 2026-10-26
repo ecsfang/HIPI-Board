@@ -153,6 +153,12 @@ jobs:
           cp build/hipi_7_pico.uf2 release/hipi_7_pico-${RELEASE_TAG}.uf2
           cp build/hipi_7_pico.elf release/hipi_7_pico-${RELEASE_TAG}.elf
           cp HIPI-SD-card.zip release/HIPI-SD-card-${RELEASE_TAG}.zip    # made by the build (sdcard/make_sd_card.py)
+          # The release text: documents/release-notes/<tag>.md if there is one
+          if [ -f "documents/release-notes/${RELEASE_TAG}.md" ]; then
+            cp "documents/release-notes/${RELEASE_TAG}.md" release/notes.md
+          else
+            echo "HIPI ${RELEASE_TAG}" > release/notes.md
+          fi
           ls -lh release/
 
       # 11. Create GitHub Release
@@ -161,6 +167,7 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: "HIPI Panel 7 - ${{ env.RELEASE_TAG }}"
+          body_path: release/notes.md       # (GitHub's own list of changes is added after it)
           generate_release_notes: true
           files: |
             release/hipi_7_pico-${{ env.RELEASE_TAG }}.uf2

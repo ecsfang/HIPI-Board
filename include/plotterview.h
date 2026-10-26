@@ -267,6 +267,15 @@ bool plotterview_isActive();
 // repeated), ENTER gives the point to the plotter, X cancels.
 bool plotterview_digitizing();               // the panel is showing
 bool plotterview_digitizeTap(int x, int y);  // true: the touch was taken
+
+// The plotter's ERROR light (the 7470A's front-panel LED), top centre of
+// the Plotter view while CPlotter::errorCode() isn't 0. A touch on it
+// shows plotterview_errorText() in a message box: true if it was there.
+bool plotterview_errorLightTap(int x, int y);
+// Where the light is (its LED), for the demo's touch: false while it's out
+bool plotterview_errorLightPoint(int& x, int& y);
+// "Error 3: bad parameter -- SC 0,100" (or "No error")
+std::string plotterview_errorText();
 void plotterview_digitizeRelease();          // finger up: an arrow stops repeating
 // A strip button while digitizing (code as boardui: 2 OK = ENTER, 3/4 Up/
 // Down, 5 X = cancel; repeat: held) -- true if taken

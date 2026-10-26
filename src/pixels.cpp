@@ -219,6 +219,15 @@ void CPixelStrip::clear() {
     for (uint32_t i = 0; i < count_; ++i) _setCurrent(i, 0, 0, 0);
 }
 
+void CPixelStrip::bufferColor(uint32_t index, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) {
+    r = g = b = 0;
+    if (index >= count_) return;
+    const PicoLed::Color c = ControllerAccess::pixel(strip_, index);
+    r = c.red;
+    g = c.green;
+    b = c.blue;
+}
+
 void CPixelStrip::show() {
     // Current limit (PIXEL_POWER_LIMIT_MA): the sum of all channel levels
     // times the brightness, against what the limit allows
@@ -239,7 +248,16 @@ void CPixelStrip::show() {
         strip_.setBrightness(static_cast<std::uint8_t>(level));
         applied_ = static_cast<std::uint8_t>(level);
     }
+    // The pixels only take a frame after the line has been low for a while
+    // (the "reset", > 280 us on newer WS2812B). PicoLED returns as soon as
+    // the last word is in the PIO's FIFO -- a second show() right after the
+    // first sent its data straight on, as more bits of the same frame: the
+    // pixels kept the first one (e.g. the Hardware test page's first Red,
+    // right after taking the strip over, stayed dark). So: wait until the
+    // last frame is out (FIFO: 4 words, 30 us each) and the reset is over.
+    while (static_cast<std::int64_t>(nextShowUs_ - time_us_64()) > 0) tight_loop_contents();
     strip_.show();
+    nextShowUs_ = time_us_64() + kShowGapUs;
 }
 
 void CPixelStrip::_blank(uint32_t first, uint32_t last) {

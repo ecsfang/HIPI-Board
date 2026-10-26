@@ -113,6 +113,10 @@ public:
     // qualified in the real library and whose Color struct doesn't
     // expose plain .r/.g/.b fields -- avoids depending on either.
     void getPixelColor(uint32_t index, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) const;
+    // What the strip's buffer holds for a pixel -- what the next show()
+    // sends, effects' frames included (before the brightness). For the
+    // Hardware test page, which mirrors the pixels on the screen.
+    void bufferColor(uint32_t index, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b);
 
     // Implements the ASCII 'C'/'O' commands' own semantics: off() blacks
     // the pixel out WITHOUT forgetting its last real color; on() restores
@@ -163,6 +167,10 @@ private:
     std::vector<Effect> effects_;
     uint32_t nextFrameMs_ = 0;
     void _blank(uint32_t first, uint32_t last);
+    // show(): the next frame waits until the last is out and the line has
+    // been low long enough (the pixels' reset) -- see show()
+    static constexpr std::uint64_t kShowGapUs = 5 * 30 + 400;
+    std::uint64_t nextShowUs_ = 0;
     // Per-pixel "last non-off color" cache -- on() restores from here (see
     // its own comment above); PicoLED's own getPixelColor() can't serve
     // this purpose since off() and clear() both actually zero the real

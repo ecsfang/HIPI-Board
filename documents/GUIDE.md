@@ -795,6 +795,28 @@ HP7470A-style plotter canvas (`TFPLOT`), or the Tape view.
 Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
+**Plotter errors and the ERROR light.** `CPlotter::setError()` sets
+OE's error number as the 7470A manual has it (1 unknown instruction, 2
+wrong number of parameters, 3 out of range, 6 position overflow; 5 and 8
+don't occur here -- CS/CA out of range gives 3, as the CS/CA pages say,
+though appendix C lists 5) -- only if IM's E-mask (default 223, all but 6;
+IN and DF set it back) lets it through, else it's never known. It's kept
+in `error_` (OS bit 5, `errorCode()`) until OE, IN or
+`clearError()` (Plotter -> Errors -> Clear error), and in a log of the last
+eight with the command (`errorLog()`; kept over IN). `errorSerial()`
+changes with each, so `plotterview_poll()` draws or removes the light: a
+small box top centre of the plot (`drawErrorLight()`), drawn again after
+a segment over it and after a redraw; removed with
+`plotterview_redrawRegion()`. A touch on it (`plotterview_errorLightTap()`,
+from `boardui_handleTap()`) shows `plotterview_errorText()`. The loop map
+draws a yellow LED on the plotter's card (and the error in its details;
+`rolesNow()` includes it, so it redraws); the info box has a line. AP, AF,
+AH, EC, VA and VN are no-ops (no error). On HP-IL, SDI answers "HP7470A"
+CR LF (`CPlotter::deviceId()`) and SST the OS byte without clearing bit 3,
+then ETO. DCL/SDC still clear the plot (the real plotter ignores them).
+Tests: `plotter_test` (the errors, IM, SDI, SST), `printer_view_test` (the
+light; `printer_view_error_light.png`).
+
 **Plotter pen.** Plotter -> Pen changes the pen's tip for what's drawn
 from then on, like a pen with a broader tip: `plotterview_setPenWide()` ->
 `CPlotter::setWideTip()`, and every new `PlotSegment` keeps it (`wide`, in
@@ -1047,13 +1069,30 @@ and columns settings, and saves `video80_*.png`.
 and copied; small changes (a button, a pixel
 dot, the I2C rows -- padded text, no clearing) are drawn on the panel when
 nothing else owns the canvas, else the whole page is redrawn later. Touches
-go to `hwtest_tap()` (boardui.cpp), `hwtest_poll()` runs the LED chase
+go to `hwtest_tap()` (boardui.cpp) -- also at the right edge: no button
+strip on this page (a tap there doesn't bring it up, and `boardui_poll()`
+hides one left up by the menu), its X closes it. The pixel dots run from
+right to left (pixel 1 on the right, as on the board). `hwtest_poll()` runs the LED chase
 (150 ms), the pixel run (60 ms a step) and the I2C rescan (3 s).
 
 The hardware is behind `hwtest_io.h` (firmware: `hwtest_io.cpp`; PC test:
-`tools/hipiview/test/hwio_stub.cpp`). `hwio::begin()` holds the HP-IL
-activity LED (`hpil_leds_hold()`), switches the LEDs off and stops
-`TFPIXEL`'s effects; `hwio::end()` switches everything off again. The
+`tools/hipiview/test/hwio_stub.cpp`). The page starts by only watching:
+every 40 ms `hwio::ledLevel()` (`CLedDriver::getCurrentPct()`, so blinking
+and fading show) and `hwio::pixelShown()` (`CPixelStrip::bufferColor()`:
+the strip's buffer, effects' frames included) are drawn on the LED buttons
+and the dots (the dots at the level sent, lifted a little so dim ones
+show); TFPIXEL changing the count redraws it. A test of its own takes a
+section over: `hwio::takeLeds()` holds the HP-IL activity LED
+(`hpil_leds_hold()`) and switches the LEDs off, `hwio::takePixels()`
+stops `TFPIXEL`'s effects and clears the strip; **Off** and leaving the
+page call `releaseLeds()` / `releasePixels()` (off, given back) for what
+was taken. `hwio::begin()` / `end()` (both at once) are the demo's.
+`CPixelStrip::show()` waits, if need be, until the last frame is out and
+the line has been low for the pixels' reset (`kShowGapUs`, 550 us after
+the last `show()`): PicoLED returns once the last word is in the PIO's
+FIFO, and a frame sent straight after was taken as more bits of the first
+-- the page's first colour, right after `takePixels()`'s clear, stayed
+dark. The
 pixel count is `pixelStrip.setActiveCount()` -- TFPIXEL's saved
 `pixel_count`. HP-IL activity (`hpil_led_activity()`, leds.cpp) flashes
 LED 4 (D8, `HPIL_ACT_LED`) for 30 ms per frame (restarted at most every
@@ -1159,7 +1198,11 @@ beside SIN(X)/X's top (`plotterview_plotToScreen()` of
 arrow repeats in real time while the demo's time stands still for
 hipiview, so the marker would run on --, ENTER (the controls from
 `plotterview_digitizeControl()`); then
-`demo::hpglDigitizedMark()` circles the point the plotter got. A real
+`demo::hpglDigitizedMark()` circles the point the plotter got. Then
+`SC0,100;` (error 2) lights the ERROR light, a call touches it
+(`plotterview_errorLightPoint()` + `plotterview_errorLightTap()`: the
+message box) and `OE;` puts it out (its answer is never read; the next
+clear drops it). A real
 touch stops the demo, and `restore()`'s `plotterview_clearPlotter()`
 ends a digitizing left waiting. `paperPullUp()` pulls the printer's paper to the tear-off
 edge (`plotterview_paperScrollBy(-1)`), then `plotterview_tearOff()`. The

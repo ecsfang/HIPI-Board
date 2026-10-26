@@ -4,7 +4,7 @@
 
 namespace hwstub {
 
-bool active = false;
+bool ledsTaken = false, pixelsTaken = false;
 bool led[5] = {};
 std::vector<Rgb> pixels(32, Rgb{ 0, 0, 0 });
 std::vector<Rgb> buffer(32, Rgb{ 0, 0, 0 });
@@ -21,18 +21,30 @@ namespace hwio {
 
 using namespace hwstub;
 
-void begin() {
-    active = true;
+void takeLeds() {
+    ledsTaken = true;
     std::fill(std::begin(led), std::end(led), false);
+}
+void releaseLeds() {
+    ledsTaken = false;
+    std::fill(std::begin(led), std::end(led), false);
+}
+void takePixels() {
+    pixelsTaken = true;
     std::fill(buffer.begin(), buffer.end(), Rgb{ 0, 0, 0 });
     pixels = buffer;
 }
-
-void end() {
-    active = false;
-    std::fill(std::begin(led), std::end(led), false);
+void releasePixels() {
+    pixelsTaken = false;
     std::fill(buffer.begin(), buffer.end(), Rgb{ 0, 0, 0 });
     pixels = buffer;
+}
+float ledLevel(int index) { return index >= 0 && index < 5 && led[index] ? 100.0f : 0.0f; }
+void pixelShown(int index, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) {
+    r = g = b = 0;
+    if (index < 0 || index >= static_cast<int>(pixels.size())) return;
+    const Rgb& c = pixels[static_cast<std::size_t>(index)];
+    r = c.r; g = c.g; b = c.b;
 }
 
 void setLed(int index, bool on) { if (index >= 0 && index < 5) led[index] = on; }

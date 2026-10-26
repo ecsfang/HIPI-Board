@@ -210,6 +210,40 @@ void plotWindow() {
     display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
 }
 
+// ── The ERROR light ─────────────────────────────────────────────────────
+// The 7470A's front-panel ERROR LED: lit while the plotter has an HP-GL
+// error (CPlotter::errorCode() -- OE, IN or Plotter -> Errors -> Clear
+// error put it out). Drawn on the plot, top centre, in a small dark box
+// with the error number; a touch on it says what the error was.
+constexpr int kErrW = 112, kErrH = 32, kErrY = 8;
+bool errLit_ = false;                     // drawn now
+std::uint32_t errSerial_ = 0;             // CPlotter::errorSerial() when drawn
+int errX() { return ((plotAreaW_ - kErrW) / 2) & ~3; }
+void drawErrorLight() {
+    errLit_ = false;
+    if (plotter_ == nullptr || plotter_->errorCode() == 0) return;
+    const int x = errX(), y = kErrY;
+    display_->fillRoundRect(static_cast<std::int16_t>(x), y, kErrW, kErrH, 8, 0x18E3);
+    display_->roundRect(static_cast<std::int16_t>(x), y, kErrW, kErrH, 8, 0x4208);
+    display_->fillCircle(static_cast<std::int16_t>(x + 18), y + kErrH / 2, 8, 0xFFE0);   // the LED, lit
+    display_->circle(static_cast<std::int16_t>(x + 18), y + kErrH / 2, 9, 0x8400);
+    char t[16];
+    std::snprintf(t, sizeof(t), "ERROR %d", plotter_->errorCode());
+    display_->selectBuiltinFont();
+    display_->txtSize(0);
+    display_->txtColor(0xFFFF, 0x18E3);
+    display_->txtSetCursor(static_cast<std::uint16_t>(x + 34), static_cast<std::uint16_t>(y + (kErrH - 16) / 2));
+    display_->txtWrite(t);
+    screen_->reassertRenderState();
+    errLit_ = true;
+}
+// A segment drawn (screen box) over the light: draw it again on top
+bool overErrorLight(int x0, int y0, int x1, int y1) {
+    const int lx = errX();
+    return errLit_ && std::max(x0, x1) + 2 >= lx && std::min(x0, x1) - 2 < lx + kErrW &&
+           std::max(y0, y1) + 2 >= kErrY && std::min(y0, y1) - 2 < kErrY + kErrH;
+}
+
 void drawDigitizeMarker();                  // (Digitizing, below)
 void drawDigitizePanel();
 
@@ -238,6 +272,7 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
     }
     plotWindow();
     drawMappedSegment(x0, y0, x1, y1, penColor(pen), plotter_->wideTip());   // (this segment's tip)
+    if (overErrorLight(mapX(x0), mapY(y0), mapX(x1), mapY(y1))) drawErrorLight();   // (kept on top)
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizeMarker();   // (kept on top)
     // line()/pixel() go through gfxMode(), which blindly zeros MWCR0 (the
     // same text-mode/cursor-visible register Screen owns) -- same fix
@@ -257,6 +292,7 @@ void onPlotterClear() {
     plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizePanel();
+    drawErrorLight();                         // (IN puts it out -- still lit after a DCL with an error)
     screen_->refreshCursor();
 }
 
@@ -1837,6 +1873,8 @@ void plotterview_redraw() {
     for (const PlotSegment& seg : plotter_->segments()) {
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen), seg.wide);
     }
+    drawErrorLight();
+    errSerial_ = plotter_->errorSerial();
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizePanel();      // (and the marker)
     screen_->refreshCursor();
 }
@@ -2220,6 +2258,30 @@ std::string plotterview_viewTitle(CDevice* dev) {
 
 bool plotterview_isSplashVisible() { return splashVisible_; }
 
+bool plotterview_errorLightTap(int x, int y) {
+    if (output_ != DisplayOutput::Plotter || !errLit_ || plotter_ == nullptr) return false;
+    if (x < errX() || x >= errX() + kErrW || y < kErrY || y >= kErrY + kErrH) return false;
+    plotterview_showMessage(plotterview_errorText().c_str());
+    return true;
+}
+
+bool plotterview_errorLightPoint(int& x, int& y) {
+    if (output_ != DisplayOutput::Plotter || !errLit_) return false;
+    x = errX() + 18;
+    y = kErrY + kErrH / 2;
+    return true;
+}
+
+std::string plotterview_errorText() {
+    if (plotter_ == nullptr || plotter_->errorCode() == 0) return "No error";
+    const int code = plotter_->errorCode();
+    std::string t = "Error " + std::to_string(code) + ": " + CPlotter::errorText(code);
+    const auto& log = plotter_->errorLog();
+    if (!log.empty() && log.back().code == code && log.back().command[0] != 0)
+        t += " -- " + std::string(log.back().command);
+    return t;
+}
+
 // DP: the Plotter view comes up with the panel (see "Digitizing" above);
 // when the plotter stops waiting (ENTER, X, DC, IN) the panel goes
 static void pollDigitize() {
@@ -2327,6 +2389,18 @@ void plotterview_plotToScreen(int px, int py, int& x, int& y) {
 
 void plotterview_poll() {
     pollDigitize();
+    // The ERROR light: an error came or went
+    if (output_ == DisplayOutput::Plotter && plotter_ != nullptr && plotter_->errorSerial() != errSerial_) {
+        errSerial_ = plotter_->errorSerial();
+        if (plotter_->errorCode() != 0) {
+            plotWindow();
+            drawErrorLight();
+        } else if (errLit_) {
+            errLit_ = false;
+            plotterview_redrawRegion(static_cast<std::int16_t>(errX()), kErrY, kErrW, kErrH);   // (the plot under it)
+        }
+        screen_->refreshCursor();
+    }
     if (output_ == DisplayOutput::MediaMap && !plotterview_isSplashVisible())
         mediamap_poll(to_ms_since_boot(get_absolute_time()));    // the head, a changed directory
     pollPrinterPanel();     // Printer view: switches, POWER light, keys

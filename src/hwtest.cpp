@@ -58,8 +58,15 @@ constexpr std::uint32_t kChaseMs = 150, kRunMs = 60, kScanMs = 3000;
 constexpr std::uint8_t kLevel = 96;      // pixel brightness (of 255): bright enough, kind to the 5 V
 
 // ── State ───────────────────────────────────────────────────────────────
-bool active_ = false;                    // the page is open (owns the hardware)
+bool active_ = false;                    // the page is open
 bool dirty_ = false;                     // something wasn't drawn: draw it all
+// Until a test of its own starts, the page shows what's on the LEDs and
+// pixels -- whoever drives them (TFLEDS, TFPIXEL, HP-IL activity): a
+// program can be tried without them fitted. A test takes that section over.
+bool ledsTest_ = false, pixTest_ = false;
+bool ledSeen_[5] = {};                   // watching: lit now (hwio::ledLevel())
+absolute_time_t nextWatch_ = nil_time;
+constexpr std::uint32_t kWatchMs = 40;
 bool ledOn_[5] = {};
 bool chase_ = false;
 int chaseStep_ = 0;
@@ -163,6 +170,15 @@ std::uint16_t rgb565(const Rgb& c) {
     return static_cast<std::uint16_t>(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
 }
 
+// Watching: as bright as the strip is sent it (a fading tail fades), lifted
+// a little so dim levels still show
+bool watchingPix() { return !pixTest_; }
+std::uint16_t rgb565Seen(const Rgb& c) {
+    auto lift = [](int v) { return v == 0 ? 0 : 64 + v * 191 / 255; };
+    const int r = lift(c.r), g = lift(c.g), b = lift(c.b);
+    return static_cast<std::uint16_t>(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+}
+
 std::string label(Id id) {
     switch (id) {
         case Id::LedFitted: return hwio::ledsFitted() ? "Fitted: YES" : "Fitted: NO";
@@ -209,7 +225,10 @@ bool enabled(Id id) {
 }
 
 bool lit(Id id) {
-    if (isLed(id)) return ledOn_[static_cast<int>(id) - static_cast<int>(Id::Led1)];
+    if (isLed(id)) {
+        const int i = static_cast<int>(id) - static_cast<int>(Id::Led1);
+        return ledsTest_ ? ledOn_[i] : ledSeen_[i];
+    }
     switch (id) {
         case Id::Chase: return chase_;
         case Id::Run:   return run_;
@@ -269,14 +288,15 @@ void drawCount() {
     text(L.valueX, L.pixHead + (L.headH - 16) / 2, b, 0, hwio::pixelsFitted() ? kWhite : kDark, kBlack);
 }
 
-// The pixels as sent (dots), dimmed past the count
+// The pixels as sent (dots), dimmed past the count. Pixel 1 on the right,
+// as they sit on the board (D12..D16, from right to left)
 void drawDot(int i) {
-    const int cx = L.pix.x + 16 + L.dotR + i * L.dotGap, cy = L.dots + L.dotR;
+    const int cx = L.pix.x + 16 + L.dotR + (kMaxPixels - 1 - i) * L.dotGap, cy = L.dots + L.dotR;
     const bool used = i < hwio::pixelCount() && hwio::pixelsFitted();
     const Rgb& c = pix_[i];
     const bool on = c.r || c.g || c.b;
     d_->fillCircle(cx, cy, L.dotR, used ? kGrey : kDark);
-    d_->fillCircle(cx, cy, L.dotR - 2, on && used ? rgb565(c) : kBlack);
+    d_->fillCircle(cx, cy, L.dotR - 2, on && used ? (watchingPix() ? rgb565Seen(c) : rgb565(c)) : kBlack);
     drawnPix_[i] = c;
 }
 
@@ -291,6 +311,11 @@ void drawDots(bool all) {
 }
 
 const char* hintText() {
+    if (!pixTest_) {
+        if (!hwio::pixelsFitted()) return "";
+        return hwio::pixelCount() > kMaxPixels ? "Shows what TFPIXEL sends (the first 16)"
+                                               : "Shows what TFPIXEL sends";
+    }
     switch (solid_) {
         case Solid::Red:   return "Not red? Choose another order above";
         case Solid::Green: return "Not green? Choose another order above";
@@ -298,6 +323,14 @@ const char* hintText() {
         case Solid::White: return "A tint: a colour is weak or missing";
         default:           return run_ ? "One pixel runs: red, green, blue, white" : "";
     }
+}
+
+// LEDS: whose the LEDs are, beside Off
+void drawLedStatus() {
+    const int x = L.leds.x + 16 + 96 + 12 + 72 + 16;
+    const std::size_t n = static_cast<std::size_t>((L.leds.x + L.leds.w - 16 - x) / 8);
+    const char* t = !hwio::ledsFitted() ? "" : ledsTest_ ? "Test -- Off: back to TFLEDS" : "Shows what TFLEDS sends";
+    text(x, L.ledRow2 + (L.ledH - 16) / 2, pad(t, n).c_str(), 0, kGrey, kBlack);
 }
 
 void drawHint() {
@@ -424,6 +457,7 @@ void renderFull() {
     drawCount();
     drawDots(true);
     drawHint();
+    drawLedStatus();
     drawI2cHeader();
     drawList();
     // Legend
@@ -447,16 +481,50 @@ void sendPixels() {
     hwio::showPixels();
 }
 
-void pixelsOff() {
+// A test starts: the page takes the LEDs / pixels over (all off first)
+void startLedTest() {
+    if (ledsTest_) return;
+    hwio::takeLeds();
+    ledsTest_ = true;
+    for (bool& b : ledOn_) b = false;
+}
+void startPixTest() {
+    if (pixTest_) return;
+    hwio::takePixels();
+    pixTest_ = true;
     for (Rgb& c : pix_) c = Rgb{ 0, 0, 0 };
+}
+// ... and ends (Off, Fitted, leaving the page): off, given back, watched again
+void endLedTest() {
+    chase_ = false;
+    for (bool& b : ledOn_) b = false;
+    if (ledsTest_) hwio::releaseLeds();
+    ledsTest_ = false;
+}
+void endPixTest() {
     run_ = false;
     solid_ = Solid::None;
-    sendPixels();
+    for (Rgb& c : pix_) c = Rgb{ 0, 0, 0 };
+    if (pixTest_) hwio::releasePixels();
+    pixTest_ = false;
 }
 
-void ledsOff() {
-    chase_ = false;
-    for (int i = 0; i < 5; ++i) { ledOn_[i] = false; hwio::setLed(i, false); }
+// Watching: what's on the LEDs and pixels now (true: something changed)
+bool watchLeds() {
+    bool changed = false;
+    for (int i = 0; i < 5; ++i) {
+        const bool on = hwio::ledsFitted() && (i < 4 || led5Usable()) && hwio::ledLevel(i) > 0.5f;
+        if (on != ledSeen_[i]) { ledSeen_[i] = on; changed = true; }
+    }
+    return changed;
+}
+void watchPixels() {
+    const int n = hwio::pixelsFitted() ? std::min(hwio::pixelCount(), kMaxPixels) : 0;
+    for (int i = 0; i < kMaxPixels; ++i) {
+        Rgb c{ 0, 0, 0 };
+        if (i < n) hwio::pixelShown(i, c.r, c.g, c.b);
+        pix_[i] = c;
+    }
 }
 
 std::string listSignature() {
@@ -488,12 +556,14 @@ void hwtest_enter() {
     if (active_) return;
     active_ = true;
     gridShown_ = false;
-    hwio::begin();
     chipsInfo_ = hwio::loadI2cChips();       // read again: an edited i2c/*.txt counts at once
     for (bool& b : ledOn_) b = false;
     chase_ = run_ = false;
     solid_ = Solid::None;
-    for (Rgb& c : pix_) c = Rgb{ 0, 0, 0 };
+    ledsTest_ = pixTest_ = false;            // (watching: nothing is taken over)
+    watchLeds();
+    watchPixels();
+    nextWatch_ = make_timeout_time_ms(kWatchMs);
     drawnCount_ = -1;
     scan();
 }
@@ -501,9 +571,9 @@ void hwtest_enter() {
 void hwtest_leave() {
     if (!active_) return;
     active_ = false;
-    chase_ = run_ = false;
     gridShown_ = false;
-    hwio::end();
+    endLedTest();                            // (gives back only what a test took)
+    endPixTest();
 }
 
 void hwtest_drawAll() {
@@ -548,6 +618,17 @@ void hwtest_poll() {
         sendPixels();
         part([] { drawDots(false); });
     }
+    // Watching: TFLEDS / TFPIXEL (or HP-IL activity) on them
+    if (time_reached(nextWatch_)) {
+        nextWatch_ = make_timeout_time_ms(kWatchMs);
+        if (!ledsTest_ && watchLeds()) part([] { drawButtons(isLed); });
+        if (!pixTest_) {
+            watchPixels();
+            if (hwio::pixelCount() != drawnCount_)          // (TFPIXEL's "0N8")
+                part([] { drawCount(); drawButton(*find(Id::Minus)); drawButton(*find(Id::Plus)); drawHint(); });
+            part([] { drawDots(false); });
+        }
+    }
     // I2C: look again now and then
     if (time_reached(nextScan_)) {
         const std::string before = listSignature();
@@ -582,26 +663,35 @@ bool hwtest_tap(int x, int y) {
     switch (id) {
         case Id::LedFitted:
             hwio::setLedsFitted(!hwio::ledsFitted());
-            ledsOff();
-            part([] { drawButton(*find(Id::LedFitted)); drawButtons(inLeds); });
+            endLedTest();
+            watchLeds();
+            part([] { drawButton(*find(Id::LedFitted)); drawButtons(inLeds); drawLedStatus(); });
             break;
         case Id::HpilLeds:
             hwio::setHpilLeds(!hwio::hpilLeds());
             part([hit] { drawButton(*hit); });
             break;
         case Id::Chase:
-            if (chase_) ledsOff();
-            else { chase_ = true; chaseStep_ = 0; nextChase_ = get_absolute_time(); }
-            part([] { drawButtons(inLeds); });
+            if (chase_) {
+                chase_ = false;
+                for (int i = 0; i < 5; ++i) { ledOn_[i] = false; hwio::setLed(i, false); }
+            } else {
+                startLedTest();
+                chase_ = true; chaseStep_ = 0; nextChase_ = get_absolute_time();
+            }
+            part([] { drawButtons(inLeds); drawLedStatus(); });
             break;
         case Id::LedOff:
-            ledsOff();
-            part([] { drawButtons(inLeds); });
+            endLedTest();                         // (back to showing TFLEDS)
+            watchLeds();
+            part([] { drawButtons(inLeds); drawLedStatus(); });
             break;
         case Id::PixFitted:
             hwio::setPixelsFitted(!hwio::pixelsFitted());   // (also hands GPIO26 to the strip or LED 5)
-            pixelsOff();
+            endPixTest();
+            watchPixels();
             ledOn_[4] = false;                    // LED 5 starts off either way
+            watchLeds();
             part([] {
                 drawButton(*find(Id::PixFitted)); drawButtons(inPixels); drawCount(); drawDots(true); drawHint();
                 drawButtons(isLed);
@@ -611,20 +701,31 @@ bool hwtest_tap(int x, int y) {
         case Id::Plus: {
             const int n = hwio::pixelCount() + (id == Id::Plus ? 1 : -1);
             hwio::setPixelCount(std::max(1, std::min(kMaxPixels, n)));
-            if (solid_ != Solid::None) {          // the new pixel takes the colour too
-                for (int i = 0; i < kMaxPixels; ++i) pix_[i] = i < hwio::pixelCount() ? pix_[0] : Rgb{ 0, 0, 0 };
+            if (pixTest_) {
+                if (solid_ != Solid::None) {      // the new pixel takes the colour too
+                    for (int i = 0; i < kMaxPixels; ++i) pix_[i] = i < hwio::pixelCount() ? pix_[0] : Rgb{ 0, 0, 0 };
+                }
+                sendPixels();
+            } else {
+                watchPixels();
             }
-            sendPixels();
-            part([] { drawButton(*find(Id::Minus)); drawButton(*find(Id::Plus)); drawCount(); drawDots(true); });
+            part([] { drawButton(*find(Id::Minus)); drawButton(*find(Id::Plus)); drawCount(); drawDots(true); drawHint(); });
             break;
         }
         case Id::Run:
-            if (run_) pixelsOff();
-            else { solid_ = Solid::None; run_ = true; runStep_ = 0; runColour_ = 0; nextRun_ = get_absolute_time(); }
+            if (run_) {
+                run_ = false;
+                for (Rgb& c : pix_) c = Rgb{ 0, 0, 0 };
+                sendPixels();
+            } else {
+                startPixTest();
+                solid_ = Solid::None; run_ = true; runStep_ = 0; runColour_ = 0; nextRun_ = get_absolute_time();
+            }
             part([] { drawButtons(inPixels); drawDots(false); drawHint(); });
             break;
         case Id::Red: case Id::Green: case Id::Blue: case Id::White: {
             const int c = static_cast<int>(id) - static_cast<int>(Id::Red);
+            startPixTest();
             run_ = false;
             solid_ = static_cast<Solid>(c + 1);
             for (int i = 0; i < kMaxPixels; ++i) pix_[i] = i < hwio::pixelCount() ? kColours[c] : Rgb{ 0, 0, 0 };
@@ -633,7 +734,8 @@ bool hwtest_tap(int x, int y) {
             break;
         }
         case Id::PixOff:
-            pixelsOff();
+            endPixTest();                         // (back to showing TFPIXEL)
+            watchPixels();
             part([] { drawButtons(inPixels); drawDots(false); drawHint(); });
             break;
         case Id::Scan:
@@ -644,16 +746,20 @@ bool hwtest_tap(int x, int y) {
             return true;
         case Id::Order0: case Id::Order1: case Id::Order2: case Id::Order3: case Id::Order4: case Id::Order5:
             hwio::setPixelOrder(orderOf(id));
-            sendPixels();                                // what's showing, in the new order
+            if (pixTest_) sendPixels();                  // what's showing, in the new order
             part([] { drawButtons(inPixels); drawHint(); });
             break;
         default: {
             if (isLed(id)) {
                 const int i = static_cast<int>(id) - static_cast<int>(Id::Led1);
-                chase_ = false;
+                startLedTest();
+                if (chase_) {                     // (the chase stops: only this one)
+                    chase_ = false;
+                    for (int k = 0; k < 5; ++k) { ledOn_[k] = false; hwio::setLed(k, false); }
+                }
                 ledOn_[i] = !ledOn_[i];
                 hwio::setLed(i, ledOn_[i]);
-                part([] { drawButtons(inLeds); });
+                part([] { drawButtons(inLeds); drawLedStatus(); });
             }
             break;
         }

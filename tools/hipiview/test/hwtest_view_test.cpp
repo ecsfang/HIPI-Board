@@ -169,12 +169,41 @@ int main(int argc, char** argv) {
     // ── The page opens ───────────────────────────────────────────────
     hipi::plotterview_showHwTest();
     check(hipi::plotterview_output() == hipi::DisplayOutput::HwTest, "System -> Hardware test: the page is shown");
-    check(hwstub::active && hwstub::scans >= 1, "it takes over the hardware and scans the bus");
+    check(!hwstub::ledsTaken && !hwstub::pixelsTaken && hwstub::scans >= 1,
+          "it only looks at the LEDs and pixels (nothing taken over) and scans the bus");
     run(2000);                                              // the name box goes away
     snapshot("tools/hipiview/hwtest_1_page.png");
 
+    // ── Watching: what TFLEDS / TFPIXEL put on them shows on the page ──
+    {
+        hwstub::led[2] = true;                              // as TFLEDS "3O"
+        hwstub::pixelCount = 8;                             // as TFPIXEL "0N8" ...
+        const hwstub::Rgb cols[8] = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 },
+                                      { 0, 0, 0 }, { 255, 255, 255 }, { 40, 0, 0 }, { 255, 0, 255 } };
+        for (int i = 0; i < 8; ++i) hwstub::pixels[static_cast<std::size_t>(i)] = cols[i];
+        run(100);
+        chip.render(panel.data(), 0.0);
+        check(yellowAt(ledButton(2).x - 20, ledButton(2).y - 10) && !yellowAt(ledButton(1).x - 20, ledButton(1).y - 10),
+              "TFLEDS lights LED 3: its button lit on the page");
+        auto dot = [](int i) { return at(544 + (15 - i) * 29, 154); };   // (pixel 1 on the right)
+        auto isRed = [](std::uint32_t c) { return ((c >> 16) & 0xFF) > 150 && ((c >> 8) & 0xFF) < 80 && (c & 0xFF) < 80; };
+        auto isBlue = [](std::uint32_t c) { return ((c >> 16) & 0xFF) < 80 && (c & 0xFF) > 150; };
+        check(isRed(dot(0)) && isBlue(dot(2)), "TFPIXEL's colours on the dots (pixel 1 red, pixel 3 blue)");
+        check(((dot(6) >> 16) & 0xFF) > 40 && ((dot(6) >> 16) & 0xFF) < ((dot(0) >> 16) & 0xFF) - 60 && (dot(6) & 0xFFFF) < 0x1010,
+              "... a dim one shown dimmer");
+        check((dot(7) & 0xFFFFFF) != 0 && (dot(8) & 0xFFFFFF) == 0, "... 8 of them (TFPIXEL's count), the 9th unlit");
+        snapshot("tools/hipiview/hwtest_4_watching.png");
+        check(!hwstub::ledsTaken && !hwstub::pixelsTaken, "... and the page took nothing over");
+        hwstub::led[2] = false;
+        hwstub::pixelCount = 5;
+        for (auto& p : hwstub::pixels) p = hwstub::Rgb{ 0, 0, 0 };
+        run(100);
+        chip.render(panel.data(), 0.0);
+        check(!yellowAt(ledButton(2).x - 20, ledButton(2).y - 10) && (dot(0) & 0xFFFFFF) == 0, "TFLEDS / TFPIXEL off: off on the page too");
+    }
+
     // ── LEDs ─────────────────────────────────────────────────────────
-    check(tap(ledButton(0)) && hwstub::led[0], "LED 1 button: LED 1 on");
+    check(tap(ledButton(0)) && hwstub::led[0] && hwstub::ledsTaken, "LED 1 button: a test -- the LEDs taken over, LED 1 on");
     chip.render(panel.data(), 0.0);
     check(yellowAt(ledButton(0).x - 20, ledButton(0).y - 10), "... and its button lit");
     check(tap(ledButton(0)) && !hwstub::led[0], "again: off");
@@ -242,7 +271,7 @@ int main(int argc, char** argv) {
     }
     check(red && green && blue && white, "... a new colour every round: red, green, blue, white");
     tap(kPixOff);
-    check(litPixels() == 0, "Off: all off");
+    check(litPixels() == 0 && !hwstub::pixelsTaken, "Off: all off, the pixels given back (watched again)");
 
     // ── I2C ──────────────────────────────────────────────────────────
     const int before = hwstub::scans;
@@ -260,7 +289,7 @@ int main(int argc, char** argv) {
     chip.render(panel.data(), 0.0);
     check(!yellowAt(SCREEN_MAX_X - 32, 13) && yellowAt(SCREEN_MAX_X - 120, 13), "the close button in the title bar");
     check(tap({ SCREEN_MAX_X - 30, 14 }), "the close button is touched");
-    check(hipi::plotterview_output() != hipi::DisplayOutput::HwTest && !hwstub::active,
+    check(hipi::plotterview_output() != hipi::DisplayOutput::HwTest && !hwstub::ledsTaken && !hwstub::pixelsTaken,
           "leaving: back to the view before, the hardware given back");
     check(!tap(ledButton(0)) && !hwstub::led[0], "taps do nothing once it's closed");
 

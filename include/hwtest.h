@@ -12,8 +12,12 @@
 //           (i2c_ident.h), looked at again every 3 s; Scan shows the
 //           classic i2cdetect grid of all addresses.
 //
-// While the page is shown it owns the LEDs and the pixels (hwtest_io.h);
-// leaving it switches them off and gives them back.
+// Until a test of its own starts the page only looks: the LED buttons and
+// the dots show what TFLEDS / TFPIXEL (and HP-IL activity) put on them
+// (hwio::ledLevel(), hwio::pixelShown()) -- a program tried without LEDs
+// or pixels fitted. An LED button or Chase takes the LEDs over, Run or a
+// colour the pixels (hwio::takeLeds() / takePixels()); Off -- or leaving
+// the page -- switches them off and gives them back.
 //
 // Shown as the DisplayOutput::HwTest view (plotterview_showHwTest()).
 #pragma once

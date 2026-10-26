@@ -10,11 +10,24 @@
 namespace hipi {
 namespace hwio {
 
-// The page opens: it takes over the LEDs (HP-IL activity held, TFLEDS'
-// state dropped) and the pixels (TFPIXEL's effects stopped), all off
-void begin();
-// The page closes: LEDs and pixels off, HP-IL activity back (if chosen)
-void end();
+// The page only looks at the LEDs and pixels until one of its own tests
+// starts: then it takes them over -- the LEDs (HP-IL activity held,
+// TFLEDS' state dropped, all off) or the pixels (TFPIXEL's effects
+// stopped, all off) -- and gives them back (off, HP-IL activity back)
+// when the test ends or the page closes.
+void takeLeds();
+void releaseLeds();
+void takePixels();
+void releasePixels();
+// Both at once (the demo's light show)
+inline void begin() { takeLeds(); takePixels(); }
+inline void end() { releaseLeds(); releasePixels(); }
+
+// What's on them now, whoever drives them (TFLEDS, TFPIXEL, HP-IL
+// activity, the page): an LED's level 0..100 % (blinking and fading as
+// it goes), a pixel's colour as the strip is sent it (effects included)
+float ledLevel(int index);                       // index 0..4 = LED 1..5
+void pixelShown(int index, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b);
 
 void setLed(int index, bool on);                 // index 0..4 = LED 1..5
 void setPixel(int index, std::uint8_t r, std::uint8_t g, std::uint8_t b);

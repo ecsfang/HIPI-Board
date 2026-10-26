@@ -10,19 +10,34 @@ extern hipi::Config config;
 namespace hipi {
 namespace hwio {
 
-void begin() {
+void takeLeds() {
     hpil_leds_hold(true);
     for (int i = 0; i < 5; ++i) leds[i]->off();
+}
+
+void releaseLeds() {
+    for (int i = 0; i < 5; ++i) leds[i]->off();
+    hpil_leds_hold(false);
+}
+
+void takePixels() {
     pixelStrip.stopAllEffects();
     pixelStrip.clear();
     pixelStrip.show();
 }
 
-void end() {
-    for (int i = 0; i < 5; ++i) leds[i]->off();
+void releasePixels() {
     pixelStrip.clear();
     pixelStrip.show();
-    hpil_leds_hold(false);
+}
+
+float ledLevel(int index) {
+    if (index < 0 || index > 4) return 0.0f;
+    return leds[index]->getCurrentPct();
+}
+
+void pixelShown(int index, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) {
+    pixelStrip.bufferColor(static_cast<uint32_t>(index), r, g, b);
 }
 
 void setLed(int index, bool on) {

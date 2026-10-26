@@ -277,6 +277,9 @@ int main(int argc, char** argv) {
     bool fitAxesShot = false, machineSeen = false, typeHighlight = false, machineShot = false, hwtestSeen = false;
     std::uint64_t machineAt = 0;
     bool fitSeen = false, digitized = false, digiShot = false, wasDigitizing = false;
+    // The ERROR light: lit, its text shown (a touch on it), put out again
+    bool errLit = false, errTextShown = false, errOut = false;
+    std::uint64_t errAt = 0;
     std::uint64_t digiFrom = 0;
     int digX = -1, digY = -1;
     std::uint64_t changedAt = fakeNowUs;
@@ -312,6 +315,18 @@ int main(int argc, char** argv) {
             digY = -digY - 1;                                  // (once)
         }
         wasDigitizing = digi;
+        {
+            int ex = 0, ey = 0;
+            const bool lit = hipi::plotterview_errorLightPoint(ex, ey);
+            if (lit && !errLit) { errLit = true; errAt = fakeNowUs; }
+            if (lit && errAt != 0 && fakeNowUs - errAt > 2000000) { snapshot("../demo_run_error_light.png"); errAt = 0; }
+            if (lit && !errTextShown && hipi::plotterview_isSplashVisible()) {
+                errTextShown = true;
+                run(200);
+                snapshot("../demo_run_error_text.png");
+            }
+            if (errTextShown && !lit && plotter->errorCode() == 0) errOut = true;
+        }
         // The Fit view while the axes are drawn, a piece at a time
         if (!fitAxesShot && o == hipi::DisplayOutput::Plotter && hipi::plotterview_plotFit() &&
             plotter->segments().size() >= 22 && plotter->segments().size() < 30) {
@@ -367,6 +382,10 @@ int main(int argc, char** argv) {
     check(plotted, "the plotter draws");
     check(fitSeen, "a plot in the Fit view");
     if (digY < 0) digY = -digY - 1;
+    check(errLit && plotter->errorLog().size() >= 1 && plotter->errorLog().back().code == 2,
+          "an HP-GL error (SC with two numbers): the ERROR light lit, error 2");
+    check(errTextShown, "... touched: the message box says what it was");
+    check(errOut, "... OE: the light out again");
     std::printf("     digitized: %d,%d (the top of SIN(X)/X: %d,%d)\n", digX, digY, hipi::demo::kFunctionPeakX, hipi::demo::kFunctionPeakY);
     check(digitized && digiShot && std::abs(digX - hipi::demo::kFunctionPeakX) < 60 && std::abs(digY - hipi::demo::kFunctionPeakY) < 60,
           "digitizing: the panel, a point picked and nudged onto SIN(X)/X's top");

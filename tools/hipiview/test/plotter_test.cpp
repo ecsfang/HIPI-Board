@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -301,6 +302,90 @@ int main() {
         check(r.penX() == 1225 || r.penX() == 1224 || r.penX() == 1226, "CA3 + SO/SI in the label: the ring over the A (two cells)");
         send(r, "IP200,200,5000,5000,600;OE;");
         check(r.outputText() == "2\r\n", "IP with five numbers: error 2, ignored");
+    }
+
+    {
+        // Errors as the manual has them (OE's numbers), the E-mask (IM),
+        // the ERROR light (errorCode()) and HIPI's error log
+        CPlotter p("TFPLOT");
+        auto oe = [&](const std::string& hpgl) {
+            send(p, "IN;" + hpgl + ";OE;");
+            const std::string t = p.outputText();
+            return t.empty() ? -1 : std::atoi(t.c_str());
+        };
+        check(oe("PA1000,1000,2000") == 2, "PA with an odd number: error 2");
+        send(p, "IN;PD;PA1000,1000,2000;");
+        check(p.penX() == 1000 && p.penY() == 1000, "... the pair before it still drawn to");
+        check(oe("PA40000,1000") == 3, "PA beyond 32767: error 3");
+        check(oe("SP40000") == 3, "SP 40000: error 3");
+        check(oe("VS97") == 3 && oe("VS38") == 0, "VS 97: error 3, VS 38: fine");
+        check(oe("SI1") == 2 && oe("SR1,2,3") == 2 && oe("SI0.5,0.8") == 0, "SI/SR: both or none (error 2)");
+        check(oe("SR200,1") == 3 && oe("SL200") == 3 && oe("TL130") == 3, "SR/SL/TL beyond 127.9999: error 3");
+        check(oe("DI0,0") == 3 && oe("DI1") == 2 && oe("DR0,0") == 3 && oe("DR1,0,5") == 2, "DI/DR: 0,0 error 3, one or three numbers error 2");
+        check(oe("IW1,2,3") == 2 && oe("CI") == 2 && oe("AA1,2") == 2, "IW/CI/AA: wrong number: error 2");
+        check(oe("LT200") == 3 && oe("LT9") == 0 && oe("LT-5") == 0, "LT 200: error 3; LT 9 ignored, LT -5 solid: no error");
+        check(oe("AP;AF;AH;EC;VA;VN") == 0 && p.unsupportedSeen().empty(), "AP AF AH EC VA VN: no-ops, no error");
+        check(oe("ZZ") == 1, "ZZ: error 1");
+
+        // The light: lit by an error, out after OE, IN or HIPI's Clear error
+        send(p, "IN;SC0,100;");
+        check(p.errorCode() == 2, "the ERROR light: lit (error 2)");
+        check(!p.errorLog().empty() && p.errorLog().back().code == 2 &&
+              std::string(p.errorLog().back().command) == "SC 0,100", "the log: error 2, \"SC 0,100\"");
+        const std::uint32_t serial = p.errorSerial();
+        send(p, "OE;");
+        check(p.errorCode() == 0 && p.errorSerial() != serial, "OE puts the light out (and the view hears of it)");
+        send(p, "XX;");
+        p.clearError();
+        check(p.errorCode() == 0, "Clear error (HIPI's menu): out");
+        send(p, "OE;");
+        check(p.outputText() == "0\r\n", "... and OE says 0 then");
+        send(p, "XX;IN;");
+        check(p.errorCode() == 0 && p.errorLog().size() >= 3, "IN puts it out; the log is kept");
+
+        // E-mask: IM 223 (default) leaves out error 6; IM 0 keeps nothing
+        send(p, "IN;IM0;ZZ;OE;");
+        check(p.outputText() == "0\r\n" && p.errorCode() == 0, "IM0: an unknown instruction leaves no error");
+        send(p, "IN;IM4;SC1;OE;");
+        check(p.outputText() == "0\r\n", "IM4 (error 3 only): error 2 not kept");
+        send(p, "IM4;SP40000;OE;");
+        check(p.outputText() == "3\r\n", "... error 3 kept");
+        send(p, "IN;SI1,1;CP0,-30000;CP0,-30000;OE;");
+        check(p.outputText() == "0\r\n", "position overflow (error 6): not kept with the default mask");
+        send(p, "IN;IM32;SI1,1;CP0,-30000;CP0,-30000;OE;");
+        check(p.outputText() == "6\r\n", "... kept with IM 32");
+        // DF puts the mask back too
+        send(p, "IN;IM0;DF;ZZ;OE;");
+        check(p.outputText() == "1\r\n", "DF: the E-mask back to 223");
+        for (std::size_t i = 0; i < CPlotter::kErrorLogSize + 2; ++i) send(p, "QQ;");
+        check(p.errorLog().size() == CPlotter::kErrorLogSize, "the log keeps the last 8");
+    }
+    {
+        // HP-IL: SDI "HP7470A" CR LF; SST the OS byte (bit 3 not cleared), then ETO
+        CPlotter p("TFPLOT");
+        p.setEnabled(true);
+        p.hpil(AAU);
+        p.hpil(AAD + 1);
+        p.hpil(TAD + 1);
+        std::string id;
+        IL_CMD_t f = p.hpil(SDI);
+        for (int i = 0; i < 20 && f != ETO; ++i) { id += static_cast<char>(f & 0xFF); f = p.hpil(f); }
+        check(id == "HP7470A\r\n", "SDI: \"HP7470A\" CR LF");
+        const IL_CMD_t st = p.hpil(SST);
+        check(st == 24, "SST: 24 after power-on (initialized, ready)");
+        check(p.hpil(st) == ETO, "... then ETO");
+        const IL_CMD_t st2 = p.hpil(SST);
+        p.hpil(st2);
+        check(st2 == 24, "SST again: still 24 (SST doesn't clear bit 3, OS does)");
+        p.hpil(UNT);
+        p.hpil(LAD + 1);
+        for (char c : std::string("ZZ;")) p.hpil(static_cast<IL_CMD_t>(static_cast<unsigned char>(c)));
+        p.hpil(UNL);
+        p.hpil(TAD + 1);
+        const IL_CMD_t st3 = p.hpil(SST);
+        p.hpil(st3);
+        check(st3 == (24 | 32), "SST with an error: bit 5 (56)");
+        p.hpil(UNT);
     }
 
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");

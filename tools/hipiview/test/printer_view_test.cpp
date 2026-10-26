@@ -512,6 +512,51 @@ int main(int argc, char** argv) {
     }
     hipi::plotterview_setPlotFit(false);
 
+    // ── Plotter: the ERROR light -- lit by an HP-GL error, on top of the
+    //    plot, a touch says what it was, OE puts it out ───────────────────
+    {
+        for (char c : std::string("IN;SP1;PU;PA1000,1000;PD;PA9000,7000;PU;")) plotter->put(c);
+        run(100);
+        int lx = 0, ly = 0;                  // the LED: top centre, 18 px into the box
+        lx = ((1024 - 112) / 2 & ~3) + 18;
+        ly = 8 + 16;
+        chip.render(panel.data(), 0.0);
+        const std::uint32_t paper = at(lx, ly);
+        check(((paper >> 16) & 0xFF) < 200 || (paper & 0xFF) > 60, "no error: no ERROR light");
+        for (char c : std::string("SC0,100;")) plotter->put(c);   // error 2
+        run(50);
+        chip.render(panel.data(), 0.0);
+        const std::uint32_t led = at(lx, ly);
+        std::printf("     the LED: %06X\n", led);
+        check(((led >> 16) & 0xFF) > 150 && ((led >> 8) & 0xFF) > 150 && (led & 0xFF) < 60, "SC with two numbers: the ERROR light is lit (yellow)");
+        snapshot("tools/hipiview/printer_view_error_light.png");
+        // A line drawn right through it: the light stays on top
+        for (char c : std::string("PU;PA0,7600;PD;PA10300,7600;PU;")) plotter->put(c);
+        run(50);
+        chip.render(panel.data(), 0.0);
+        check(at(lx, ly) == led, "a line drawn through it: the light stays on top");
+        check(hipi::plotterview_errorText() == "Error 2: wrong number of parameters -- SC 0,100",
+              "its text: \"Error 2: wrong number of parameters -- SC 0,100\"");
+        check(!hipi::plotterview_errorLightTap(lx, 300), "a touch beside it: not taken");
+        check(hipi::plotterview_errorLightTap(lx, ly) && hipi::plotterview_isSplashVisible(),
+              "a touch on it: the message box");
+        run(3000);
+        for (char c : std::string("OE;")) plotter->put(c);         // reading the error puts it out
+        run(50);
+        chip.render(panel.data(), 0.0);
+        check(at(lx, ly) != led && plotter->errorCode() == 0, "OE: the light goes out, the plot under it back");
+        check(!hipi::plotterview_errorLightTap(lx, ly), "... and a touch there does nothing");
+        for (char c : std::string("ZZ;")) plotter->put(c);
+        run(50);
+        hipi::plotterview_redraw();
+        chip.render(panel.data(), 0.0);
+        check(at(lx, ly) == led, "an error, then the plot redrawn: the light is drawn again");
+        plotter->clearError();
+        run(50);
+        chip.render(panel.data(), 0.0);
+        check(at(lx, ly) != led, "Clear error (the menu): out");
+    }
+
     // A message box ("Saved screendump_3.bmp" ...) writes its text with the
     // chip's one text cursor: afterwards it's back at the display's cursor
     hipi::plotterview_showView(hipi::DisplayOutput::Display, nullptr);

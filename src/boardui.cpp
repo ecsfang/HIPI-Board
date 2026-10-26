@@ -342,6 +342,13 @@ void showInfoBox() {
         display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
     }
 
+    // The plotter's ERROR light, while it's lit
+    if (plotter != nullptr && plotter->errorCode() != 0) {
+        std::snprintf(buf, sizeof(buf), "%s: ERROR %d (%s)", plotter->name(), plotter->errorCode(),
+                      CPlotter::errorText(plotter->errorCode()));
+        display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
+    }
+
     std::snprintf(buf, sizeof(buf), "Trace: %s",
                   config.extTrace() ? "Extended" : (config.trace() ? "On" : "Off"));
     display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
@@ -670,6 +677,13 @@ void boardui_poll() {
             dialog_->handleButton(repeatButton, /*repeat=*/true);
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);  // keep the strip up
     }
+    // Hardware test page: no button strip over it (left up by the menu
+    // that opened the page, or a button from hipiview) -- the page's own
+    // buttons reach the right edge, and its X closes it
+    if (buttonStripVisible && pressedButton == Button::None && dialog_ != nullptr && !dialog_->isOpen() &&
+        plotterview_output() == DisplayOutput::HwTest && !plotterview_isSplashVisible()) {
+        hideButtonStrip();
+    }
     // Auto-hide the info box after kInfoBoxShowMs, same idea as the button
     // strip's own countdown below.
     if (infoBoxVisible && !saverActive && time_reached(infoBoxHideDeadline)) {
@@ -920,8 +934,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
                                                     static_cast<int>(deviceListCache.size())));
     } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::CharTable) {
         plotterview_leaveCharTable();         // the character table: any touch closes it
-    } else if (!dialog_->isOpen() && !(stripZone && buttonStripVisible) &&
-               plotterview_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
+    } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
         // Hardware test: its buttons (checked before the corners). Its
         // buttons reach the right edge (and its close button sits there):
         // they get the touch unless the strip is showing -- a touch there
@@ -936,6 +949,8 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     } else if (!dialog_->isOpen() && !stripZone && plotterview_digitizeTap(x, y)) {
         // Plotter view while the plotter waits for a point (HP-GL DP): the
         // touch is that point (checked before the corners: a point may be there)
+    } else if (!dialog_->isOpen() && !stripZone && plotterview_errorLightTap(x, y)) {
+        // Plotter view: the ERROR light -- what the error was (a message box)
     } else if (printerHit.spot != PrinterHotspot::None) {
         handlePrinterTouch(printerHit);
     } else if (isInfoCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest &&
@@ -1011,6 +1026,9 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
             return;
         }
         if (!inStripZone) return;
+        // Hardware test page: no button strip -- its own buttons reach the
+        // right edge (the close X, pixel Off), and the X closes the page
+        if (plotterview_output() == DisplayOutput::HwTest && !dialog_->isOpen()) return;
 
         const bool wasHidden = !buttonStripVisible;
         if (wasHidden) {

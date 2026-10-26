@@ -8,7 +8,8 @@
 //   and the media map where it lies, CREATE MEDIA filled in (never
 //   created), a made-up disk's media map BY TYPE / BY MACHINE; the plotter:
 //   the HIPI logo, a spirograph (with a screendump), a function plot in the
-//   Fit view and digitizing on it, an HP-IL loop drawing; the printer (its
+//   Fit view and digitizing on it, an HP-GL error (the ERROR light, touched,
+//   put out by OE), an HP-IL loop drawing; the printer (its
 //   paper pulled up and torn off); a made-up HP-41 session on a made-up
 //   loop (PILBOX's PC devices, devices after HIPI) in the analyzer,
 //   the loop map (a card's details) and the HP-IL signals (the example,

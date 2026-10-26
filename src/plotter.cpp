@@ -22,6 +22,19 @@ std::int16_t clamp16(double v) {
 // well beyond any realistic real-world label, just a backstop against a
 // program that forgets the terminator entirely.
 constexpr std::size_t kMaxLabelLength = 200;
+// HP-GL parameter ranges (the manual): a coordinate, pen, radius ...
+// -32768..32767; a size, slant, direction or line type 0..127.9999
+bool in16(double v) { return v >= -32768.0 && v <= 32767.0; }
+bool all16(const std::vector<double>& p) {
+    for (double v : p) if (!in16(v)) return false;
+    return true;
+}
+bool in128(double v) { return v >= -128.0 && v < 128.0; }
+// "No-operation" instructions of the 9872 the 7470A accepts and ignores
+// (appendix C) -- no error
+bool isNop(const std::string& m) {
+    return m == "AP" || m == "AF" || m == "AH" || m == "EC" || m == "VA" || m == "VN";
+}
 }
 
 void CPlotter::reset_defaults() {
@@ -37,6 +50,7 @@ void CPlotter::reset_defaults() {
     charSlant_ = 0.0;
     dirCos_ = 1.0; dirSin_ = 0.0;
     labelTerminator_ = 0x03;  // ETX -- see plotter.h's note on DT/DF
+    errorMask_ = 223;         // IM's E-mask: every error but 6 lights ERROR
 }
 
 void CPlotter::applyRelativeSize() {
@@ -68,7 +82,9 @@ void CPlotter::reset_state() {
 
     everInitialized_ = true;  // OS's power-on status bit, see plotter.h
     p1p2Changed_ = false;
+    if (error_ != 0) ++errorSerial_;          // (the ERROR light goes out)
     error_ = 0;
+    sstPending_ = false;
     symbol_ = '\0';
     lineType_ = -1;
     patternPct_ = 4.0;
@@ -113,6 +129,36 @@ void CPlotter::digitize(std::int16_t x, std::int16_t y) {
     LOGF("\r\n * %s: digitized point %d,%d", name(), x, y);
 }
 
+void CPlotter::setError(int code) {
+    if (code < 1 || code > 8 || !(errorMask_ & (1 << (code - 1)))) return;   // (masked: never known)
+    error_ = code;
+    ++errorSerial_;
+    ErrorEntry e{};
+    e.code = static_cast<std::uint8_t>(code);
+    if (cmd_ != nullptr) {
+        // The command as sent, shortened: "SC0,100,0" -> "SC 0,100,0"
+        std::string t = cmd_->substr(0, 2);
+        if (cmd_->size() > 2) t += " " + cmd_->substr(2);
+        if (t.size() >= sizeof(e.command)) t = t.substr(0, sizeof(e.command) - 4) + "...";
+        std::snprintf(e.command, sizeof(e.command), "%s", t.c_str());
+    }
+    if (errorLog_.size() >= kErrorLogSize) errorLog_.erase(errorLog_.begin());
+    errorLog_.push_back(e);
+    LOGF("\r\n * %s: HP-GL error %d (%s): %s", name(), code, errorText(code), e.command);
+}
+
+// OS's status byte: 1 pen down, 2 P1/P2 changed, 4 a digitized point, 8
+// initialized, 16 ready for data (always), 32 error
+int CPlotter::statusByte() {
+    int status = 16;
+    if (penDown_) status |= 1;
+    if (p1p2Changed_) status |= 2;
+    if (pointReady_) status |= 4;
+    if (everInitialized_) status |= 8;
+    if (error_ != 0) status |= 32;
+    return status;
+}
+
 void CPlotter::clear(void) {
     MTRC_LOGF("clear (DCL/SDC)");
     reset_state();
@@ -136,6 +182,20 @@ void CPlotter::doListener(IL_CMD_t cmd, IL_CMD_t *rtn) {
 // SDA as "send the next byte" left every later poll unhandled, so the
 // first byte just kept getting echoed back forever instead of advancing.
 void CPlotter::doTalker(IL_CMD_t cmd, IL_CMD_t *rtn) {
+    // Send Status (manual, chapter 11, T2): the byte OS gives -- without
+    // clearing "initialized" -- then ETO when it has come back round
+    if (cmd == SST) {
+        *rtn = static_cast<IL_CMD_t>(statusByte());
+        sstPending_ = true;
+        MTRC_LOGF("doTalker: SST -> %d", *rtn);
+        return;
+    }
+    if (sstPending_ && (IS_DATA(cmd) || cmd == NRD)) {
+        if (cmd == NRD) return;              // (ETO when our byte is back)
+        *rtn = ETO;
+        sstPending_ = false;
+        return;
+    }
     if (cmd == NRD) {
         // Do NOT clear midTransfer_ here -- the controller's own echoed
         // copy of the last byte we sent is still coming back around the
@@ -536,6 +596,9 @@ void CPlotter::moveThroughParams(const std::vector<double>& params) {
     // without, plotter units as given (a fraction dropped).
     for (std::size_t i = 0; i + 1 < params.size(); i += 2) {
         double x = params[i], y = params[i + 1];
+        // Out of range (plotter units: -32768..32767): this pair is
+        // discarded, error 3 -- the others still count
+        if (!scaling_ && (!in16(x) || !in16(y))) { setError(3); continue; }
         if (scaling_) {
             const double fx = (p2x_ - p1x_) / (scX2_ - scX1_), fy = (p2y_ - p1y_) / (scY2_ - scY1_);
             if (coordMode_ == CoordMode::Absolute) {
@@ -555,6 +618,8 @@ void CPlotter::moveThroughParams(const std::vector<double>& params) {
         doMove(clamp16(x), clamp16(y));
         if (symbol_ != '\0') drawSymbol();
     }
+    // An odd number: the pairs before it are drawn, the last one isn't (error 2)
+    if (params.size() % 2 != 0) setError(2);
 }
 
 void CPlotter::drawSymbol() {
@@ -695,12 +760,20 @@ void CPlotter::execute(const std::string& cmd) {
     if (cmd.size() < 2) return;
     const std::string mnemonic = cmd.substr(0, 2);
     const std::vector<double> params = parseParams(cmd, 2);
+    cmd_ = &cmd;                              // (an error names it -- setError())
+    executeCommand(cmd, mnemonic, params);
+    cmd_ = nullptr;
+}
+
+void CPlotter::executeCommand(const std::string& cmd, const std::string& mnemonic,
+                              const std::vector<double>& params) {
 
     if (mnemonic == "IN") {
         MTRC_LOGF("IN (initialize/reset)");
         reset_state();
         if (onClear_) onClear_();
     } else if (mnemonic == "SP") {
+        if (!params.empty() && !in16(params[0])) { setError(3); return; }   // (the pen stays)
         currentPen_ = params.empty() ? 0 : static_cast<std::uint8_t>(params[0]);
         MTRC_LOGF("SP -> pen=%u", currentPen_);
         if (onPenChanged_) onPenChanged_(currentPen_, penDown_);
@@ -764,6 +837,7 @@ void CPlotter::execute(const std::string& cmd) {
         char buf[16];
         std::snprintf(buf, sizeof(buf), "%d\r\n", error_);
         MTRC_LOGF("OE (output error) -> %d", error_);
+        if (error_ != 0) ++errorSerial_;     // (the ERROR light goes out)
         error_ = 0;
         queueOutput(buf);
     } else if (mnemonic == "OI") {
@@ -785,22 +859,11 @@ void CPlotter::execute(const std::string& cmd) {
         MTRC_LOGF("OO (output options)");
         queueOutput("0,1,0,0,1,0,0,0\r\n");
     } else if (mnemonic == "OS") {
-        // Output Status -- an 8-bit status byte. We only meaningfully
-        // track bit 0 (pen down) and bit 3 (initialized, one-shot --
-        // cleared the moment it's read, matching the spec); bit 4 (ready
-        // for data) is always set since we have no real motors/pinch
-        // wheels to wait on, and bit 5 (error) stays clear since OE
-        // always reports no error. Power-on value is 24 (8+16), matching
-        // the manual.
-        int status = 16;
-        if (penDown_) status |= 1;
-        if (p1p2Changed_) { status |= 2; p1p2Changed_ = false; }
-        if (pointReady_) status |= 4;
-        if (error_ != 0) status |= 32;
-        if (everInitialized_) {
-            status |= 8;
-            everInitialized_ = false;
-        }
+        // Output Status -- statusByte(); reading it clears "initialized"
+        // (bit 3) and "P1/P2 changed" (bit 1). Power-on value 24 (8+16).
+        const int status = statusByte();
+        everInitialized_ = false;
+        p1p2Changed_ = false;
         char buf[16];
         std::snprintf(buf, sizeof(buf), "%d\r\n", status);
         MTRC_LOGF("OS (output status) -> %d", status);
@@ -816,6 +879,7 @@ void CPlotter::execute(const std::string& cmd) {
         // Tick Length: tp[,tn] as percentages of the P1-P2 span. tn
         // defaults to tp if omitted; bare "TL" resets both to the HP-GL
         // default (0.5%).
+        for (double v : params) if (!in128(v)) { setError(3); return; }   // (-128..127.9999)
         tickLenPos_ = params.empty() ? 0.5 : params[0];
         tickLenNeg_ = params.size() > 1 ? params[1] : tickLenPos_;
         MTRC_LOGF("TL pos=%.3f%% neg=%.3f%%", tickLenPos_, tickLenNeg_);
@@ -829,6 +893,8 @@ void CPlotter::execute(const std::string& cmd) {
         // Input Window: a clip rectangle for every subsequently drawn
         // line (PD, ticks, label strokes) -- bare "IW" resets it to the
         // full P1-P2 area (i.e. no extra clipping).
+        if (!params.empty() && params.size() != 4) { setError(2); return; }
+        if (!all16(params)) { setError(3); return; }
         if (params.size() < 4) {
             iw1x_ = 0; iw1y_ = 0; iw2x_ = kMaxX; iw2y_ = kMaxY;   // (the whole area, as after IN)
             MTRC_LOGF("IW reset to P1-P2");
@@ -843,7 +909,10 @@ void CPlotter::execute(const std::string& cmd) {
         }
     } else if (mnemonic == "SR") {
         // Character size: width%,height% of the P1-P2 span. Bare "SR"
-        // resets to the HP-GL default (0.75%, 1.5%).
+        // resets to the HP-GL default (0.75%, 1.5%). Both or none (else
+        // error 2), each -128..127.9999 (else 3); in error: ignored
+        if (params.size() == 1 || params.size() > 2) { setError(2); return; }
+        if (params.size() == 2 && (!in128(params[0]) || !in128(params[1]))) { setError(3); return; }
         const double wPct = params.empty() ? 0.75 : params[0];
         const double hPct = params.size() > 1 ? params[1] : wPct;
         charRelW_ = wPct;
@@ -864,6 +933,8 @@ void CPlotter::execute(const std::string& cmd) {
         // free -- glyphToPlotter()'s scaling already flips correctly for a
         // negative charWidthUnits_/charHeightUnits_.
         constexpr double kUnitsPerCm = 400.0;  // 10 mm/cm * 40 units/mm
+        if (params.size() == 1 || params.size() > 2) { setError(2); return; }   // (as SR)
+        if (params.size() == 2 && (!in128(params[0]) || !in128(params[1]))) { setError(3); return; }
         const double wCm = params.empty() ? 0.19 : params[0];
         const double hCm = params.size() > 1 ? params[1] : 0.27;
         charWidthUnits_  = wCm * kUnitsPerCm;
@@ -876,11 +947,16 @@ void CPlotter::execute(const std::string& cmd) {
     } else if (mnemonic == "SL") {
         // Character slant: a shear factor (dx per unit y), not an angle in
         // degrees -- matches how oo7470A.rx's PxCSA is used directly.
+        if (!params.empty() && !in128(params[0])) { setError(3); return; }
         charSlant_ = params.empty() ? 0.0 : params[0];
         MTRC_LOGF("SL slant=%.3f", charSlant_);
     } else if (mnemonic == "DI") {
         // Label direction: a (run,rise) vector: bare "DI" resets to the
         // default (horizontal, i.e. (1,0)).
+        // One number or more than two: error 2; 0,0: error 3 -- ignored
+        if (params.size() == 1 || params.size() > 2) { setError(2); return; }
+        if (params.size() == 2 && params[0] == 0.0 && params[1] == 0.0) { setError(3); return; }
+        if (!all16(params)) { setError(3); return; }
         if (params.empty()) {
             dirCos_ = 1.0; dirSin_ = 0.0;
         } else {
@@ -900,7 +976,7 @@ void CPlotter::execute(const std::string& cmd) {
         // the CR point (as the 7470A / emu7470: "LBSALES $" "CP-9,-1"
         // "LB(THOUSANDS)" starts the second label 9 spaces left of where
         // the first line began, not of where it ended)
-        if (params.size() == 1) { error_ = 2; return; }     // (one number: wrong)
+        if (params.size() == 1 || params.size() > 2) { setError(2); return; }   // (one number, or three: wrong)
         const double dCols = params.empty() ? 0.0 : params[0];
         const double dRows = params.empty() ? -1.0 : params[1];
         const double sp = 1.5 * charWidthUnits_, ln = 2.0 * charHeightUnits_;
@@ -908,6 +984,7 @@ void CPlotter::execute(const std::string& cmd) {
         cpOffY_ = dCols * sp * dirSin_;
         crPosX_ -= dRows * ln * dirSin_;
         crPosY_ += dRows * ln * dirCos_;
+        if (!in16(crPosX_) || !in16(crPosY_)) setError(6);   // (position overflow -- masked by default)
         penX_ = clamp16(std::floor(crPosX_ + 0.5));          // (pen up -- nothing drawn)
         penY_ = clamp16(std::floor(crPosY_ + 0.5));
         if (onMove_ && !penDown_) onMove_(penX_, penY_);
@@ -916,7 +993,8 @@ void CPlotter::execute(const std::string& cmd) {
         // Circle: radius[,chord angle] around the pen -- the pen goes up
         // to the start (0 degrees; a negative radius: 180), down for the
         // circle, up again and back to the centre, then as it was
-        if (params.empty()) return;
+        if (params.empty() || params.size() > 2) { setError(2); return; }
+        if (!all16(params)) { setError(3); return; }
         const double r = params[0];
         const double chord = params.size() > 1 ? params[1] : 5.0;
         double fx, fy;
@@ -935,7 +1013,8 @@ void CPlotter::execute(const std::string& cmd) {
         // Arc: centre x,y (AA absolute, AR from the pen), angle (degrees,
         // positive = counter-clockwise)[,chord angle] -- from the pen,
         // drawn if the pen is down; the pen ends at the arc's end
-        if (params.size() < 3) return;
+        if (params.size() < 3 || params.size() > 4) { setError(2); return; }
+        if (!all16(params)) { setError(3); return; }
         double fx, fy;
         unitFactors(fx, fy);
         double cx, cy;
@@ -958,9 +1037,10 @@ void CPlotter::execute(const std::string& cmd) {
         // the defaults; two numbers: P1 moves there and P2 with it (same
         // size). User units (SC) follow: they map onto the new P1..P2.
         if (params.size() != 0 && params.size() != 2 && params.size() != 4) {
-            error_ = 2;                      // (wrong number of parameters: ignored)
+            setError(2);                     // (wrong number of parameters: ignored)
             return;
         }
+        if (!all16(params)) { setError(3); return; }      // (P1/P2 don't change)
         if (params.empty()) {
             p1x_ = kP1X; p1y_ = kP1Y; p2x_ = kP2X; p2y_ = kP2Y;
         } else if (params.size() >= 2) {
@@ -983,7 +1063,7 @@ void CPlotter::execute(const std::string& cmd) {
         // ymax at P2 -- for PA/PR/PU/PD from now on. Bare "SC" (or a range
         // of zero): back to plotter units.
         if (params.size() != 0 && params.size() != 4) {
-            error_ = 2;                      // (wrong number of parameters: ignored)
+            setError(2);                     // (wrong number of parameters: ignored)
             return;
         }
         if (params.size() == 4 && params[1] != params[0] && params[3] != params[2]) {
@@ -1008,23 +1088,35 @@ void CPlotter::execute(const std::string& cmd) {
         MTRC_LOGF("DF (defaults)");
     } else if (mnemonic == "DR") {
         // Relative direction: run,rise in % of P1..P2's width/height (the
-        // label slants with P1/P2's shape); bare DR: horizontal
+        // label slants with P1/P2's shape); bare DR: horizontal. One
+        // number or three: error 2, 0,0: error 3 -- ignored
+        if (params.size() == 1 || params.size() > 2) { setError(2); return; }
+        if (params.size() == 2 && ((params[0] == 0.0 && params[1] == 0.0) || !all16(params))) { setError(3); return; }
         const double run = params.empty() ? 1.0 : params[0] / 100.0 * (p2x_ - p1x_);
         const double rise = params.size() > 1 ? params[1] / 100.0 * (p2y_ - p1y_) : 0.0;
         const double mag = std::sqrt(run * run + rise * rise);
         if (mag > 1e-9) { dirCos_ = run / mag; dirSin_ = rise / mag; }
         crPosX_ = penX_; crPosY_ = penY_;
         MTRC_LOGF("DR cos=%.3f sin=%.3f", dirCos_, dirSin_);
-    } else if (mnemonic == "VS" || mnemonic == "IM") {
-        // Pen speed / input mask (which errors light the error LED, ask
-        // for service): nothing to do here
-        MTRC_LOGF("%s (accepted, nothing to do)", mnemonic.c_str());
+    } else if (mnemonic == "VS") {
+        // Pen speed: nothing to draw differently -- but 0..96.9999 only
+        if (!params.empty() && (params[0] < 0.0 || params[0] >= 97.0)) { setError(3); return; }
+        MTRC_LOGF("VS (accepted)");
+    } else if (mnemonic == "IM") {
+        // Input mask: the E-mask says which errors are kept at all (and
+        // light ERROR); bare IM: 223. The S- and P-masks are HP-IB only.
+        if (params.empty()) { errorMask_ = 223; return; }
+        if (params[0] < 0.0 || params[0] > 255.0) { setError(3); return; }
+        errorMask_ = static_cast<int>(params[0]);
+        MTRC_LOGF("IM E-mask %d", errorMask_);
+    } else if (isNop(mnemonic)) {
+        MTRC_LOGF("%s (a 9872 instruction: no operation)", mnemonic.c_str());
     } else if (mnemonic == "CS" || mnemonic == "CA") {
         // Character set 0..4 (standard / alternate); another number: error
         // 3, ignored. Bare: set 0
         const int set = params.empty() ? 0 : static_cast<int>(params[0]);
         if (set < 0 || set > 4) {
-            error_ = 3;
+            setError(3);                     // (the CS/CA pages: 3; appendix C's list says 5)
         } else if (mnemonic == "CS") {
             charSet_ = set;
         } else {
@@ -1036,7 +1128,11 @@ void CPlotter::execute(const std::string& cmd) {
     } else if (mnemonic == "LT") {
         // Line type 0..6[,pattern length in % of the P1..P2 diagonal,
         // default 4]; bare LT: solid
-        if (params.empty() || params[0] < 0 || params[0] > 6) {
+        // (the manual: 7..127.9999 ignored, no error; 128 or more, or
+        // below -128: error 3, unchanged; -128..0: solid)
+        if (!params.empty() && (params[0] >= 128.0 || params[0] < -128.0)) { setError(3); return; }
+        if (!params.empty() && params[0] >= 7.0) return;
+        if (params.empty() || params[0] < 0) {
             lineType_ = -1;
         } else {
             lineType_ = static_cast<int>(params[0]);
@@ -1073,7 +1169,7 @@ void CPlotter::execute(const std::string& cmd) {
     } else {
         // Not implemented (see plotter.h): ignored -- logged once since the
         // last IN, trace or not, so a program's missing pieces show up
-        error_ = 1;                          // OE: instruction not recognized
+        setError(1);                         // OE: instruction not recognized
         if (unsupported_.find(mnemonic + " ") == std::string::npos) {
             unsupported_ += mnemonic + " ";
             LOGF("\r\n * %s: HP-GL '%s' not supported -- ignored (\"%.40s\")", name(), mnemonic.c_str(), cmd.c_str());

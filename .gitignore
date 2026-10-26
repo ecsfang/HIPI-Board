@@ -108,3 +108,5 @@ tools/hipiview/demo_sd/
 HIPI-SD-card/
 PicoLed/
 pyilper2/
+make_freeze.txt
+scripts/do-release.txt

@@ -721,6 +721,21 @@ void buildScript() {
     add(wait(1200));
     add(hpgl([] { return demo::hpglDigitizedMark(plotter->penX(), plotter->penY()); }, 4));
     add(wait(3500));
+    // An HP-GL error: the ERROR light, a touch on it says what it was, OE
+    // (as a program reads it) puts it out
+    add(caption("AN HP-GL ERROR: THE ERROR LIGHT", 3000));
+    add(hpgl([] { return std::string("SC0,100;"); }, 3));       // (SC needs four numbers: error 2)
+    add(wait(3300));
+    add(caption("TOUCH IT: WHAT WENT WRONG", 2500));
+    add(wait(2700));
+    add(call([] {
+        int x = 0, y = 0;
+        if (plotterview_errorLightPoint(x, y)) plotterview_errorLightTap(x, y);
+    }));
+    add(wait(3200));
+    add(caption("OE READS THE ERROR - THE LIGHT GOES OUT", 2500));
+    add(hpgl([] { return std::string("OE;"); }, 3));
+    add(wait(2800));
     add(call([] { plotterview_setPlotFit(false); }));
     add(call([] { plotterview_clearPlotter(); }));
     add(caption("THE HP-IL LOOP", 2500));

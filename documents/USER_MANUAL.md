@@ -311,6 +311,33 @@ HIPI always starts with **Thin**; the choice isn't saved. It's only how
 HIPI draws: the plotter itself, and what a program reads back from it,
 stay the same.
 
+**The ERROR light.** The real 7470A has a yellow ERROR light on its front
+panel. HIPI shows it at the top of the Plotter view — a small dark box with
+a lit yellow LED and the error number, e.g. **ERROR 2** — whenever the
+plotter has received something it couldn't carry out:
+
+| Error | Meaning | E.g. |
+|-------|---------|------|
+| 1 | Instruction not recognized | `ZZ`, a letter where a number should be |
+| 2 | Wrong number of parameters | `SC 0,100` (needs four), `PA 1000,2000,3000` |
+| 3 | Bad parameter (out of range) | `SP 40000`, `VS 100`, `DI 0,0` |
+| 5 | Unknown character set | |
+| 6 | Position overflow | a label or `CP` beyond the plotter's numbers |
+
+- **Touch the light** to see what went wrong, e.g. *Error 2: wrong number
+  of parameters -- SC 0,100* — the error and the command that caused it.
+- **Errors** in the Plotter view's menu (it appears after the first error)
+  lists the last eight errors, newest first, each with its command.
+  **Clear error** there puts the light out.
+- A program reads the error with `OE` (output error), which also puts the
+  light out, as on the real plotter. `IN` puts it out too. Just looking at
+  it on HIPI doesn't: the program still gets it with `OE`.
+- `IM` (input mask) chooses which errors count at all — as on the real
+  plotter, error 6 doesn't by default.
+- While the light is lit, the plotter's card in the **Loop map** has a
+  yellow LED, its details say *ERROR 2: …*, and the info box (top-left
+  corner) has a line about it.
+
 <a href="images/view-plotter.png"><img src="images/view-plotter.png" alt="Plotter view" width="512"></a>
 
 ### 5.3 Tape
@@ -463,7 +490,7 @@ OK in a view — that view's menu
 │                    Font size < 0 > · More >
 │   └── Text >       Save as text (120 lines) · Start anew
 ├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > ·
-│                    Paper < White > · Pen < Thin > · More >
+│                    Paper < White > · Pen < Thin > · Errors > · More >
 ├── TAPE TFDRIVE     Select cassette > · Media map > · Rewind · Power < ON > · Screendump · More >
 ├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
 │                    Time < Relative > · Idle frames < Hidden > · More >
@@ -1346,13 +1373,25 @@ anything arrives on HP-IL IN.
 **System → Hardware test** is a page for trying out what's connected to
 HIPI: the five LEDs, the colour pixels and the chips on the I2C bus. Touch
 the buttons; the **✕** at the top right closes the page. The page's
-buttons reach the right edge, so there a touch goes to them; a touch at
-the edge beside them brings up the button strip as usual, where **X** also
-leaves and **OK** opens the page's menu (**Leave view**, **Scan I2C**,
-**Screendump**). The corners don't open the info box or the device list
-here (the page's buttons are there). While the page is open it drives the
-LEDs and pixels itself — what the HP-41 had set on them is switched off
-— and when you leave they are all off again.
+buttons reach the right edge, so the button strip stays away while the
+page is shown (also when the menu that opened it had it up) — a touch at
+the edge only goes to the page's buttons. The corners don't open the info
+box or the device list here (the page's buttons are there).
+
+**It shows what your program does.** When the page opens it only
+*looks*: the LED buttons light up and the row of circles shows the
+colours as `TFLEDS` and `TFPIXEL` drive them — set by the HP-41, blinking,
+fading, an effect running, HP-IL traffic on LED 4. So a program can be
+tried out even without LEDs or pixels fitted (**Fitted** must be *YES*,
+and **Count** says how many pixels: `0N8` from the HP-41 shows 8). The
+line beside **Off** and the line under the pixel buttons say *Shows what
+TFLEDS sends* / *Shows what TFPIXEL sends*.
+
+**A test of its own takes over.** Touching an LED button or **Chase**
+takes the LEDs over, **Run** or a colour the pixels: what the HP-41 had
+set on them is switched off (a running effect stops), and the page drives
+them itself. **Off** ends the test — all off — and the page shows
+`TFLEDS` / `TFPIXEL` again; leaving the page does the same.
 
 <a href="images/view-hwtest.png"><img src="images/view-hwtest.png" alt="Hardware test" width="512"></a>
 
@@ -1364,7 +1403,8 @@ LEDs and pixels itself — what the HP-41 had set on them is switched off
   whatever else you wire to that pin. Remembered. LED 1–3 and 5 are never
   used for HP-IL activity.
 - **1** – **5** switch each LED on and off. **Chase** runs a light from 1
-  to 5 over and over; **Off** switches them all off. LED 5 shares its pin
+  to 5 over and over; **Off** switches them all off and goes back to
+  showing `TFLEDS`. LED 5 shares its pin
   with the pixels: while **PIXELS → Fitted** is *YES* its button is greyed
   out and the chase stops at LED 4.
 
@@ -1380,13 +1420,15 @@ LEDs and pixels itself — what the HP-41 had set on them is switched off
   WS2811 strings BRG. Touch **Red**, then try the orders until the pixels
   really are red; then check with **Green** and **Blue**. Remembered
   (`pixel_order`), and used for `TFPIXEL` too.
-- The row of circles shows what is sent to the pixels.
+- The row of circles shows what is sent to the pixels — by `TFPIXEL`, or
+  by the page's own test (the first 16). **Pixel 1 is on the right**, as
+  the pixels sit on the board (from right to left).
 - **Run** — one pixel at a time runs along the strip, quickly, in a new
   colour every round: red, green, blue, white. With only one or two pixels
   you still see it.
 - **Red**, **Green**, **Blue**, **White** — all of them in that colour.
   If a colour comes out wrong, choose another **Order**.
-- **Off** — all off.
+- **Off** — all off, and back to showing `TFPIXEL`.
 
 **I2C**
 
@@ -1462,7 +1504,9 @@ bottom says what you're looking at:
    axes slowly, a piece at a time, so the view is seen growing with them,
    then the curves — **digitizing** on it (the digitize panel comes up, a point is
    touched, nudged with the arrows onto the curve's top and taken with
-   ENTER, then circled with its coordinates) and a drawing of the HP-IL
+   ENTER, then circled with its coordinates), an **HP-GL error** (`SC`
+   with two numbers: the **ERROR light** comes on, is touched and says
+   what went wrong, then `OE` puts it out) and a drawing of the HP-IL
    loop.
 5. **The printer** prints a program listing, a table of sines, HP-41
    characters, a sine wave and a bar chart;

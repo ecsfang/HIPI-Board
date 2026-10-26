@@ -2,6 +2,7 @@
 #include "loopmap.h"
 #include "analyzer.h"
 #include "plotterview.h"
+#include "plotter.h"
 #include "drive.h"
 #include "pilbox.h"
 #include "backlight.h"
@@ -66,6 +67,13 @@ CDevice* hipiDeviceAt(int addr) {
         if (d->enabled() && static_cast<int>(d->addr()) == addr) return d;
     }
     return nullptr;
+}
+
+// HIPI's plotter's ERROR light: its error number, 0 = out (or no plotter)
+int plotterError() {
+    for (CDevice* d : devices)
+        if (d->type() == PLOTTER && d->enabled()) return static_cast<CPlotter*>(d)->errorCode();
+    return 0;
 }
 
 // What a HIPI device emulates (its card's ID line)
@@ -253,6 +261,7 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
 constexpr std::uint16_t kYellow = 0xEDC0, kBlack = 0x0000, kWhite = 0xFFFF;
 constexpr std::uint16_t kGrey = 0x7BEF, kDark = 0x39C7, kCard = 0x10A2;
 constexpr std::uint16_t kBlue = 0x563C, kOrange = 0xF4A5;
+constexpr std::uint16_t kLedYellow = 0xFFE0;    // the plotter's ERROR light
 // Roles: talker green, listener blue (lighter than the PC cards' blue),
 // both at once magenta
 constexpr std::uint16_t kTalker = 0x07E0, kListener = 0x2B7F, kBoth = 0xF81F;
@@ -408,6 +417,14 @@ void drawCard(const Card& c) {
         else               text(c.x + 42, c.y + 66, srcText(n.src), 0, col, kCard);
     }
     roleFrame(c.x, c.y, c.w, c.h, 8, role);
+    // HIPI's plotter with its ERROR light lit: a yellow LED on the card
+    if (CDevice* d = hipiDeviceAt(c.addr)) {
+        if (d->type() == PLOTTER && static_cast<CPlotter*>(d)->errorCode() != 0) {
+            const int lx = c.x + c.w - 14, ly = c.y + 13;
+            d_->fillCircle(static_cast<std::int16_t>(lx), static_cast<std::int16_t>(ly), 6, kLedYellow);
+            d_->circle(static_cast<std::int16_t>(lx), static_cast<std::int16_t>(ly), 7, kBlack);
+        }
+    }
 }
 
 // The details box and its buttons: X CLOSE (left), and GO TO <view> VIEW
@@ -462,6 +479,12 @@ void drawDetails() {
             status = f.empty() ? "no cassette" : "cassette " + f;
         } else if (!n.haveStatus) {
             status = "ready";
+        }
+    }
+    if (CDevice* d = hipiDeviceAt(selected_)) {
+        if (d->type() == PLOTTER && static_cast<CPlotter*>(d)->errorCode() != 0) {
+            const int e = static_cast<CPlotter*>(d)->errorCode();
+            status = "ERROR " + std::to_string(e) + ": " + CPlotter::errorText(e);
         }
     }
     rows[r++] = { "Status", status };
@@ -559,6 +582,7 @@ std::string rolesNow() {
     std::string s(kMaxAddr + 2, '0');
     for (int a = 1; a <= kMaxAddr; ++a) if (nodes_[a].used) s[static_cast<std::size_t>(a)] = static_cast<char>('0' + roleOf(a, now));
     s[0] = static_cast<char>('0' + ctrlRole(now));
+    s += static_cast<char>('0' + plotterError());    // (the ERROR light came or went: redraw)
     return s;
 }
 std::string drawnRoles_;

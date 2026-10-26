@@ -40,8 +40,16 @@
 //   OA  - output actual pen position + up/down status
 //   OC  - output commanded pen position + up/down status (same format as
 //         OA -- we don't simulate motor lag, so these never differ here)
-//   OE  - output error: 1 = instruction not recognized (sets OS bit 5;
-//         reading OE clears both), 0 = none
+//   OE  - output error: the last HP-GL error (1..8, the manual's table;
+//         errorText()), 0 = none -- sets OS bit 5 and lights the ERROR
+//         light; reading OE (or IN) clears both. Errors are set as the
+//         manual has them: 1 unknown instruction, 2 wrong number of
+//         parameters (PA/PD/PU/PR with an odd number, SI/SR/DI/DR/IP/IW/
+//         SC/CP/CI/AA/AR), 3 out of range (coordinates and pens beyond
+//         -32768..32767, sizes/slant/ticks beyond -128..127.9999, VS, LT,
+//         DI/DR 0,0, CS/CA), 6 position overflow (CP)
+//   IM  - input mask: the E-mask -- which errors are kept at all (default
+//         223, every one but 6; IN and DF set it back)
 //   OI  - output identification (always "7470A")
 //   OF  - output scaling factors (always "40,40" -- fixed at the real
 //         7470A/7475A's standard resolution, 40 units/mm)
@@ -93,7 +101,9 @@
 //         circles, arcs); labels and ticks stay solid; bare LT: solid
 //   SM  - symbol mode: a character drawn centred on every point (SM; off)
 //   DR  - relative label direction (% of P1..P2's width/height)
-//   VS, IM - accepted, nothing to do; CS/CA/SS/SA: set 0 only (others noted)
+//   VS  - pen speed: checked (0..96.9999), nothing to do
+//   AP AF AH EC VA VN - the 9872's instructions the 7470A ignores: no error
+//   HP-IL: SDI "HP7470A" CR LF; SST the OS byte (bit 3 not cleared), ETO
 //   DP  - digitize: waits for a point -- touched in the Plotter view (the
 //         real plotter: moved with the arrow keys, ENTER); OS bit 2 then
 //         says it's ready, OD outputs it (x,y,pen), DC stops waiting
@@ -133,14 +143,16 @@ public:
     void put(char c) { feed_char(c); }
 
     ViewKind viewKind() const override { return ViewKind::Plotter; }
-    // sai/aau/device-id match the real HP-7475A/pyILPER conventions:
-    // AID 0x60, default address 5, device-id string "HP7470A".
+    // sai/aau/device-id match the real HP 7470A: AID 0x60, default
+    // address 5, device ID "HP7470A" CR LF (deviceId(), not the name).
     CPlotter(const char *name, IL_ADDR_t _sai = 0x60, IL_ADDR_t _aau = 5)
         : CDevice(name, _sai, _aau, PLOTTER) {
         reset_state();
     }
 
     void clear(void);   // HP-IL "Clear Device" (DCL/SDC) -- resets everything
+    // SDI: as the real plotter (manual, chapter 11: "HP7470A" CR LF)
+    const char* deviceId() override { return "HP7470A\r\n"; }
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);
     void doTalker(IL_CMD_t cmd, IL_CMD_t *rtn);
     void show(void);    // extended-trace detail: pen/position/mode/parser state
@@ -196,6 +208,39 @@ public:
     std::string outputText() const { return std::string(outQueue_.begin(), outQueue_.end()); }
     const std::string& unsupportedSeen() const { return unsupported_; }
 
+    // ── Errors (OE) and the ERROR light ──────────────────────────────
+    // The last HP-GL error, as OE reports it (0: none) -- also the front
+    // panel's ERROR light: lit while it isn't 0. Only errors the input
+    // mask lets through (IM's E-mask, default 223: all but error 6) are
+    // kept at all, as on the real plotter. OE and IN put it out.
+    int errorCode() const { return error_; }
+    // What an error number means (OE's table): "bad parameter"
+    static const char* errorText(int code) {
+        switch (code) {
+            case 0: return "no error";
+            case 1: return "instruction not recognized";
+            case 2: return "wrong number of parameters";
+            case 3: return "bad parameter";
+            case 5: return "unknown character set";
+            case 6: return "position overflow";
+            case 8: return "pinch wheels raised";
+            default: return "unknown error";
+        }
+    }
+    // The light put out from HIPI's menu (Plotter -> Errors -> Clear
+    // error): as if OE had been read, without the answer
+    void clearError() { error_ = 0; ++errorSerial_; }
+    // The last errors (newest last; up to kErrorLogSize), with the command
+    // that caused them -- for the Plotter view. Kept over IN and clearing.
+    struct ErrorEntry {
+        std::uint8_t code;
+        char command[28];                  // "SC 0,100,0" (shortened)
+    };
+    static constexpr std::size_t kErrorLogSize = 8;
+    const std::vector<ErrorEntry>& errorLog() const { return errorLog_; }
+    // Changes whenever an error comes or goes (the view redraws then)
+    std::uint32_t errorSerial() const { return errorSerial_; }
+
 private:
     enum class CoordMode { Absolute, Relative };
 
@@ -207,6 +252,8 @@ private:
     void reset_defaults();
     void feed_char(char c);
     void execute(const std::string& cmd);
+    void executeCommand(const std::string& cmd, const std::string& mnemonic,
+                        const std::vector<double>& params);
     std::vector<double> parseParams(const std::string& cmd, std::size_t from) const;
     void moveThroughParams(const std::vector<double>& params);
     void doMove(std::int16_t x, std::int16_t y);
@@ -214,7 +261,17 @@ private:
     void patternedSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1);
     void drawSymbol();                        // SM: symbol_ centred on the pen
     char symbol_ = '\0';                      // SM's character, '\0' = off
-    int error_ = 0;                           // OE: 1 unknown instruction, 2 wrong number of parameters, 3 out of range
+    int error_ = 0;                           // OE's error number (errorText()), 0 = none
+    // An HP-GL error in the command being carried out (cmd_): kept if
+    // IM's E-mask lets it through (bit n-1 for error n)
+    void setError(int code);
+    int errorMask_ = 223;                     // IM's E-mask (IN, DF: 223)
+    std::vector<ErrorEntry> errorLog_;
+    std::uint32_t errorSerial_ = 0;
+    const std::string* cmd_ = nullptr;        // the command execute() is on (for the log)
+    // HP-IL Send Status (SST): the OS byte, then ETO when it comes back
+    bool sstPending_ = false;
+    int statusByte();                         // OS's byte (without clearing anything)
     int lineType_ = -1;                       // LT: -1 solid, 0..6
     double patternPct_ = 4.0;                 // pattern length, % of the P1..P2 diagonal
     double patPos_ = 0.0;                     // how far into the pattern the pen is

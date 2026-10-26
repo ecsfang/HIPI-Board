@@ -1615,6 +1615,16 @@ private:
             m.push_back(plotViewItem());
             m.push_back(paperItem());
             m.push_back(penItem());
+            // The plotter's errors (the ERROR light), once there has been one
+            if (plotter != nullptr && (plotter->errorCode() != 0 || !plotter->errorLog().empty())) {
+                const int row = static_cast<int>(m.size());
+                m.push_back(Item{ [] {
+                                      return plotter->errorCode() != 0
+                                                 ? "Errors (ERROR " + std::to_string(plotter->errorCode()) + ") >"
+                                                 : std::string("Errors >");
+                                  },
+                                  [this, row] { openPlotterErrors(row); } });
+            }
         } else if (out == DisplayOutput::Tape) {
             CDrive* drv = plotterview_drive();
             title = drv ? std::string("TAPE ") + drv->name() : std::string("TAPE");
@@ -1718,6 +1728,35 @@ private:
         }
         m.push_back(item("More >", [this] { openHipiMenu(); }));
         openList(title, std::move(m), nullptr, sel);
+    }
+
+    // ── Plotter > Errors: the HP-GL errors (the ERROR light) ────────────
+    // Clear error (while lit), then the last errors, newest first: the
+    // number, what it means, the command. A row: the whole text in a
+    // message box. `backRow`: the Errors row in the Plotter menu.
+    void openPlotterErrors(int backRow) {
+        std::vector<Item> m;
+        if (plotter->errorCode() != 0)
+            m.push_back(item("Clear error", [this, backRow] {
+                plotter->clearError();               // (the light goes out from plotterview_poll())
+                openPlotterErrors(backRow);
+            }));
+        const auto& log = plotter->errorLog();
+        for (auto it = log.rbegin(); it != log.rend(); ++it) {
+            const int code = it->code;
+            const std::string cmd = it->command;
+            std::string label = std::to_string(code) + " " + CPlotter::errorText(code);
+            if (!cmd.empty()) label += ": " + cmd;
+            if (label.size() > 32) label = label.substr(0, 31) + "~";
+            const std::string full = "Error " + std::to_string(code) + ": " + CPlotter::errorText(code) +
+                                     (cmd.empty() ? std::string() : " -- " + cmd);
+            m.push_back(item(label, [this, full] {
+                withMainCanvas([&] { plotterview_showMessage(full.c_str()); });
+                close();
+            }));
+        }
+        if (m.empty()) m.push_back(item("(no errors)", [this, backRow] { openContextMenu(backRow); }));
+        openList("PLOTTER / ERRORS", std::move(m), [this, backRow] { openContextMenu(backRow); });
     }
 
     // ── Display > Text: the display's output as plain text ──────────────
