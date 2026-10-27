@@ -1470,6 +1470,22 @@ void views_impl::switchView(DisplayOutput mode, CDevice* dev, bool splash) {
     revealCurrentView();
 }
 
+// The view HIPI starts with, and goes to when the one it would go back to
+// has gone: the first device in loop order that is switched on and has a
+// view -- else the loop map. (Not the printer while it's switched off,
+// though its view could be shown.)
+static void showFirstView(bool splash) {
+    for (CDevice* d : devices) {
+        if (d != nullptr && d->enabled() && deviceHasView(d)) {
+            switchView(outputFor(d->viewKind()), d, splash);
+            return;
+        }
+    }
+    switchView(DisplayOutput::LoopMap, nullptr, splash);
+}
+
+void views_showStartView() { showFirstView(false); }
+
 void views_showDevice(CDevice* dev) {
     if (deviceHasView(dev)) switchView(outputFor(dev->viewKind()), dev);
 }
@@ -1544,7 +1560,7 @@ void views_leaveHwTest() {
     } else if (deviceHasView(beforeHwTest_)) {
         switchView(outputFor(beforeHwTest_->viewKind()), beforeHwTest_);
     } else {
-        switchView(displayOutput(), nullptr);
+        showFirstView(true);
     }
 }
 
@@ -1568,7 +1584,7 @@ void views_leaveMediaMap() {
     } else if (deviceHasView(beforeMediaMap_)) {
         switchView(outputFor(beforeMediaMap_->viewKind()), beforeMediaMap_);
     } else {
-        switchView(displayOutput(), nullptr);
+        showFirstView(true);
     }
 }
 
@@ -1609,7 +1625,7 @@ void views_leaveLoopMap() {
     } else if (deviceHasView(beforeLoopMap_)) {
         switchView(outputFor(beforeLoopMap_->viewKind()), beforeLoopMap_);
     } else {
-        switchView(displayOutput(), nullptr);
+        showFirstView(true);
     }
 }
 
@@ -1631,7 +1647,7 @@ void views_leaveSignals() {
     } else if (deviceHasView(beforeSignals_)) {
         switchView(outputFor(beforeSignals_->viewKind()), beforeSignals_);
     } else {
-        switchView(displayOutput(), nullptr);
+        showFirstView(true);
     }
 }
 
@@ -1654,7 +1670,7 @@ void views_leaveCharTable() {
     } else if (deviceHasView(beforeCharTable_)) {
         switchView(outputFor(beforeCharTable_->viewKind()), beforeCharTable_, false);
     } else {
-        switchView(displayOutput(), nullptr, false);
+        showFirstView(false);
     }
 }
 
@@ -1676,7 +1692,7 @@ void views_leaveClock() {
     } else if (deviceHasView(beforeClock_)) {
         switchView(outputFor(beforeClock_->viewKind()), beforeClock_, false);
     } else {
-        switchView(displayOutput(), nullptr, false);
+        showFirstView(false);
     }
 }
 
@@ -1685,9 +1701,13 @@ void views_leaveAnalyzer() {
     if (deviceHasView(beforeAnalyzer_)) {
         switchView(outputFor(beforeAnalyzer_->viewKind()), beforeAnalyzer_);
     } else {
-        const bool deviceView = beforeAnalyzerOutput_ == DisplayOutput::Tape ||
-                                beforeAnalyzerOutput_ == DisplayOutput::Printer;
-        switchView(deviceView ? displayOutput() : beforeAnalyzerOutput_, nullptr);
+        const DisplayOutput o = beforeAnalyzerOutput_;
+        const bool deviceView = o == DisplayOutput::Display || o == DisplayOutput::Video80 ||
+                                o == DisplayOutput::Plotter || o == DisplayOutput::Tape ||
+                                o == DisplayOutput::Printer;
+        // (its device has gone: the first one that has a view, else the loop map)
+        if (deviceView) showFirstView(true);
+        else switchView(o, nullptr);
     }
 }
 
@@ -1793,8 +1813,8 @@ void views_cycleOutput(bool forward) {
             return;
         }
     }
-    // No device has a view at all: the text display is always there
-    switchView(displayOutput(), nullptr);
+    // No device has a view at all: the loop map
+    showFirstView(true);
 }
 
 bool views_isActive() { return output_ != DisplayOutput::Display; }

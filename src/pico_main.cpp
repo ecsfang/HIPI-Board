@@ -752,6 +752,8 @@ int main() {
     if (config.columns() != 0) screen->setColumns(config.columns());
     // The display emulates the HP 92198: its screen is the Display view
     hipi::views_setDisplayModel(videoDisplay != nullptr && videoDisplay->isVideo80());
+    // The first view: the first device switched on that has one, in loop order (else the loop map)
+    hipi::views_showStartView();
 
     hipi::backlight_init(screen);   // the screen saver timer starts now (backlight.h)
     hipi_bootServiceDone();   // the main loop handles USB and PILBox from here

@@ -916,6 +916,19 @@ they're not in it. Tests: `tools/hipiview/test/display_text_test.cpp`.
 27 ACCHR  35 ACCHR  84 ACCHR       ; ESC # T
 ```
 
+**The start view.** At the end of start-up `pico_main.cpp` calls
+`views_showStartView()`. It shows the view of the first device in
+`devices` (loop order) that is switched on (`enabled()`) and has a view
+(`deviceHasView()`); with none, it shows the loop map. The printer, whose
+view can be shown while it's switched off, counts only while it's on. The
+same rule (`showFirstView()` in views.cpp) is the fallback when a view
+can't go back to the one before it, because that device has been switched
+off: leaving the loop map, the analyzer, the hardware test, the media map,
+the signals view, the character table or the clock. It is also used when a
+swipe finds no device with a view. Before, HIPI always started on the
+Display view, and fell back to it, even with `TFDISPLAY` switched off.
+Tests: `printer_view_test`.
+
 **Choosing the view from the HP-41.** `ESC # V <addr>` (sent to
 `TFDISPLAY`; `<addr>` is one byte, the HP-IL address 1..30) shows the view
 of the HIPI device that currently has that address -- looked up in the

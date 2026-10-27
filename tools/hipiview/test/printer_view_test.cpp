@@ -571,6 +571,43 @@ int main(int argc, char** argv) {
     run(3000);
     check(textCursor() == cur, "... and is still there after the box has gone");
 
+    // The view HIPI starts with: the first device on the loop that is
+    // switched on and has a view -- not TFDISPLAY if it's switched off
+    {
+        struct ViewDev : CDevice {
+            ViewKind k;
+            ViewDev(const char* n, ViewKind kind) : CDevice(n, 0, 0, DISPLAY), k(kind) {}
+            ViewKind viewKind() const override { return k; }
+            void clear() override {}
+        } disp("TFDISPLAY", ViewKind::Display), leds("TFLEDS", ViewKind::None);
+        const std::vector<CDevice*> saved = devices;
+        const bool printerOn = printer->enabled(), plotterOn = plotter->enabled();
+        devices = { &leds, &disp, plotter, printer };
+        disp.setEnabled(true); plotter->setEnabled(true); printer->setEnabled(true);
+        hipi::views_showStartView();
+        check(hipi::views_output() == hipi::DisplayOutput::Display && hipi::views_viewDevice() == &disp,
+              "start view: TFDISPLAY, the first device with a view (TFLEDS has none)");
+        disp.setEnabled(false);
+        hipi::views_showStartView();
+        check(hipi::views_output() == hipi::DisplayOutput::Plotter && hipi::views_viewDevice() == plotter,
+              "start view, TFDISPLAY switched off: the next one, TFPLOT");
+        devices = { &leds, &disp, printer, plotter };
+        hipi::views_showStartView();
+        check(hipi::views_viewDevice() == printer, "... in loop order: TFPRINT before TFPLOT");
+        plotter->setEnabled(false); printer->setEnabled(false);
+        hipi::views_showStartView();
+        check(hipi::views_output() == hipi::DisplayOutput::LoopMap,
+              "start view, no device switched on has a view (the printer off): the loop map");
+        // Leaving the loop map, the view before it gone: the first one again
+        plotter->setEnabled(true);
+        hipi::views_leaveLoopMap();
+        check(hipi::views_output() == hipi::DisplayOutput::Plotter, "leaving the loop map: the first view there is");
+        hipi::views_showStartView();
+        run(3000);
+        devices = saved;
+        printer->setEnabled(printerOn); plotter->setEnabled(plotterOn);
+    }
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

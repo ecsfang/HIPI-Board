@@ -130,8 +130,14 @@ The **PILBox** line changes as soon as a PC program (e.g. pyILPER) connects:
 On the right, the **DEVICES ON THE LOOP** are shown in loop order: yellow
 when switched on, grey when off.
 
-After a few seconds (or when you touch the screen) HIPI is ready. Anything
-the controller prints now appears on the screen.
+After a few seconds (or when you touch the screen) HIPI is ready and shows
+the view of the **first device on the loop that is switched on and has a
+view** (display, plotter, cassette drive, printer). The order is the loop
+order in **Settings → Devices → Change order**. Usually that is the display:
+anything the controller prints now appears on the screen. With `TFDISPLAY`
+switched off it is the next one, for example the plotter. If no switched-on
+device has a view, HIPI starts with the **Loop map**. The printer counts only
+while it is switched on.
 
 <a href="images/screen-startup.png"><img src="images/screen-startup.png" alt="The start-up screen while HIPI starts" width="512"></a>
 
@@ -956,12 +962,6 @@ HIPI creates (on Linux usually `/dev/ttyACM1`) as its PILBox port.
 
 When no emulator is running, `PILBOX` simply passes everything on.
 
-The emulator chooses how PILBox works, and the device list (bottom-left
-corner) shows it on the PILBOX line:
-
-| Mode | Means |
-|------|-------|
-| `TDIS` | No PC program connected — PILBox just passes frames on |
 **When the PC doesn't answer.** In `COFF` and `COFI` most frames go to the
 PC and come back from it. HIPI keeps running while it waits: the screen,
 touch and hipiview are not held up by a slow PC program. If the program
@@ -977,6 +977,12 @@ lost), or closes the port while HIPI waits, HIPI:
   mode, as pyILPER does when it starts. If pyILPER is still running, turn
   its HP-IL off and on again (or restart it).
 
+The emulator chooses how PILBox works, and the device list (bottom-left
+corner) shows it on the PILBOX line:
+
+| Mode | Means |
+|------|-------|
+| `TDIS` | No PC program connected — PILBox just passes frames on |
 | `COFF` | Connected; the controller is the loop's controller |
 | `COFI` | As `COFF`, and idle frames (IDY) are passed to the PC too |
 | `CON` | Connected; the PC program is the loop's controller (see below) |
@@ -1806,7 +1812,7 @@ card files, they are in the SD card zip of that download.
 | Problem | Try this |
 |---------|----------|
 | HP-41 can't find the drive or the cassette | Is a cassette chosen (not *No media*)? Is `TFDRIVE` ON in **Devices**, and the switch in the Tape view not OFF? |
-| Nothing shows on the screen | Is `TFDISPLAY` ON in **Devices**? Is the Display view chosen (swipe)? |
+| Nothing shows on the screen | Is `TFDISPLAY` ON in **Devices**? Is the Display view chosen (swipe)? HIPI starts with the first device switched on that has a view, which is not always the display |
 | Tape view is missing | The tape pictures are missing from the `resources` folder — copy the files from the SD card zip |
 | Printer view is missing | `hp82162a.bmp` and `prtparts.bmp` are missing from the `resources` folder — copy them from the SD card zip |
 | The HP-41 prints on the printer instead of the display | That's what it does with a printer on the loop — switch `TFPRINT` off (Printer view or **Devices**) |

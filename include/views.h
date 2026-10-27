@@ -155,6 +155,11 @@ std::vector<CDevice*> views_viewDevices();
 std::string views_viewTitle(CDevice* dev);
 // Shows that device's view
 void views_showDevice(CDevice* dev);
+// At start-up: the view of the first device on the loop (in loop order)
+// that is switched on and has one -- else the loop map. Also where HIPI goes
+// when the view it would go back to (leaving the loop map, the hardware test
+// ...) has gone, or no device has a view any more.
+void views_showStartView();
 // The device whose view is showing (nullptr if none)
 CDevice* views_viewDevice();
 
