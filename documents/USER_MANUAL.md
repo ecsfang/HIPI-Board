@@ -169,6 +169,7 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 |-------|--------------|
 | **Top-left corner** | Info box: current file, settings, version (not on the Hardware test page) |
 | **Bottom-left corner** | List of HIPI's HP-IL devices and their addresses. The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on the Hardware test page.) |
+| **Middle of the left edge** | The shortcut: opens the view chosen in **Settings → Shortcut** — the **Loop map** unless you choose another (Analyzer, HP-IL signals, Characters, Hardware test, or Off). Touch the same place again to go back to the view you came from. (Not on the Hardware test page or the media map: their own buttons are there — leave them with their **✕**.) |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
 <a href="images/screen-infobox.png"><img src="images/screen-infobox.png" alt="Info box" width="512"></a>
@@ -514,7 +515,8 @@ More > — HIPI's menu
 │   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
 │   │                    Date < EU > · Time < 24 h > · Show now
 │   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
-│   └── PC link >        CON loop < Cable > · Trace < Off >
+│   ├── PC link >        CON loop < Cable > · Trace < Off >
+│   └── Shortcut         < Loop map >  (the view the left edge's middle opens)
 └── System >
     ├── Connect to PC    Show the SD card on your computer
     ├── Loopback test >  Test the HP-IL connection
@@ -1710,6 +1712,7 @@ value.
 | `brightness` | `0`–`255` | `255` | Backlight. The menu's steps: `51`, `102`, `153`, `204`, `255` (20–100 %). |
 | `plot_fit` | `1` / `0` | `1` | Plotter view: `1` = Fit (the drawing fills the screen), `0` = Page (like the paper). |
 | `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
+| `shortcut` | `loopmap` / `analyzer` / `signals` / `chartable` / `hwtest` / `off` | `loopmap` | The view a touch in the middle of the screen's left edge opens (**Settings → Shortcut**). |
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
 | `plotter_led` | `plotter` / `off` | `plotter` | The plotter's ERROR light on LED 3 (**Hardware test → Plotter error on LED 3**). `off` leaves LED 3 to `TFLEDS`. |
 | `hpil_leds` | `messages` / `all` / `off` | `messages` | HP-IL traffic on LED 4 (**Hardware test → HP-IL on LED 4**): `messages` ignores IDY (idle) frames, `all` shows every frame, `off` leaves LED 4 to `TFLEDS`. The old values `1` (= `all`) and `0` (= `off`) are still read. |

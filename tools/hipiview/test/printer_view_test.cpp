@@ -608,6 +608,39 @@ int main(int argc, char** argv) {
         printer->setEnabled(printerOn); plotter->setEnabled(plotterOn);
     }
 
+    // ── The shortcut: the middle of the left edge (Settings -> Shortcut)
+    {
+        using hipi::ShortcutView;
+        hipi::views_showDevice(plotter);
+        run(2000);
+        const int mid = SCREEN_MAX_Y / 2;
+        check(hipi::views_shortcutTouch(10, mid) && hipi::views_shortcutTouch(hipi::kShortcutW - 1, mid - hipi::kShortcutH / 2) &&
+              !hipi::views_shortcutTouch(hipi::kShortcutW, mid) && !hipi::views_shortcutTouch(10, mid - hipi::kShortcutH / 2 - 1) &&
+              !hipi::views_shortcutTouch(10, mid + hipi::kShortcutH / 2) && !hipi::views_shortcutTouch(10, 10) &&
+              !hipi::views_shortcutTouch(10, SCREEN_MAX_Y - 10),
+              "shortcut zone: the middle of the left edge, clear of the two corners' 120 px");
+        check(hipi::views_openShortcut(ShortcutView::LoopMap) && hipi::views_output() == hipi::DisplayOutput::LoopMap,
+              "shortcut (the default, Loop map): the loop map");
+        run(2000);
+        check(hipi::views_openShortcut(ShortcutView::LoopMap) && hipi::views_output() == hipi::DisplayOutput::Plotter,
+              "... touched again: back to the view before (the plotter)");
+        run(2000);
+        check(hipi::views_openShortcut(ShortcutView::Analyzer) && hipi::views_output() == hipi::DisplayOutput::Analyzer,
+              "shortcut Analyzer: the analyzer");
+        run(2000);
+        check(hipi::views_openShortcut(ShortcutView::Analyzer) && hipi::views_output() == hipi::DisplayOutput::Plotter,
+              "... and back");
+        run(2000);
+        check(!hipi::views_openShortcut(ShortcutView::Off) && hipi::views_output() == hipi::DisplayOutput::Plotter,
+              "shortcut Off: not taken, nothing changes");
+        hipi::views_showHwTest();
+        check(!hipi::views_shortcutTouch(10, mid), "on the Hardware test page the zone is off (its buttons are there)");
+        hipi::views_leaveHwTest();
+        run(2000);
+        check(std::strcmp(hipi::views_shortcutName(ShortcutView::LoopMap), "Loop map") == 0 &&
+              std::strcmp(hipi::views_shortcutName(ShortcutView::Off), "Off") == 0, "shortcut names for the menu");
+    }
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

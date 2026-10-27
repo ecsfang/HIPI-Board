@@ -953,6 +953,10 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // Plotter view: the ERROR light -- what the error was (a message box)
     } else if (printerHit.spot != PrinterHotspot::None) {
         handlePrinterTouch(printerHit);
+    } else if (!dialog_->isOpen() && views_shortcutTouch(x, y) &&
+               views_openShortcut(static_cast<ShortcutView>(config.shortcut()))) {
+        // The middle of the left edge: the view chosen in Settings ->
+        // Shortcut (the loop map by default); touched again, back
     } else if (isInfoCornerTouch(x, y) && views_output() != DisplayOutput::HwTest &&
                views_output() != DisplayOutput::MediaMap) {
         // (not on the Hardware test page: its buttons sit in the corners,

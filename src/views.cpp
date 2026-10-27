@@ -1711,6 +1711,48 @@ void views_leaveAnalyzer() {
     }
 }
 
+bool views_shortcutTouch(int x, int y) {
+    const int y0 = (SCREEN_MAX_Y - kShortcutH) / 2;
+    return x >= 0 && x < kShortcutW && y >= y0 && y < y0 + kShortcutH &&
+           output_ != DisplayOutput::HwTest && output_ != DisplayOutput::MediaMap;
+}
+
+bool views_openShortcut(ShortcutView v) {
+    // Showing it already: the same touch goes back
+    switch (v) {
+        case ShortcutView::LoopMap:
+            if (output_ == DisplayOutput::LoopMap) views_leaveLoopMap(); else views_showLoopMap();
+            return true;
+        case ShortcutView::Analyzer:
+            if (output_ == DisplayOutput::Analyzer) views_leaveAnalyzer(); else views_showAnalyzer();
+            return true;
+        case ShortcutView::Signals:
+            if (output_ == DisplayOutput::Signals) views_leaveSignals(); else views_showSignals();
+            return true;
+        case ShortcutView::CharTable:
+            if (output_ == DisplayOutput::CharTable) views_leaveCharTable(); else views_showCharTable();
+            return true;
+        case ShortcutView::HwTest:     // (left with its own X: the zone is off there)
+            views_showHwTest();
+            return true;
+        case ShortcutView::Off:
+            break;
+    }
+    return false;
+}
+
+const char* views_shortcutName(ShortcutView v) {
+    switch (v) {
+        case ShortcutView::LoopMap:   return "Loop map";
+        case ShortcutView::Analyzer:  return "Analyzer";
+        case ShortcutView::Signals:   return "HP-IL signals";
+        case ShortcutView::CharTable: return "Characters";
+        case ShortcutView::HwTest:    return "Hardware test";
+        case ShortcutView::Off:       return "Off";
+    }
+    return "?";
+}
+
 std::vector<CDevice*> views_viewDevices() {
     std::vector<CDevice*> list;
     for (CDevice* dev : devices) {

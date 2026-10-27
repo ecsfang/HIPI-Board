@@ -1809,11 +1809,15 @@ private:
 
     // ── Settings ────────────────────────────────────────────────────────
     void openSettingsMenu(int sel = 0) {
+        static_assert(hipi::Config::kShortcutCount == kShortcutViews, "CONFIG.TXT's shortcut names: one per ShortcutView");
         openList("SETTINGS", {
             item("Screen >",       [this] { openScreenSettings(); }),
             item("Screen saver >", [this] { openSaverSettings(); }),
             item("Devices >",      [this] { openDevicesMenu(); }),
             item("PC link >",      [this] { openPcLinkSettings(); }),
+            // The view the middle of the left edge opens (views.h: ShortcutView)
+            value("Shortcut", [] { return std::string(views_shortcutName(static_cast<ShortcutView>(config.shortcut()))); },
+                  [this] { config.setShortcut(static_cast<std::uint8_t>((config.shortcut() + 1) % kShortcutViews)); refreshItems(); }),
         }, [this] { openHipiMenu(1); }, sel);
     }
 

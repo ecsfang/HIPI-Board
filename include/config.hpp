@@ -134,6 +134,10 @@ public:
         n = std::snprintf(line, sizeof(line), "signal_cells=%s\n", kCells[signalCells_ < 3 ? signalCells_ : 0]);
         f_write(&file, line, static_cast<UINT>(n), &bw);
 
+        n = std::snprintf(line, sizeof(line), "shortcut=%s\n",
+                          kShortcutNames[shortcut_ < kShortcutCount ? shortcut_ : 0]);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
+
         static const char* kMirror[] = { "off", "view", "control" };
         n = std::snprintf(line, sizeof(line), "display_mirror=%s\n", kMirror[displayMirror_ < 3 ? displayMirror_ : 0]);
         f_write(&file, line, static_cast<UINT>(n), &bw);
@@ -261,6 +265,13 @@ public:
     // HP-IL signals view, bit cells: 0 bands, 1 lines, 2 none (hpil_diag.h)
     std::uint8_t signalCells() const { return signalCells_; }
     void setSignalCells(std::uint8_t c) { signalCells_ = c; save(); }
+    // The left edge's shortcut (Settings -> Shortcut): a ShortcutView
+    // (views.h), in that order -- shortcut=loopmap|analyzer|...|off
+    static constexpr const char* kShortcutNames[] = { "loopmap", "analyzer", "signals", "chartable",
+                                                      "hwtest", "off" };
+    static constexpr std::uint8_t kShortcutCount = 6;
+    std::uint8_t shortcut() const { return shortcut_; }
+    void setShortcut(std::uint8_t v) { shortcut_ = v; save(); }
     // TFPIXEL: how many colour pixels are connected (told by the
     // controller, "0N<n>" -- see pixels.h)
     std::uint8_t pixelCount() const { return pixelCount_; }
@@ -420,6 +431,9 @@ private:
                     plotFit_ = std::atoi(value) != 0;
                 } else if (std::strcmp(key, "plot_paper") == 0) {
                     plotPaperBlack_ = std::strcmp(value, "black") == 0;
+                } else if (std::strcmp(key, "shortcut") == 0) {
+                    for (std::uint8_t i = 0; i < kShortcutCount; ++i)      // (unknown: stays the loop map)
+                        if (std::strcmp(value, kShortcutNames[i]) == 0) shortcut_ = i;
                 } else if (std::strcmp(key, "signal_cells") == 0) {
                     signalCells_ = std::strcmp(value, "lines") == 0 ? 1
                                  : std::strcmp(value, "none") == 0  ? 2 : 0;
@@ -496,6 +510,7 @@ private:
     bool          plotPaperBlack_ = false; // plot_paper=white|black
     std::uint8_t  displayMirror_ = 0;      // display_mirror=off|view|control (USB CDC3, tools/hipiview)
     std::uint8_t  signalCells_ = 0;        // signal_cells=bands|lines|none
+    std::uint8_t  shortcut_ = 0;           // shortcut=loopmap (kShortcutNames)
     std::uint8_t  pixelCount_ = 5;         // pixel_count=1..32 (TFPIXEL)
     std::string   pixelOrder_ = "RGB";     // pixel_order=RGB|GRB|BRG|RBG|GBR|BGR (the HIPI board's strip: RGB)
     std::uint8_t  printerMode_ = 0;        // printer_mode=man|trace|norm (TFPRINT)

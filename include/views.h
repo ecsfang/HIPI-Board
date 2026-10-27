@@ -212,6 +212,23 @@ void views_leaveCharTable();
 void views_showClock();
 void views_leaveClock();
 
+// The shortcut: a touch in the middle of the left edge (like the info box's
+// top-left corner and the device list's bottom-left one) opens the view
+// chosen in Settings -> Shortcut; touched again there, it goes back. The
+// order is CONFIG.TXT's (Config::kShortcutNames) -- add new ones at the end.
+enum class ShortcutView : std::uint8_t { LoopMap, Analyzer, Signals, CharTable, HwTest, Off };
+constexpr int kShortcutViews = 6;
+// The touch zone: kShortcutW wide from the left edge, kShortcutH high,
+// centred between the two corners
+constexpr int kShortcutW = 120, kShortcutH = 120;
+// In the zone, and the view showing leaves it free (not the Hardware test
+// page or the media map: their own buttons sit at the left edge)
+bool views_shortcutTouch(int x, int y);
+// Opens `v` -- or, while it's showing, goes back to the view before. False
+// for Off (the touch is then nothing special)
+bool views_openShortcut(ShortcutView v);
+const char* views_shortcutName(ShortcutView v);   // "Loop map" ... (the menu)
+
 // Call once per main-loop iteration -- handles the view-switch splash's
 // auto-dismiss timer (see views_showDevice()).
 void views_poll();

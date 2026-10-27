@@ -691,6 +691,7 @@ commands sent by the HP-41.
 |-----------------------------|--------|
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
 | Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (12x24 font, 34 px rows, nine rows), PC test `devicelist_test` |
+| Tap **middle of the left edge** | The shortcut: the view in **Settings → Shortcut** (`shortcut=` in CONFIG.TXT, `Config::shortcut()`, a `ShortcutView` -- `views.h`; default the loop map). `views_shortcutTouch()` is the zone (`kShortcutW` x `kShortcutH`, centred between the corners; off on the Hardware test page and the media map), `views_openShortcut()` shows the view, or leaves it if it's showing. Checked in `boardui_handleTap()` just before the corners (after the views' own touch areas). PC test `printer_view_test` |
 | Vertical swipe              | Scroll the device list (when it is open) |
 | Horizontal swipe            | Switch view: each device with a view (display, plotter, every cassette drive) in loop order -- left = next device, right = previous |
 
