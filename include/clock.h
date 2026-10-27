@@ -27,13 +27,13 @@ namespace hipi {
 
 void clock_init(DisplayDriver* display);
 // What the screen saver view shows: the clock, or an animation
-// (saver_anim.h). Set before plotterview_showClock().
+// (saver_anim.h). Set before views_showClock().
 enum class SaverShow { Clock, Rain, Goose };
 // lcd: style for the animations (the clock always uses Settings' style)
 void clock_setShow(SaverShow show, bool lcd);
 // RTC found and set: the clock can be shown
 bool clock_available();
-// The clock view (see plotterview_showClock())
+// The clock view (see views_showClock())
 void clock_drawAll();
 // Main loop: redraws when the minute changes (while shown), and handles
 // the "time" command on the USB console

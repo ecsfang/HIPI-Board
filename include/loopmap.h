@@ -26,7 +26,7 @@ constexpr std::uint32_t kLoopMapRoleHoldMs = 1200;
 void loopmap_init(DisplayDriver* display);
 // Main loop: takes in new frames, redraws when something changed (while shown)
 void loopmap_poll();
-// The view (see plotterview_showLoopMap())
+// The view (see views_showLoopMap())
 void loopmap_drawAll();
 // A tap while the map is shown: on a card -> its details box. In the box:
 // GO TO <view> VIEW (a device with a view here) -> that view, where X on

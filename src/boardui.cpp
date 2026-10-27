@@ -18,8 +18,8 @@
 #include "hwtest.h"
 #include "mediamap.h"
 #include "demo.h"
-#include "plotterview.h"
-#include "plotterview.h"
+#include "views.h"
+#include "views.h"
 
 #include "boardui.h"
 
@@ -367,7 +367,7 @@ void showInfoBox() {
 
     display_->endOverlayDraw();
     screen_->reassertRenderState();
-    plotterview_refreshCursor();       // see showDeviceList()
+    views_refreshCursor();       // see showDeviceList()
     display_->showPipOverlay(boxX, boxY, boxW, boxH);
 
     infoBoxVisible = true;
@@ -431,7 +431,7 @@ void redrawDeviceListRows() {
     devlist::drawRows(display_, deviceListCache, deviceListScrollOffset);
     display_->endOverlayDraw();
     screen_->reassertRenderState();
-    plotterview_refreshCursor();       // (drawing moved the chip's shared text cursor)
+    views_refreshCursor();       // (drawing moved the chip's shared text cursor)
 }
 
 void showDeviceList() {
@@ -452,7 +452,7 @@ void showDeviceList() {
     screen_->reassertRenderState();
     // Drawing the list moved the chip's (shared) text cursor into the
     // box -- put the blinking cursor back where the text stands
-    plotterview_refreshCursor();
+    views_refreshCursor();
     display_->showPipOverlay(devlist::kX, devlist::kY, devlist::kW, devlist::kH);
 
     deviceListVisible = true;
@@ -673,7 +673,7 @@ void boardui_poll() {
     if (repeatButton != Button::None && pressedButton == repeatButton &&
         time_reached(repeatNext)) {
         repeatNext = make_timeout_time_ms(kRepeatIntervalMs);
-        if (dialog_->isOpen() || !plotterview_digitizeButton(static_cast<int>(repeatButton), true))
+        if (dialog_->isOpen() || !views_digitizeButton(static_cast<int>(repeatButton), true))
             dialog_->handleButton(repeatButton, /*repeat=*/true);
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);  // keep the strip up
     }
@@ -681,7 +681,7 @@ void boardui_poll() {
     // that opened the page, or a button from hipiview) -- the page's own
     // buttons reach the right edge, and its X closes it
     if (buttonStripVisible && pressedButton == Button::None && dialog_ != nullptr && !dialog_->isOpen() &&
-        plotterview_output() == DisplayOutput::HwTest && !plotterview_isSplashVisible()) {
+        views_output() == DisplayOutput::HwTest && !views_isSplashVisible()) {
         hideButtonStrip();
     }
     // Auto-hide the info box after kInfoBoxShowMs, same idea as the button
@@ -710,7 +710,7 @@ void boardui_poll() {
 
     // Deferred drive switch-off (power switch / Devices menu) -- done here,
     // in the main loop between HP-IL frames, once the drive is idle
-    if (CDrive* drive = plotterview_drive()) {
+    if (CDrive* drive = views_drive()) {
         drive->servicePendingDisable();
         drive->servicePowerUp();        // STANDBY wake-up completes here if the loop is quiet
     }
@@ -721,9 +721,9 @@ void boardui_poll() {
     // so the new view is what shows -- not the view the saver goes back to.
     if (!dialog_->isOpen()) {
         std::uint8_t addr = 0;
-        if (plotterview_takeViewRequest(addr)) {
+        if (views_takeViewRequest(addr)) {
             backlight_activity();
-            plotterview_showAddress(addr);
+            views_showAddress(addr);
         }
     }
 
@@ -739,12 +739,12 @@ void boardui_poll() {
     if (screendump_takePending(withOverlays)) {
         std::string msg;
         if (!withOverlays) {
-            plotterview_showMessage("Saving screendump...");
+            views_showMessage("Saving screendump...");
             if (dialog_->isOpen()) menuCoveredByMessage = true;
         }
         const bool ok = screendump_save(display_, msg, withOverlays);
         if (!ok) LOGF("\r\n * Screendump failed: %s", msg.c_str());
-        plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+        views_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
         if (dialog_->isOpen()) menuCoveredByMessage = true;
     }
     // The display's text saved ("ESC # T" or Display > Text > Save as text)
@@ -752,10 +752,10 @@ void boardui_poll() {
         std::string msg;
         const bool ok = displayText_save(msg);
         if (!ok) LOGF("\r\n * Saving the display text failed: %s", msg.c_str());
-        plotterview_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
+        views_showMessage(ok ? ("Saved " + msg).c_str() : msg.c_str());
         if (dialog_->isOpen()) menuCoveredByMessage = true;
     }
-    if (menuCoveredByMessage && !plotterview_isSplashVisible()) {
+    if (menuCoveredByMessage && !views_isSplashVisible()) {
         menuCoveredByMessage = false;
         if (dialog_->isOpen()) dialog_->restoreAfterMessage();
     }
@@ -833,9 +833,9 @@ void pressStripButton(Button b) {
     // The redraws above went through drawBitmap565(), which switches to
     // graphics mode -- Screen never sees that, so the blinking cursor
     // would otherwise vanish on every button touch.
-    plotterview_refreshCursor();
+    views_refreshCursor();
     // Digitizing (no menu open): OK = ENTER, Up/Down move the marker, X cancels
-    if (dialog_->isOpen() || !plotterview_digitizeButton(static_cast<int>(b), false))
+    if (dialog_->isOpen() || !views_digitizeButton(static_cast<int>(b), false))
         dialog_->handleButton(b);
     if (b == Button::Up || b == Button::Down) {
         repeatButton = b;                       // see boardui_poll()
@@ -846,9 +846,9 @@ void pressStripButton(Button b) {
 // Printer view: a touch on one of its controls. The switches and keys
 // act like the real ones; the switch positions are saved (CONFIG.TXT),
 // power like the Devices menu does. The picture follows in
-// plotterview_poll().
+// views_poll().
 void handlePrinterTouch(const PrinterHit& hit) {
-    CPrinter* prt = plotterview_printer();
+    CPrinter* prt = views_printer();
     if (prt == nullptr) return;
     switch (hit.spot) {
         case PrinterHotspot::Power: {
@@ -866,11 +866,11 @@ void handlePrinterTouch(const PrinterHit& hit) {
             config.setPrinterIntensity(static_cast<std::uint8_t>(hit.value));
             break;
         case PrinterHotspot::Print:
-            plotterview_printerPrint(true);
+            views_printerPrint(true);
             printerKeyHeld = hit.spot;
             break;
         case PrinterHotspot::Advance:
-            plotterview_printerAdvance(true);
+            views_printerAdvance(true);
             printerKeyHeld = hit.spot;
             break;
         default:
@@ -883,7 +883,7 @@ void handlePrinterTouch(const PrinterHit& hit) {
 // A tap on the media map (mediamap.h): true if it hit something
 static bool mediaMapTap(int x, int y) {
     const MediaMapTap t = mediamap_tap(x, y);
-    if (t == MediaMapTap::Close) plotterview_leaveMediaMap();
+    if (t == MediaMapTap::Close) views_leaveMediaMap();
     return t != MediaMapTap::None;
 }
 
@@ -895,15 +895,15 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     // The view-switch splash owns the PIP overlay for its 1.5 s -- ignore
     // taps meanwhile, so the menu, info box or device list
     // (which all use the same overlay) can't take it over and then be
-    // hidden by the splash's own timeout. See plotterview.cpp.
-    if (plotterview_isSplashVisible()) return;
+    // hidden by the splash's own timeout. See views.cpp.
+    if (views_isSplashVisible()) return;
     // The button strip's zone (right edge) belongs to the strip -- a view's
     // own touch areas under it (loop map cards reach the edge) don't get
     // those touches, or OK on the strip would open a card instead of the menu
     const bool stripZone = x >= buttonStripScreenX0;
     // Printer view controls (nothing while a menu is open)
     const PrinterHit printerHit = (dialog_ != nullptr && dialog_->isOpen()) || stripZone
-                                      ? PrinterHit{} : plotterview_printerHitTest(x, y);
+                                      ? PrinterHit{} : views_printerHitTest(x, y);
     if (dialog_ != nullptr && dialog_->isShowingLoopbackResult()) {
         // Any touch anywhere dismisses the loopback test's own result
         // dialog -- same "any touch while it's up" pattern as
@@ -932,37 +932,37 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         if (devlist::isClose(x, y)) hideDeviceList();
         else toggleListedDevice(devlist::checkboxAt(x, y, deviceListScrollOffset,
                                                     static_cast<int>(deviceListCache.size())));
-    } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::CharTable) {
-        plotterview_leaveCharTable();         // the character table: any touch closes it
-    } else if (!dialog_->isOpen() && plotterview_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
+    } else if (!dialog_->isOpen() && views_output() == DisplayOutput::CharTable) {
+        views_leaveCharTable();         // the character table: any touch closes it
+    } else if (!dialog_->isOpen() && views_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
         // Hardware test: its buttons (checked before the corners). Its
         // buttons reach the right edge (and its close button sits there):
         // they get the touch unless the strip is showing -- a touch there
         // that hits none of them still wakes the strip.
     } else if (!dialog_->isOpen() && !(stripZone && buttonStripVisible) &&
-               plotterview_output() == DisplayOutput::MediaMap && mediaMapTap(x, y)) {
+               views_output() == DisplayOutput::MediaMap && mediaMapTap(x, y)) {
         // Media map: a ring -> that file; the X in the title bar -> back
-    } else if (!dialog_->isOpen() && !stripZone && plotterview_output() == DisplayOutput::LoopMap &&
+    } else if (!dialog_->isOpen() && !stripZone && views_output() == DisplayOutput::LoopMap &&
                loopmap_tap(x, y)) {
         // Loop map: a card -> its details; the details box -> closed
         // (checked before the corners: cards may sit in them)
-    } else if (!dialog_->isOpen() && !stripZone && plotterview_digitizeTap(x, y)) {
+    } else if (!dialog_->isOpen() && !stripZone && views_digitizeTap(x, y)) {
         // Plotter view while the plotter waits for a point (HP-GL DP): the
         // touch is that point (checked before the corners: a point may be there)
-    } else if (!dialog_->isOpen() && !stripZone && plotterview_errorLightTap(x, y)) {
+    } else if (!dialog_->isOpen() && !stripZone && views_errorLightTap(x, y)) {
         // Plotter view: the ERROR light -- what the error was (a message box)
     } else if (printerHit.spot != PrinterHotspot::None) {
         handlePrinterTouch(printerHit);
-    } else if (isInfoCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest &&
-               plotterview_output() != DisplayOutput::MediaMap) {
+    } else if (isInfoCornerTouch(x, y) && views_output() != DisplayOutput::HwTest &&
+               views_output() != DisplayOutput::MediaMap) {
         // (not on the Hardware test page: its buttons sit in the corners,
         // and a touch just beside one shouldn't open the box instead)
         showInfoBox();
-    } else if (isDeviceListCornerTouch(x, y) && plotterview_output() != DisplayOutput::HwTest &&
-               plotterview_output() != DisplayOutput::MediaMap) {
+    } else if (isDeviceListCornerTouch(x, y) && views_output() != DisplayOutput::HwTest &&
+               views_output() != DisplayOutput::MediaMap) {
         showDeviceList();
     } else if (!dialog_->isOpen() &&
-               plotterview_tapeHitTest(x, y) == TapeHotspot::Open) {
+               views_tapeHitTest(x, y) == TapeHotspot::Open) {
         // Tape view: cassette window or OPEN button -> file picker.
         // The button strip is needed to navigate the list, so show it too
         // (it stays up while the menu is open).
@@ -971,25 +971,25 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         showButtonStrip();
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
     } else if (!dialog_->isOpen() &&
-               plotterview_tapeHitTest(x, y) == TapeHotspot::Rewind) {
+               views_tapeHitTest(x, y) == TapeHotspot::Rewind) {
         // Tape view: REWIND button -- ignored while the drive is busy,
         // powered down or empty (see CDrive::manualRewind())
-        if (CDrive* drive = plotterview_drive()) {
+        if (CDrive* drive = views_drive()) {
             if (!drive->manualRewind()) {
                 MTRC_LOGF("REWIND ignored (BUSY lit, off or no tape)");
             }
         }
     } else if (!dialog_->isOpen() &&
-               plotterview_tapeHitTest(x, y) == TapeHotspot::Power) {
+               views_tapeHitTest(x, y) == TapeHotspot::Power) {
         // Tape view: power switch -> TFDRIVE's OFF/STANDBY/ON, saved like
         // the Devices menu does. The switch and POWER LED follow on the
-        // next plotterview_poll().
+        // next views_poll().
         // The switch picture moves at once; switching OFF itself waits
         // until the drive is idle (CDrive::servicePendingDisable(),
         // serviced in boardui_poll()), and the POWER LED goes out then.
         // Each tap moves the switch one step: OFF -> STANDBY -> ON ->
         // STANDBY -> OFF -> ...
-        if (CDrive* drive = plotterview_drive()) {
+        if (CDrive* drive = views_drive()) {
             static bool towardsOn = true;       // direction through STANDBY
             DrivePower next;
             switch (drive->powerMode()) {
@@ -1021,14 +1021,14 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // Analyzer view: a tap anywhere else (not a corner, not the strip)
         // pauses / resumes it
         if (!inStripZone && !dialog_->isOpen() &&
-            plotterview_output() == DisplayOutput::Analyzer) {
+            views_output() == DisplayOutput::Analyzer) {
             analyzer_setPaused(!analyzer_paused());
             return;
         }
         if (!inStripZone) return;
         // Hardware test page: no button strip -- its own buttons reach the
         // right edge (the close X, pixel Off), and the X closes the page
-        if (plotterview_output() == DisplayOutput::HwTest && !dialog_->isOpen()) return;
+        if (views_output() == DisplayOutput::HwTest && !dialog_->isOpen()) return;
 
         const bool wasHidden = !buttonStripVisible;
         if (wasHidden) {
@@ -1046,9 +1046,9 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
 
 void boardui_handleRelease() {
     repeatButton = Button::None;          // finger lifted: stop auto-repeat
-    plotterview_digitizeRelease();        // (and a digitize arrow)
-    if (printerKeyHeld == PrinterHotspot::Print)   plotterview_printerPrint(false);
-    if (printerKeyHeld == PrinterHotspot::Advance) plotterview_printerAdvance(false);
+    views_digitizeRelease();        // (and a digitize arrow)
+    if (printerKeyHeld == PrinterHotspot::Print)   views_printerPrint(false);
+    if (printerKeyHeld == PrinterHotspot::Advance) views_printerAdvance(false);
     printerKeyHeld = PrinterHotspot::None;
     if (pressedButton == Button::None) return;
     // The button strip may have been hidden entirely DURING the press
@@ -1077,7 +1077,7 @@ void boardui_handleRelease() {
     // matching restore for why this matters (a later Screen::full(), on
     // menu close, would otherwise clear the whole panel instead of just
     // its own text area). drawOnStrip() restores it.
-    plotterview_refreshCursor();  // same MWCR0-clobber fix as on press
+    views_refreshCursor();  // same MWCR0-clobber fix as on press
     pressedButton = Button::None;
 }
 
@@ -1087,18 +1087,18 @@ bool boardui_handleDrag(TouchDragPhase phase, std::uint16_t x, std::uint16_t y) 
         if (demo_running() || backlight_dimmed()) return false;   // (that touch only stops / wakes)
         if (dialog_->isOpen() || infoBoxVisible || deviceListVisible) return false;
         if (x >= buttonStripScreenX0 && buttonStripVisible) return false;
-        if (!plotterview_paperDragBegin(x, y)) return false;
+        if (!views_paperDragBegin(x, y)) return false;
         backlight_activity();
         return true;
     }
     if (phase == TouchDragPhase::Move) {
-        plotterview_paperDragMove(x, y);
+        views_paperDragMove(x, y);
         backlight_activity();
     } else {
-        plotterview_paperDragEnd();
+        views_paperDragEnd();
         // Up to the tear-off edge and then sideways: tear it off? (asks)
         int dir = 0;
-        if (plotterview_takeTearGesture(dir)) dialog_->openTearOff(dir);
+        if (views_takeTearGesture(dir)) dialog_->openTearOff(dir);
     }
     return true;
 }
@@ -1119,7 +1119,7 @@ void boardui_handleSwipe(bool forward) {
     // `forward` from touch.cpp means a left-to-right swipe. Swiping LEFT
     // goes to the next device on the loop (like turning a page), right
     // goes back.
-    plotterview_cycleOutput(!forward);
+    views_cycleOutput(!forward);
 }
 
 void boardui_onMenuClosed() {

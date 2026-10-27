@@ -584,7 +584,7 @@ public:
     // own, independently-rendered content, and vice versa.
     static constexpr std::uint32_t kMenuLayerAddr = 1024UL * 600UL * 2UL * 3UL;
     // Fifth full-size layer: the pre-rendered HP82161A image shown by the
-    // Tape view (see plotterview.cpp). Loaded once at boot from hp82161a.bmp
+    // Tape view (see views.cpp). Loaded once at boot from hp82161a.bmp
     // and only ever copied to the panel via copyLayerToPanel() -- never
     // drawn to at runtime, so it can't collide with BTE staging or the
     // menu layer. Lies below kCgramAddr, which is confirmed working on
@@ -608,7 +608,7 @@ public:
     // layer slot, 64 kB after CGRAM's 1616 bytes: no overlap, and inside
     // the SDRAM region confirmed working on real hardware.
     static constexpr std::uint32_t kStripLayerAddr = kCgramAddr + 0x10000UL;
-    // Tape view cassette (see plotterview.cpp): two full-stride (width_)
+    // Tape view cassette (see views.cpp): two full-stride (width_)
     // areas of up to 128 rows each (~256 kB), also in CGRAM's slot after
     // the strip. kCassetteAddr holds the cassette picture as loaded from
     // tape-in.bmp; kCassetteLabelAddr is a copy of it with the current
@@ -628,7 +628,7 @@ public:
     // power switch ON and STANDBY), narrow stride, right after the
     // open-lid area (~19 kB).
     static constexpr std::uint32_t kLedsAddr          = kCgramAddr + 0x120000UL;
-    // Printer view (see plotterview.cpp): the HP82162A picture
+    // Printer view (see views.cpp): the HP82162A picture
     // (hp82162a.bmp) in a full layer of its own, the 7th slot -- past
     // CGRAM's slot, well inside the 16 MB (128 Mbit) SDRAM set up in
     // begin() (SDRAR) -- and its control sprites (prtparts.bmp, narrow

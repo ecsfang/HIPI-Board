@@ -4,7 +4,7 @@
 // scripts/hp41_charset.py into src/chartable_font.cpp). A help page only:
 // shown over the whole screen, any touch (or X) closes it.
 //
-// Shown as the DisplayOutput::CharTable view (plotterview_showCharTable()).
+// Shown as the DisplayOutput::CharTable view (views_showCharTable()).
 #pragma once
 #include "display_config.h"
 

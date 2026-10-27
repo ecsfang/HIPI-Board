@@ -5,7 +5,7 @@
 #include "glyph_font.h"
 #include "saver_anim.h"
 #include "config.hpp"
-#include "plotterview.h"
+#include "views.h"
 #include "touch.h"          // TOUCH_SDA/TOUCH_SCL, touch_i2c (the shared I2C bus)
 #include "usb_serial.h"
 #include "tusb.h"
@@ -170,7 +170,7 @@ Style style() {
 }
 
 bool visible() {
-    return d_ != nullptr && plotterview_output() == DisplayOutput::Clock && !plotterview_isSplashVisible();
+    return d_ != nullptr && views_output() == DisplayOutput::Clock && !views_isSplashVisible();
 }
 
 // What is on screen, row by row, so an update only repaints what changed

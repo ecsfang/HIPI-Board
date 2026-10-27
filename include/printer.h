@@ -3,7 +3,7 @@
 
 // CPrinter -- an HP 82162A thermal printer on the HP-IL loop (TFPRINT),
 // with its own view on the panel: a picture of the printer with working
-// controls (plotterview.cpp, Printer view).
+// controls (views.cpp, Printer view).
 //
 // The HP-IL side follows the real printer and pyILPER's emulation of it
 // (pilhp82162a.py, itself derived from Eric Smith's nonpareil):

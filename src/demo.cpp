@@ -2,7 +2,7 @@
 #define MODULE "DEMO"
 #include "demo.h"
 #include "demo_content.h"
-#include "plotterview.h"
+#include "views.h"
 #include "Screen.hpp"
 #include "video80.h"
 #include "display.h"
@@ -116,7 +116,7 @@ void showCaption(const std::string& text, std::uint32_t ms) {
     d_->endOverlayDraw();
     screen->reassertRenderState();
     d_->showPipOverlay(x, y, w, h);
-    plotterview_refreshCursor();        // (the caption's text moved the chip's text cursor)
+    views_refreshCursor();        // (the caption's text moved the chip's text cursor)
     captionShown_ = true;
     captionUntil_ = nowMs() + ms;
 }
@@ -163,7 +163,7 @@ Step caption(const char* text, std::uint32_t ms = 3000) {
 }
 
 Step view(DisplayOutput o, CDevice* dev) {
-    return call([o, dev] { plotterview_showView(o, dev); });
+    return call([o, dev] { views_showView(o, dev); });
 }
 
 // Text to the display (82163: Screen) or the 92198 screen, ms per character
@@ -215,14 +215,14 @@ Step digitizePoint() {
     return acts([](std::vector<Act>& a) {
         auto press = [](int id) {
             int x = 0, y = 0;
-            if (plotterview_digitizeControl(id, x, y)) plotterview_digitizeTap(x, y);
+            if (views_digitizeControl(id, x, y)) views_digitizeTap(x, y);
         };
         std::uint32_t t = 0;
         a.push_back({ t, [] {
             int x = 0, y = 0;
-            plotterview_plotToScreen(demo::kFunctionPeakX, demo::kFunctionPeakY, x, y);
-            plotterview_digitizeTap(x + 10, y + 6);
-            plotterview_digitizeRelease();
+            views_plotToScreen(demo::kFunctionPeakX, demo::kFunctionPeakY, x, y);
+            views_digitizeTap(x + 10, y + 6);
+            views_digitizeRelease();
         } });
         // Arrows tapped, never held: a held arrow repeats in real time, and
         // the demo's time stands still while hipiview catches up -- the
@@ -232,17 +232,17 @@ Step digitizePoint() {
         for (int k = 0; k < 10; ++k) {                             // left
             t += 220;
             a.push_back({ t, [press] { press(2); } });
-            a.push_back({ t + 100, [] { plotterview_digitizeRelease(); } });
+            a.push_back({ t + 100, [] { views_digitizeRelease(); } });
         }
         t += 300;
         for (int k = 0; k < 6; ++k) {                              // up, tapped
             t += 450;
             a.push_back({ t, [press] { press(0); } });
-            a.push_back({ t + 120, [] { plotterview_digitizeRelease(); } });
+            a.push_back({ t + 120, [] { views_digitizeRelease(); } });
         }
         t += 1500;
         a.push_back({ t, [press] { press(4); } });                // ENTER
-        a.push_back({ t + 120, [] { plotterview_digitizeRelease(); } });
+        a.push_back({ t + 120, [] { views_digitizeRelease(); } });
     });
 }
 
@@ -286,7 +286,7 @@ int pickFrom_ = 0, pickTo_ = 0;
 // Opens the lid, shows the list, moves to another cassette, closes, turns the reels
 Step tapePick() {
     return [step = 0, sel = 0, next = std::uint32_t(0)](bool first) mutable {
-        CDrive* drv = plotterview_drive();
+        CDrive* drv = views_drive();
         if (first) {
             step = 0;
             next = nowMs();
@@ -306,7 +306,7 @@ Step tapePick() {
         switch (step) {
             case 0:                                   // the lid opens, the list
                 tapeShown_ = true;
-                plotterview_setTapeEjected(true);
+                views_setTapeEjected(true);
                 if (captionShown_) hideOverlay();
                 pickerShown_ = true;
                 if (hooks_.showPicker) hooks_.showPicker(files_, sel);
@@ -326,14 +326,14 @@ Step tapePick() {
             case 2:                                   // chosen: the lid closes with it
                 if (hooks_.hidePicker) hooks_.hidePicker();
                 pickerShown_ = false;
-                plotterview_setTapeFile(files_[static_cast<std::size_t>(pickTo_)]);
-                plotterview_setTapeEjected(false);
-                plotterview_setDemoTape(true);        // reading it: BUSY, the reels
+                views_setTapeFile(files_[static_cast<std::size_t>(pickTo_)]);
+                views_setTapeEjected(false);
+                views_setDemoTape(true);        // reading it: BUSY, the reels
                 next = nowMs() + 3000;
                 ++step;
                 return false;
             default:
-                plotterview_setDemoTape(false);
+                views_setDemoTape(false);
                 return true;
         }
     };
@@ -395,7 +395,7 @@ Step mediaMap(std::uint32_t ms) {
                     return ok;
                 });
             demoMap_ = true;
-            plotterview_showView(DisplayOutput::MediaMap, nullptr);   // (no name box: the caption)
+            views_showView(DisplayOutput::MediaMap, nullptr);   // (no name box: the caption)
             until = nowMs() + ms;
             return false;
         }
@@ -495,7 +495,7 @@ Step machineMap() {
             [](MediaMapLive& l) { l.file = "DEMODISK.DAT"; l.op = MediaOp::None; l.writes = 0; l.busy = false; return true; },
             demoDiskBlock);
         demoMap_ = true;
-        plotterview_showView(DisplayOutput::MediaMap, nullptr);
+        views_showView(DisplayOutput::MediaMap, nullptr);
         auto row = [](int r) { int x = 0, y = 0; if (mediamap_rowPoint(r, x, y)) mediamap_tap(x, y); };
         auto tab = [](bool m) { int x = 0, y = 0; mediamap_tabPoint(m, x, y); mediamap_tap(x, y); };
         a.push_back({ 100, [] { showCaption("HP-41, HP-71 AND HP-75 FILES ON ONE DISK", 3500); } });
@@ -522,7 +522,7 @@ Step paperPullUp() {
         if (first) { n = 0; next = nowMs(); }
         if (static_cast<std::int32_t>(nowMs() - next) < 0) return false;
         next = nowMs() + 250;
-        if (n < 4) { plotterview_paperScrollBy(-1); ++n; return false; }   // (stops at the edge)
+        if (n < 4) { views_paperScrollBy(-1); ++n; return false; }   // (stops at the edge)
         return true;
     };
 }
@@ -630,7 +630,7 @@ void buildScript() {
     const char* kColourNames[] = { "WHITE", "YELLOW", "GREEN", "CYAN", "RED" };
 
     // ── The display as an HP 82163 ──────────────────────────────────
-    add(call([] { plotterview_setDisplayModel(false); }));
+    add(call([] { views_setDisplayModel(false); }));
     add(view(DisplayOutput::Display, videoDisplay));
     add(call([] { screen->setTextSize(1); screen->setColumns(0); screen->setColor(0x07E0); }));
     add(caption(round_ == 0 ? "HIPI DEMO  -  touch to stop" : "HP 82163 VIDEO INTERFACE", 3500));
@@ -658,7 +658,7 @@ void buildScript() {
         video80Term->setSmallFont(false);
         video80Term->setColor(0x07FF);
         video80Term->hardReset();
-        plotterview_setDisplayModel(true);
+        views_setDisplayModel(true);
     }));
     add(caption("OR AS AN HP 92198 - 80 COLUMNS", 3000));
     add(type(Sink::Video80, demo::text80(), 4));
@@ -668,11 +668,11 @@ void buildScript() {
     add(type(Sink::Video80, demo::text40(), 20));
     add(wait(3000));
     add(type(Sink::Video80, "\x1b[", 0));
-    add(call([] { plotterview_setDisplayModel(false); }));
+    add(call([] { views_setDisplayModel(false); }));
 
     // ── The cassette drive ──────────────────────────────────────────
-    CDrive* drv = plotterview_drive();
-    if (drv != nullptr && plotterview_isAvailable(DisplayOutput::Tape)) {
+    CDrive* drv = views_drive();
+    if (drv != nullptr && views_isAvailable(DisplayOutput::Tape)) {
         add(view(DisplayOutput::Tape, drv));
         add(caption("HP 82161A CASSETTE DRIVE", 2500));
         add(wait(2600));
@@ -691,12 +691,12 @@ void buildScript() {
     add(machineMap());
 
     // ── The plotter ─────────────────────────────────────────────────
-    add(call([] { plotterview_setPlotFit(false); plotterview_clearPlotter(); plotterview_setPaperBlack(true); }));
+    add(call([] { views_setPlotFit(false); views_clearPlotter(); views_setPaperBlack(true); }));
     add(view(DisplayOutput::Plotter, plotter));
     add(caption("HP 7470A PLOTTER", 2500));
     add(hpgl([] { return demo::hpglLogo(kLogoImage, kLogoImageWidth, kLogoImageHeight); }, 60));
     add(wait(2500));
-    add(call([] { plotterview_clearPlotter(); plotterview_setPaperBlack(false); }));
+    add(call([] { views_clearPlotter(); views_setPaperBlack(false); }));
     add(hpgl(demo::hpglSpirograph, 90));
     add(wait(800));
     add(caption("SCREENDUMP", 1500));
@@ -707,7 +707,7 @@ void buildScript() {
     add(wait(2600));
     // Fit: the plot fills the screen -- the axes slowly, a piece at a time, so
     // the view is seen growing with them; then the rest, faster
-    add(call([] { plotterview_clearPlotter(); plotterview_setPlotFit(true); }));
+    add(call([] { views_clearPlotter(); views_setPlotFit(true); }));
     add(caption("PLOT VIEW: FIT", 2500));
     add(hpgl(demo::hpglFunctionAxes, 1));            // slowly: the view grows with them
     add(wait(800));
@@ -730,20 +730,20 @@ void buildScript() {
     add(wait(2700));
     add(call([] {
         int x = 0, y = 0;
-        if (plotterview_errorLightPoint(x, y)) plotterview_errorLightTap(x, y);
+        if (views_errorLightPoint(x, y)) views_errorLightTap(x, y);
     }));
     add(wait(3200));
     add(caption("OE READS THE ERROR - THE LIGHT GOES OUT", 2500));
     add(hpgl([] { return std::string("OE;"); }, 3));
     add(wait(2800));
-    add(call([] { plotterview_setPlotFit(false); }));
-    add(call([] { plotterview_clearPlotter(); }));
+    add(call([] { views_setPlotFit(false); }));
+    add(call([] { views_clearPlotter(); }));
     add(caption("THE HP-IL LOOP", 2500));
     add(hpgl(demo::hpglLoop, 60));
     add(wait(3000));
 
     // ── The printer ─────────────────────────────────────────────────
-    if (printer != nullptr && plotterview_isAvailable(DisplayOutput::Printer)) {
+    if (printer != nullptr && views_isAvailable(DisplayOutput::Printer)) {
         add(view(DisplayOutput::Printer, printer));
         add(caption("HP 82162A THERMAL PRINTER", 2500));
         add(wait(1500));
@@ -754,7 +754,7 @@ void buildScript() {
         add(wait(1500));
         add(caption("TEAR IT OFF - .BMP + .TXT  (NOT IN THE DEMO)", 3000));
         add(wait(1200));
-        add(call([] { plotterview_tearOff(1); }));
+        add(call([] { views_tearOff(1); }));
         add(wait(2500));
     }
 
@@ -787,7 +787,7 @@ void buildScript() {
     if (clock_available()) {
         add(call([] {
             clock_setShow(SaverShow::Clock, config.clockStyle() == 1);
-            plotterview_showClock();
+            views_showClock();
         }));
         add(caption("THE CLOCK - FROM THE REAL-TIME CLOCK", 3000));
         add(wait(6000));
@@ -804,7 +804,7 @@ void buildScript() {
     add(wait(4000));
 
     // ── The end: name, lights, a screen saver ───────────────────────
-    add(call([] { plotterview_clearPlotter(); plotterview_setPaperBlack(true); }));
+    add(call([] { views_clearPlotter(); views_setPaperBlack(true); }));
     add(view(DisplayOutput::Plotter, plotter));
     add(hpgl([] { return demo::hpglLogo(kLogoImage, kLogoImageWidth, kLogoImageHeight); }, 400));
     add(call([] { showEndCard(); }));
@@ -813,10 +813,10 @@ void buildScript() {
     add(call([] {
         // Goose or rain, in turn (the clock had its own turn)
         clock_setShow(round_ % 2 == 0 ? SaverShow::Goose : SaverShow::Rain, config.clockStyle() == 1);
-        plotterview_showClock();
+        views_showClock();
     }));
     add(wait(9000));
-    add(call([] { plotterview_leaveClock(); }));
+    add(call([] { views_leaveClock(); }));
 }
 
 // ── Putting everything back ─────────────────────────────────────────────
@@ -828,12 +828,12 @@ void restore() {
     createShown_ = false;
     hideOverlay();
     if (lights_) { hwio::end(); lights_ = false; }
-    plotterview_setDemoTape(false);
+    views_setDemoTape(false);
     if (demoMap_) { mediamap_clearDemoSource(); demoMap_ = false; }
     if (tapeShown_) {
-        CDrive* drv = plotterview_drive();
-        plotterview_setTapeFile(drv != nullptr ? drv->mediaFile() : std::string());
-        plotterview_setTapeEjected(drv != nullptr && drv->ejected());
+        CDrive* drv = views_drive();
+        views_setTapeFile(drv != nullptr ? drv->mediaFile() : std::string());
+        views_setTapeEjected(drv != nullptr && drv->ejected());
         tapeShown_ = false;
     }
     restoreAddresses();
@@ -844,24 +844,24 @@ void restore() {
     video80Term->setColor(config.textColor());
     video80Term->setSmallFont(config.v80Small());
     video80Term->setDefaultForty(config.v80Forty());
-    plotterview_setPlotFit(config.plotFit());
-    plotterview_setPaperBlack(config.plotPaperBlack());
+    views_setPlotFit(config.plotFit());
+    views_setPaperBlack(config.plotPaperBlack());
     // Empty afterwards
     screen->clear();
     video80Term->hardReset();
-    plotterview_clearPlotter();
-    plotterview_clearPaper();
+    views_clearPlotter();
+    views_clearPaper();
 #if HIPI_ANALYZER
     analyzer_clear();
     loopmap_reset();
 #endif
-    plotterview_setDisplayModel(videoDisplay != nullptr && videoDisplay->isVideo80());
+    views_setDisplayModel(videoDisplay != nullptr && videoDisplay->isVideo80());
     // Back to where it started
     if (startOutput_ == DisplayOutput::Video80 || startOutput_ == DisplayOutput::Display)
-        plotterview_showView(videoDisplay != nullptr && videoDisplay->isVideo80() ? DisplayOutput::Video80 : DisplayOutput::Display,
+        views_showView(videoDisplay != nullptr && videoDisplay->isVideo80() ? DisplayOutput::Video80 : DisplayOutput::Display,
                              videoDisplay);
     else
-        plotterview_showView(startOutput_, startDevice_);
+        views_showView(startOutput_, startDevice_);
 }
 
 }  // namespace
@@ -877,8 +877,8 @@ bool demo_running() { return running_; }
 void demo_start() {
     if (running_ || d_ == nullptr) return;
     LOGF("\r\n * Demo started");
-    startOutput_ = plotterview_output();
-    startDevice_ = plotterview_viewDevice();
+    startOutput_ = views_output();
+    startDevice_ = views_viewDevice();
     running_ = true;
     stopRequested_ = false;
     round_ = 0;

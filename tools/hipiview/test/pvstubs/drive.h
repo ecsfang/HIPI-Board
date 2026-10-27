@@ -1,4 +1,4 @@
-// A drive without the tape behind it, for the view tests (plotterview.cpp needs the type)
+// A drive without the tape behind it, for the view tests (views.cpp needs the type)
 #pragma once
 #include "hpil.h"
 #include <string>

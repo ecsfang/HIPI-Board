@@ -5,7 +5,7 @@
 #include "clock.h"
 #include "saver_anim.h"
 #include "pico/rand.h"
-#include "plotterview.h"
+#include "views.h"
 #include "boardui.h"
 #include "usb_serial.h"
 #include "pico/time.h"
@@ -78,7 +78,7 @@ void backlight_activity() {
     } else if (saver_ == Saver::Clock) {
         fading_ = false;
         screen_->display()->brightness(screen_->brightness());   // full brightness at once
-        plotterview_leaveClock();             // back to the view before
+        views_leaveClock();             // back to the view before
         boardui_saverEnd();                   // menu, strip... as they were
         MLOGF("clock screen saver ended");
     }
@@ -118,7 +118,7 @@ void backlight_poll() {
         clock_setShow(mode == Config::SaverRain  ? SaverShow::Rain
                     : mode == Config::SaverGoose ? SaverShow::Goose : SaverShow::Clock, lcd);
         boardui_saverBegin();                 // the saver gets the whole panel
-        plotterview_showClock();              // the screen saver view
+        views_showClock();              // the screen saver view
         saver_ = Saver::Clock;
         startClockDim();                      // dimmed too
         if (manual) MLOGF("screen saver shown (Show now)");

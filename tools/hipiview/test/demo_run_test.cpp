@@ -9,7 +9,7 @@
 //   make demo_run_test && ./demo_run_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "Screen.hpp"
-#include "plotterview.h"
+#include "views.h"
 #include "printer.h"
 #include "plotter.h"
 #include "drive.h"
@@ -122,7 +122,7 @@ void check(bool ok, const char* what) {
 void run(int ms) {
     for (int t = 0; t < ms; t += 5) {
         fakeNowUs += 5000;
-        hipi::plotterview_poll();
+        hipi::views_poll();
         hipi::hwtest_poll();
         hipi::demo_poll();
         if (videoDisplay) videoDisplay->idle();
@@ -188,10 +188,10 @@ int main(int argc, char** argv) {
     drive->setEnabled(true);
     plotter->setEnabled(true);
     devices = { videoDisplay, drive, plotter, printer };
-    hipi::plotterview_setPrinter(printer);
-    hipi::plotterview_setDrive(drive);
-    hipi::plotterview_init(&d, screen, plotter);
-    hipi::plotterview_setVideo80(video80Term);
+    hipi::views_setPrinter(printer);
+    hipi::views_setDrive(drive);
+    hipi::views_init(&d, screen, plotter);
+    hipi::views_setVideo80(video80Term);
     hipi::hwtest_init(&d);
     hipi::hpil_diag_init(&d);
     int pickerShows = 0, pickerMoves = 0, pickerHides = 0;
@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
     hipi::demo_start();
     check(hipi::demo_running(), "System -> Demo: it runs");
     run(50);
-    check(hipi::plotterview_output() == hipi::DisplayOutput::Display, "it starts on the Display view");
+    check(hipi::views_output() == hipi::DisplayOutput::Display, "it starts on the Display view");
 
     // hipiview connected and still getting the whole screen: the demo waits
     run(1500);
@@ -254,10 +254,10 @@ int main(int argc, char** argv) {
     // A viewer that never catches up: a step waits 3 s at most, then on
     mirrorBacklog = 100000;
     {
-        const hipi::DisplayOutput o0 = hipi::plotterview_output();
+        const hipi::DisplayOutput o0 = hipi::views_output();
         bool moved = false;
         int k_ = 0;
-        for (k_ = 0; k_ < 150 && !moved; ++k_) { run(1000); moved = hipi::plotterview_output() != o0; }
+        for (k_ = 0; k_ < 150 && !moved; ++k_) { run(1000); moved = hipi::views_output() != o0; }
         std::printf("     (next view after %d s)\n", k_);
         check(moved, "hipiview never catching up: the demo still goes on");
     }
@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
 
     // A whole round: a picture shortly after each new view
     std::vector<std::string> seen;
-    hipi::DisplayOutput last = hipi::plotterview_output();
+    hipi::DisplayOutput last = hipi::views_output();
     int shots = 0;
     bool plotted = false, printed = false, analyzed = false, wentBack = false;
     bool mapRings = false, signalsExample = false, scrolled = false, tornOff = false, clockShown = false;
@@ -286,7 +286,7 @@ int main(int argc, char** argv) {
     bool shotDone = false;
     for (int ms = 0; ms < 260000; ms += 5) {
         run(5);
-        const hipi::DisplayOutput o = hipi::plotterview_output();
+        const hipi::DisplayOutput o = hipi::views_output();
         if (o != last) {
             // (the clock's own turn first, then the screen saver at the end)
             if (last == hipi::DisplayOutput::Clock && o != hipi::DisplayOutput::Clock &&
@@ -304,9 +304,9 @@ int main(int argc, char** argv) {
             shotDone = true;
         }
         if (!plotter->segments().empty()) plotted = true;
-        if (o == hipi::DisplayOutput::Plotter && hipi::plotterview_plotFit() && plotter->segments().size() > 100) fitSeen = true;
+        if (o == hipi::DisplayOutput::Plotter && hipi::views_plotFit() && plotter->segments().size() > 100) fitSeen = true;
         // Digitizing: a picture while the panel is up, then where the point went
-        const bool digi = hipi::plotterview_digitizing();
+        const bool digi = hipi::views_digitizing();
         if (digi && !wasDigitizing) digiFrom = fakeNowUs;
         if (digi && !digiShot && fakeNowUs - digiFrom > 3000000) { snapshot("../demo_run_digitize.png"); digiShot = true; }
         if (!digi && wasDigitizing) { digitized = true; digX = plotter->penX(); digY = plotter->penY(); digiFrom = fakeNowUs; }
@@ -317,10 +317,10 @@ int main(int argc, char** argv) {
         wasDigitizing = digi;
         {
             int ex = 0, ey = 0;
-            const bool lit = hipi::plotterview_errorLightPoint(ex, ey);
+            const bool lit = hipi::views_errorLightPoint(ex, ey);
             if (lit && !errLit) { errLit = true; errAt = fakeNowUs; }
             if (lit && errAt != 0 && fakeNowUs - errAt > 2000000) { snapshot("../demo_run_error_light.png"); errAt = 0; }
-            if (lit && !errTextShown && hipi::plotterview_isSplashVisible()) {
+            if (lit && !errTextShown && hipi::views_isSplashVisible()) {
                 errTextShown = true;
                 run(200);
                 snapshot("../demo_run_error_text.png");
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
             if (errTextShown && !lit && plotter->errorCode() == 0) errOut = true;
         }
         // The Fit view while the axes are drawn, a piece at a time
-        if (!fitAxesShot && o == hipi::DisplayOutput::Plotter && hipi::plotterview_plotFit() &&
+        if (!fitAxesShot && o == hipi::DisplayOutput::Plotter && hipi::views_plotFit() &&
             plotter->segments().size() >= 22 && plotter->segments().size() < 30) {
             snapshot("../demo_run_fit_axes.png");
             fitAxesShot = true;
@@ -342,13 +342,13 @@ int main(int argc, char** argv) {
         }
         if (o == hipi::DisplayOutput::HwTest) hwtestSeen = true;
         if (o == hipi::DisplayOutput::MediaMap && hipi::mediamap_rings() > 0) mapRings = true;
-        if (o == hipi::DisplayOutput::Printer && hipi::plotterview_paperScrolled() && !scrolled) {   // (pulled up)
+        if (o == hipi::DisplayOutput::Printer && hipi::views_paperScrolled() && !scrolled) {   // (pulled up)
             scrolled = true;
             run(1500);
             snapshot("../demo_run_printer_pulled_up.png");
         }
-        maxLines = std::max(maxLines, hipi::plotterview_paperLines());
-        if (o == hipi::DisplayOutput::Printer && maxLines > 0 && hipi::plotterview_paperLines() == 0) tornOff = true;
+        maxLines = std::max(maxLines, hipi::views_paperLines());
+        if (o == hipi::DisplayOutput::Printer && maxLines > 0 && hipi::views_paperLines() == 0) tornOff = true;
         if (o == hipi::DisplayOutput::Signals && shotDone && !signalsExample) {
             chip.render(panel.data(), 0.0);
             // The cyan "EXAMPLE" band under the title, and a waveform (yellow) in it
@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
     hipi::demo_hpilActivity();
     run(10);
     check(!hipi::demo_running(), "HP-IL traffic stops it");
-    check(hipi::plotterview_output() == hipi::DisplayOutput::Display, "back to the view it started from");
+    check(hipi::views_output() == hipi::DisplayOutput::Display, "back to the view it started from");
     check(plotter->segments().empty() && printer->lines().empty(), "the plot and the paper are empty");
     check(plotter->addr() == addrBefore, "the devices' loop addresses put back");
     check(drive->mediaFile().empty(), "the cassette wasn't really changed");
@@ -414,7 +414,7 @@ int main(int argc, char** argv) {
     hipi::demo_start();
     run(4000);
     hipi::demo_stop();
-    check(!hipi::demo_running() && hipi::plotterview_output() == hipi::DisplayOutput::Display, "stopped: back");
+    check(!hipi::demo_running() && hipi::views_output() == hipi::DisplayOutput::Display, "stopped: back");
     chdir(here.c_str());
     std::system(("rm -rf '" + sd + "'").c_str());
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");

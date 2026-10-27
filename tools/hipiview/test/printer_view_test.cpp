@@ -1,7 +1,7 @@
 // printer_view_test.cpp -- the Printer view as HIPI draws it: the real
-// plotterview.cpp, printer.cpp, BMP loader and LT7683 driver against the
+// views.cpp, printer.cpp, BMP loader and LT7683 driver against the
 // emulated chip, with the real pictures from resources/. The controller's
-// frames go to the printer, plotterview_poll() runs as the main loop
+// frames go to the printer, views_poll() runs as the main loop
 // would, and the panel is saved as PNGs to look at:
 //
 //   printer_view_1_feeding.png   in the middle of the paper moving up
@@ -15,7 +15,7 @@
 //   make printer_view_test && ./printer_view_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "Screen.hpp"
-#include "plotterview.h"
+#include "views.h"
 #include "hp82163_font.hpp"
 #include "boardui.h"            // (the pvstubs one: counts boardui_closePipBoxes())
 #include "printout.h"
@@ -101,7 +101,7 @@ void check(bool ok, const char* what) {
 void run(int ms) {
     for (int t = 0; t < ms; t += 5) {
         fakeNowUs += 5000;
-        hipi::plotterview_poll();
+        hipi::views_poll();
     }
 }
 
@@ -133,11 +133,11 @@ int main(int argc, char** argv) {
     printer->setEnabled(true);
     printer->hpil(AAD + 1);
     devices = { plotter, printer };
-    hipi::plotterview_setPrinter(printer);
-    hipi::plotterview_init(&d, &screen, plotter);
-    check(hipi::plotterview_isAvailable(hipi::DisplayOutput::Printer), "Printer view loaded (hp82162a.bmp, prtparts.bmp)");
+    hipi::views_setPrinter(printer);
+    hipi::views_init(&d, &screen, plotter);
+    check(hipi::views_isAvailable(hipi::DisplayOutput::Printer), "Printer view loaded (hp82162a.bmp, prtparts.bmp)");
     const int closedBefore = hipi::pipBoxesClosedStub();
-    hipi::plotterview_showDevice(printer);
+    hipi::views_showDevice(printer);
     // The name box takes PIP-1: an open info box / device list is closed first
     check(hipi::pipBoxesClosedStub() == closedBefore + 1, "view switch closes the PIP-1 boxes first");
     run(2000);                                              // the name box goes away
@@ -227,9 +227,9 @@ int main(int argc, char** argv) {
     // Away and back: the paper is drawn again as it was
     chip.render(panel.data(), 0.0);
     const std::vector<std::uint32_t> before = panel;
-    hipi::plotterview_cycleOutput(true);
+    hipi::views_cycleOutput(true);
     run(2000);
-    hipi::plotterview_showDevice(printer);
+    hipi::views_showDevice(printer);
     run(2000);
     chip.render(panel.data(), 0.0);
     long diff = 0;
@@ -246,52 +246,52 @@ int main(int argc, char** argv) {
             for (int x = 496; x < 748; ++x) if (lum(at(x, y)) < 120) ++n;
         return n;
     };
-    check(!hipi::plotterview_paperDragBegin(200, 300), "a finger beside the paper: no drag");
-    check(hipi::plotterview_paperDragBegin(620, 200), "a finger on the paper: it drags");
+    check(!hipi::views_paperDragBegin(200, 300), "a finger beside the paper: no drag");
+    check(hipi::views_paperDragBegin(620, 200), "a finger on the paper: it drags");
     // Up as far as it goes: the newest line out above the tear-off bar
-    for (int y = 200; y >= 0; y -= 10) { hipi::plotterview_paperDragMove(620, y); run(30); }
-    hipi::plotterview_paperDragEnd();
+    for (int y = 200; y >= 0; y -= 10) { hipi::views_paperDragMove(620, y); run(30); }
+    hipi::views_paperDragEnd();
     snapshot("tools/hipiview/printer_view_4_pulled_up.png");
-    check(hipi::plotterview_paperScrolled(), "moved: not where it prints");
+    check(hipi::views_paperScrolled(), "moved: not where it prints");
     check(inkRows(270, 290) > 50 && inkRows(310, 340) == 0, "pulled up: the newest line just above the tear-off bar, nothing below");
     const std::vector<std::uint32_t> upTop = panel;
-    hipi::plotterview_paperDragBegin(620, 100);
-    hipi::plotterview_paperDragMove(620, 20);                    // further up: no
+    hipi::views_paperDragBegin(620, 100);
+    hipi::views_paperDragMove(620, 20);                    // further up: no
     run(30);
-    hipi::plotterview_paperDragEnd();
+    hipi::views_paperDragEnd();
     chip.render(panel.data(), 0.0);
     check(panel == upTop, "... and no further");
     // Down to the first line
-    hipi::plotterview_paperDragBegin(620, 40);
-    for (int y = 40; y < 340; y += 7) { hipi::plotterview_paperDragMove(620, y); run(20); }
+    hipi::views_paperDragBegin(620, 40);
+    for (int y = 40; y < 340; y += 7) { hipi::views_paperDragMove(620, y); run(20); }
     for (int k = 0; k < 4; ++k) {
-        hipi::plotterview_paperDragEnd();
-        hipi::plotterview_paperDragBegin(620, 40);
-        for (int y = 40; y < 340; y += 13) { hipi::plotterview_paperDragMove(620, y); run(20); }
+        hipi::views_paperDragEnd();
+        hipi::views_paperDragBegin(620, 40);
+        for (int y = 40; y < 340; y += 13) { hipi::views_paperDragMove(620, y); run(20); }
     }
-    hipi::plotterview_paperDragEnd();
+    hipi::views_paperDragEnd();
     snapshot("tools/hipiview/printer_view_5_first_line.png");
     const std::vector<std::uint32_t> stepped = panel;
     check(inkRows(24, 40) > 50, "pulled down: the first line at the top of the window");
     // The same place drawn afresh (one big jump): the same paper
-    hipi::plotterview_paperToLive();
+    hipi::views_paperToLive();
     run(1500);
-    check(!hipi::plotterview_paperScrolled(), "X: back to the print head (gliding)");
-    hipi::plotterview_paperDragBegin(620, 30);
-    hipi::plotterview_paperDragMove(620, 30 + 2000);             // one jump, clamped to the first line
-    hipi::plotterview_paperDragEnd();
+    check(!hipi::views_paperScrolled(), "X: back to the print head (gliding)");
+    hipi::views_paperDragBegin(620, 30);
+    hipi::views_paperDragMove(620, 30 + 2000);             // one jump, clamped to the first line
+    hipi::views_paperDragEnd();
     chip.render(panel.data(), 0.0);
     long d2 = 0;
     for (std::size_t i = 0; i < panel.size(); ++i) if (panel[i] != stepped[i]) ++d2;
     check(d2 == 0, "moved step by step or at once: the same paper");
     // ▲ / ▼ (a line)
-    hipi::plotterview_paperScrollBy(-1);
-    check(hipi::plotterview_paperScrolled(), "▼: a line towards the newest");
+    hipi::views_paperScrollBy(-1);
+    check(hipi::views_paperScrolled(), "▼: a line towards the newest");
     // Printing while it's moved: back to the head first, then the line
     send("AFTER\r");
     run(1500);
     snapshot("tools/hipiview/printer_view_6_printing_again.png");
-    check(!hipi::plotterview_paperScrolled() && inkRows(331, 347) > 50, "printing again: back at the head, the new line there");
+    check(!hipi::views_paperScrolled() && inkRows(331, 347) > 50, "printing again: back at the head, the new line there");
     // ── Saving the paper (printouts/printout_<n>.bmp + .txt) ───────────
     {
         char cwd[512];
@@ -323,29 +323,29 @@ int main(int argc, char** argv) {
     const std::deque<CPrinter::Line> savedPaper = printer->lines();
 
     // ── Tearing off: up to the edge, then sideways ─────────────────────
-    hipi::plotterview_paperDragBegin(620, 300);
-    for (int y = 300; y >= 100; y -= 20) { hipi::plotterview_paperDragMove(620, y); run(20); }
+    hipi::views_paperDragBegin(620, 300);
+    for (int y = 300; y >= 100; y -= 20) { hipi::views_paperDragMove(620, y); run(20); }
     int dir = 0;
-    for (int x = 620; x >= 480; x -= 20) { hipi::plotterview_paperDragMove(x, 100); run(20); }
-    hipi::plotterview_paperDragEnd();
-    check(hipi::plotterview_takeTearGesture(dir) && dir == -1, "up to the edge, then left: tear off (to the left)");
-    check(!hipi::plotterview_takeTearGesture(dir), "... asked once");
+    for (int x = 620; x >= 480; x -= 20) { hipi::views_paperDragMove(x, 100); run(20); }
+    hipi::views_paperDragEnd();
+    check(hipi::views_takeTearGesture(dir) && dir == -1, "up to the edge, then left: tear off (to the left)");
+    check(!hipi::views_takeTearGesture(dir), "... asked once");
     // Not at the edge: sideways does nothing
-    hipi::plotterview_paperDragBegin(620, 200);
-    hipi::plotterview_paperDragMove(620, 230);
-    hipi::plotterview_paperDragMove(400, 230);
-    hipi::plotterview_paperDragEnd();
-    check(!hipi::plotterview_takeTearGesture(dir), "sideways without being at the edge: nothing");
-    hipi::plotterview_tearOff(-1);
+    hipi::views_paperDragBegin(620, 200);
+    hipi::views_paperDragMove(620, 230);
+    hipi::views_paperDragMove(400, 230);
+    hipi::views_paperDragEnd();
+    check(!hipi::views_takeTearGesture(dir), "sideways without being at the edge: nothing");
+    hipi::views_tearOff(-1);
     const int inkBefore = inkRows(24, 340);
     run(40);
     const int inkMid = inkRows(24, 340);
     check(inkMid > 0 && inkMid < inkBefore, "tearing: the paper slides away to the side");
     snapshot("tools/hipiview/printer_view_7_tearing.png");
     run(1000);
-    check(hipi::plotterview_paperLines() == 0 && inkRows(24, 340) == 0, "torn off: the paper is empty");
-    hipi::plotterview_paperScrollBy(5);
-    check(!hipi::plotterview_paperScrolled(), "torn off: nothing older to show");
+    check(hipi::views_paperLines() == 0 && inkRows(24, 340) == 0, "torn off: the paper is empty");
+    hipi::views_paperScrollBy(5);
+    check(!hipi::views_paperScrolled(), "torn off: nothing older to show");
 
     // ── Printouts: listed, loaded back into the printer, deleted ───────
     {
@@ -366,13 +366,13 @@ int main(int argc, char** argv) {
             if (!b.text.empty() && a.text != b.text) same = false;
         }
         check(same, "loaded: the same dots and text as when it was saved");
-        hipi::plotterview_reloadPaper();
+        hipi::views_reloadPaper();
         run(300);
         snapshot((std::string(cwd) + "/tools/hipiview/printer_view_8_loaded.png").c_str());
-        check(inkRows(24, 340) > 1000 && !hipi::plotterview_paperScrolled(), "loaded: on the paper again, at the live position");
-        hipi::plotterview_paperScrollBy(5);
-        check(hipi::plotterview_paperScrolled(), "... and it can be scrolled back");
-        hipi::plotterview_paperToLive();
+        check(inkRows(24, 340) > 1000 && !hipi::views_paperScrolled(), "loaded: on the paper again, at the live position");
+        hipi::views_paperScrollBy(5);
+        check(hipi::views_paperScrolled(), "... and it can be scrolled back");
+        hipi::views_paperToLive();
         run(1000);
         check(hipi::printout_delete(2), "deleted printout_2");
         FILE* f1 = std::fopen("printouts/printout_2.bmp", "rb");
@@ -389,60 +389,60 @@ int main(int argc, char** argv) {
 
     // ── Plotter: DP -- the digitize panel; a touch sets the marker, the
     //    arrows move it a pixel, ENTER gives the point, X cancels ─────────
-    hipi::plotterview_setPlotFit(false);                    // Page: the whole paper, known mapping
+    hipi::views_setPlotFit(false);                    // Page: the whole paper, known mapping
     for (char c : std::string("IN;SP1;PA1000,1000;PD;PA9000,1000,9000,6500,1000,6500,1000,1000;"
                               "PU;PA2000,2000;PD;CI1500;PU;PA5150,3825;")) plotter->put(c);
     for (char c : std::string("DP;")) plotter->put(c);
     run(100);
-    check(hipi::plotterview_output() == hipi::DisplayOutput::Plotter && hipi::plotterview_digitizing(),
+    check(hipi::views_output() == hipi::DisplayOutput::Plotter && hipi::views_digitizing(),
           "DP: the Plotter view with the digitize panel");
     int mx = 0, my = 0;
-    hipi::plotterview_digitizeMarker(mx, my);
+    hipi::views_digitizeMarker(mx, my);
     std::printf("     marker at the pen: %d,%d\n", mx, my);
     check(mx == 367 && my == 300, "... the marker starts at the pen (5150,3825)");
-    check(hipi::plotterview_digitizeTap(200, 400) && plotter->digitizing(), "a touch on the plot: the marker moves, no point yet");
-    hipi::plotterview_digitizeMarker(mx, my);
+    check(hipi::views_digitizeTap(200, 400) && plotter->digitizing(), "a touch on the plot: the marker moves, no point yet");
+    hipi::views_digitizeMarker(mx, my);
     check(mx == 200 && my == 400, "... the marker where the finger was");
-    hipi::plotterview_digitizeTap(72, 501);                 // the frame's corner (1000,1000): in the loupe
+    hipi::views_digitizeTap(72, 501);                 // the frame's corner (1000,1000): in the loupe
     snapshot("tools/hipiview/digitize_1_white.png");
-    hipi::plotterview_digitizeTap(200, 400);
+    hipi::views_digitizeTap(200, 400);
     int bx = 0, by = 0;
-    hipi::plotterview_digitizeControl(3, bx, by);           // right
-    for (int i = 0; i < 3; ++i) { hipi::plotterview_digitizeTap(bx, by); hipi::plotterview_digitizeRelease(); }
-    hipi::plotterview_digitizeControl(0, bx, by);           // up
-    hipi::plotterview_digitizeTap(bx, by); hipi::plotterview_digitizeRelease();
-    hipi::plotterview_digitizeMarker(mx, my);
+    hipi::views_digitizeControl(3, bx, by);           // right
+    for (int i = 0; i < 3; ++i) { hipi::views_digitizeTap(bx, by); hipi::views_digitizeRelease(); }
+    hipi::views_digitizeControl(0, bx, by);           // up
+    hipi::views_digitizeTap(bx, by); hipi::views_digitizeRelease();
+    hipi::views_digitizeMarker(mx, my);
     check(mx == 203 && my == 399, "arrows: 3 right, 1 up -- a pixel each");
-    hipi::plotterview_digitizeTap(bx, by);                  // up, held: repeats after a moment
+    hipi::views_digitizeTap(bx, by);                  // up, held: repeats after a moment
     run(1000);
-    hipi::plotterview_digitizeRelease();
-    hipi::plotterview_digitizeMarker(mx, my);
+    hipi::views_digitizeRelease();
+    hipi::views_digitizeMarker(mx, my);
     std::printf("     up held 1 s: y %d\n", my);
     check(my < 399 - 5, "an arrow held: repeats");
-    hipi::plotterview_digitizeTap(200, 400);
-    hipi::plotterview_digitizeButton(3, false);             // the strip's Up
-    hipi::plotterview_digitizeMarker(mx, my);
+    hipi::views_digitizeTap(200, 400);
+    hipi::views_digitizeButton(3, false);             // the strip's Up
+    hipi::views_digitizeMarker(mx, my);
     check(mx == 200 && my == 399, "the strip's Up moves it too");
     // Page in the narrowed area: 734 px wide (1024 - strip 50 - panel 240)
     const double sc = std::min(734.0 / 10300, 600.0 / 7650), dy = (600 - 7650 * sc) / 2;
     const int wantX = static_cast<int>(std::lround(200 / sc)), wantY = static_cast<int>(std::lround((dy + 7650 * sc - 399) / sc));
-    hipi::plotterview_digitizeControl(4, bx, by);           // ENTER
-    hipi::plotterview_digitizeTap(bx, by);
+    hipi::views_digitizeControl(4, bx, by);           // ENTER
+    hipi::views_digitizeTap(bx, by);
     std::printf("     ENTER: %d,%d (expected %d,%d)\n", plotter->penX(), plotter->penY(), wantX, wantY);
     check(!plotter->digitizing() && std::abs(plotter->penX() - wantX) <= 2 && std::abs(plotter->penY() - wantY) <= 2,
           "ENTER: the point under the marker, given to the plotter");
-    check(!hipi::plotterview_digitizing(), "... and the panel gone");
+    check(!hipi::views_digitizing(), "... and the panel gone");
     run(1500);
-    hipi::plotterview_setPaperBlack(true);
+    hipi::views_setPaperBlack(true);
     for (char c : std::string("DP;")) plotter->put(c);
     run(100);
-    hipi::plotterview_digitizeTap(185, 327);                // on the circle
+    hipi::views_digitizeTap(185, 327);                // on the circle
     snapshot("tools/hipiview/digitize_2_black.png");
-    hipi::plotterview_digitizeControl(5, bx, by);           // X
-    hipi::plotterview_digitizeTap(bx, by);
-    check(!plotter->digitizing() && !hipi::plotterview_digitizing(), "X: cancelled, the panel gone");
-    hipi::plotterview_setPaperBlack(false);
-    check(!hipi::plotterview_digitizeTap(100, 100), "no DP: a touch isn't a point");
+    hipi::views_digitizeControl(5, bx, by);           // X
+    hipi::views_digitizeTap(bx, by);
+    check(!plotter->digitizing() && !hipi::views_digitizing(), "X: cancelled, the panel gone");
+    hipi::views_setPaperBlack(false);
+    check(!hipi::views_digitizeTap(100, 100), "no DP: a touch isn't a point");
     // DP right after IN: the pen at 0,0 -- on the Page view that's the
     // paper's corner: the marker there, its arms cut at the screen's edge
     // (given to the chip as negative / too large corners they drew magenta
@@ -450,7 +450,7 @@ int main(int argc, char** argv) {
     // clips them anyway, so this only shows the case)
     for (char c : std::string("IN;DP;")) plotter->put(c);
     run(100);
-    hipi::plotterview_digitizeMarker(mx, my);
+    hipi::views_digitizeMarker(mx, my);
     chip.render(panel.data(), 0.0);
     long stray = 0;
     for (int y = 0; y < SCREEN_MAX_Y; ++y)
@@ -462,12 +462,12 @@ int main(int argc, char** argv) {
     std::printf("     marker %d,%d -- stray magenta pixels: %ld\n", mx, my, stray);
     snapshot("tools/hipiview/digitize_3_corner.png");
     check(stray == 0, "DP at the pen 0,0: no magenta outside the marker");
-    hipi::plotterview_digitizeControl(5, bx, by);
-    hipi::plotterview_digitizeTap(bx, by);
+    hipi::views_digitizeControl(5, bx, by);
+    hipi::views_digitizeTap(bx, by);
 
     // ── Plotter: the pen's tip -- only what's drawn after the change gets
     //    it: a thin and a wide line in one plot, kept through a redraw ──
-    check(!hipi::plotterview_penWide(), "Pen: thin at start");
+    check(!hipi::views_penWide(), "Pen: thin at start");
     for (char c : std::string("IN;")) plotter->put(c);
     run(100);
     chip.render(panel.data(), 0.0);
@@ -481,36 +481,36 @@ int main(int argc, char** argv) {
         return n;
     };
     for (char c : std::string("SP1;PU;PA1000,5000;PD;PA9000,5000;PU;")) plotter->put(c);   // thin (upper)
-    hipi::plotterview_setPenWide(true);
+    hipi::views_setPenWide(true);
     for (char c : std::string("PA1000,3000;PD;PA9000,3000;PU;")) plotter->put(c);          // wide (lower)
-    hipi::plotterview_setPenWide(false);
+    hipi::views_setPenWide(false);
     for (char c : std::string("SP2;PA2000,2000;PD;CI1500;PU;")) plotter->put(c);           // thin again
-    hipi::plotterview_setPenWide(true);
+    hipi::views_setPenWide(true);
     for (char c : std::string("PA4000,1500;SI0.4,0.6;LBWIDE PEN\x03;PU;")) plotter->put(c);
-    hipi::plotterview_setPenWide(false);
+    hipi::views_setPenWide(false);
     run(100);
     const int thinRows = rowsNear(0, 300), wideRows = rowsNear(300, 400);
     std::printf("     column 500: %d row(s) for the thin line, %d for the wide one\n", thinRows, wideRows);
     check(thinRows == 1 && wideRows == 3, "Pen: the thin line one pixel across, the wide one three");
-    hipi::plotterview_redraw();
+    hipi::views_redraw();
     check(rowsNear(0, 300) == 1 && rowsNear(300, 400) == 3, "Pen: each keeps its own width when the plot is redrawn");
     snapshot("tools/hipiview/printer_view_wide_pen.png");
 
     // ── Plotter: Fit after IN -- a new, smaller plot inside the old one's
     //    area is fitted afresh, not drawn at the old scale ───────────────
-    hipi::plotterview_setPlotFit(true);
+    hipi::views_setPlotFit(true);
     for (char c : std::string("IN;SP1;PU;PA0,0;PD;PA10000,0,10000,7000,0,7000,0,0;PU;")) plotter->put(c);
     run(100);
     for (char c : std::string("IN;SP1;PU;PA3000,2000;PD;PA6000,2000,6000,4000,3000,4000,3000,2000;PU;")) plotter->put(c);
     run(100);
     {
         int ax = 0, ay = 0, bx = 0, by = 0;
-        hipi::plotterview_plotToScreen(3000, 2000, ax, ay);
-        hipi::plotterview_plotToScreen(6000, 4000, bx, by);
+        hipi::views_plotToScreen(3000, 2000, ax, ay);
+        hipi::views_plotToScreen(6000, 4000, bx, by);
         std::printf("     the small plot after IN: %d x %d pixels\n", bx - ax, ay - by);
         check(bx - ax > 600, "Fit after IN: the new plot fills the screen (not the old plot's scale)");
     }
-    hipi::plotterview_setPlotFit(false);
+    hipi::views_setPlotFit(false);
 
     // ── Plotter: the ERROR light -- lit by an HP-GL error, on top of the
     //    plot, a touch says what it was, OE puts it out ───────────────────
@@ -535,20 +535,20 @@ int main(int argc, char** argv) {
         run(50);
         chip.render(panel.data(), 0.0);
         check(at(lx, ly) == led, "a line drawn through it: the light stays on top");
-        check(hipi::plotterview_errorText() == "Error 2: wrong number of parameters -- SC 0,100",
+        check(hipi::views_errorText() == "Error 2: wrong number of parameters -- SC 0,100",
               "its text: \"Error 2: wrong number of parameters -- SC 0,100\"");
-        check(!hipi::plotterview_errorLightTap(lx, 300), "a touch beside it: not taken");
-        check(hipi::plotterview_errorLightTap(lx, ly) && hipi::plotterview_isSplashVisible(),
+        check(!hipi::views_errorLightTap(lx, 300), "a touch beside it: not taken");
+        check(hipi::views_errorLightTap(lx, ly) && hipi::views_isSplashVisible(),
               "a touch on it: the message box");
         run(3000);
         for (char c : std::string("OE;")) plotter->put(c);         // reading the error puts it out
         run(50);
         chip.render(panel.data(), 0.0);
         check(at(lx, ly) != led && plotter->errorCode() == 0, "OE: the light goes out, the plot under it back");
-        check(!hipi::plotterview_errorLightTap(lx, ly), "... and a touch there does nothing");
+        check(!hipi::views_errorLightTap(lx, ly), "... and a touch there does nothing");
         for (char c : std::string("ZZ;")) plotter->put(c);
         run(50);
-        hipi::plotterview_redraw();
+        hipi::views_redraw();
         chip.render(panel.data(), 0.0);
         check(at(lx, ly) == led, "an error, then the plot redrawn: the light is drawn again");
         plotter->clearError();
@@ -559,14 +559,14 @@ int main(int argc, char** argv) {
 
     // A message box ("Saved screendump_3.bmp" ...) writes its text with the
     // chip's one text cursor: afterwards it's back at the display's cursor
-    hipi::plotterview_showView(hipi::DisplayOutput::Display, nullptr);
+    hipi::views_showView(hipi::DisplayOutput::Display, nullptr);
     run(2000);
     for (char c : std::string("01 LBL \"A\"\r\n02 X")) screen.pr_char(static_cast<std::uint8_t>(c));
     auto textCursor = [] {
         return std::vector<std::uint8_t>{ chip.reg(0x63), chip.reg(0x64), chip.reg(0x65), chip.reg(0x66) };
     };
     const std::vector<std::uint8_t> cur = textCursor();
-    hipi::plotterview_showMessage("Saved screenshots/screendump_3.bmp");
+    hipi::views_showMessage("Saved screenshots/screendump_3.bmp");
     check(textCursor() == cur, "message box: the text cursor is put back where the display has it");
     run(3000);
     check(textCursor() == cur, "... and is still there after the box has gone");

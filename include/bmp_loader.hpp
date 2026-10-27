@@ -3,7 +3,7 @@
 // Loads 24-bit uncompressed BMP files from the SD card and draws them via
 // DisplayDriver::drawBitmap565(). Shared by the button-strip loader, the
 // splash-screen logo (both in boardui.cpp) and the Tape view image
-// (plotterview.cpp) so the BMP-parsing logic only exists once.
+// (views.cpp) so the BMP-parsing logic only exists once.
 #pragma once
 
 #include "display_config.h"

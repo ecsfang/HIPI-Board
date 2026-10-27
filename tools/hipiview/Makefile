@@ -52,15 +52,15 @@ host_test: test/host_test.cpp lt7683_emu.cpp lt7683_emu.hpp ../../src/LT7683.cpp
 	$(CXX) $(CXXFLAGS) -I../../include test/host_test.cpp lt7683_emu.cpp \
 	    ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz
 
-# The Printer view as HIPI draws it (real plotterview.cpp, printer.cpp,
+# The Printer view as HIPI draws it (real views.cpp, plotterview.cpp, printer.cpp,
 # BMP loader, LT7683 driver) with the pictures from resources/ -- saves
 # printer_view_*.png to look at
 PV_SRC := test/printer_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
-          ../../src/plotterview.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
+          ../../src/views.cpp ../../src/plotterview.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
           ../../src/plotter.cpp ../../src/device.cpp ../../src/video80.cpp \
           ../../src/hwtest.cpp test/hwio_stub.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp \
           ../../src/printout.cpp ../../src/hpil_signals.cpp ../../src/hpil.cpp
-printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/plotterview.h
+printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/views.h ../../include/views_impl.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(PV_SRC) -o $@ -lz
 
 # TFDISPLAY as an HP 92198 / MC00701A: the real Video80 screen and the

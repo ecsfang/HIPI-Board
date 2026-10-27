@@ -29,7 +29,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parent.parent      # (this file is in sdcard/)
 
 # The pictures HIPI reads from the card (see include/sd_paths.h and
-# src/plotterview.cpp)
+# src/views.cpp)
 PICTURES = ["hp82161a.bmp", "tape-in.bmp", "open.bmp", "leds.bmp", "reels.bmp",
             "hp82162a.bmp", "prtparts.bmp"]
 

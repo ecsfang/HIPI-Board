@@ -19,17 +19,17 @@
 // colour the pixels (hwio::takeLeds() / takePixels()); Off -- or leaving
 // the page -- switches them off and gives them back.
 //
-// Shown as the DisplayOutput::HwTest view (plotterview_showHwTest()).
+// Shown as the DisplayOutput::HwTest view (views_showHwTest()).
 #pragma once
 #include "display_config.h"
 
 namespace hipi {
 
 void hwtest_init(DisplayDriver* display);
-// The page opens / closes (plotterview.cpp): takes over / gives back the hardware
+// The page opens / closes (views.cpp): takes over / gives back the hardware
 void hwtest_enter();
 void hwtest_leave();
-// The view (see plotterview_showHwTest())
+// The view (see views_showHwTest())
 void hwtest_drawAll();
 // Main loop: the running lights, the I2C list
 void hwtest_poll();

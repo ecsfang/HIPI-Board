@@ -66,14 +66,14 @@ void boardui_showWarning(const char* title, const char* line1, const char* line2
 // dismisses/opens the info box, wakes/uses the button strip, or forwards to
 // the UiDialog menu; boardui_handleRelease() restores a pressed button's
 // normal appearance once the finger lifts. Both work the same regardless
-// of which output plotterview.h is currently showing -- the button strip
+// of which output views.h is currently showing -- the button strip
 // always shows/hides/responds normally; only *what's underneath it* (text
 // vs. the plotter's drawing) differs, see hideButtonStrip() in boardui.cpp.
 void boardui_handleTap(std::uint16_t x, std::uint16_t y);
 void boardui_handleRelease();
 
 // Register with touch_set_swipe_callback() (see touch.h). Cycles the
-// current display output (see plotterview.h) forward/backward -- ignored
+// current display output (see views.h) forward/backward -- ignored
 // while the menu is open, so a swipe during menu navigation doesn't also
 // switch views underneath it.
 void boardui_handleSwipe(bool forward);
@@ -84,7 +84,7 @@ void boardui_handleSwipe(bool forward);
 void boardui_handleVerticalSwipe(bool down);
 
 // Register with touch_set_drag_callback() (see touch.h): a finger on the
-// Printer view's paper moves it (plotterview_paperDragBegin())
+// Printer view's paper moves it (views_paperDragBegin())
 bool boardui_handleDrag(TouchDragPhase phase, std::uint16_t x, std::uint16_t y);
 
 // Called by UiDialog::close() (see uidialog.hpp) -- shortens the button
@@ -108,7 +108,7 @@ std::uint16_t boardui_buttonStripWidth();
 // A drawn screen saver (clock, rain, goose) takes over the whole panel:
 // Begin closes the info box and device list and puts the menu and button
 // strip out of the way, End brings those two back as they were. Called by
-// backlight.cpp around plotterview_showClock()/plotterview_leaveClock().
+// backlight.cpp around views_showClock()/views_leaveClock().
 void boardui_saverBegin();
 // Closes the info box and the device list -- called before something else
 // takes their PIP-1 window (the view-switch name box, a message box), so

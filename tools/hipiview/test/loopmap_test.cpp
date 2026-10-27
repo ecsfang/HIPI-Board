@@ -16,7 +16,7 @@
 #include "loopmap.h"
 #include "demo_content.h"
 #include "analyzer.h"
-#include "plotterview.h"
+#include "views.h"
 #include "hp82163_font.hpp"
 #include "../lt7683_emu.hpp"
 #include "../png.hpp"
@@ -33,9 +33,9 @@ std::vector<CDevice*> devices;
 // to see that the details box asks for it
 CDevice* viewOpened = nullptr;
 namespace hipi {
-DisplayOutput plotterview_output() { return DisplayOutput::LoopMap; }
-bool plotterview_isSplashVisible() { return false; }
-const char* plotterview_viewName(CDevice* d) {
+DisplayOutput views_output() { return DisplayOutput::LoopMap; }
+bool views_isSplashVisible() { return false; }
+const char* views_viewName(CDevice* d) {
     switch (d->type()) {
         case PLOTTER: return "PLOTTER";
         case PRINTER: return "PRINTER";
@@ -43,7 +43,7 @@ const char* plotterview_viewName(CDevice* d) {
         default:      return nullptr;
     }
 }
-void plotterview_showDeviceFromLoopMap(CDevice* d) { viewOpened = d; }
+void views_showDeviceFromLoopMap(CDevice* d) { viewOpened = d; }
 }
 
 namespace {

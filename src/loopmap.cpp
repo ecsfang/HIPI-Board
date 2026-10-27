@@ -1,7 +1,7 @@
 #define MODULE "LOOPMAP"
 #include "loopmap.h"
 #include "analyzer.h"
-#include "plotterview.h"
+#include "views.h"
 #include "plotter.h"
 #include "drive.h"
 #include "pilbox.h"
@@ -438,7 +438,7 @@ struct Box { int x, y, w, h; bool in(int px, int py) const { return px >= x && p
 // The selected device's view, if it has one ("PLOTTER" ...), else nullptr
 const char* selectedView() {
     CDevice* d = selected_ ? hipiDeviceAt(selected_) : nullptr;
-    return d != nullptr ? plotterview_viewName(d) : nullptr;
+    return d != nullptr ? views_viewName(d) : nullptr;
 }
 std::string viewButtonText(const char* view) { return std::string("GO TO ") + view + " VIEW  >"; }
 Box viewButton(const char* view) {
@@ -511,7 +511,7 @@ void drawDetails() {
 }
 
 bool visible() {
-    return d_ != nullptr && plotterview_output() == DisplayOutput::LoopMap && !plotterview_isSplashVisible();
+    return d_ != nullptr && views_output() == DisplayOutput::LoopMap && !views_isSplashVisible();
 }
 
 // What the header line says (padded, so a shorter text overwrites a longer one)
@@ -663,9 +663,9 @@ void loopmap_closeDetails() {
 void loopmap_detailsOk() {
     if (!selected_) return;
     CDevice* d = hipiDeviceAt(selected_);
-    if (d == nullptr || plotterview_viewName(d) == nullptr) return;   // (no view: OK does nothing)
+    if (d == nullptr || views_viewName(d) == nullptr) return;   // (no view: OK does nothing)
     selected_ = 0;                                   // (closed when the map comes back)
-    plotterview_showDeviceFromLoopMap(d);
+    views_showDeviceFromLoopMap(d);
 }
 
 void loopmap_init(DisplayDriver* display) {

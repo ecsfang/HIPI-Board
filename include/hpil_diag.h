@@ -18,7 +18,7 @@ namespace hipi {
 void hpil_diag_init(DisplayDriver* display);
 // Main loop: scope capture and drawing (only while the view is shown)
 void hpil_diag_poll();
-// The view (DisplayOutput::Signals, plotterview_showSignals())
+// The view (DisplayOutput::Signals, views_showSignals())
 void hpil_diag_drawAll();
 
 // How the bit cells are marked: BitCells (hpil_signals.h)

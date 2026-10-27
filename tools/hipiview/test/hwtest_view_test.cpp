@@ -1,5 +1,5 @@
 // hwtest_view_test.cpp -- the Hardware test page (System -> Hardware
-// test) as HIPI draws it: the real hwtest.cpp and plotterview.cpp with the
+// test) as HIPI draws it: the real hwtest.cpp and views.cpp with the
 // LT7683 driver against the emulated chip; the LEDs, pixels and I2C bus
 // are a stand-in (hwio_stub.h) that remembers what the page did. Taps go
 // to the page's buttons, the main loop is run, and the panel is saved:
@@ -12,7 +12,7 @@
 //   make hwtest_view_test && ./hwtest_view_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "Screen.hpp"
-#include "plotterview.h"
+#include "views.h"
 #include "printer.h"
 #include "hwtest.h"
 #include "hwio_stub.h"
@@ -94,7 +94,7 @@ void check(bool ok, const char* what) {
 void run(int ms) {
     for (int t = 0; t < ms; t += 5) {
         fakeNowUs += 5000;
-        hipi::plotterview_poll();
+        hipi::views_poll();
         hipi::hwtest_poll();
     }
 }
@@ -152,8 +152,8 @@ int main(int argc, char** argv) {
     plotter = new CPlotter("TFPLOT");
     printer = new CPrinter("TFPRINT");
     devices = { plotter, printer };
-    hipi::plotterview_setPrinter(printer);
-    hipi::plotterview_init(&d, &screen, plotter);
+    hipi::views_setPrinter(printer);
+    hipi::views_init(&d, &screen, plotter);
     hipi::hwtest_init(&d);
 
     using S = hipi::I2cState;
@@ -168,8 +168,8 @@ int main(int argc, char** argv) {
     };
 
     // ── The page opens ───────────────────────────────────────────────
-    hipi::plotterview_showHwTest();
-    check(hipi::plotterview_output() == hipi::DisplayOutput::HwTest, "System -> Hardware test: the page is shown");
+    hipi::views_showHwTest();
+    check(hipi::views_output() == hipi::DisplayOutput::HwTest, "System -> Hardware test: the page is shown");
     check(!hwstub::ledsTaken && !hwstub::pixelsTaken && hwstub::scans >= 1,
           "it only looks at the LEDs and pixels (nothing taken over) and scans the bus");
     run(2000);                                              // the name box goes away
@@ -311,7 +311,7 @@ int main(int argc, char** argv) {
     chip.render(panel.data(), 0.0);
     check(!yellowAt(SCREEN_MAX_X - 32, 13) && yellowAt(SCREEN_MAX_X - 120, 13), "the close button in the title bar");
     check(tap({ SCREEN_MAX_X - 30, 14 }), "the close button is touched");
-    check(hipi::plotterview_output() != hipi::DisplayOutput::HwTest && !hwstub::ledsTaken && !hwstub::pixelsTaken,
+    check(hipi::views_output() != hipi::DisplayOutput::HwTest && !hwstub::ledsTaken && !hwstub::pixelsTaken,
           "leaving: back to the view before, the hardware given back");
     check(!tap(ledButton(0)) && !hwstub::led[0], "taps do nothing once it's closed");
 

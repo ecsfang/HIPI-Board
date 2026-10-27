@@ -1,19 +1,20 @@
 #pragma once
-// plotterview.h -- the device views on the panel: the normal HP-41 text
+// views.h -- the device views on the panel: the normal HP-41 text
 // display (Screen), a live rendering of the plotter's output (CPlotter),
 // and (7" panel only) one Tape view per cassette drive: a picture of an
 // HP82161A with touch-sensitive areas. Each device says which view it has
 // (CDevice::viewKind()); swiping steps through them in loop order. See
 // boardui.h for the button strip/info-box/status-LED "chrome" this
-// coordinates with.
+// coordinates with. The Plotter view is drawn in plotterview.cpp, the rest
+// in views.cpp (what they share: views_impl.h).
 //
 // Usage (see pico_main.cpp):
 //
 //   plotter = new CPlotter("TFPLOT");   // (done inside hipi_init())
-//   hipi::plotterview_init(display, screen, plotter);
+//   hipi::views_init(display, screen, plotter);
 //
-// The UiDialog "Display" menu calls plotterview_viewDevices()/
-// plotterview_showDevice()/plotterview_clearPlotter() directly (see
+// The UiDialog "Display" menu calls views_viewDevices()/
+// views_showDevice()/views_clearPlotter() directly (see
 // uidialog.hpp) -- there's no separate callback wiring needed here.
 
 #include "display_config.h"
@@ -37,11 +38,11 @@ namespace hipi {
 enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals, CharTable, Printer, Video80, HwTest,
                            MediaMap };
 
-// Touch-sensitive areas of the Tape view -- see plotterview_tapeHitTest().
+// Touch-sensitive areas of the Tape view -- see views_tapeHitTest().
 enum class TapeHotspot { None, Open, Power, Rewind };
 
 // Touch-sensitive areas of the Printer view -- see
-// plotterview_printerHitTest(). `value` is the switch position the touch
+// views_printerHitTest(). `value` is the switch position the touch
 // asks for (Mode: 0 MAN, 1 TRACE, 2 NORM; Intensity: 0 LIGHT .. 4 DARK).
 enum class PrinterHotspot { None, Power, Mode, Intensity, Print, Advance };
 struct PrinterHit {
@@ -52,110 +53,110 @@ struct PrinterHit {
 // Call once, after display/screen/plotter all exist (see hipi_init()).
 // On the 7" panel this also loads hp82161a.bmp from the SD card into its own
 // off-screen SDRAM layer (LT7683::kTapeLayerAddr) for the Tape view.
-void plotterview_init(DisplayDriver* display, Screen* screen, CPlotter* plotter);
+void views_init(DisplayDriver* display, Screen* screen, CPlotter* plotter);
 
 // Tape view cassette (7" only; needs tape-in.bmp on the SD card): the
 // cassette shows the selected .dat file's name on its label. Call
-// plotterview_setTapeFile() at boot and whenever another file is
-// selected ("" = no file, empty drive). plotterview_setTapeEjected(true)
+// views_setTapeFile() at boot and whenever another file is
+// selected ("" = no file, empty drive). views_setTapeEjected(true)
 // shows the drive empty with its lid open (open.bmp, if present)
 // while the file picker is open. Both may be called
 // from inside menu drawing -- they restore the active canvas themselves.
-void plotterview_setTapeFile(const std::string& filename);
-void plotterview_setTapeEjected(bool ejected);
+void views_setTapeFile(const std::string& filename);
+void views_setTapeEjected(bool ejected);
 
 // Tape view status LEDs (7" only; needs leds.bmp): POWER is lit while the
 // drive device is enabled, BUSY while it's accessing its file (see
-// CDrive::isBusy()). Updated from plotterview_poll().
+// CDrive::isBusy()). Updated from views_poll().
 // Shows a short message (e.g. "Saved screendump_3.bmp") in the same
 // yellow box as the view-switch splash, for 2.5 s. Taps are ignored
 // meanwhile, like during the splash.
-void plotterview_showMessage(const char* text);
+void views_showMessage(const char* text);
 
-void plotterview_setDrive(CDrive* drive);
+void views_setDrive(CDrive* drive);
 
 // Printer view (7" only; needs hp82162a.bmp, and prtparts.bmp for the
 // switches, POWER light and pressed keys): the printer shown. Its front
-// panel follows the device by itself (plotterview_poll()).
-void plotterview_setPrinter(CPrinter* printer);
-CPrinter* plotterview_printer();
+// panel follows the device by itself (views_poll()).
+void views_setPrinter(CPrinter* printer);
+CPrinter* views_printer();
 // PRINT / PAPER ADVANCE from the view's keys: passed on to the printer,
 // and the key is shown pressed (at least briefly, even for a quick tap)
-void plotterview_printerPrint(bool down);
-void plotterview_printerAdvance(bool down);
+void views_printerPrint(bool down);
+void views_printerAdvance(bool down);
 
 // TFDISPLAY's HP 92198 screen (video80.h). It draws itself; the view
 // only switches it on and off.
-void plotterview_setVideo80(Video80* v);
-Video80* plotterview_video80();
+void views_setVideo80(Video80* v);
+Video80* views_video80();
 // Puts the blinking text cursor back where the view showing has it
 // (Screen's, or the HP 92198 view's) -- after something else has drawn
 // text with the chip's one shared text cursor (menu, button strip, boxes)
-void plotterview_refreshCursor();
+void views_refreshCursor();
 // The display's model (display.h): true = HP 92198, the Display view is
 // then Video80 (output DisplayOutput::Video80) instead of Screen. If the
 // display is showing, the other one takes over at once.
-void plotterview_setDisplayModel(bool v80);
+void views_setDisplayModel(bool v80);
 
 // ── The demo (demo.h) ───────────────────────────────────────────────────
 // Shows a view without the name box (dev: the device, for a device's view)
-void plotterview_showView(DisplayOutput mode, CDevice* dev);
+void views_showView(DisplayOutput mode, CDevice* dev);
 // The Tape view as if the drive were working: POWER and BUSY lit, the
 // reels turning (nothing happens to the drive itself)
-void plotterview_setDemoTape(bool busy);
+void views_setDemoTape(bool busy);
 // The printer's paper torn off (CPrinter::clearPaper()), redrawn empty
-void plotterview_clearPaper();
+void views_clearPaper();
 // The Printer view's paper, moved by hand (7"): a finger on the paper
 // drags it up and down (boardui.cpp, touch_set_drag_callback()). Down
 // shows older lines, back to the first one at the top; up pulls the
 // newest line out above the tear-off bar, no further. Where it's let go
 // it stays -- until something is printed (or PAPER ADVANCE, PRINT, X):
 // then it glides back to the print head first.
-bool plotterview_paperDragBegin(int x, int y);   // true: on the paper, the touch moves it
-void plotterview_paperDragMove(int x, int y);
-void plotterview_paperDragEnd();
+bool views_paperDragBegin(int x, int y);   // true: on the paper, the touch moves it
+void views_paperDragMove(int x, int y);
+void views_paperDragEnd();
 // Tearing off: the paper dragged up to the tear-off edge and then
 // sideways (at least 100 px, finger still down). After the drag ends:
 // true once, with the direction (-1 left, 1 right) -- the caller asks
-// (Save / Discard / Cancel) and then calls plotterview_tearOff().
-bool plotterview_takeTearGesture(int& dir);
+// (Save / Discard / Cancel) and then calls views_tearOff().
+bool views_takeTearGesture(int& dir);
 // The paper above the tear-off edge slides away to that side, then the
 // printer's paper is empty (CPrinter::clearPaper())
-void plotterview_tearOff(int dir);
-int  plotterview_paperLines();                   // lines on the paper (kept)
+void views_tearOff(int dir);
+int  views_paperLines();                   // lines on the paper (kept)
 // The printer's paper was replaced (a printout loaded): drawn afresh,
 // back at the print head
-void plotterview_reloadPaper();
-void plotterview_paperScrollBy(int lines);       // > 0: older lines (▲), < 0: newer (▼)
-int  plotterview_paperWindowLines();             // lines the window shows (Shift+▲/▼)
-bool plotterview_paperScrolled();                // not where it prints
-void plotterview_paperToLive();                  // back there (glides)
-// The drive given to plotterview_setDrive() (nullptr if none) -- e.g. for
+void views_reloadPaper();
+void views_paperScrollBy(int lines);       // > 0: older lines (▲), < 0: newer (▼)
+int  views_paperWindowLines();             // lines the window shows (Shift+▲/▼)
+bool views_paperScrolled();                // not where it prints
+void views_paperToLive();                  // back there (glides)
+// The drive given to views_setDrive() (nullptr if none) -- e.g. for
 // the power switch hotspot, which toggles it (see boardui_handleTap()).
-CDrive* plotterview_drive();
+CDrive* views_drive();
 
 // True if the view can be shown on this build/board. Tape is only
 // available on the 7" panel, and only if hp82161a.bmp loaded at boot;
 // the same for Printer and hp82162a.bmp.
-bool plotterview_isAvailable(DisplayOutput mode);
+bool views_isAvailable(DisplayOutput mode);
 
 // The kind of view currently shown
-DisplayOutput plotterview_output();
+DisplayOutput views_output();
 
 // Swipe (see boardui.cpp's boardui_handleSwipe()): shows the view of the next (forward) or previous device on the
 // loop that has one (CDevice::viewKind()), in loop order.
-void plotterview_cycleOutput(bool forward);
+void views_cycleOutput(bool forward);
 
 // The devices that currently have a view (switched on, view available
 // here), in loop order -- e.g. for the Display menu
-std::vector<CDevice*> plotterview_viewDevices();
+std::vector<CDevice*> views_viewDevices();
 // A view's name: "Display", "Plotter", "Tape" -- plus the device name if
 // several devices have that kind of view ("Tape TFDRIVE2")
-std::string plotterview_viewTitle(CDevice* dev);
+std::string views_viewTitle(CDevice* dev);
 // Shows that device's view
-void plotterview_showDevice(CDevice* dev);
+void views_showDevice(CDevice* dev);
 // The device whose view is showing (nullptr if none)
-CDevice* plotterview_viewDevice();
+CDevice* views_viewDevice();
 
 // The view chosen from the HP-41 with "ESC # V <addr>" (sent to the
 // display device): shows the view of the HIPI device at HP-IL address
@@ -164,86 +165,86 @@ CDevice* plotterview_viewDevice();
 // showAddress() from the main loop. If there's no HIPI device at that
 // address, or it has no view (or is disabled), nothing happens apart
 // from a warning in the log. Returns true if the view was shown.
-void plotterview_requestViewByAddress(std::uint8_t addr);
-bool plotterview_takeViewRequest(std::uint8_t& addr);
-bool plotterview_showAddress(std::uint8_t addr);
+void views_requestViewByAddress(std::uint8_t addr);
+bool views_takeViewRequest(std::uint8_t& addr);
+bool views_showAddress(std::uint8_t addr);
 
 // The HP-IL analyzer's view (analyzer.h) -- not a device, so not in the
 // swipe order. Leaving it returns to the view shown before.
-void plotterview_showAnalyzer();
-void plotterview_leaveAnalyzer();
+void views_showAnalyzer();
+void views_leaveAnalyzer();
 
 // The HP-IL loop map (loopmap.h) -- not a device, not in the swipe order;
 // leaving it returns to the view shown before
-void plotterview_showLoopMap();
-void plotterview_leaveLoopMap();
+void views_showLoopMap();
+void views_leaveLoopMap();
 // From the loop map's details box: a device's view, if it has one here
-// (plotterview_viewName(): "PLOTTER", "TAPE" ..., nullptr if none). X
-// there brings back the loop map (plotterview_backToLoopMap() -- true if
+// (views_viewName(): "PLOTTER", "TAPE" ..., nullptr if none). X
+// there brings back the loop map (views_backToLoopMap() -- true if
 // it did); any other way of leaving the view forgets that.
-const char* plotterview_viewName(CDevice* dev);
-void plotterview_showDeviceFromLoopMap(CDevice* dev);
-bool plotterview_cameFromLoopMap();
-bool plotterview_backToLoopMap();
+const char* views_viewName(CDevice* dev);
+void views_showDeviceFromLoopMap(CDevice* dev);
+bool views_cameFromLoopMap();
+bool views_backToLoopMap();
 
 // HP-IL signal diagnostics (hpil_diag.h) -- like the loop map
-void plotterview_showSignals();
-void plotterview_leaveSignals();
+void views_showSignals();
+void views_leaveSignals();
 
 // System -> Character table (chartable.h) -- a help page, like the loop map
 // System -> Hardware test (hwtest.h) -- not a device's view; leaving it
 // goes back to the view before
-void plotterview_showHwTest();
-void plotterview_leaveHwTest();
+void views_showHwTest();
+void views_leaveHwTest();
 // Media map (mediamap.h): the drive's cassette/disk as rings; leaving goes
 // back to the view before
-void plotterview_showMediaMap();
-void plotterview_leaveMediaMap();
-void plotterview_showCharTable();
-void plotterview_leaveCharTable();
+void views_showMediaMap();
+void views_leaveMediaMap();
+void views_showCharTable();
+void views_leaveCharTable();
 
 // The clock screen saver (clock.h) -- shown and left without the splash
-void plotterview_showClock();
-void plotterview_leaveClock();
+void views_showClock();
+void views_leaveClock();
 
 // Call once per main-loop iteration -- handles the view-switch splash's
-// auto-dismiss timer (see plotterview_showDevice()).
-void plotterview_poll();
+// auto-dismiss timer (see views_showDevice()).
+void views_poll();
 
 // True while the brief "DISPLAY"/"PLOTTER"/"TAPE" switch-announcement
-// splash is showing (see plotterview_showDevice()). Checked by
+// splash is showing (see views_showDevice()). Checked by
 // UiDialog::close() (don't hide the PIP overlay the splash now owns) and
 // by boardui_handleTap() (taps are ignored while it's up).
-bool plotterview_isSplashVisible();
+bool views_isSplashVisible();
 
 // Clears the plotter's drawing (both the retained segments() history and,
 // if Plotter output is currently showing, the on-screen drawing too) --
 // the "new paper" menu action. Safe to call regardless of which output
 // mode is currently showing.
-void plotterview_clearPlotter();
+void views_clearPlotter();
 
 // Plot view: true = Fit (the plot itself fills the screen), false = Page
 // (the whole P1..P2 area, like the paper). Display -> Plot view.
-void plotterview_setPlotFit(bool fit);
-bool plotterview_plotFit();
+void views_setPlotFit(bool fit);
+bool views_plotFit();
 
 // Paper colour: false = white paper with dark pens (default), true =
 // black paper with light pens (inverted). Plotter -> Paper.
-void plotterview_setPaperBlack(bool black);
-bool plotterview_paperBlack();
+void views_setPaperBlack(bool black);
+bool views_paperBlack();
 // The pen's tip (Plotter -> Pen): thin (1 pixel) or wide (3 pixels, a
 // round tip), like putting a pen with a broader tip in the real plotter:
 // only what's drawn from now on gets it, so thin and wide lines mix in one
 // plot. Thin at start-up (not saved). CPlotter::setWideTip().
-void plotterview_setPenWide(bool wide);
-bool plotterview_penWide();
+void views_setPenWide(bool wide);
+bool views_penWide();
 
 // Redraws the current full-screen view from scratch: the plotter output
 // (segments() replayed in full) or the Tape image. Called internally when
 // switching views or when the menu closes back into one (to erase the
 // menu box drawn on top), but exposed in case something else needs to
 // force a refresh. Does nothing while Display (text) output is showing.
-void plotterview_redraw();
+void views_redraw();
 
 // Redraws only a rectangular sub-region (screen pixel coordinates) of the
 // current full-screen view. For Tape this is a single BTE copy from the
@@ -253,49 +254,49 @@ void plotterview_redraw();
 // active window Plotter mode normally runs with. Used by boardui.cpp's
 // hideButtonStrip() to restore just the area the button bitmap occupied,
 // instead of a full-screen redraw for what's normally a small strip.
-void plotterview_redrawRegion(std::int16_t x0, std::int16_t y0,
-                              std::int16_t w, std::int16_t h);
+void views_redrawRegion(std::int16_t x0, std::int16_t y0,
+                        std::int16_t w, std::int16_t h);
 
 // True while a non-text full-screen view (Plotter or Tape) is showing,
 // i.e. Screen is suspended and anything drawn over the view (such as the
-// button strip) must be restored via plotterview_redrawRegion().
-bool plotterview_isActive();
+// button strip) must be restored via views_redrawRegion().
+bool views_isActive();
 
-// Plotter digitizing (HP-GL DP): plotterview_poll() brings up the Plotter
+// Plotter digitizing (HP-GL DP): views_poll() brings up the Plotter
 // view with a panel on the right -- a loupe, X/Y, arrows, ENTER, X. A touch
 // on the plot puts the marker there, the arrows move it a pixel (held:
 // repeated), ENTER gives the point to the plotter, X cancels.
-bool plotterview_digitizing();               // the panel is showing
-bool plotterview_digitizeTap(int x, int y);  // true: the touch was taken
+bool views_digitizing();               // the panel is showing
+bool views_digitizeTap(int x, int y);  // true: the touch was taken
 
 // The plotter's ERROR light (the 7470A's front-panel LED), top centre of
 // the Plotter view while CPlotter::errorCode() isn't 0. A touch on it
-// shows plotterview_errorText() in a message box: true if it was there.
-bool plotterview_errorLightTap(int x, int y);
+// shows views_errorText() in a message box: true if it was there.
+bool views_errorLightTap(int x, int y);
 // Where the light is (its LED), for the demo's touch: false while it's out
-bool plotterview_errorLightPoint(int& x, int& y);
+bool views_errorLightPoint(int& x, int& y);
 // "Error 3: bad parameter -- SC 0,100" (or "No error")
-std::string plotterview_errorText();
-void plotterview_digitizeRelease();          // finger up: an arrow stops repeating
+std::string views_errorText();
+void views_digitizeRelease();          // finger up: an arrow stops repeating
 // A strip button while digitizing (code as boardui: 2 OK = ENTER, 3/4 Up/
 // Down, 5 X = cancel; repeat: held) -- true if taken
-bool plotterview_digitizeButton(int code, bool repeat);
+bool views_digitizeButton(int code, bool repeat);
 // For tests: the centre of a panel control (0 up, 1 down, 2 left, 3 right,
 // 4 ENTER, 5 X) and the marker, in screen pixels
-bool plotterview_digitizeControl(int id, int& x, int& y);
-void plotterview_digitizeMarker(int& x, int& y);
+bool views_digitizeControl(int id, int& x, int& y);
+void views_digitizeMarker(int& x, int& y);
 // Where a plotter point is on the screen, as the Plotter view draws it now
 // (Page or Fit, narrowed while digitizing) -- the demo's "touch"
-void plotterview_plotToScreen(int px, int py, int& x, int& y);
+void views_plotToScreen(int px, int py, int& x, int& y);
 
 // Returns which Tape hotspot (if any) contains the given screen point.
 // Always TapeHotspot::None unless the Tape view is showing and its
 // switch splash has timed out.
-TapeHotspot plotterview_tapeHitTest(std::uint16_t x, std::uint16_t y);
+TapeHotspot views_tapeHitTest(std::uint16_t x, std::uint16_t y);
 
 // Which Printer control (if any) is at the given screen point -- always
 // PrinterHotspot::None unless the Printer view is showing and its switch
 // splash has timed out.
-PrinterHit plotterview_printerHitTest(std::uint16_t x, std::uint16_t y);
+PrinterHit views_printerHitTest(std::uint16_t x, std::uint16_t y);
 
 }  // namespace hipi

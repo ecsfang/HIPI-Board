@@ -3,7 +3,7 @@
 #include "hwtest.h"
 #include "hwtest_io.h"
 #include "i2c_ident.h"
-#include "plotterview.h"
+#include "views.h"
 #include "boardui.h"
 #include "pico/time.h"
 #include <algorithm>
@@ -153,8 +153,8 @@ std::string pad(const char* s, std::size_t n) {
 }
 
 bool visible() {
-    return d_ != nullptr && active_ && plotterview_output() == DisplayOutput::HwTest &&
-           !plotterview_isSplashVisible();
+    return d_ != nullptr && active_ && views_output() == DisplayOutput::HwTest &&
+           !views_isSplashVisible();
 }
 
 // A small change may be drawn now (not while the menu draws elsewhere / covers it)
@@ -754,7 +754,7 @@ bool hwtest_tap(int x, int y) {
             hwtest_showScan();
             break;
         case Id::Close:
-            plotterview_leaveHwTest();                   // (the page is gone: nothing more to draw)
+            views_leaveHwTest();                   // (the page is gone: nothing more to draw)
             return true;
         case Id::Order0: case Id::Order1: case Id::Order2: case Id::Order3: case Id::Order4: case Id::Order5:
             hwio::setPixelOrder(orderOf(id));

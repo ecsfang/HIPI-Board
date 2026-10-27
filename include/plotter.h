@@ -189,7 +189,7 @@ public:
     bool wideTip() const { return wideTip_; }
 
     // Digitizing (DP): waiting for a point (the Plotter view takes it from
-    // a touch -- plotterview_digitizeTap()); digitize() gives it: the pen
+    // a touch -- views_digitizeTap()); digitize() gives it: the pen
     // moves there, OD reports it, OS bit 2 says one is ready
     bool digitizing() const { return digitizing_; }
     void digitize(std::int16_t x, std::int16_t y);

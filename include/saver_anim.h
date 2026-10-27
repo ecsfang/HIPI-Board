@@ -6,7 +6,7 @@
 //  Goose  The HP-41's "running" goose: flocks of 1..5, in different sizes
 //         and speeds, flying across the screen from left to right.
 //
-// Shown in the screen saver view (see clock.h / plotterview_showClock()),
+// Shown in the screen saver view (see clock.h / views_showClock()),
 // in the clock's style (dark, or LCD).
 #pragma once
 #include "display_config.h"

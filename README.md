@@ -200,7 +200,7 @@ The firmware, by area (`.h`/`.hpp` in `include/`, `.cpp` in `src/`):
 | **HP-IL devices** | `display`, `drive` + `tape`, `plotter`, `printer`, `illeds`, `ilpixels`, `terminal`, `pilbox`, `ili2c` | `TFDISPLAY` (HP 82163 or HP 92198), `TFDRIVE` (LIF on SD), `TFPLOT` (HP-GL), `TFPRINT` (HP 82162A), `TFLEDS`, `TFPIXEL`, `TFTERM`, `PILBOX`, `TFI2C` (any I2C chip: temperature, pressure, distance, clock ...) |
 | **Display driver** | `LT7683`, `*Transport`, `display_config.h` | The 7" panel's controller; SPI on the Pico (or spidev on Linux) |
 | **Text display** | `Screen`, `hp82163_font.hpp`, `video80` | HP 82163 emulation: text buffer, escape codes, scroll-back; the HP 92198's 80-column screen |
-| **Views** | `plotterview`, `analyzer`, `loopmap`, `hpil_diag` (+ `.pio`), `chartable` | Display / Plotter / Tape / Printer views and switching; analyzer, loop map, HP-IL signals, character table |
+| **Views** | `views`, `plotterview`, `analyzer`, `loopmap`, `hpil_diag` (+ `.pio`), `chartable` | Display / Tape / Printer views and switching (`views`), the Plotter view (`plotterview`); analyzer, loop map, HP-IL signals, character table |
 | **User interface** | `boardui`, `uidialog.hpp`, `ui_buttons.hpp`, `touch`, `bootscreen` | Button strip, menus, info box, device list, touch, start-up screen |
 | **Screen extras** | `backlight`, `clock`, `rtc`, `saver_anim`, `screendump` | Backlight and screen savers, DS3231 clock, screen dumps |
 | **Display mirror** | `display_mirror`, `mirror_*.h(pp)` | The screen mirrored to a PC (`tools/hipiview`) |

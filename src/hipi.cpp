@@ -34,7 +34,7 @@ CPilBox* pilbox = nullptr;      // Need to be global for UI indication
 CDisplay* videoDisplay = nullptr;  // Same pattern -- needed for pico_main.cpp's
                                      // own periodic fifoSize() diagnostic (see
                                      // display.h's own comment on fifoSize()).
-CPlotter* plotter = nullptr;    // Need to be global for plotterview.cpp
+CPlotter* plotter = nullptr;    // Need to be global for views.cpp
 CPrinter* printer = nullptr;    // TFPRINT, shown in the Printer view
 extern hipi::Video80* video80Term;   // TFDISPLAY's HP 92198 screen (pico_main.cpp)
 CBmp280* bmp280Sensor = nullptr;  // Constructed in hipi_init() rather than as
@@ -161,12 +161,12 @@ void hipi_init()
         CDrive* drive = new CDrive("TFDRIVE", config.driveMedia("TFDRIVE"));
         drive->setMediaChangedCallback([](CDrive* d) {
             config.setDriveMedia(d->name(), d->mediaFile());
-            if (d == hipi::plotterview_drive())
-                hipi::plotterview_setTapeFile(d->mediaFile());  // label on the Tape view's cassette
+            if (d == hipi::views_drive())
+                hipi::views_setTapeFile(d->mediaFile());  // label on the Tape view's cassette
         });
         driveDev = drive;
         devices.push_back(drive);
-        hipi::plotterview_setDrive(drive);   // the drive shown in the Tape view
+        hipi::views_setDrive(drive);   // the drive shown in the Tape view
         // The file picker works on this drive (and takes its cassette out
         // while open)
         dialog->setTargetDrive(drive);
@@ -199,7 +199,7 @@ void hipi_init()
     printer->setMode(static_cast<PrinterMode>(config.printerMode()));
     printer->setIntensity(config.printerIntensity());
     devices.push_back(printer);
-    hipi::plotterview_setPrinter(printer);
+    hipi::views_setPrinter(printer);
     // TFI2C: any I2C chip, from the controller (ili2c.h) -- last, so the
     // devices before it keep their addresses
     devices.push_back(new CHipiI2c("TFI2C", hipi::i2c_commandEnv(), [] { hipi::i2c_loadChips(); }));

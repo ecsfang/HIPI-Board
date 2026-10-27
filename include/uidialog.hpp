@@ -6,7 +6,7 @@
 #include "ui_buttons.hpp"
 #include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
 #include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
-#include "plotterview.h" // DisplayOutput, for the "Display" output-mode menu
+#include "views.h" // DisplayOutput, for the "Display" output-mode menu
 #include "hpil_diag.h"    // BitCells, for the HP-IL signals "Bit cells" setting
 #include "hipi_features.h"  // HIPI_MIRROR_PORT/TRANSPORT, for Settings -> Screen -> Mirror
 #include "display_mirror.h" // displayMirror_setMode(), Settings -> Screen -> Mirror to PC
@@ -186,7 +186,7 @@ public:
         showPip();
     }
 
-    // A message box (plotterview_showMessage()) was drawn over the open
+    // A message box (views_showMessage()) was drawn over the open
     // menu in the shared PIP layer and has now timed out: put the menu back.
     // Lists are redrawn; any other dialog state can't be, so it's closed.
     void restoreAfterMessage() {
@@ -295,7 +295,7 @@ public:
         media_.cancel();
         state_ = State::Closed;
         d_->hidePipOverlay();
-        plotterview_refreshCursor();
+        views_refreshCursor();
     }
 
     // File picker -> Create media...: its dialogs are worked by touch too
@@ -316,7 +316,7 @@ public:
         if (state_ == State::Closed && !pendingMessage_.empty()) {
             const std::string m = pendingMessage_;
             pendingMessage_.clear();
-            plotterview_showMessage(m.c_str());
+            views_showMessage(m.c_str());
         }
         if (state_ != State::CreateMedia || !media_.busy()) return;
         drawingMenu([&] { mediaAction(media_.poll(to_ms_since_boot(get_absolute_time()))); });
@@ -326,7 +326,7 @@ public:
     // side the paper slides away to (-1 left, 1 right). From the touch
     // gesture (boardui.cpp) or the Printer view's menu.
     void openTearOff(int dir) {
-        if (plotterview_paperLines() == 0) return;
+        if (views_paperLines() == 0) return;
         if (state_ == State::Closed) {
             drawingMenu([&] { menuOpening(); showTearOff(dir); });
         } else {
@@ -424,7 +424,7 @@ public:
             // this same call for the full reasoning on why it can't run
             // any earlier than "canvas is definitely back at the main
             // window".
-            plotterview_refreshCursor();
+            views_refreshCursor();
             if (onExitRequested_) onExitRequested_();
             return;
         }
@@ -446,38 +446,38 @@ public:
                 if (b == Button::Ok || b == Button::X) close();
                 break;
             case State::Closed:
-                if (plotterview_output() == DisplayOutput::LoopMap && loopmap_detailsOpen() &&
+                if (views_output() == DisplayOutput::LoopMap && loopmap_detailsOpen() &&
                     (b == Button::Ok || b == Button::X)) {
                     // The loop map's details box: OK = the device's view, X = close it
                     withMainCanvas([&] { if (b == Button::Ok) loopmap_detailsOk(); else loopmap_closeDetails(); });
-                } else if (b == Button::X && !shifted && plotterview_cameFromLoopMap() && !viewScrolledBack()) {
+                } else if (b == Button::X && !shifted && views_cameFromLoopMap() && !viewScrolledBack()) {
                     // A device's view opened from the loop map: X goes back there
-                    plotterview_backToLoopMap();
-                } else if (plotterview_output() == DisplayOutput::LoopMap && b == Button::X) {
+                    views_backToLoopMap();
+                } else if (views_output() == DisplayOutput::LoopMap && b == Button::X) {
                     // The loop map: X leaves it (back to the view before)
-                    plotterview_leaveLoopMap();
-                } else if (plotterview_output() == DisplayOutput::Signals && b == Button::X) {
-                    plotterview_leaveSignals();
-                } else if (plotterview_output() == DisplayOutput::HwTest && b == Button::X) {
-                    plotterview_leaveHwTest();
-                } else if (plotterview_output() == DisplayOutput::Printer && b != Button::Ok &&
-                           (b != Button::X || plotterview_paperScrolled())) {
+                    views_leaveLoopMap();
+                } else if (views_output() == DisplayOutput::Signals && b == Button::X) {
+                    views_leaveSignals();
+                } else if (views_output() == DisplayOutput::HwTest && b == Button::X) {
+                    views_leaveHwTest();
+                } else if (views_output() == DisplayOutput::Printer && b != Button::Ok &&
+                           (b != Button::X || views_paperScrolled())) {
                     // The Printer view: ▲/▼ move the paper (Shift: a window
                     // at a time), X takes it back to the print head
-                    const int page = plotterview_paperWindowLines() - 1;
-                    if (b == Button::Up)        plotterview_paperScrollBy(shifted ? page : 1);
-                    else if (b == Button::Down) plotterview_paperScrollBy(shifted ? -page : -1);
-                    else if (b == Button::X)    plotterview_paperToLive();
-                } else if (plotterview_output() == DisplayOutput::MediaMap && b == Button::X) {
-                    plotterview_leaveMediaMap();
-                } else if (plotterview_output() == DisplayOutput::CharTable) {
-                    withMainCanvas([] { plotterview_leaveCharTable(); });   // any button closes it
-                } else if (plotterview_output() == DisplayOutput::Video80 && b != Button::Ok) {
+                    const int page = views_paperWindowLines() - 1;
+                    if (b == Button::Up)        views_paperScrollBy(shifted ? page : 1);
+                    else if (b == Button::Down) views_paperScrollBy(shifted ? -page : -1);
+                    else if (b == Button::X)    views_paperToLive();
+                } else if (views_output() == DisplayOutput::MediaMap && b == Button::X) {
+                    views_leaveMediaMap();
+                } else if (views_output() == DisplayOutput::CharTable) {
+                    withMainCanvas([] { views_leaveCharTable(); });   // any button closes it
+                } else if (views_output() == DisplayOutput::Video80 && b != Button::Ok) {
                     // The display as an HP 92198: the arrows look back
                     // through its 48-line memory (Shift: a screen at a
                     // time), X back to the live window (Shift+X: clear,
                     // like ESC E)
-                    if (Video80* v = plotterview_video80()) {
+                    if (Video80* v = views_video80()) {
                         const int page = v->rows();
                         if (b == Button::Up)        v->scrollView(shifted ? page : 1);
                         else if (b == Button::Down) v->scrollView(shifted ? -page : -1);
@@ -487,7 +487,7 @@ public:
                             else                       hideStrip();
                         }
                     }
-                } else if (plotterview_output() == DisplayOutput::Analyzer) {
+                } else if (views_output() == DisplayOutput::Analyzer) {
                     // The Analyzer view: its own menu, and the arrows scroll
                     // its log instead of the HP-41 text
                     if (b == Button::Ok)        openContextMenu();
@@ -512,7 +512,7 @@ public:
                     // (nothing to go back to) hide the button strip.
                     // Shift+X = clear. On the views without a text to
                     // scroll (Plotter, Printer, Tape...) X just hides it.
-                    const bool scrolledBack = plotterview_output() == DisplayOutput::Display &&
+                    const bool scrolledBack = views_output() == DisplayOutput::Display &&
                                               screen_.scrollOffset() != 0;
                     if (shifted)           screen_.clear();
                     else if (scrolledBack) screen_.scrollToLive();
@@ -682,7 +682,7 @@ public:
                 // re-applies Screen's own last-known visibility/position
                 // without a full redraw (nothing to redraw anyway -- the
                 // main window's own content was never touched).
-                plotterview_refreshCursor();
+                views_refreshCursor();
             }
         }
     }
@@ -731,7 +731,7 @@ private:
     static constexpr int kTraceCount = 3;
 
     // "Display"/"Plotter" pick which full-screen output is showing (see
-    // plotterview.h); "Clear plotter" is an immediate action ("new paper"),
+    // views.h); "Clear plotter" is an immediate action ("new paper"),
     // not a pickable state, so it doesn't need a selected_-tracked value.
 
 
@@ -769,7 +769,7 @@ private:
         } else {
             shown = analyzer_saveLog(msg) ? "Saved " + msg : msg;
         }
-        withMainCanvas([&]{ plotterview_showMessage(shown.c_str()); });
+        withMainCanvas([&]{ views_showMessage(shown.c_str()); });
         close();
     }
 
@@ -1020,7 +1020,7 @@ private:
     void openFilePicker() {
         // The drive whose Tape view was shown last (the first drive until
         // then) -- with several drives, each view picks its own file
-        if (CDrive* d = plotterview_drive()) targetDrive_ = d;
+        if (CDrive* d = views_drive()) targetDrive_ = d;
         setMediaEjected(true);              // cassette out while choosing
         files_.clear();
         files_.push_back("");               // first row: "No media" (no file selected)
@@ -1528,7 +1528,7 @@ private:
                          config.setDisplayModel(v80 ? 1 : 0);
                          if (videoDisplay != nullptr)
                              videoDisplay->setModel(v80 ? DisplayModel::Hp92198 : DisplayModel::Hp82163);
-                         withMainCanvas([&] { plotterview_setDisplayModel(displayV80() != nullptr); });
+                         withMainCanvas([&] { views_setDisplayModel(displayV80() != nullptr); });
                          refreshItems();
                      });
     }
@@ -1566,28 +1566,28 @@ private:
                      });
     }
     Item plotViewItem() {
-        return value("Plot view", [] { return std::string(plotterview_plotFit() ? "Fit" : "Page"); },
+        return value("Plot view", [] { return std::string(views_plotFit() ? "Fit" : "Page"); },
                      [this] {
-                         const bool fit = !plotterview_plotFit();
+                         const bool fit = !views_plotFit();
                          config.setPlotFit(fit);
-                         withMainCanvas([&] { plotterview_setPlotFit(fit); });
+                         withMainCanvas([&] { views_setPlotFit(fit); });
                          refreshItems();
                      });
     }
     Item paperItem() {
-        return value("Paper", [] { return std::string(plotterview_paperBlack() ? "Black" : "White"); },
+        return value("Paper", [] { return std::string(views_paperBlack() ? "Black" : "White"); },
                      [this] {
-                         const bool black = !plotterview_paperBlack();
+                         const bool black = !views_paperBlack();
                          config.setPlotPaperBlack(black);
-                         withMainCanvas([&] { plotterview_setPaperBlack(black); });
+                         withMainCanvas([&] { views_setPaperBlack(black); });
                          refreshItems();
                      });
     }
     Item penItem() {
-        return value("Pen", [] { return std::string(plotterview_penWide() ? "Wide" : "Thin"); },
+        return value("Pen", [] { return std::string(views_penWide() ? "Wide" : "Thin"); },
                      [this] {
                          // Only what's drawn from now on; not saved (thin at start-up)
-                         plotterview_setPenWide(!plotterview_penWide());
+                         views_setPenWide(!views_penWide());
                          refreshItems();
                      });
     }
@@ -1605,12 +1605,12 @@ private:
     // ── The context menu: the view that's showing ───────────────────────
     // `sel`: the row to highlight (back from a submenu)
     void openContextMenu(int sel = 0) {
-        const DisplayOutput out = plotterview_output();
+        const DisplayOutput out = views_output();
         std::vector<Item> m;
         std::string title;
         if (out == DisplayOutput::Plotter) {
             title = "PLOTTER";
-            m.push_back(item("Clear plotter", [this] { doAndClose([] { plotterview_clearPlotter(); }); }));
+            m.push_back(item("Clear plotter", [this] { doAndClose([] { views_clearPlotter(); }); }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
             m.push_back(plotViewItem());
             m.push_back(paperItem());
@@ -1626,14 +1626,14 @@ private:
                                   [this, row] { openPlotterErrors(row); } });
             }
         } else if (out == DisplayOutput::Tape) {
-            CDrive* drv = plotterview_drive();
+            CDrive* drv = views_drive();
             title = drv ? std::string("TAPE ") + drv->name() : std::string("TAPE");
             m.push_back(item("Select cassette >", [this] {
                 pickerFromTape_ = true;
                 openFilePicker();
             }));
             if (drv && !drv->mediaFile().empty())
-                m.push_back(item("Media map >", [this] { doAndClose([] { plotterview_showMediaMap(); }); }));
+                m.push_back(item("Media map >", [this] { doAndClose([] { views_showMediaMap(); }); }));
             // The cassette to hipiview, which asks where to save it on the PC
             // (mirror_download.h) -- only with hipiview connected
             if (drv && !drv->mediaFile().empty() && displayMirror_active())
@@ -1655,7 +1655,7 @@ private:
             }
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::Printer) {
-            CPrinter* prt = plotterview_printer();
+            CPrinter* prt = views_printer();
             title = "PRINTER";
             if (prt) {
                 // The same as the printer's own switches (the picture follows)
@@ -1680,13 +1680,13 @@ private:
                                       refreshItems();
                                   }));
             }
-            if (plotterview_paperLines() > 0)
+            if (views_paperLines() > 0)
                 m.push_back(item("Tear off paper >", [this] { showTearOff(1); }));
             m.push_back(item("Printouts >", [this] { openPrintouts(); }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::Analyzer) {
             title = "ANALYZER";
-            m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveAnalyzer(); }); }));
+            m.push_back(item("Leave view", [this] { doAndClose([] { views_leaveAnalyzer(); }); }));
             m.push_back(item("Clear", [this] { analyzer_clear(); close(); }));
             m.push_back(Item{ [] { return std::string(analyzer_logging() ? "Logging (on) >" : "Logging >"); },
                               [this] { openAnalyzerLogMenu(); } });
@@ -1702,18 +1702,18 @@ private:
                               [this] { analyzer_setShowIdle(!analyzer_showIdle()); refreshItems(); }));
         } else if (out == DisplayOutput::MediaMap) {
             title = "MEDIA MAP";
-            m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveMediaMap(); }); }));
+            m.push_back(item("Leave view", [this] { doAndClose([] { views_leaveMediaMap(); }); }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::HwTest) {
             title = "HARDWARE TEST";
-            m.push_back(item("Leave view", [this] { doAndClose([] { plotterview_leaveHwTest(); }); }));
+            m.push_back(item("Leave view", [this] { doAndClose([] { views_leaveHwTest(); }); }));
             m.push_back(item("Scan I2C", [this] { doAndClose([] { hwtest_showScan(); }); }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::LoopMap || out == DisplayOutput::Signals) {
             const bool map = out == DisplayOutput::LoopMap;
             title = map ? "LOOP MAP" : "HP-IL SIGNALS";
             m.push_back(item("Leave view", [this, map] {
-                doAndClose([map] { if (map) plotterview_leaveLoopMap(); else plotterview_leaveSignals(); });
+                doAndClose([map] { if (map) views_leaveLoopMap(); else views_leaveSignals(); });
             }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
             if (!map) {
@@ -1747,7 +1747,7 @@ private:
         std::vector<Item> m;
         if (plotter->errorCode() != 0)
             m.push_back(item("Clear error", [this, backRow] {
-                plotter->clearError();               // (the light goes out from plotterview_poll())
+                plotter->clearError();               // (the light goes out from views_poll())
                 openPlotterErrors(backRow);
             }));
         const auto& log = plotter->errorLog();
@@ -1760,7 +1760,7 @@ private:
             const std::string full = "Error " + std::to_string(code) + ": " + CPlotter::errorText(code) +
                                      (cmd.empty() ? std::string() : " -- " + cmd);
             m.push_back(item(label, [this, full] {
-                withMainCanvas([&] { plotterview_showMessage(full.c_str()); });
+                withMainCanvas([&] { views_showMessage(full.c_str()); });
                 close();
             }));
         }
@@ -1795,15 +1795,15 @@ private:
     void openViewsMenu() {
         std::vector<Item> m;
         int sel = 0;
-        for (CDevice* dev : plotterview_viewDevices()) {
-            if (dev == plotterview_viewDevice() && plotterview_output() != DisplayOutput::Analyzer &&
-                plotterview_output() != DisplayOutput::LoopMap && plotterview_output() != DisplayOutput::Signals)
+        for (CDevice* dev : views_viewDevices()) {
+            if (dev == views_viewDevice() && views_output() != DisplayOutput::Analyzer &&
+                views_output() != DisplayOutput::LoopMap && views_output() != DisplayOutput::Signals)
                 sel = static_cast<int>(m.size());
-            m.push_back(item(plotterview_viewTitle(dev), [this, dev] { doAndClose([dev] { plotterview_showDevice(dev); }); }));
+            m.push_back(item(views_viewTitle(dev), [this, dev] { doAndClose([dev] { views_showDevice(dev); }); }));
         }
-        m.push_back(item("Analyzer",      [this] { doAndClose([] { plotterview_showAnalyzer(); }); }));
-        m.push_back(item("Loop map",      [this] { doAndClose([] { plotterview_showLoopMap(); }); }));
-        m.push_back(item("HP-IL signals", [this] { doAndClose([] { plotterview_showSignals(); }); }));
+        m.push_back(item("Analyzer",      [this] { doAndClose([] { views_showAnalyzer(); }); }));
+        m.push_back(item("Loop map",      [this] { doAndClose([] { views_showLoopMap(); }); }));
+        m.push_back(item("HP-IL signals", [this] { doAndClose([] { views_showSignals(); }); }));
         openList("GO TO VIEW", std::move(m), [this] { openHipiMenu(0); }, sel);
     }
 
@@ -1906,9 +1906,9 @@ private:
             Item{ [this] { return std::string((usbMscModeActive() || devForceDisconnectLabel_) ? "Disconnect from PC" : "Connect to PC"); },
                   [this] { toggleConnectToPc(); } },
             item("Loopback test >", [this] { openLoopbackConfirm(); }),
-            item("Hardware test >", [this] { doAndClose([] { plotterview_showHwTest(); }); }),
+            item("Hardware test >", [this] { doAndClose([] { views_showHwTest(); }); }),
             item("Demo",            [this] { doAndClose([] { demo_start(); }); }),
-            item("Character table >", [this] { doAndClose([] { plotterview_showCharTable(); }); }),
+            item("Character table >", [this] { doAndClose([] { views_showCharTable(); }); }),
             item("About >",         [this] { openAbout(); }),
             item("Bootsel mode",    [this] { enterBootselMode(); }),
         }, [this] { openHipiMenu(2); }, sel);
@@ -1974,18 +1974,18 @@ private:
         // immediately, correct regardless of what it turns out to be --
         // Exception: if this menu action just switched view, the switch
         // splash has taken over the PIP overlay -- leave it
-        // up; plotterview_poll() removes it when its timer expires.
-        if (!plotterview_isSplashVisible()) d_->hidePipOverlay();
+        // up; views_poll() removes it when its timer expires.
+        if (!views_isSplashVisible()) d_->hidePipOverlay();
         // The HP 92198 screen doesn't draw while the menu is being drawn
         // (it would land in the menu's layer): what it held back, now
-        if (plotterview_output() == DisplayOutput::Video80)
-            if (Video80* v = plotterview_video80()) v->catchUp();
+        if (views_output() == DisplayOutput::Video80)
+            if (Video80* v = views_video80()) v->catchUp();
         // The cursor back where the display has it (the menu hid it and
         // moved it): here for every way of closing -- a touch, a warning
         // dismissed, the demo -- not just the buttons. Only with the canvas
         // on the panel (its position is relative to the canvas); from
         // inside the menu's drawing, handleButton() does it afterwards.
-        if (d_->canvasAddr() == 0) plotterview_refreshCursor();
+        if (d_->canvasAddr() == 0) views_refreshCursor();
     }
 
     void moveSelection(int delta, int count) {
@@ -2053,7 +2053,7 @@ private:
         menuFont();
         d_->txtColor(0xFFFF, 0x0000);
         d_->txtSetCursor(MenuFrame::X + 20, MenuFrame::Y + 20);
-        const int n = plotterview_paperLines();
+        const int n = views_paperLines();
         const std::string t = std::to_string(n) + (n == 1 ? " line" : " lines") + " on the paper";
         d_->txtWrite(t.c_str());
         d_->txtSize(0);
@@ -2088,22 +2088,22 @@ private:
         const int dir = tearDir_;
         if (i == 0) {
             std::string msg;
-            CPrinter* prt = plotterview_printer();
+            CPrinter* prt = views_printer();
             const bool ok = prt != nullptr && printout_save(*prt, msg);
             LOGF("\r\n * Printer paper %s: %s", ok ? "saved" : "not saved", msg.c_str());
             close();
             pendingMessage_ = ok ? "Saved " + msg : msg;
-            if (ok) plotterview_tearOff(dir);
+            if (ok) views_tearOff(dir);
             return;
         }
         close();
-        if (i == 1) plotterview_tearOff(dir);
+        if (i == 1) views_tearOff(dir);
     }
 
     // ── Printer: the saved printouts (printout.h) ───────────────────────
     // Printer menu -> Printouts: the list, newest first; a printout ->
     // load it into the printer (instead of the paper there) or delete it
-    int printoutsRowInMenu() const { return plotterview_paperLines() > 0 ? 4 : 3; }
+    int printoutsRowInMenu() const { return views_paperLines() > 0 ? 4 : 3; }
 
     void openPrintouts(unsigned select = 0) {
         const std::vector<PrintoutInfo> list = printout_list();
@@ -2127,10 +2127,10 @@ private:
         openList(t, {
             item("Load into the printer", [this, n] {
                 std::string msg;
-                CPrinter* prt = plotterview_printer();
+                CPrinter* prt = views_printer();
                 const bool ok = prt != nullptr && printout_load(n, *prt, msg);
                 LOGF("\r\n * Printer: %s %s", ok ? "loaded" : "not loaded", msg.c_str());
-                doAndClose([] { plotterview_reloadPaper(); });
+                doAndClose([] { views_reloadPaper(); });
                 pendingMessage_ = ok ? "Loaded " + msg : msg;
             }),
             item("Delete >", [this, n, t] {
@@ -2199,7 +2199,7 @@ private:
     }
 
     static bool viewIsNotText() {
-        const DisplayOutput o = plotterview_output();
+        const DisplayOutput o = views_output();
         return o == DisplayOutput::Plotter || o == DisplayOutput::Analyzer || o == DisplayOutput::LoopMap ||
                o == DisplayOutput::Signals || o == DisplayOutput::CharTable || o == DisplayOutput::HwTest ||
                o == DisplayOutput::MediaMap ||
@@ -2214,7 +2214,7 @@ private:
         d_->endOverlayDraw();
         screen_.reassertRenderState();
         if (state_ != State::Closed) showPip();
-        else plotterview_refreshCursor();
+        else views_refreshCursor();
     }
 
     // Clears the full width of one menu row's own slot to the given
@@ -2236,11 +2236,11 @@ private:
     // A view looking back (the printer's paper, the text's or the 92198's
     // history): X first goes back to live there
     bool viewScrolledBack() {
-        switch (plotterview_output()) {
-            case DisplayOutput::Printer: return plotterview_paperScrolled();
+        switch (views_output()) {
+            case DisplayOutput::Printer: return views_paperScrolled();
             case DisplayOutput::Display: return screen_.scrollOffset() != 0;
             case DisplayOutput::Video80: {
-                Video80* v = plotterview_video80();
+                Video80* v = views_video80();
                 return v != nullptr && !v->viewIsLive();
             }
             default: return false;
@@ -2389,7 +2389,7 @@ private:
     void setMediaEjected(bool ejected) {
         if (ejected == mediaEjected_) return;
         mediaEjected_ = ejected;
-        plotterview_setTapeEjected(ejected);
+        views_setTapeEjected(ejected);
         if (targetDrive_) targetDrive_->setEjected(ejected);
     }
     std::function<void(std::uint16_t)> onColorChanged_;

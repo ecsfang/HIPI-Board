@@ -6,7 +6,7 @@
 //   make demo_view_test && ./demo_view_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "Screen.hpp"
-#include "plotterview.h"
+#include "views.h"
 #include "printer.h"
 #include "demo_content.h"
 #include "video80.h"
@@ -89,7 +89,7 @@ void check(bool ok, const char* what) {
 void run(int ms) {
     for (int t = 0; t < ms; t += 5) {
         fakeNowUs += 5000;
-        hipi::plotterview_poll();
+        hipi::views_poll();
     }
 }
 
@@ -116,8 +116,8 @@ void makeChipFont() {
 }
 
 void plot(const std::string& g, bool black, const char* png) {
-    hipi::plotterview_clearPlotter();
-    hipi::plotterview_setPaperBlack(black);
+    hipi::views_clearPlotter();
+    hipi::views_setPaperBlack(black);
     for (char c : g) plotter->put(c);
     run(50);
     snapshot(png);
@@ -139,8 +139,8 @@ int main(int argc, char** argv) {
     plotter = new CPlotter("TFPLOT");
     printer = new CPrinter("TFPRINT");
     devices = { plotter, printer };
-    hipi::plotterview_setPrinter(printer);
-    hipi::plotterview_init(&d, &screen, plotter);
+    hipi::views_setPrinter(printer);
+    hipi::views_init(&d, &screen, plotter);
 
     // Display
     for (char c : hipi::demo::textIntro()) screen.pr_char(static_cast<std::uint8_t>(c));
@@ -173,8 +173,8 @@ int main(int argc, char** argv) {
     v.setActive(false);
 
     // Plotter
-    hipi::plotterview_setPlotFit(false);
-    hipi::plotterview_showDevice(plotter);
+    hipi::views_setPlotFit(false);
+    hipi::views_showDevice(plotter);
     run(2000);
     plot(hipi::demo::hpglLogo(kLogoImage, kLogoImageWidth, kLogoImageHeight), true, "tools/hipiview/demo_7_logo.png");
     plot(hipi::demo::hpglSpirograph(), false, "tools/hipiview/demo_8_spiro.png");
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
     plot(hipi::demo::hpglLoop(), false, "tools/hipiview/demo_10_loop.png");
 
     // Printer
-    hipi::plotterview_showDevice(printer);
+    hipi::views_showDevice(printer);
     run(2000);
     for (const std::string& l : hipi::demo::printLines()) {
         for (char c : l) printer->put(static_cast<std::uint8_t>(c));

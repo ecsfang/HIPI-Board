@@ -38,7 +38,7 @@ void analyzer_capture(IL_CMD_t in, IL_CMD_t out);
 // Main loop: analyses newly captured frames, redraws the view if shown
 void analyzer_poll();
 
-// The view (see plotterview_showAnalyzer())
+// The view (see views_showAnalyzer())
 void analyzer_redrawAll();
 void analyzer_scroll(int lines);          // > 0 = back in time
 void analyzer_scrollToLive();

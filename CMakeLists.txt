@@ -192,6 +192,7 @@ add_executable(${EXE_TARGET}
     src/bmp280.cpp
     src/pilbox.cpp
     src/plotter.cpp
+    src/views.cpp
     src/plotterview.cpp
     src/printer.cpp
     src/printer_font.cpp

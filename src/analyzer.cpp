@@ -4,7 +4,7 @@
 #include "usb_msc.h"
 #include "usb_serial.h"
 #include "boardui.h"
-#include "plotterview.h"
+#include "views.h"
 #include "backlight.h"
 #include "ff.h"
 #include "pico/time.h"
@@ -633,7 +633,7 @@ constexpr int kRows = (SCREEN_MAX_Y - kTitleH - 4) / kRowH;
 constexpr int kCols = (SCREEN_MAX_X - 16) / 8;
 
 bool visible() {
-    if (plotterview_output() != DisplayOutput::Analyzer || plotterview_isSplashVisible()) return false;
+    if (views_output() != DisplayOutput::Analyzer || views_isSplashVisible()) return false;
     return true;
 }
 

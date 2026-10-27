@@ -4,7 +4,7 @@
 #include "hpil.h"
 #include "hpil_pio.hpp"          // IN_P_PIN / IN_M_PIN: the receiver's "plus" and "minus"
 #include "hpil_diag.pio.h"
-#include "plotterview.h"
+#include "views.h"
 #include "usb_serial.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
@@ -63,7 +63,7 @@ BitCells bitCells_ = BitCells::Bands;
 bool live_ = false;                                   // a real capture in buf_ (else: the example)
 
 bool visible() {
-    return d_ != nullptr && plotterview_output() == DisplayOutput::Signals && !plotterview_isSplashVisible();
+    return d_ != nullptr && views_output() == DisplayOutput::Signals && !views_isSplashVisible();
 }
 
 }  // namespace

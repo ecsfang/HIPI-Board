@@ -73,7 +73,7 @@ extern void init_spi(void);
 #include "tusb.h"
 
 #include "boardui.h"
-#include "plotterview.h"
+#include "views.h"
 #include "screendump.h"
 #include "display_text.h"
 #include "bootscreen.h"
@@ -261,8 +261,8 @@ static hipi::BootState pilboxState() {
 static int bitmapsRow = -1;
 
 static void bootRowsDevices() {
-    const bool tape = hipi::plotterview_isAvailable(hipi::DisplayOutput::Tape);
-    const bool prt = hipi::plotterview_isAvailable(hipi::DisplayOutput::Printer);
+    const bool tape = hipi::views_isAvailable(hipi::DisplayOutput::Tape);
+    const bool prt = hipi::views_isAvailable(hipi::DisplayOutput::Printer);
     const hipi::BootState st = tape && prt ? hipi::BootState::Ok : hipi::BootState::Fail;
     const char* what = tape && prt ? "images loaded"
                      : tape        ? "printer images missing"
@@ -511,11 +511,11 @@ int main() {
     // 7" panel this also loads the Tape and Printer pictures -- slow, so
     // the start-up screen says so first.
     bitmapsRow = hipi::bootscreen_row("Bitmaps", hipi::BootState::Info, "Loading ...");
-    hipi::plotterview_init(display, screen, plotter);
-    // The media map shows the drive of the Tape view (plotterview_drive())
+    hipi::views_init(display, screen, plotter);
+    // The media map shows the drive of the Tape view (views_drive())
     hipi::mediamap_setSource(
         [](hipi::MediaMapLive& l) {
-            CDrive* d = hipi::plotterview_drive();
+            CDrive* d = hipi::views_drive();
             if (d == nullptr) return false;
             l.file = d->ejected() ? std::string() : d->mediaFile();
             l.head = d->headBlock();
@@ -525,11 +525,11 @@ int main() {
             return true;
         },
         [](std::uint32_t block, std::uint8_t* buf) {
-            CDrive* d = hipi::plotterview_drive();
+            CDrive* d = hipi::views_drive();
             return d != nullptr && d->peekBlock(block, buf);
         });
-    hipi::plotterview_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
-    hipi::plotterview_setPaperBlack(config.plotPaperBlack());  // Plotter -> Paper (saved)
+    hipi::views_setPlotFit(config.plotFit());   // Display -> Plot view (saved)
+    hipi::views_setPaperBlack(config.plotPaperBlack());  // Plotter -> Paper (saved)
     hipi::analyzer_init(display);            // HP-IL analyzer (Display -> Analyzer)
     hipi::loopmap_init(display);             // HP-IL loop map (Display -> Loop map)
     hipi::hwtest_init(display);              // System -> Hardware test
@@ -556,13 +556,13 @@ int main() {
             std::string mediaFile() const override { return d_->mediaFile(); }
             bool quiet() const override { return d_->quiet(); }
             void open() override {
-                if (d_ == hipi::plotterview_drive()) hipi::plotterview_setTapeEjected(true);   // the lid opens
+                if (d_ == hipi::views_drive()) hipi::views_setTapeEjected(true);   // the lid opens
                 d_->setEjected(true);
             }
             void insert(const std::string& file) override {
                 d_->setMediaFile(file);              // (saved, the label: see hipi.cpp)
                 d_->setEjected(false);
-                if (d_ == hipi::plotterview_drive()) hipi::plotterview_setTapeEjected(false);
+                if (d_ == hipi::views_drive()) hipi::views_setTapeEjected(false);
             }
             bool readBlock(std::uint32_t block, std::uint8_t* out) override { return d_->peekBlock(block, out); }
             std::uint32_t fileSize() const override { return d_->mediaFileSize(); }
@@ -571,8 +571,8 @@ int main() {
         };
         hipi::UploadEnv env;
         env.drive = []() -> std::shared_ptr<hipi::UploadDrive> {
-            if (hipi::plotterview_output() != hipi::DisplayOutput::Tape) return nullptr;
-            CDrive* d = hipi::plotterview_drive();
+            if (hipi::views_output() != hipi::DisplayOutput::Tape) return nullptr;
+            CDrive* d = hipi::views_drive();
             return d != nullptr ? std::make_shared<DriveForUpload>(d) : nullptr;
         };
         env.notNow = []() -> std::string {
@@ -590,7 +590,7 @@ int main() {
                 return true;
             };
             for (CDevice* dev : devices) {
-                if (dev->type() != DRIVE || dev == hipi::plotterview_drive()) continue;
+                if (dev->type() != DRIVE || dev == hipi::views_drive()) continue;
                 if (same(static_cast<CDrive*>(dev)->mediaFile(), file)) return dev->name();
             }
             return "";
@@ -620,9 +620,9 @@ int main() {
         hipi::DownloadEnv env;
         env.drive = []() -> std::shared_ptr<hipi::DownloadDrive> {
             // (the Tape view, or its Media map: a file from its box)
-            if (hipi::plotterview_output() != hipi::DisplayOutput::Tape &&
-                hipi::plotterview_output() != hipi::DisplayOutput::MediaMap) return nullptr;
-            CDrive* d = hipi::plotterview_drive();
+            if (hipi::views_output() != hipi::DisplayOutput::Tape &&
+                hipi::views_output() != hipi::DisplayOutput::MediaMap) return nullptr;
+            CDrive* d = hipi::views_drive();
             return d != nullptr ? std::make_shared<DriveForDownload>(d) : nullptr;
         };
         env.notNow = []() -> std::string {
@@ -639,8 +639,8 @@ int main() {
         [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },
         [](std::uint8_t code, bool down) { hipi::boardui_remoteButton(code, down); });
     hipi::clock_init(display);               // RTC (rtc.h), clock screen saver
-    if (CDrive* d = hipi::plotterview_drive())               // cassette in the Tape view
-        hipi::plotterview_setTapeFile(d->mediaFile());
+    if (CDrive* d = hipi::views_drive())               // cassette in the Tape view
+        hipi::views_setTapeFile(d->mediaFile());
     // Project escape sequences from the HP-41 (see
     // Screen::setExtCommandCallback()) -- only recorded here, carried out
     // from the main loop by boardui_poll():
@@ -652,7 +652,7 @@ int main() {
     auto extCommand = [](std::uint8_t c, std::uint8_t arg) {
         if (c == 'D') hipi::screendump_request(false);
         else if (c == 'M') hipi::screendump_request(true);
-        else if (c == 'V') hipi::plotterview_requestViewByAddress(arg);
+        else if (c == 'V') hipi::views_requestViewByAddress(arg);
         else if (c == 'T') hipi::displayText_request();
     };
     constexpr const char* kExtArgCmds = "V";   // the commands with an argument byte
@@ -660,7 +660,7 @@ int main() {
     // ... and the same in the HP 92198 mode, and for the text log's filter
     video80Term->setExtCommandCallback(extCommand, kExtArgCmds);
     hipi::displayText().setExtArgCmds(kExtArgCmds);
-    hipi::plotterview_setVideo80(video80Term);
+    hipi::views_setVideo80(video80Term);
 
     bootRowsDevices();
     LOGF("\r\n\t* HP-IL initialized");
@@ -751,7 +751,7 @@ int main() {
     screen->setTextSize(config.fontSize());
     if (config.columns() != 0) screen->setColumns(config.columns());
     // The display emulates the HP 92198: its screen is the Display view
-    hipi::plotterview_setDisplayModel(videoDisplay != nullptr && videoDisplay->isVideo80());
+    hipi::views_setDisplayModel(videoDisplay != nullptr && videoDisplay->isVideo80());
 
     hipi::backlight_init(screen);   // the screen saver timer starts now (backlight.h)
     hipi_bootServiceDone();   // the main loop handles USB and PILBox from here
@@ -770,7 +770,7 @@ int main() {
         timed("HP-IL", [&] { hipi_loop(hpil); });        // Check IL for any instruction to send through the loop!
         timed("touch", [] { touch_poll(); });             // debounced tap/release detection (touch.h)
         timed("buttons/menus", [] { hipi::boardui_poll(); });   // auto-hide timers + status LED poll
-        timed("views", [] { hipi::plotterview_poll(); });  // view-switch splash auto-dismiss timer
+        timed("views", [] { hipi::views_poll(); });  // view-switch splash auto-dismiss timer
         hipi::backlight_poll();      // screen saver (dim / clock) after a while without use
         timed("mirror", [] { hipi::displayMirror_poll(); });   // the display mirrored to a PC viewer (display_mirror.h)
         hipi::crashlog_poll();       // a new stack depth, logged (crashlog.h)

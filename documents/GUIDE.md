@@ -467,9 +467,9 @@ role that lasted a few ms is still seen. `loopmap_poll()` compares
 `rolesNow()` with what was drawn and redraws when a role comes or its hold
 runs out.
 The details box's GO TO … VIEW (a HIPI device with a view,
-`plotterview_viewName()`) calls `plotterview_showDeviceFromLoopMap()`: the
+`views_viewName()`) calls `views_showDeviceFromLoopMap()`: the
 view without its name box, and X on the strip
-(`plotterview_backToLoopMap()`, from `UiDialog::handleButton()`) goes back
+(`views_backToLoopMap()`, from `UiDialog::handleButton()`) goes back
 to the map unless that view is scrolled back; any other view change
 forgets it. PC test: `tools/hipiview/test/loopmap_test.cpp` (made-up
 traffic through `test/lmstubs/analyzer.h`).
@@ -514,7 +514,7 @@ The frame and title live in `include/menu_frame.h` (`MenuFrame::drawTitled()`
 draws one at any place and size), so other dialogs look the same.
 Order in every menu: where to go, what to do, settings, More.
 
-**Printer paper by hand.** `paperOff_` in plotterview.cpp is how far the
+**Printer paper by hand.** `paperOff_` in views.cpp is how far the
 paper is from where it prints (pixels; > 0 older lines, < 0 pulled up, at
 most to the tear-off bar). The ink layer is moved with `shiftInk()` (BTE via
 the staging area) and only the rows that come into view are rendered
@@ -526,12 +526,12 @@ Tearing off: at the edge (`paperOff_ == -kMaxPullUp`) a sideways move of
 `kTearDx` sets `tearGesture_`; boardui takes it at the drag's end and opens
 `UiDialog::openTearOff()` (State::TearOff: Save / Discard / Cancel, touch or
 strip). Save is `printout_save()` (`src/printout.cpp`: 1-bpp BMP + text);
-`plotterview_tearOff()` slides the ink sideways (`tearDir_`) and then calls
+`views_tearOff()` slides the ink sideways (`tearDir_`) and then calls
 `CPrinter::clearPaper()`.
 The menu's **Printouts** (`UiDialog::openPrintouts()`) lists
 `printout_list()`; loading is `printout_load()` (the BMP read back into each
 line's dots -- the 2x2 cells' top-left pixel -- and the text from the .txt)
-into `CPrinter::loadPaper()`, then `plotterview_reloadPaper()` redraws the
+into `CPrinter::loadPaper()`, then `views_reloadPaper()` redraws the
 ink at the live position. `printout_delete()` removes both files.
 
 **Media map.** `src/mediamap.cpp` (DisplayOutput::MediaMap, from the Tape
@@ -599,7 +599,7 @@ data, talker -> controller answers after SDA/SST/SAI/SDI, auto-addressing,
 IFC/DCL/LPD, the HP82161A's DDL/DDT commands decoded) and flags missing
 answers, ETE and gaps over 500 ms (`kSlowUs`) inside a transaction; the
 detailed mode is one explained line per frame. Changing mode re-analyses the
-whole ring. Shown via `plotterview_showAnalyzer()` (`DisplayOutput::Analyzer`,
+whole ring. Shown via `views_showAnalyzer()` (`DisplayOutput::Analyzer`,
 not in the swipe order); UiDialog routes OK/arrows to it while shown
 (`AnalyzerMenu`). Logs go to `logs/analyzer_<n>.txt`.
 
@@ -670,7 +670,7 @@ The device list performs a live AAD/SAI/SDI enumeration of the internal
 devices. Avoid opening it while a controller is in the middle of a transfer.
 
 The info box and the device list share PIP-1 with the menu, the
-view-switch name box and `plotterview_showMessage()`. Whatever else takes
+view-switch name box and `views_showMessage()`. Whatever else takes
 PIP-1 closes them first (`boardui_closePipBoxes()`, called from
 `showSplashBox()` and `boardui_saverBegin()`), and `boardui_poll()` closes
 either one whose PIP-1 window is gone anyway (logged "... lost its window").
@@ -812,11 +812,11 @@ IN and DF set it back) lets it through, else it's never known. It's kept
 in `error_` (OS bit 5, `errorCode()`) until OE, IN or
 `clearError()` (Plotter -> Errors -> Clear error), and in a log of the last
 eight with the command (`errorLog()`; kept over IN). `errorSerial()`
-changes with each, so `plotterview_poll()` draws or removes the light: a
+changes with each, so `views_poll()` draws or removes the light: a
 small box top centre of the plot (`drawErrorLight()`), drawn again after
 a segment over it and after a redraw; removed with
-`plotterview_redrawRegion()`. A touch on it (`plotterview_errorLightTap()`,
-from `boardui_handleTap()`) shows `plotterview_errorText()`. The loop map
+`views_redrawRegion()`. A touch on it (`views_errorLightTap()`,
+from `boardui_handleTap()`) shows `views_errorText()`. The loop map
 draws a yellow LED on the plotter's card (and the error in its details;
 `rolesNow()` includes it, so it redraws); the info box has a line. AP, AF,
 AH, EC, VA and VN are no-ops (no error). On HP-IL, SDI answers "HP7470A"
@@ -826,7 +826,7 @@ Tests: `plotter_test` (the errors, IM, SDI, SST), `printer_view_test` (the
 light; `printer_view_error_light.png`).
 
 **Plotter pen.** Plotter -> Pen changes the pen's tip for what's drawn
-from then on, like a pen with a broader tip: `plotterview_setPenWide()` ->
+from then on, like a pen with a broader tip: `views_setPenWide()` ->
 `CPlotter::setWideTip()`, and every new `PlotSegment` keeps it (`wide`, in
 what was padding -- the struct is still 10 bytes). So thin and wide lines
 mix in one plot, and a redraw keeps each one's width. Thin at start-up,
@@ -902,8 +902,8 @@ warning on the debug log. E.g. the device at address 3:
 ```
 
 Like the dump, the request is only recorded during HP-IL frame handling
-(`plotterview_requestViewByAddress()`) and carried out from
-`boardui_poll()` (`plotterview_showAddress()`) -- deferred while a menu is
+(`views_requestViewByAddress()`) and carried out from
+`boardui_poll()` (`views_showAddress()`) -- deferred while a menu is
 open, and it ends the screen saver first. In `Screen`, commands that take
 an argument byte are listed in the second parameter of
 `setExtCommandCallback()` (currently `"V"`).
@@ -944,12 +944,12 @@ control changed, so showing it is one BTE copy over the base picture:
 POWER lit and the switch ON, the MODE switch's three positions, the
 INTENSITY switch's five, PRINT and PAPER ADVANCE pressed -- and the
 print head, which moves.
-`plotterview_poll()` compares the printer's state with what's drawn and
+`views_poll()` compares the printer's state with what's drawn and
 copies only what changed. Both pictures are made from a photo by
 `tools/images/make_hp82162a.py`, which also prints the sprite table that
-`kPrt*` in `plotterview.cpp` must match.
+`kPrt*` in `views.cpp` must match.
 
-Touches (`plotterview_printerHitTest()`, handled in `boardui.cpp`): the
+Touches (`views_printerHitTest()`, handled in `boardui.cpp`): the
 power switch toggles `TFPRINT` on and off (like **Devices**), MODE and
 INTENSITY jump to the position touched (or one step for LIGHT/DARK), PRINT
 and PAPER ADVANCE are held while the finger is down
@@ -994,7 +994,7 @@ into the ink layer one line *below* what the window shows (the layer is
 `kInkBufH`, a line taller); then the layer moves up 4 px at a time (via a
 staging copy, `kPrinterInkStageAddr`) and the line comes into view. The
 next line the head glides back. Blank lines (PAPER ADVANCE, an empty CR)
-only move the paper. One step per `plotterview_poll()`, at most every
+only move the paper. One step per `views_poll()`, at most every
 15-20 ms, so the main loop isn't held up; while the head moves only the
 slot is redrawn. Lines that come
 faster, or while the view isn't showing, go onto the paper at once;
@@ -1002,7 +1002,7 @@ more than a window full redraws it from `line(n)`. PAPER ADVANCE held
 feeds a line every 220 ms.
 
 `tools/printertest` checks the HP-IL side and the dots (`make test`);
-`tools/hipiview`'s `printer_view_test` runs the real `plotterview.cpp`,
+`tools/hipiview`'s `printer_view_test` runs the real `views.cpp`,
 `printer.cpp`, BMP loader and LT7683 driver against the emulated chip
 with the real pictures, checks the paper and saves `printer_view_*.png`.
 
@@ -1024,7 +1024,7 @@ Both: address 31 after AAU, data queued and handed over one byte per
 up the loop. On the panel the Display view is `Screen` (output
 `DisplayOutput::Display`) or `Video80` (output `DisplayOutput::Video80`):
 `outputFor(ViewKind::Display)` and the "back to the display" paths ask
-`displayOutput()`, and `plotterview_setDisplayModel()` swaps them while
+`displayOutput()`, and `views_setDisplayModel()` swaps them while
 the display is showing. Text colour applies to both; each keeps its
 own font and columns settings (`fontsize`/`columns` for the 82163,
 `v80_font`/`v80_columns` for the 92198), and the menu's **Font size** and
@@ -1072,7 +1072,7 @@ of both models, the escape sequences, scrolling, long lines and the font
 and columns settings, and saves `video80_*.png`.
 
 **Hardware test page.** `hwtest.h`/`.cpp` is a full-screen view
-(`DisplayOutput::HwTest`, `plotterview_showHwTest()` from System, X or
+(`DisplayOutput::HwTest`, `views_showHwTest()` from System, X or
 **Leave view** goes back) drawn like the loop map: off-screen in layer 3
 and copied; small changes (a button, a pixel
 dot, the I2C rows -- padded text, no clearing) are drawn on the panel when
@@ -1181,18 +1181,18 @@ run from `demo_poll()`: each step is a function called every poll until it
 says it's done (`Step`), built by helpers -- `type()` (characters to
 `Screen` or `Video80`, n ms apart), `hpgl()` (HP-GL to the plotter, n
 characters per 15 ms, through `CPlotter::put()`), `print()` (lines to
-`CPrinter::put()`), `view()` (`plotterview_showView()`: a view without the
+`CPrinter::put()`), `view()` (`views_showView()`: a view without the
 name box), `caption()` (a yellow band at the bottom, drawn in the menu
 layer and shown as PIP-1), `wait()`, `call()`. What is shown lives in
 `demo_content.cpp` (texts, HP-GL, printouts; plain data -- the logo is
 hatched from the built-in bitmap, one stroke per run of coloured pixels in
 the nearest pen).
 
-Special steps: `tapePick()` opens the lid (`plotterview_setTapeEjected()`),
+Special steps: `tapePick()` opens the lid (`views_setTapeEjected()`),
 shows the cassette list through UiDialog's own drawing
 (`demoShowPicker()`/`demoMovePicker()`/`demoHidePicker()`, via
 `DemoHooks` -- nothing is chosen, the menu stays closed), puts the picked
-name on the label and lets the reels turn (`plotterview_setDemoTape()`);
+name on the label and lets the reels turn (`views_setDemoTape()`);
 `dir()` formats `lifDescribe()` of that file; `mediaMap()` shows that file
 on the media map through `mediamap_setDemoSource()` (its blocks read with
 FatFs, a made-up head reading the directory and then the whole medium) and
@@ -1210,20 +1210,20 @@ kept) and touches it with `mediamap_tabPoint()` / `mediamap_rowPoint()` /
 `demo::hpglFunctionAxes()` (short PD pieces, 1 character per 15 ms) and
 then `hpglFunctionCurves()`. `digitizePoint()` plays a person digitizing after `DP;`
 (the plot in Fit; growing out of the view refits with 15 % room, `fitMargin_`, so a plot drawn in small pieces isn't redrawn whole at every piece): timed calls to
-`plotterview_digitizeTap()` / `plotterview_digitizeRelease()` -- a touch
-beside SIN(X)/X's top (`plotterview_plotToScreen()` of
+`views_digitizeTap()` / `views_digitizeRelease()` -- a touch
+beside SIN(X)/X's top (`views_plotToScreen()` of
 `demo::kFunctionPeakX/Y`), left and up tapped -- never held: a held
 arrow repeats in real time while the demo's time stands still for
 hipiview, so the marker would run on --, ENTER (the controls from
-`plotterview_digitizeControl()`); then
+`views_digitizeControl()`); then
 `demo::hpglDigitizedMark()` circles the point the plotter got. Then
 `SC0,100;` (error 2) lights the ERROR light, a call touches it
-(`plotterview_errorLightPoint()` + `plotterview_errorLightTap()`: the
+(`views_errorLightPoint()` + `views_errorLightTap()`: the
 message box) and `OE;` puts it out (its answer is never read; the next
 clear drops it). A real
-touch stops the demo, and `restore()`'s `plotterview_clearPlotter()`
+touch stops the demo, and `restore()`'s `views_clearPlotter()`
 ends a digitizing left waiting. `paperPullUp()` pulls the printer's paper to the tear-off
-edge (`plotterview_paperScrollBy(-1)`), then `plotterview_tearOff()`. The
+edge (`views_paperScrollBy(-1)`), then `views_tearOff()`. The
 clock gets its own turn when `clock_available()` (RTC fitted and set); the
 screen saver at the end alternates goose and rain. `session()` sends a made-up
 HP-41 session through HIPI's own devices with `hipi_simFrame()` (the same
@@ -1246,7 +1246,7 @@ Stopping (`demo_stop()`): any touch, swipe or hipiview button
 (Screen's size/colour/columns, Video80's font/width/colour, plot fit and
 paper, the Tape view's label, the display model's view, the addresses),
 empties the display, the 92198 screen, the plot, the paper
-(`plotterview_clearPaper()`) and the analyzer (`loopmap_reset()` too), and
+(`views_clearPaper()`) and the analyzer (`loopmap_reset()` too), and
 shows the view it started from. Nothing is written to CONFIG.TXT.
 
 `tools/hipiview`: `demo_view_test` renders `demo_content.cpp` (the texts,
@@ -1788,15 +1788,15 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   `CI`/`AA`/`AR` (`arc()`): chords of the chord angle (default 5°, 0.5..180),
   turned in user units and each end mapped to plotter units (unequal x/y
   scaling: an ellipse, as on the real plotter). `DP` sets `digitizing()`;
-  `plotterview_poll()` (`pollDigitize()`) brings up the Plotter view with the
+  `views_poll()` (`pollDigitize()`) brings up the Plotter view with the
   digitize panel ("Digitizing" in plotterview.cpp): the plot is fitted into
   `plotAreaW_` (left of the panel, which sits left of the button strip's
   zone), the marker is kept in screen pixels and drawn over the plot
-  (erased with `plotterview_redrawRegion()`), the loupe redraws the segments
-  around it at 4x (software-clipped). `plotterview_digitizeTap()` (from
+  (erased with `views_redrawRegion()`), the loupe redraws the segments
+  around it at 4x (software-clipped). `views_digitizeTap()` (from
   `boardui_handleTap()`) takes plot and panel touches; arrows repeat until
-  `plotterview_digitizeRelease()` (from `boardui_handleRelease()`); strip
-  buttons go through `plotterview_digitizeButton()` when no menu is open.
+  `views_digitizeRelease()` (from `boardui_handleRelease()`); strip
+  buttons go through `views_digitizeButton()` when no menu is open.
   ENTER maps the marker back to plotter units and calls
   `CPlotter::digitize()` (OS bit 2, `OD`); X calls `cancelDigitize()`.
   PC test: `printer_view_test` (digitize_1_white.png, digitize_2_black.png).
@@ -1821,10 +1821,12 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   with `LOGF` (not only under trace), listed in `show()`.
   IW stays in plotter units, its default the factory P1-P2. PC test:
   `tools/hipiview/test/plotter_test.cpp`.
-- **`plotterview`** (`src/plotterview.cpp`) — owns the display while the
-  plotter view is active. `plotterview_init()` registers the callbacks,
-  scales plotter coordinates to screen coordinates, and redraws everything
-  from `segments()` when the view is switched in.
+- **`plotterview`** (`src/plotterview.cpp`) — the Plotter view, part of
+  the `views` module (`include/views.h`, `src/views.cpp`: the views and
+  switching between them). `views_init()` registers the callbacks
+  (`plotInit()`), plotter coordinates are scaled to screen coordinates, and
+  everything is redrawn from `segments()` when the view is switched in.
+  What the two files share is in `include/views_impl.h`.
 
 To add your own graphical device:
 
@@ -1832,13 +1834,13 @@ To add your own graphical device:
 2. Write a view module (e.g. `src/myview.cpp`) that registers the
    callbacks and draws through `DisplayDriver`.
 3. Give the device a view: add a value to `ViewKind` (`include/hpil.h`)
-   and to `DisplayOutput` (`include/plotterview.h`), return it from the
-   device's `viewKind()`, and handle it in `plotterview.cpp` (`outputFor()`,
-   `plotterview_viewTitle()`, `switchView()`, and `plotterview_isAvailable()`
+   and to `DisplayOutput` (`include/views.h`), return it from the
+   device's `viewKind()`, and handle it in `views.cpp` (`outputFor()`,
+   `views_viewTitle()`, `switchView()`, and `views_isAvailable()`
    if the view isn't available on every board). Swiping and the **Display**
    menu then pick it up automatically, in loop order.
 4. Call the view's `init()` from `pico_main.cpp`, after `hipi_init()`
-   (the device must exist) — the same place `plotterview_init()` is called.
+   (the device must exist) — the same place `views_init()` is called.
 
 Store what you draw (as `CPlotter` does with `segments_`) so the view can be
 redrawn completely when the user switches back to it.

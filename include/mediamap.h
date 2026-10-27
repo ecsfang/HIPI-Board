@@ -19,7 +19,7 @@
 // operation in the middle); after the drive has written something the
 // directory is read again. A tap on a ring shows that file.
 //
-// Shown as the DisplayOutput::MediaMap view (plotterview_showMediaMap()).
+// Shown as the DisplayOutput::MediaMap view (views_showMediaMap()).
 // The drive is reached through two functions (mediamap_setSource()), so
 // the view can be tried on the PC (tools/hipiview/test/mediamap_test.cpp).
 #pragma once

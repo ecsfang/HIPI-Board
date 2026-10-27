@@ -8,7 +8,7 @@ same family -- as the real devices are.
 
 Needs numpy, opencv-python and Pillow, and the FreeSans Bold font
 (Ubuntu: fonts-freefont-ttf). Prints the sprite table -- the Printer view's
-coordinates in src/plotterview.cpp (kPrt*) must match it.
+coordinates in src/views.cpp (kPrt*) must match it.
 
   upper body  : the printer photo, warped row by row into the drive's
                 silhouette, colour-graded to the drive's lighting
@@ -106,7 +106,7 @@ Pc[WY0:WY1, WX0:WX1] += np.random.default_rng(1).normal(0, 1.2, (WY1 - WY0, WX1 
 # photo it runs a little to the left there. Each row from the bar down to
 # the paper's lower edge moves left by slant(y) -- a gentle curve, 0 at the
 # bar, SLANT_PX at the edge. The Printer view shifts the ink the same way
-# (src/plotterview.cpp, inkShift()): keep the two in step.
+# (src/views.cpp, inkShift()): keep the two in step.
 SLANT_Y0, SLANT_Y1, SLANT_PX = 310, 347, 8
 def slant(y):
     t = (y - SLANT_Y0 + 1) / (SLANT_Y1 - SLANT_Y0)

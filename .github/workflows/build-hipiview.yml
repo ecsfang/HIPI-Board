@@ -25,6 +25,7 @@ on:
       - 'include/mirror_*.h*'
       - 'include/display_mirror.h'
       - 'src/display_mirror.cpp'
+      - 'src/views.cpp'
       - 'src/plotterview.cpp'
       - 'src/printer*.cpp'
       - 'include/printer*.h'

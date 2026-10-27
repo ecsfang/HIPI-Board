@@ -78,7 +78,7 @@ public:
     // state the chip already had active, which otherwise just keeps
     // blinking autonomously via its own hardware timer regardless of
     // software suspension. Used when an alternate full-screen view (see
-    // plotterview.h) takes over the panel. resume()'s full() call (which
+    // views.h) takes over the panel. resume()'s full() call (which
     // ends with set_cur()) correctly restores the cursor afterward,
     // based on the unchanged cv_, so this doesn't need an explicit
     // "undo".
