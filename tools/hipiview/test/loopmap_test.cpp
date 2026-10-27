@@ -10,6 +10,7 @@
 //   loopmap_3_both.png       the plotter is talker and listener at once
 //   loopmap_4_details.png    TFPLOT's details box, with GO TO PLOTTER VIEW
 //   loopmap_5_no_view.png    a device after HIPI: no view of its own
+//   loopmap_5b_error.png     TFPLOT's details box with an HP-GL error
 //
 //   make loopmap_test && ./loopmap_test   (in tools/hipiview)
 #include "LT7683.hpp"
@@ -17,6 +18,7 @@
 #include "demo_content.h"
 #include "analyzer.h"
 #include "views.h"
+#include "plotter.h"
 #include "hp82163_font.hpp"
 #include "../lt7683_emu.hpp"
 #include "../png.hpp"
@@ -24,9 +26,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 std::uint64_t fakeNowUs = 1000000;
+bool bTrace = false, bExtTrace = false;   // (plotter.cpp logs under trace)
 std::vector<CDevice*> devices;
 
 // The views: the loop map is shown; a device's view is "opened" here only
@@ -154,7 +158,11 @@ int main() {
     hipi::LT7683 d(t, SCREEN_MAX_X, SCREEN_MAX_Y);
     d.begin();
     makeChipFont();
-    Dev disp("TFDISPLAY", 0x30, DISPLAY, 1), prt("TFPRINT", 0x20, PRINTER, 2), plot("TFPLOT", 0x60, PLOTTER, 3);
+    Dev disp("TFDISPLAY", 0x30, DISPLAY, 1), prt("TFPRINT", 0x20, PRINTER, 2);
+    // The plotter is a real CPlotter: loopmap.cpp asks it for its error
+    // (static_cast<CPlotter*>), so a stand-in CDevice would be read as one
+    CPlotter plot("TFPLOT");
+    plot.addr(3);
     devices = { &disp, &prt, &plot };
     hipi::loopmap_init(&d);
 
@@ -255,6 +263,28 @@ int main() {
     hipi::loopmap_drawAll();
     hipi::loopmap_tap(470, 510);
     check(hipi::loopmap_tap(330, 400) && !hipi::loopmap_detailsOpen() && viewOpened == nullptr, "X CLOSE: closed");
+    // An HP-GL error: its number and text in the Status row (before: none)
+    {
+        auto statusRow = [] {
+            chip.render(panel.data(), 0.0, false);
+            std::vector<std::uint32_t> row;
+            for (int y = 280; y < 310; ++y) for (int x = 380; x < 760; ++x) row.push_back(at(x, y));
+            return row;
+        };
+        check(plot.errorCode() == 0, "TFPLOT: no error yet");
+        hipi::loopmap_drawAll();
+        hipi::loopmap_tap(470, 510);
+        const std::vector<std::uint32_t> before = statusRow();
+        hipi::loopmap_closeDetails();
+        for (char ch : std::string("SC 0,100;")) plot.put(ch);
+        check(plot.errorCode() == 2, "SC 0,100: error 2 (wrong number of parameters)");
+        hipi::loopmap_drawAll();
+        hipi::loopmap_tap(470, 510);
+        snapshot("loopmap_5b_error.png");
+        check(statusRow() != before, "... and the details box's Status row shows it");
+        hipi::loopmap_closeDetails();
+        plot.clearError();
+    }
     hipi::loopmap_tap(470, 510);
     check(hipi::loopmap_tap(60, 60) && !hipi::loopmap_detailsOpen(), "a tap beside the box: closed");
     hipi::loopmap_tap(470, 510);

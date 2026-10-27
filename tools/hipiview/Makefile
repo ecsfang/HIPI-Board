@@ -129,8 +129,8 @@ plotter_test: $(PLOT_SRC) ../../include/plotter.h
 
 # The loop map, fed made-up HP-41 traffic -- saves loopmap_*.png
 LM_SRC := test/loopmap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/loopmap.cpp ../../src/device.cpp ../../src/hpil.cpp \
-          ../../src/demo_content.cpp
-loopmap_test: $(LM_SRC) ../../include/loopmap.h $(wildcard test/lmstubs/*.h)
+          ../../src/demo_content.cpp ../../src/plotter.cpp
+loopmap_test: $(LM_SRC) ../../include/loopmap.h ../../include/plotter.h $(wildcard test/lmstubs/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/lmstubs -Itest/pvstubs -I../../include $(LM_SRC) -o $@ -lz
 
 # The real-time clock chips (rtc.cpp, rtc_probe.cpp, the chip list's

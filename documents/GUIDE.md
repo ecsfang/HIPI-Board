@@ -472,7 +472,9 @@ view without its name box, and X on the strip
 (`views_backToLoopMap()`, from `UiDialog::handleButton()`) goes back
 to the map unless that view is scrolled back; any other view change
 forgets it. PC test: `tools/hipiview/test/loopmap_test.cpp` (made-up
-traffic through `test/lmstubs/analyzer.h`).
+traffic through `test/lmstubs/analyzer.h`). Its plotter is a real
+`CPlotter`: loopmap.cpp casts a `PLOTTER` device to one to read its error,
+so a stand-in `CDevice` of that type would be read as garbage.
 
 **HP-IL signals view.** `src/hpil_diag.cpp` + `src/hpil_diag.pio`, on
 **PIO2** + one DMA channel, only *reading* the input pins (no
