@@ -2,6 +2,7 @@
 #define __PILBOX_H__
 
 #include "hpil.h"
+#include <cstdint>
 
 class CPilBox : public CDevice {
     unsigned char PIL_rx_lo;             // PILBox lo byte previously received
@@ -19,7 +20,36 @@ class CPilBox : public CDevice {
     bool tdisBacklogDrained_ = false;    // the TDIS backlog is dropped only once
     bool m_ssrq = false;                 // SSRQ: set the SRQ bit in IDY frames (COFF)
     bool m_hadCmd = false;               // true right after a CMD frame, until the next RFC consumes it (matches the PIC firmware's FCMD flag)
+    // A frame sent to the PC, its answer not here yet (see hpil(), poll())
+    bool waiting_ = false;
+    bool waitRfc_ = false;               // it was the command of a CMD/RFC handshake: RFC goes on
+    IL_CMD_t waitFrame_ = 0;             // what went to the PC
+    std::uint64_t waitSince_ = 0;        // (us)
+    const char* lostWhy_ = "";
 public:
+    // hpil() for a frame that went to the PC and isn't back yet: the caller
+    // (hipi_loop()) holds the frame and asks poll() -- the main loop (screen,
+    // touch, the mirror ...) keeps running meanwhile. On an HP-IL loop only
+    // one frame is under way, so nothing else comes from the loop meanwhile.
+    static constexpr IL_CMD_t kWaiting = 0xFFFE;
+    // How long the PC may take to answer a frame before it's given up
+    static constexpr std::uint32_t kReplyMs = 2000;
+    // How long hpil() / poll() themselves wait (a quick answer then doesn't
+    // wait for the next round of the main loop)
+    static constexpr std::uint32_t kSpinUs = 3000;
+    enum class Reply { Waiting, Answered, Lost };
+    // While hpil() returned kWaiting: Answered -- `frame` goes on round the
+    // loop; Lost -- no answer within kReplyMs, or the PC closed the port or
+    // sent TDIS / CON meanwhile: the frame is dropped (the controller, an
+    // HP-41, then reports TRANSMIT ERR and tries again) and the PILBox is
+    // in TDIS -- frames pass through unchanged until the PC sends its mode
+    // again (as pyILPER does when it starts).
+    Reply poll(IL_CMD_t& frame);
+    bool waiting() const { return waiting_; }
+    IL_CMD_t waitFrame() const { return waitFrame_; }
+    // Why the last frame was lost (for the log / a warning)
+    const char* lostWhy() const { return lostWhy_; }
+
     // Takes over what pilbox_serviceEarly() already agreed with the PC
     // during start-up (mode, and that the port is open), so the PC
     // doesn't have to start again.
@@ -47,6 +77,8 @@ private:
     IL_CMD_t receiveFrame(void);
     void drainTdisBacklog(void);
     void checkConnection(void);
+    bool awaitReply(std::uint32_t spinUs, IL_CMD_t& frame);
+    void disable(void);
 };
 
 // The single CPilBox instance created in hipi_init() (see hipi.cpp) --

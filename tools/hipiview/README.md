@@ -365,6 +365,7 @@ the time (given up), refusals, the session ending, 2 MB.
 | `../../include/lif_file.h` | A file from the PC as a LIF file (`.raw`: an HP-41 program), by its extension |
 | `../../include/lif_dir.h`, `../../src/lif_dir.cpp` | A LIF volume's directory: a file found, a file added (as lifutils' lifput) |
 | `test/download_test.cpp` | A cassette to the PC: HIPI's sender against hipiview's side (part of `make test`) |
+| `test/pilbox_test.cpp`, `test/pilboxstubs/` | The PILBox (`pilbox.cpp`) against a stand-in PC with a simulated clock: HIPI never waits long for the PC; a frame it doesn't answer within 2 s is dropped and the PILBox goes to TDIS, until the PC sends its mode again (part of `make test`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures (part of `make test`; saves `printer_view_*.png`) |
 | `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
 | `test/display_text_test.cpp` | The display's text log: the filter for both models (escapes, CR/LF, BS, Roman-8 as UTF-8), the ring running over, `writeSdram`/`readSdram` on the emulated chip, bytes from HP-IL through the display device (part of `make test`) |

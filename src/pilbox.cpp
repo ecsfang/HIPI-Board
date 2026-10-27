@@ -93,7 +93,6 @@ CPilBox::CPilBox(const char *name) : CDevice(name, 0, 0, PILBOX)
 
 IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
 {
-    IL_CMD_t pil_cmd = NO_FRAME;
     // Got a frame from the HPIL bus
     // in this case the frame is received from the PILBox emulator
     // modelled after functions in V41 (Christoph Giesselink)
@@ -132,43 +131,95 @@ IL_CMD_t CPilBox::hpil(IL_CMD_t cmd)
         PD_LOGF("pilbox: RFC\r\n");
         cmd = m_wLastCmd;                            // use the last CMD frame as answer
         m_hadCmd = false;   // consumed
-        sendFrame(cmd);                            // send the RFC frame
-        // Waits until the PC answers. NOTE: unbounded -- a 500 ms timeout
-        // was tried here but is disabled; if the PC side never answers
-        // (dropped byte, app not ready), hipi_loop() doesn't return.
-        do {
-            tud_task();  // TinyUSB background task
-            pil_cmd = receiveFrame();
-        } while( pil_cmd == NO_FRAME );
-        PD_LOGF("\t   <== RFC!\r\n");
-        if( pil_cmd == NO_FRAME ) LOGF("\t   <== Timeout!!!!!!!!!!!!\r\n");
-        return RFC;
+        // The command goes to the PC now; RFC goes on once the PC has
+        // answered (it has done the command) -- or, with no PC to send it
+        // to, at once
+        if (sendFrame(cmd) == NO_FRAME) return RFC;
+        waitRfc_ = true;
+        waitFrame_ = cmd;
+    } else {
+        // IDY frames circulate constantly on an idle bus. The PIC firmware
+        // only forwards them to the PC when PILBox_mode == COFI (TRIDY set)
+        // or CON (controller); in COFF mode they're handled purely locally
+        // (retransmitted unchanged). Falling through to the "forward
+        // everything" path below would otherwise send+wait for a PC reply
+        // to routine bus polling traffic the PC was never going to answer.
+        if ( IS_IDLE(cmd) && PILBox_mode == COFF) {
+            // SSRQ: the PC wants service -- the SRQ bit set in IDY frames
+            // passing by (IDY 0x600-0x6FF -> ISR 0x700-0x7FF), like the PIC firmware
+            return m_ssrq ? static_cast<IL_CMD_t>(cmd | 0x100) : cmd;
+        }
+        // All other frames go to the PC; what it answers goes on round the
+        // loop. No PC to send it to (the port closed): on unchanged.
+        if (sendFrame(cmd) == NO_FRAME) return cmd;
+        waitRfc_ = false;
+        waitFrame_ = cmd;
     }
 
-    // IDY frames circulate constantly on an idle bus. The PIC firmware
-    // only forwards them to the PC when PILBox_mode == COFI (TRIDY set)
-    // or CON (controller); in COFF mode they're handled purely locally
-    // (retransmitted unchanged -- SRQ-bit patching isn't implemented
-    // here yet). Falling through to the generic "forward everything"
-    // path below would otherwise send+wait for a PC reply to routine
-    // bus polling traffic the PC was never going to answer.
-    if ( IS_IDLE(cmd) && PILBox_mode == COFF) {
-        // SSRQ: the PC wants service -- the SRQ bit set in IDY frames
-        // passing by (IDY 0x600-0x6FF -> ISR 0x700-0x7FF), like the PIC firmware
-        return m_ssrq ? static_cast<IL_CMD_t>(cmd | 0x100) : cmd;
-    }
+    // The answer: usually here within a millisecond or two -- else the
+    // caller asks poll() from the main loop (never waiting here for long:
+    // with no answer from the PC, HIPI would stand still)
+    waiting_ = true;
+    waitSince_ = time_us_64();
+    IL_CMD_t answer = NO_FRAME;
+    if (poll(answer) == Reply::Answered) return answer;
+    return kWaiting;                                 // (lost already: poll() says so next)
+}
 
-    // Send all other frames to PyIlPer
-    sendFrame(cmd);
-
+// Waits up to spinUs for the PC's answer to the frame sent. False: none yet
+// (or it can't come any more: translation ended -- the port closed, or the
+// PC sent TDIS or CON. COFF <-> COFI, SSRQ, CSRQ don't end it.)
+bool CPilBox::awaitReply(std::uint32_t spinUs, IL_CMD_t& frame)
+{
+    const std::uint64_t until = time_us_64() + spinUs;
     do {
         tud_task();  // TinyUSB background task
-        pil_cmd = receiveFrame();
-    } while( pil_cmd == NO_FRAME );
-    PD_IDY_LOGF(pil_cmd, "\t   <== %s\r\n", ilMnemonic(pil_cmd, pbBuf));
+        const IL_CMD_t f = receiveFrame();          // (PILBox commands are handled in there)
+        if (PILBox_mode == TDIS || PILBox_mode == CON) return false;
+        if (f != NO_FRAME) { frame = f; return true; }
+    } while (time_us_64() < until);
+    return false;
+}
 
-    // return the received frame
-    return pil_cmd;
+CPilBox::Reply CPilBox::poll(IL_CMD_t& frame)
+{
+    if (!waiting_) return Reply::Lost;
+    IL_CMD_t f = NO_FRAME;
+    if (awaitReply(kSpinUs, f)) {
+        waiting_ = false;
+        PD_IDY_LOGF(f, "\t   <== %s\r\n", ilMnemonic(f, pbBuf));
+        frame = waitRfc_ ? static_cast<IL_CMD_t>(RFC) : f;
+        return Reply::Answered;
+    }
+    if (PILBox_mode == TDIS || PILBox_mode == CON) {
+        // The port closed, or the PC switched translation off: no answer is coming
+        waiting_ = false;
+        lostWhy_ = !tud_cdc_n_connected(ITF_HPIL) ? "the PC closed the connection"
+                                                   : "the PC changed the PILBox mode";
+        MLOGF("frame %03X to the PC lost: %s", waitFrame_, lostWhy_);
+        return Reply::Lost;
+    }
+    if (time_us_64() - waitSince_ >= kReplyMs * 1000ull) {
+        // pyILPER stopped, hung, or a byte went missing: the frame is
+        // dropped and the PILBox switched off -- the HP-41 reports an
+        // error and tries again, then without the PC's devices
+        waiting_ = false;
+        lostWhy_ = "the PC didn't answer within 2 s";
+        MLOGF("frame %03X to the PC lost: %s -- PILBox off (TDIS)", waitFrame_, lostWhy_);
+        disable();
+        return Reply::Lost;
+    }
+    return Reply::Waiting;
+}
+
+// Translation off (TDIS), as if the PC had sent TDIS -- until it sends its
+// mode again
+void CPilBox::disable(void)
+{
+    PILBox_mode = TDIS;
+    m_ssrq = false;
+    m_hadCmd = false;
+    type( NONE );
 }
 
 // The PC app may have sent TDIS (0x32 0x94) several times while waiting

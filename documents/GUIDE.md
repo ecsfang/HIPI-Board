@@ -503,6 +503,32 @@ gives a log line and a warning box (`boardui_showWarning()`). SSRQ (0x49C)
 and CSRQ (0x49D) set/clear the SRQ bit HIPI puts in passing IDY frames in
 COFF (and switch COFI to COFF), as in the PIC firmware.
 
+**PILBox COFF/COFI: waiting for the PC.** A frame `CPilBox::hpil()` sends to
+the PC (anything but IDY in COFF; the command, with its RFC) is answered
+within `kSpinUs` (3 ms) most of the time. hpil() itself waits only that long,
+then returns `CPilBox::kWaiting`. `runDevices()` in hipi.cpp then keeps the
+frame, PILBOX's place in `devices` and what came to it (`pilWaiting`), and
+`hipi_loop()` returns. Until it's over, each round of the main loop asks
+`CPilBox::poll()` (again waiting at most 3 ms) and nothing else of HP-IL runs.
+Only one frame is under way on HP-IL, so the loop sends nothing meanwhile.
+`poll()` gives one of three results:
+
+- `Answered`: the answer (RFC for a command) goes on through the devices after
+  PILBOX and onto the loop.
+- `Lost`: there was no answer within `kReplyMs` (2 s), or the port closed or
+  the PC sent TDIS/CON meanwhile.
+  - On a timeout `CPilBox::disable()` puts the PILBox in TDIS.
+  - The frame is dropped, so the controller reports TRANSMIT ERR and tries
+    again, then with frames passing through.
+  - `pilWarn()` logs it and shows a warning box (at most every 5 s).
+  - The PC's next mode command (pyILPER starting) turns translation on again.
+  - A late answer is read away by `idle()` in TDIS.
+- `Waiting`: no answer yet; it asks again on the next round.
+
+Before, hpil() waited for the PC with no limit, and HIPI stood still when it
+didn't answer. `tools/hipiview/test/pilbox_test.cpp` tests this against a
+stand-in PC with a simulated clock.
+
 **Menus.** `include/uidialog.hpp`: every menu is a `State::List` built by
 `openList(title, items, back, sel)` from `Item`s -- a label function and an
 OK action. `item()` makes a plain row (a trailing `" >"` draws the submenu

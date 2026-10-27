@@ -962,6 +962,21 @@ corner) shows it on the PILBOX line:
 | Mode | Means |
 |------|-------|
 | `TDIS` | No PC program connected — PILBox just passes frames on |
+**When the PC doesn't answer.** In `COFF` and `COFI` most frames go to the
+PC and come back from it. HIPI keeps running while it waits: the screen,
+touch and hipiview are not held up by a slow PC program. If the program
+hasn't answered within **2 seconds** (it has stopped, hung, or a byte was
+lost), or closes the port while HIPI waits, HIPI:
+
+- drops that frame, so the controller reports an error (an HP-41 shows
+  `TRANSMIT ERR`);
+- switches PILBox to `TDIS` and shows a warning box. From then on frames
+  pass straight through, so the controller works again with its other
+  devices when it tries again (the PC's devices are gone until then);
+- carries on as usual as soon as the PC program starts again. It sends its
+  mode, as pyILPER does when it starts. If pyILPER is still running, turn
+  its HP-IL off and on again (or restart it).
+
 | `COFF` | Connected; the controller is the loop's controller |
 | `COFI` | As `COFF`, and idle frames (IDY) are passed to the PC too |
 | `CON` | Connected; the PC program is the loop's controller (see below) |

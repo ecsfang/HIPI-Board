@@ -623,7 +623,124 @@ static bool conLoop(HpIlLoop& loop) {
     return false;
 }
 
+// ── A frame at the PILBox, waiting for the PC (COFF / COFI) ────────────
+// CPilBox::hpil() returns kWaiting when the PC's answer isn't there at once:
+// the frame stays here, the main loop runs on (screen, touch, the mirror),
+// and hipi_loop() asks CPilBox::poll() until the answer comes -- then the
+// frame goes on through the devices after PILBOX and out onto the loop. No
+// answer within CPilBox::kReplyMs: the frame is dropped (the HP-41 reports
+// TRANSMIT ERR and tries again) and the PILBox is in TDIS until the PC
+// sends its mode again. One frame at a time is under way on HP-IL, so no
+// other frame comes from the loop meanwhile.
+static bool pilWaiting = false;
+static std::size_t pilWaitAt = 0;         // PILBOX's place in `devices`
+static IL_CMD_t pilWaitIn = 0;            // the frame as it came to PILBOX
+static IL_CMD_t pilWaitArrived = 0;       // ... and as it came from the loop (analyzer)
+static absolute_time_t pilNextWarn = nil_time;
+
+static void pilWarn(const char* why) {
+    LOGF("\r\n * PILBox: a frame to the PC was lost -- %s", why);
+    if (!bootDone() || !time_reached(pilNextWarn)) return;   // (at most every few seconds)
+    pilNextWarn = make_timeout_time_ms(5000);
+    hipi::boardui_showWarning("PILBox", why, "PILBox off (TDIS) until the PC starts again.");
+}
+
+// What PILBOX made of a frame: the devices on the PC take addresses in AAD
+static void pilboxNoteAad(IL_CMD_t in, IL_CMD_t out) {
+    if (inAddrRange(in, AAD) && inAddrRange(out, AAD)) {
+        pilboxFirstAddr = static_cast<int>(in - AAD);
+        pilboxDevices   = static_cast<int>(out - in);
+    }
+}
+
+// The frame through the devices from `from` on, then onto the loop (unless
+// one absorbed it, or PILBOX waits for the PC)
+static void runDevices(HpIlLoop& loop, IL_CMD_t rx_frame, std::size_t from, IL_CMD_t arrived) {
+    bool absorbed = false;
+    for (std::size_t i = from; i < devices.size(); ++i) {
+        CDevice* dev = devices[i];
+        // Check if device is enabled ...
+        if( dev->enabled() ) {
+            // Let the device handle the frame
+            IL_CMD_t rtn = dev->hpil(rx_frame);
+            if( dev == pilbox ) {
+                if( rtn == CPilBox::kWaiting ) {
+                    // Gone to the PC: the rest when it answers (hipi_loop())
+                    pilWaiting = true;
+                    pilWaitAt = i;
+                    pilWaitIn = rx_frame;
+                    pilWaitArrived = arrived;
+                    return;
+                }
+                // Devices behind the PILBox (on the PC): during auto-
+                // addressing each takes one address, so the AAD frame
+                // comes back from the PILBox counted up by their number
+                pilboxNoteAad(rx_frame, rtn);
+            }
+            if( rtn == IL_NO_FRAME ) {
+                // Absorbed (see IL_NO_FRAME): the loop is interrupted
+                // here -- later devices don't see it, nothing is sent
+                absorbed = true;
+                break;
+            }
+            doTrace(dev, rx_frame, rtn);
+            rx_frame = rtn;
+        } else {
+            // Not on the loop -- only notes re-addressing (see offLoopFrame())
+            dev->offLoopFrame(rx_frame);
+        }
+    }
+#if HIPI_ANALYZER
+    // The analyzer sees what arrived and what leaves (analyzer.h)
+    hipi::analyzer_capture(arrived, absorbed ? static_cast<IL_CMD_t>(IL_NO_FRAME)
+                                             : static_cast<IL_CMD_t>(rx_frame));
+#else
+    (void)arrived;
+#endif
+    if( absorbed ) {
+        TRC_LOGF("\r\n\t   <<< frame absorbed (device powering up)");
+    } else {
+        postTrace(rx_frame);
+        // Send the final frame back to the HP-IL loop using the PIO interface
+        loop.sendFrame(rx_frame);
+    }
+}
+
+// PILBOX waits for the PC: its answer, or the frame given up.
+// True: the frame was dealt with (it went on, or was dropped)
+static bool pilboxWait(HpIlLoop& loop) {
+    IL_CMD_t answer = NO_FRAME;
+    switch (pilbox->poll(answer)) {
+    case CPilBox::Reply::Waiting:
+        return false;
+    case CPilBox::Reply::Answered:
+        pilWaiting = false;
+        pilboxNoteAad(pilWaitIn, answer);
+        doTrace(pilbox, pilWaitIn, answer);
+        runDevices(loop, answer, pilWaitAt + 1, pilWaitArrived);
+        return true;
+    case CPilBox::Reply::Lost:
+    default:
+        pilWaiting = false;
+#if HIPI_ANALYZER
+        hipi::analyzer_capture(pilWaitArrived, static_cast<IL_CMD_t>(IL_NO_FRAME));
+#endif
+        TRC_LOGF("\r\n\t   <<< frame dropped (no answer from the PC)");
+        pilWarn(pilbox->lostWhy());
+        return true;
+    }
+}
+
 bool hipi_loop(HpIlLoop& loop) {
+    // A frame at the PILBox, waiting for the PC: nothing else until it's
+    // answered or given up (the loop's next frame comes only after it)
+    if (pilWaiting) {
+        if (pilbox == nullptr) { pilWaiting = false; return false; }
+        const bool done = pilboxWait(loop);
+        // (PILBox commands -- a COFF after a lost frame -- as below)
+        if (done && pilbox->enabled() && !pilbox->isConnected()) pilbox->idle();
+        return done;
+    }
     const bool con = conActive();
     if (con != conWasActive) {                        // CON started / ended
         conWasActive = con;
@@ -642,48 +759,7 @@ bool hipi_loop(HpIlLoop& loop) {
         if (!IS_IDLE(static_cast<IL_CMD_t>(rx_frame))) hipi::demo_hpilActivity();
         // Got a frame, send to all devices in the loop
         preTrace(rx_frame);
-        const IL_CMD_t arrived = static_cast<IL_CMD_t>(rx_frame);   // for the analyzer
-        bool absorbed = false;
-        for (CDevice* dev : devices) {
-            // Check if device is enabled ...
-            if( dev->enabled() ) {
-                // Let the device handle the frame
-                IL_CMD_t rtn = dev->hpil(rx_frame);
-                // Devices behind the PILBox (on the PC): during auto-
-                // addressing each takes one address, so the AAD frame
-                // comes back from the PILBox counted up by their number
-                if( dev->type() == PILBOX && inAddrRange(rx_frame, AAD)
-                    && inAddrRange(rtn, AAD) ) {
-                    pilboxFirstAddr = static_cast<int>(rx_frame - AAD);
-                    pilboxDevices   = static_cast<int>(rtn - rx_frame);
-                }
-                if( rtn == IL_NO_FRAME ) {
-                    // Absorbed (see IL_NO_FRAME): the loop is interrupted
-                    // here -- later devices don't see it, nothing is sent
-                    absorbed = true;
-                    break;
-                }
-                doTrace(dev, rx_frame, rtn);
-                rx_frame = rtn;
-            } else {
-                // Not on the loop -- only notes re-addressing (see offLoopFrame())
-                dev->offLoopFrame(rx_frame);
-            }
-        }
-#if HIPI_ANALYZER
-        // The analyzer sees what arrived and what leaves (analyzer.h)
-        hipi::analyzer_capture(arrived, absorbed ? static_cast<IL_CMD_t>(IL_NO_FRAME)
-                                                 : static_cast<IL_CMD_t>(rx_frame));
-#else
-        (void)arrived;
-#endif
-        if( absorbed ) {
-            TRC_LOGF("\r\n\t   <<< frame absorbed (device powering up)");
-        } else {
-            postTrace(rx_frame);
-            // Send the final frame back to the HP-IL loop using the PIO interface
-            loop.sendFrame(rx_frame);
-        }
+        runDevices(loop, static_cast<IL_CMD_t>(rx_frame), 0, static_cast<IL_CMD_t>(rx_frame));
         // PILBox commands from the PC (TDIS/COFI/COFF/CON) must be answered
         // even while frames keep coming -- the HP-41 polls with IDY frames
         // non-stop, so idle() below may never run. While translation is off

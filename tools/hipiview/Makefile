@@ -147,10 +147,16 @@ SAVER_SRC := test/saver_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/s
 saver_test: $(SAVER_SRC) ../../include/saver_anim.h $(wildcard test/saverstubs/*.h test/saverstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/saverstubs -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(SAVER_SRC) -o $@ -lz
 
+# The PILBox (pilbox.cpp) against a stand-in PC: HIPI never waits for the PC
+# for long -- a frame it doesn't answer within 2 s is dropped, TDIS
+PIL_SRC := test/pilbox_test.cpp ../../src/pilbox.cpp ../../src/hpil.cpp ../../src/device.cpp
+pilbox_test: $(PIL_SRC) ../../include/pilbox.h ../../include/hpil.h $(wildcard test/pilboxstubs/*.h test/pilboxstubs/*/*.h)
+	$(CXX) $(CXXFLAGS) -Itest/pilboxstubs -Itest/stubs -I../../include $(PIL_SRC) -o $@
+
 rtc_test: $(RTC_SRC) ../../include/rtc.h ../../include/rtc_probe.h ../../sdcard/i2c/chips.txt $(wildcard test/rtcstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/rtcstubs -I../../include $(RTC_SRC) -o $@
 
-test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test upload_test download_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test
+test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test upload_test download_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test pilbox_test
 	./deframer_test
 	./saver_test
 	./host_test
@@ -167,6 +173,7 @@ test: deframer_test saver_test host_test printer_view_test video80_view_test dis
 	./loopmap_test
 	./plotter_test
 	./devicelist_test
+	./pilbox_test
 	./rtc_test
 
 install: hipiview
@@ -174,7 +181,7 @@ install: hipiview
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
+	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test pilbox_test *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
 	rm -rf link_sim_sd link_sim_saved
 
 .PHONY: test install clean windows
