@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace hipi {
 
@@ -55,6 +56,12 @@ public:
     // Send the cassette of the drive shown. False (and why) if it can't:
     // then the viewer is told too (kDlError)
     bool start(std::string& why);
+    // ... or one file on it (its LIF name; the Media map's file box: Save
+    // on PC): an HP-41 program as lifutils' `lifget -r` gives it -- its
+    // data only, as long as its type says (lifFileLength()) -- NAME.raw;
+    // any other file as `lifget` gives it, its directory entry first:
+    // NAME.lif
+    bool startFile(const std::string& lifName, std::string& why);
     // The viewer asked (kDlAsk) / said stop (kDlAbort)
     void ask() { std::string why; start(why); }
     void abort();
@@ -83,6 +90,10 @@ private:
     State state_ = State::Idle;
     std::shared_ptr<DownloadDrive> drive_;
     std::string file_;
+    std::string single_;                 // one file of it (its LIF name), "" = the whole cassette
+    std::uint32_t firstBlock_ = 0;       // where the data starts on the medium
+    std::string lastError_;
+    std::vector<std::uint8_t> head_;     // sent before the data: a file's directory entry (NAME.lif)
     std::uint32_t size_ = 0, sent_ = 0, crc_ = 0, changes_ = 0;
     int restarts_ = 0;
     std::uint64_t progressAt_ = 0, waitSaid_ = 0;

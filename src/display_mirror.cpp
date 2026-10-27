@@ -569,6 +569,12 @@ bool displayMirror_sendMedia(std::string& why) {
     return download_->start(why);
 }
 
+bool displayMirror_sendFile(const std::string& lifName, std::string& why) {
+    if (state_ == State::Off) { why = "hipiview isn't connected"; return false; }
+    if (!download_) { why = "this HIPI can't send files"; return false; }
+    return download_->startFile(lifName, why);
+}
+
 static void pollMirror() {
 #if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
     if (display_ == nullptr) return;

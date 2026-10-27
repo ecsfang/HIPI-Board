@@ -48,14 +48,20 @@
 //                                          the next offset it wants)
 //        kUpEnd                            all sent: check it, use it
 //        kUpAbort                          forget it
-//   what: kUpVolume (replace the drive's cassette); kUpFile (a file added
-//   to the cassette -- not yet: an error)
+//   what: kUpVolume (replace the drive's cassette); kUpFile (a LIF file --
+//   its 32-byte directory entry, then its blocks -- added to the cassette,
+//   name = its LIF name); | kUpReplace in kUpBegin: a file of that name on
+//   the cassette is replaced
 // HIPI answers in the stream: kUpload kind(1) len(2) payload(len)
-//   kind kUpInfo   flags(1) "drive|cassette"   flags: kUpHasMedia,
-//                                          kUpExists (lif/<name> is there)
+//   kind kUpInfo   flags(1) "drive|cassette|new"   flags: kUpHasMedia,
+//                                          kUpExists (lif/<name> is there;
+//                                          kUpFile: on the cassette). new
+//                                          (kUpFile, no cassette): the one
+//                                          that will be made, CASSnn.DAT
 //        kUpAck    offset(4)               everything before it written
 //        kUpWait   text                    waiting (the drive is busy ...)
-//        kUpDone   name                    in the drive now
+//        kUpDone   name                    in the drive now (kUpFile:
+//                                          "name|cassette")
 //        kUpError  text                    refused / failed (it's over)
 // The viewer sends a few pieces ahead of the last ack and starts again
 // from it when nothing comes for a while; HIPI ignores a piece that isn't
@@ -69,7 +75,10 @@
 // HIPI sends it in the stream (reliable already: no acks of its own):
 //   kDownload kind(1) len(2) payload(len)
 //   kind kDlBegin  size(4) "drive|name"    a file comes (again from the start,
-//                                          if the drive wrote to it meanwhile)
+//                                          if the drive wrote to it meanwhile);
+//                                          one file of the cassette (the Media
+//                                          map's Save on PC): "drive|NAME.raw|
+//                                          cassette", its data as lifget -r
 //        kDlData   offset(4) bytes         the next piece (kDlChunk at most)
 //        kDlEnd    crc32(4)                that's all
 //        kDlWait   text                    waiting (the drive is busy ...)
@@ -197,7 +206,7 @@ constexpr std::size_t  kUpChunk   = 512;      // bytes in a kUpData piece, at mo
 constexpr std::size_t  kMsgFileMax = 6 + kUpChunk + 8 + 2;   // 'F' sid kind len(2) payload crc(2)
 constexpr std::uint8_t kUpAsk = 1, kUpBegin = 2, kUpData = 3, kUpEnd = 4, kUpAbort = 5;
 constexpr std::uint8_t kUpInfo = 1, kUpAck = 2, kUpWait = 3, kUpDone = 4, kUpError = 5;
-constexpr std::uint8_t kUpVolume = 1, kUpFile = 2;
+constexpr std::uint8_t kUpVolume = 1, kUpFile = 2, kUpReplace = 0x80;
 constexpr std::uint8_t kUpHasMedia = 1, kUpExists = 2;
 // A cassette to the PC (FILES above)
 constexpr std::uint8_t kDlAsk = 6, kDlAbort = 7;                       // 'F' kinds

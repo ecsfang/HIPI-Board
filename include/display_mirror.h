@@ -91,6 +91,9 @@ void displayMirror_setUploadEnv(UploadEnv env);
 // and why if it can't. The viewer can ask for it too.
 void displayMirror_setDownloadEnv(DownloadEnv env);
 bool displayMirror_sendMedia(std::string& why);
+// One file on it (its LIF name; the Media map's file box -> Save on PC),
+// for the PC as <NAME>.raw (as lifutils' lifget -r)
+bool displayMirror_sendFile(const std::string& lifName, std::string& why);
 
 // HIPI is about to restart (Bootsel mode): tells the viewer (kBye) and
 // keeps the mirror going for `ms` instead of a plain sleep, so the viewer

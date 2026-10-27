@@ -2,6 +2,7 @@
 #define MODULE "UPLOAD"
 #include "mirror_upload.h"
 #include "lif_check.h"
+#include "lif_dir.h"
 #include "sd_paths.h"
 #include "usb_serial.h"   // LOGF
 #include <cctype>
@@ -49,15 +50,55 @@ void UploadReceiver::drop() {
 bool UploadReceiver::checkRequest(std::uint8_t what, const std::string& name, std::uint64_t size,
                                   std::shared_ptr<UploadDrive>& drive) {
     std::string why;
-    if (what != mirror::kUpVolume) { text(mirror::kUpError, "only LIF volumes (.dat / .lif) for now"); return false; }
-    if (!lifVolumeNameOk(name, why)) { text(mirror::kUpError, why); return false; }
-    if (size < 2 * kLifBlock || size > kLifLargestVolume) { text(mirror::kUpError, "not a LIF volume (its size)"); return false; }
+    what &= static_cast<std::uint8_t>(~mirror::kUpReplace);
+    if (what == mirror::kUpVolume) {
+        if (!lifVolumeNameOk(name, why)) { text(mirror::kUpError, why); return false; }
+        if (size < 2 * kLifBlock || size > kLifLargestVolume) { text(mirror::kUpError, "not a LIF volume (its size)"); return false; }
+    } else if (what == mirror::kUpFile) {
+        if (!lifFileNameOk(name)) { text(mirror::kUpError, "not a name a cassette file can have: " + name); return false; }
+        if (size < kLifEntrySize + kLifBlock || (size - kLifEntrySize) % kLifBlock != 0 || size > kMaxFileBytes) {
+            text(mirror::kUpError, "not a LIF file (its size)");
+            return false;
+        }
+    } else {
+        text(mirror::kUpError, "this HIPI doesn't know that kind of file");
+        return false;
+    }
     const std::string notNow = env_.notNow ? env_.notNow() : std::string();
     if (!notNow.empty()) { text(mirror::kUpError, notNow); return false; }
     drive = env_.drive ? env_.drive() : nullptr;
     if (!drive) { text(mirror::kUpError, "show the Tape view of the drive first"); return false; }
-    const std::string other = env_.inOtherDrive ? env_.inOtherDrive(name) : std::string();
-    if (!other.empty()) { text(mirror::kUpError, name + " is in " + other + " -- take it out there first"); return false; }
+    // A volume: not one another drive has; a file: not onto a cassette
+    // another drive has too
+    const std::string file = what == mirror::kUpVolume ? name : drive->mediaFile();
+    const std::string other = env_.inOtherDrive && !file.empty() ? env_.inOtherDrive(file) : std::string();
+    if (!other.empty()) { text(mirror::kUpError, file + " is in " + other + " -- take it out there first"); return false; }
+    return true;
+}
+
+// A file for the cassette: is a file of that name on it (kUpExists), is
+// there room -- and with no cassette, the name of the one that will be made
+bool UploadReceiver::fileInfo(const std::shared_ptr<UploadDrive>& drive, const std::string& name, std::uint64_t size,
+                              std::uint8_t& flags, std::string& extra) {
+    const std::string media = drive->mediaFile();
+    if (media.empty()) {
+        extra = lifSuggestName(kLifMediaTypes[0].prefix) + ".DAT";
+        return true;
+    }
+    LifDir dir;
+    std::string why;
+    const LifReadBlock read = [&](std::uint32_t b, std::uint8_t* out) { return drive->readBlock(b, out); };
+    if (!lifReadDir(read, drive->fileSize() / kLifBlock, dir, why)) { text(mirror::kUpError, media + ": " + why); return false; }
+    const std::uint32_t blocks = static_cast<std::uint32_t>((size - kLifEntrySize) / kLifBlock);
+    const LifDirEntry* old = dir.find(name);
+    if (old != nullptr) flags |= mirror::kUpExists;
+    if (old == nullptr && dir.firstFree < 0) { text(mirror::kUpError, media + ": the directory is full"); return false; }
+    std::uint32_t start = 0;
+    if (!dir.findSpace(blocks, old != nullptr ? old->index : -1, start)) {
+        text(mirror::kUpError, "no room on " + media + " (" + std::to_string(blocks) + (blocks == 1 ? " block" : " blocks") + " needed, " +
+                                   std::to_string(dir.freeBlocks(old != nullptr ? old->index : -1)) + " free)");
+        return false;
+    }
     return true;
 }
 
@@ -70,9 +111,14 @@ void UploadReceiver::info(const std::string& name, std::uint64_t size, std::uint
     if (!checkRequest(what, name, size, drive)) return;
     const std::string media = drive->mediaFile();
     std::uint8_t flags = 0;
+    std::string extra;
     if (!media.empty()) flags |= mirror::kUpHasMedia;
-    if (exists(std::string(HIPI_DIR_LIF "/") + name)) flags |= mirror::kUpExists;
-    const std::string t = std::string(1, static_cast<char>(flags)) + drive->name() + "|" + media;
+    if ((what & ~mirror::kUpReplace) == mirror::kUpFile) {
+        if (!fileInfo(drive, name, size, flags, extra)) return;
+    } else if (exists(std::string(HIPI_DIR_LIF "/") + name)) {
+        flags |= mirror::kUpExists;
+    }
+    const std::string t = std::string(1, static_cast<char>(flags)) + drive->name() + "|" + media + "|" + extra;
     text(mirror::kUpInfo, t);
 }
 
@@ -93,7 +139,7 @@ void UploadReceiver::handle(std::uint8_t kind, const std::uint8_t* p, std::size_
         if ((state_ == State::Receiving || state_ == State::Swapping || state_ == State::Done) &&
             name == name_ && size == size_ && crc == crc_) {
             if (state_ == State::Receiving) ack();
-            else if (state_ == State::Done) text(mirror::kUpDone, name_);
+            else if (state_ == State::Done) text(mirror::kUpDone, doneText_);
             return;
         }
         if (state_ == State::Receiving || state_ == State::Swapping) { text(mirror::kUpError, "another file is on its way"); return; }
@@ -116,6 +162,8 @@ void UploadReceiver::handle(std::uint8_t kind, const std::uint8_t* p, std::size_
         state_ = State::Receiving;
         drive_ = drive;
         name_ = name;
+        what_ = what & static_cast<std::uint8_t>(~mirror::kUpReplace);
+        replace_ = (what & mirror::kUpReplace) != 0;
         size_ = size;
         crc_ = crc;
         got_ = 0;
@@ -143,7 +191,7 @@ void UploadReceiver::handle(std::uint8_t kind, const std::uint8_t* p, std::size_
         return;
     }
     case mirror::kUpEnd:
-        if (state_ == State::Done) { text(mirror::kUpDone, name_); return; }
+        if (state_ == State::Done) { text(mirror::kUpDone, doneText_); return; }
         if (state_ == State::Swapping) { text(mirror::kUpWait, "waiting for " + drive_->name()); return; }
         if (state_ != State::Receiving) return;
         if (got_ < size_) { ack(); return; }        // (pieces still missing)
@@ -166,7 +214,7 @@ void UploadReceiver::finish() {
         fileOpen_ = false;
     }
     if (runningCrc_ != crc_) { error("the file arrived damaged (CRC) -- try again"); return; }
-    // A LIF volume? (its first block, as written)
+    // A LIF volume? A LIF file? (its first block, as written)
     std::uint8_t blk[kLifBlock];
     UINT br = 0;
     FIL f;
@@ -174,7 +222,22 @@ void UploadReceiver::finish() {
     const bool read = f_read(&f, blk, sizeof blk, &br) == FR_OK;
     f_close(&f);
     std::string why;
-    if (!read || !lifCheckVolume(blk, br, size_, why)) { error(why.empty() ? "can't read it back" : why); return; }
+    if (what_ == mirror::kUpFile) {
+        // Its directory entry: the name asked for, its blocks all there
+        auto be32 = [](const std::uint8_t* p) {
+            return (static_cast<std::uint32_t>(p[0]) << 24) | (static_cast<std::uint32_t>(p[1]) << 16) |
+                   (static_cast<std::uint32_t>(p[2]) << 8) | p[3];
+        };
+        const std::uint16_t type = static_cast<std::uint16_t>((blk[10] << 8) | blk[11]);
+        if (!read || br < kLifEntrySize || lifPaddedName(name_) != std::string(reinterpret_cast<char*>(blk), kLifNameLen) ||
+            type == 0 || type == 0xFFFF || kLifEntrySize + static_cast<std::uint64_t>(be32(blk + 16)) * kLifBlock != size_) {
+            error("not a LIF file (its directory entry)");
+            return;
+        }
+    } else if (!read || !lifCheckVolume(blk, br, size_, why)) {
+        error(why.empty() ? "can't read it back" : why);
+        return;
+    }
     state_ = State::Swapping;
     swapSince_ = waitSaid_ = env_.nowMs();
     poll();                                         // (at once, if the drive is quiet)
@@ -193,6 +256,7 @@ void UploadReceiver::poll() {
 }
 
 void UploadReceiver::swap() {
+    if (what_ == mirror::kUpFile) { addFile(); return; }
     // Another drive may have taken it meanwhile
     const std::string other = env_.inOtherDrive ? env_.inOtherDrive(name_) : std::string();
     if (!other.empty()) { error(name_ + " is in " + other + " -- take it out there first"); return; }
@@ -211,7 +275,71 @@ void UploadReceiver::swap() {
     drive_->insert(name_);
     LOGF("\r\n * File from hipiview: %s is in %s now", name_.c_str(), drive_->name().c_str());
     state_ = State::Done;                           // (the file is ours now: nothing to delete)
-    text(mirror::kUpDone, name_);
+    doneText_ = name_;
+    text(mirror::kUpDone, doneText_);
+    drive_.reset();
+}
+
+// A file added to the drive's cassette (a new one made if there's none):
+// the cassette out, the file in (lif_dir.h), the cassette in again
+void UploadReceiver::addFile() {
+    std::string media = drive_->mediaFile();
+    const std::string other = env_.inOtherDrive && !media.empty() ? env_.inOtherDrive(media) : std::string();
+    if (!other.empty()) { error(media + " is in " + other + " -- take it out there first"); return; }
+    drive_->open();                                 // (its file closed: all written)
+    std::string made;                               // a new cassette for it
+    auto giveBack = [&](const std::string& why) {
+        if (!made.empty()) f_unlink((std::string(HIPI_DIR_LIF "/") + made).c_str());
+        drive_->insert(drive_->mediaFile() == made ? std::string() : drive_->mediaFile());
+        error(why);
+    };
+    if (media.empty()) {
+        // No cassette: a new, empty HP82161A one (as Create media makes it)
+        const LifMediaType& t = kLifMediaTypes[0];
+        LifDate date{};
+        const bool haveDate = env_.today && env_.today(date);
+        LifCreator c;
+        if (!c.begin(lifSuggestName(t.prefix), t, t.defaultDirEntries, haveDate ? &date : nullptr)) {
+            giveBack("can't make a new cassette: " + c.error());
+            return;
+        }
+        while (c.step(65536) == LifCreator::State::Running) {}
+        if (c.state() != LifCreator::State::Done) { giveBack("can't make a new cassette: " + c.error()); return; }
+        made = media = c.fileName();
+        LOGF("\r\n * File from hipiview: a new cassette for it, %s", made.c_str());
+    }
+    const std::string path = std::string(HIPI_DIR_LIF "/") + media;
+    FIL vol, src;
+    if (f_open(&vol, path.c_str(), FA_READ | FA_WRITE) != FR_OK) { giveBack("can't open " + media); return; }
+    if (f_open(&src, kTempFile, FA_READ) != FR_OK) { f_close(&vol); giveBack("can't read the file back"); return; }
+    auto readAt = [](FIL& f, std::uint64_t at, std::uint8_t* out, UINT n) {
+        UINT br = 0;
+        return f_lseek(&f, static_cast<FSIZE_t>(at)) == FR_OK && f_read(&f, out, n, &br) == FR_OK && br == n;
+    };
+    const LifReadBlock read = [&](std::uint32_t b, std::uint8_t* out) {
+        return readAt(vol, static_cast<std::uint64_t>(b) * kLifBlock, out, kLifBlock);
+    };
+    const LifWriteBlock write = [&](std::uint32_t b, const std::uint8_t* in) {
+        UINT bw = 0;
+        return f_lseek(&vol, static_cast<FSIZE_t>(static_cast<std::uint64_t>(b) * kLifBlock)) == FR_OK &&
+               f_write(&vol, in, kLifBlock, &bw) == FR_OK && bw == kLifBlock;
+    };
+    const LifReadBlock data = [&](std::uint32_t b, std::uint8_t* out) {
+        return readAt(src, kLifEntrySize + static_cast<std::uint64_t>(b) * kLifBlock, out, kLifBlock);
+    };
+    std::uint8_t entry[kLifEntrySize];
+    std::string why;
+    const bool ok = readAt(src, 0, entry, kLifEntrySize) &&
+                    lifAddFile(read, write, static_cast<std::uint32_t>(f_size(&vol) / kLifBlock), entry, data, replace_, why);
+    const bool closed = f_close(&vol) == FR_OK;
+    f_close(&src);
+    if (!ok || !closed) { giveBack(why.empty() ? "writing " + media + " failed" : media + ": " + why); return; }
+    f_unlink(kTempFile);
+    drive_->insert(media);                          // (again: the same, or the new one)
+    LOGF("\r\n * File from hipiview: %s is on %s in %s now", name_.c_str(), media.c_str(), drive_->name().c_str());
+    state_ = State::Done;
+    doneText_ = name_ + "|" + media;
+    text(mirror::kUpDone, doneText_);
     drive_.reset();
 }
 

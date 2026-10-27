@@ -36,6 +36,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <deque>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -94,7 +95,7 @@ void usage() {
         "      Enter OK, Up/Down, Backspace X, Tab Shift (or hold Shift), Left/Right\n"
         "      previous/next view, mouse wheel Up/Down;\n"
         "      a LIF volume (.dat/.lif) dropped on the window goes into the drive\n"
-        "      whose Tape view HIPI shows\n");
+        "      whose Tape view HIPI shows; an HP-41 program (.raw) onto its cassette\n");
 }
 
 bool parseArgs(int argc, char** argv, Options& o) {
@@ -611,8 +612,8 @@ public:
             } else if (it.what == "drop") {              // a file dropped on the window
                 e.type = SDL_DROPFILE;
                 e.drop.file = SDL_strdup(it.arg.c_str());
-            } else if (it.what == "answer") {            // the next question's answer (yes / no)
-                answers_.push_back(it.arg == "yes");
+            } else if (it.what == "answer") {            // the next question's answer (yes / no / all)
+                answers_.push_back(it.arg == "all" ? 2 : it.arg == "yes" ? 1 : 0);
                 continue;
             } else {
                 continue;
@@ -623,14 +624,15 @@ public:
     bool done() const { return next_ >= items_.size(); }
     // The answer given for a question (a message box isn't shown in a test);
     // none given yet: false
-    bool takeAnswer(bool& yes) {
+    // (0 no, 1 yes, 2 yes to all)
+    bool takeAnswer(int& yes) {
         if (answers_.empty()) return false;
         yes = answers_.front();
         answers_.erase(answers_.begin());
         return true;
     }
 private:
-    std::vector<bool> answers_;
+    std::vector<int> answers_;
     struct Item { double t = 0; std::string what, arg; int a = 0, b = 0; };
     std::vector<Item> items_;
     std::size_t next_ = 0;
@@ -791,6 +793,57 @@ int main(int argc, char** argv) {
         cassette = Cassette();
     };
 
+    // Several files dropped at once: one after the other -- each asked
+    // about (or "... all"), and at the end one message for those that
+    // weren't done
+    std::deque<std::string> drops;
+    // "... all" covers the same sort of question only: Add all (and a new
+    // cassette, Put in) never says Replace -- that needs its own "Replace all"
+    struct DropBatch { int total = 0, ok = 0; std::vector<std::string> notDone; bool allAdd = false, allReplace = false; };
+    DropBatch batch;
+    auto replacing = [&] { return upload.yesText() == "Replace"; };
+    auto allSaid = [&] { return replacing() ? batch.allReplace : batch.allAdd; };
+    auto sayAll = [&] { (replacing() ? batch.allReplace : batch.allAdd) = true; };
+    std::string dropName;                     // the one on its way (the PC's name)
+    auto batchOver = [&](double) {
+        if (upload.busy() || !drops.empty() || batch.total == 0) return;
+        if (batch.total > 1 && batch.ok + static_cast<int>(batch.notDone.size()) >= batch.total) {
+            std::string m = std::to_string(batch.ok) + " of " + std::to_string(batch.total) + " files sent to HIPI.";
+            if (!batch.notDone.empty()) {
+                m += "\n\nNot:";
+                for (const auto& n : batch.notDone) m += "\n" + n;
+            }
+            std::printf("hipiview: %s\n", m.c_str());
+            std::fflush(stdout);
+            fileBox(batch.notDone.empty() ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_WARNING, m);
+        }
+        batch = DropBatch();
+    };
+    auto startNextDrop = [&](double now) {
+        if (upload.busy() || drops.empty()) return;
+        const std::string path = drops.front();
+        drops.pop_front();
+        const std::size_t slash = path.find_last_of("/\\");
+        dropName = slash == std::string::npos ? path : path.substr(slash + 1);
+        std::string why;
+        bool linkOk = false;
+        if (!reader || !emu.connected()) why = "hipiview isn't connected to HIPI.";
+        else if (emu.mirrorMode() != 2) why = "Set Settings > Screen > Mirror to PC to Control on HIPI first.";
+        else if (emu.version() < 7) why = "HIPI's firmware is too old to take files (1.6.0 or newer).";
+        else linkOk = true;
+        if (!linkOk) {
+            // (the same for all of them: said once)
+            fileBox(SDL_MESSAGEBOX_WARNING, (batch.total > 1 ? "Can't send the files to HIPI:\n" : "Can't send " + dropName + " to HIPI:\n") + why);
+            drops.clear();
+            batch = DropBatch();
+            return;
+        }
+        if (upload.start(path, now, why)) { uploadShowUntil = 1e18; return; }
+        if (batch.total > 1) batch.notDone.push_back(dropName + ": " + why);
+        else fileBox(SDL_MESSAGEBOX_WARNING, "Can't send " + dropName + " to HIPI:\n" + why);
+        batchOver(now);
+    };
+
     TestInput testInput;
     if (!o.testInput.empty() && !testInput.load(o.testInput)) {
         std::fprintf(stderr, "hipiview: can't read %s\n", o.testInput.c_str());
@@ -809,18 +862,12 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) running = false;
             const double tnow = secsNow();
-            // A file dropped on the window: to HIPI's drive (Tape view)
+            // Files dropped on the window: to HIPI's drive (Tape view), one
+            // after the other (startNextDrop() below)
             if (ev.type == SDL_DROPFILE) {
-                const std::string path = ev.drop.file;
+                drops.push_back(ev.drop.file);
                 SDL_free(ev.drop.file);
-                const std::size_t slash = path.find_last_of("/\\");
-                const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
-                std::string why;
-                if (!reader || !emu.connected()) why = "hipiview isn't connected to HIPI.";
-                else if (emu.mirrorMode() != 2) why = "Set Settings > Screen > Mirror to PC to Control on HIPI first.";
-                else if (emu.version() < 7) why = "HIPI's firmware is too old to take files (1.6.0 or newer).";
-                else if (upload.start(path, tnow, why)) { uploadShowUntil = 1e18; continue; }
-                fileBox(SDL_MESSAGEBOX_WARNING, "Can't send " + base + " to HIPI:\n" + why);
+                ++batch.total;
                 continue;
             }
             // The mouse: a finger on the panel (coordinates are the
@@ -937,23 +984,36 @@ int main(int argc, char** argv) {
         // The file on its way: HIPI's answers, resends, the user's "Replace?"
         for (const auto& r : emu.takeUploadReplies()) upload.onReply(r.kind, r.data.data(), r.data.size(), sec);
         upload.tick(sec, emu.connected() && !emu.syncing());
-        bool testAnswer = false;
-        if (upload.step() == Uploader::Step::Confirm && !o.testInput.empty()) {
+        int testAnswer = 0;
+        if (upload.step() == Uploader::Step::Confirm && allSaid()) {
+            // (more files dropped, "... all" said for an earlier one)
+            std::printf("hipiview: [question] %s -> yes (all)\n", upload.question().c_str());
+            upload.answer(true, secsNow());
+        } else if (upload.step() == Uploader::Step::Confirm && !o.testInput.empty()) {
             // (a test: the answer from the test input, when it's there)
             if (testInput.takeAnswer(testAnswer)) {
-                std::printf("hipiview: [question] %s -> %s\n", upload.question().c_str(), testAnswer ? "yes" : "no");
-                upload.answer(testAnswer, secsNow());
+                std::printf("hipiview: [question] %s -> %s\n", upload.question().c_str(),
+                            testAnswer == 2 ? "yes (all)" : testAnswer ? "yes" : "no");
+                if (testAnswer == 2) sayAll();
+                upload.answer(testAnswer != 0, secsNow());
             }
         } else if (upload.step() == Uploader::Step::Confirm) {
+            // More files waiting: "... all" answers theirs too
+            const std::string all = upload.yesText() + " all";
+            const std::string q = drops.empty() ? upload.question()
+                                                : upload.question() + "\n\n(" + std::to_string(drops.size()) +
+                                                      (drops.size() == 1 ? " more file" : " more files") + " after this one)";
             const SDL_MessageBoxButtonData buttons[] = {
-                { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel" },
+                { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, upload.noText().c_str() },
                 { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, upload.yesText().c_str() },
+                { 0, 2, all.c_str() },
             };
-            const SDL_MessageBoxData box = { SDL_MESSAGEBOX_INFORMATION, win, "hipiview - a cassette for HIPI",
-                                             upload.question().c_str(), 2, buttons, nullptr };
+            const SDL_MessageBoxData box = { SDL_MESSAGEBOX_INFORMATION, win, upload.isFile() ? "hipiview - a file for HIPI's cassette" : "hipiview - a cassette for HIPI",
+                                             q.c_str(), drops.empty() ? 2 : 3, buttons, nullptr };
             int pressed = 0;
             if (SDL_ShowMessageBox(&box, &pressed) != 0) pressed = 0;
-            upload.answer(pressed == 1, secsNow());
+            if (pressed == 2) sayAll();
+            upload.answer(pressed != 0, secsNow());
         }
         // A cassette from HIPI: the pieces, then where to save it
         for (const auto& r : emu.takeDownloads()) {
@@ -985,7 +1045,7 @@ int main(int argc, char** argv) {
                 downloadStatus = cassette.name + " from " + cassette.drive + ": where to save it?";
                 downloadShowUntil = 1e18;
                 lastTitle = Clock::time_point();
-                saveDialog.open("Save " + cassette.name + " from HIPI's " + cassette.drive, saveFolder(cacheDir()), cassette.name);
+                saveDialog.open("Save " + cassette.name + " from " + cassette.drive + " (HIPI)", saveFolder(cacheDir()), cassette.name);
             }
         }
         {
@@ -1035,14 +1095,22 @@ int main(int argc, char** argv) {
             uploadSeen = upload.step();
             std::printf("hipiview: %s\n", upload.status().c_str());
             std::fflush(stdout);
-            if (uploadSeen == Uploader::Step::Done) uploadShowUntil = sec + 8;
+            if (uploadSeen == Uploader::Step::Done) {
+                uploadShowUntil = sec + 8;
+                ++batch.ok;
+            }
             if (uploadSeen == Uploader::Step::Failed) {
                 uploadShowUntil = sec + 8;
-                if (upload.status().rfind("cancelled", 0) != 0)
-                    fileBox(SDL_MESSAGEBOX_ERROR, upload.name() + " wasn't put in:\n" + upload.status());
+                const bool userSaidNo = upload.status().rfind("cancelled", 0) == 0 || upload.status().rfind("skipped", 0) == 0;
+                if (batch.total > 1) batch.notDone.push_back(dropName + ": " + (userSaidNo ? std::string("skipped") : upload.status()));
+                else if (!userSaidNo) fileBox(SDL_MESSAGEBOX_ERROR, dropName + " wasn't put in:\n" + upload.status());
             }
+            batchOver(sec);
             lastTitle = Clock::time_point();             // the title at once
         }
+        // The next file dropped (after the step above was seen: a file done
+        // and the next one started in the same frame would hide the first's result)
+        startNextDrop(sec);
         emu.render(px.data(), sec, o.backlight);
         if (o.marks) marks.draw(px.data(), W, H, sec);
         SDL_UpdateTexture(tex, nullptr, px.data(), W * 4);
@@ -1084,7 +1152,12 @@ int main(int argc, char** argv) {
             if (o.backlight) state += "  |  backlight";
             if (!o.marks) state += "  |  no touch rings";
             if (reader && emu.connected() && emu.mirrorMode() == 2) state += "  |  control";
-            if (upload.busy() || uploadShowUntil > sec) state = upload.status() + "  |  " + state;
+            if (upload.busy() || uploadShowUntil > sec) {
+                // (several dropped: which one this is)
+                const int nth = batch.ok + static_cast<int>(batch.notDone.size()) + 1;
+                state = (batch.total > 1 && upload.busy() ? "file " + std::to_string(nth) + " of " + std::to_string(batch.total) + ": " : std::string()) +
+                        upload.status() + "  |  " + state;
+            }
             if (download.busy()) state = download.status() + "  |  " + state;
             else if (!cassette.data.empty() || downloadShowUntil > sec) state = downloadStatus + "  |  " + state;
             if (viewOnlyHintUntil > sec)

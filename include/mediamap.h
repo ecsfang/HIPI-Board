@@ -59,6 +59,14 @@ void mediamap_poll(std::uint32_t nowMs);
 enum class MediaMapTap { None, Handled, Close };
 MediaMapTap mediamap_tap(int x, int y);
 
+// The tapped file's box has a "Save on PC" button while available() says
+// so (hipiview connected); a tap on it: save(lifName, why), the file to
+// hipiview (display_mirror.h, displayMirror_sendFile()) -- its answer is
+// shown instead of the button. Where the button is (tests, the demo):
+// mediamap_savePoint(), false if it isn't shown.
+void mediamap_setSaveOnPc(std::function<bool()> available, std::function<bool(const std::string&, std::string&)> save);
+bool mediamap_savePoint(int& x, int& y);
+
 // Where to touch (the demo, demo.h): a tab of the card, a row of it, the
 // ring step holding a block -- screen pixels; false: not there
 void mediamap_tabPoint(bool machine, int& x, int& y);

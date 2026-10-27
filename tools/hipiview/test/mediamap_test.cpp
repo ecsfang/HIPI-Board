@@ -4,6 +4,9 @@
 // is a stand-in: a head that moves, reads and writes. Saves:
 //
 //   mediamap_1_cassette.png   a cassette: two rings, reading track 0
+//   mediamap_7_programs.png   programs one after the other: their boundaries
+//   mediamap_8_save.png       a file's box with Save on PC (hipiview connected)
+//   mediamap_9_saved.png      ... tapped: the answer in its place
 //   mediamap_2_disk.png       a 16 MB disk: eight rings, writing
 //   mediamap_3_file.png       a file tapped
 //   mediamap_4_highlight.png  HP-41/71/75 files, programs highlighted
@@ -208,6 +211,40 @@ int main() {
         snapshot("mediamap_3_file.png");
     }
     check(hipi::mediamap_tap(1000, 10) == hipi::MediaMapTap::Close, "the X in the title bar: close");
+
+    // ── Programs one after the other: their boundaries, a darker hair ──
+    {
+        std::vector<File> progs = { { "SDUMP", 0xE080, 1 }, { "PIXEL", 0xE080, 1 }, { "VECTOP", 0xE080, 2 },
+                                    { "GAME1", 0xE080, 12 }, { "GAME2", 0xE080, 20 }, { "ALL", 0xE040, 11 },
+                                    { "BIG", 0xE080, 60 }, { "SMALL", 0xE080, 3 } };
+        for (int i = 0; i < 24; ++i) progs.push_back({ "T" + std::to_string(i), 0xE080, 1 });   // many tiny ones
+        progs.push_back({ "LAST", 0xE080, 40 });
+        makeImage(hipi::kLifMediaTypes[0], 64, progs);
+        drive.file = "PROGS.DAT";
+        drive.op = hipi::MediaOp::None;
+        run(300);
+        snapshot("mediamap_7_programs.png");
+        check(hipi::mediamap_blocksOf(2) == 1 + 1 + 2 + 12 + 20 + 60 + 3 + 24 + 40, "programs after each other: all counted");
+        // A file's box: Save on PC (with hipiview there)
+        bool viewer = false;
+        std::string asked;
+        hipi::mediamap_setSaveOnPc([&] { return viewer; },
+                                   [&](const std::string& n, std::string& why) { asked = n; why.clear(); return true; });
+        int x = 0, y = 0;
+        hipi::mediamap_blockPoint(10 + 1 + 1 + 1, x, y);           // VECTOP (after SDUMP, PIXEL)
+        hipi::mediamap_tap(x, y);
+        check(!hipi::mediamap_savePoint(x, y), "no hipiview: no Save on PC in the file's box");
+        viewer = true;
+        hipi::mediamap_blockPoint(10 + 1 + 1 + 1, x, y);
+        hipi::mediamap_tap(x, y);
+        int bx = 0, by = 0;
+        check(hipi::mediamap_savePoint(bx, by), "hipiview there: Save on PC in VECTOP's box");
+        snapshot("mediamap_8_save.png");
+        check(hipi::mediamap_tap(bx, by) == hipi::MediaMapTap::Handled && asked == "VECTOP", "tapped: VECTOP sent (its LIF name)");
+        check(!hipi::mediamap_savePoint(bx, by), "... the answer in the button's place");
+        snapshot("mediamap_9_saved.png");
+        hipi::mediamap_setSaveOnPc(nullptr, nullptr);
+    }
 
     // ── A 16 MB disk ───────────────────────────────────────────────────
     std::mt19937 rng(7);

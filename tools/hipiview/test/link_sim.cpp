@@ -42,6 +42,8 @@
 #include "display_mirror.h"
 #include "mirror_upload.h"
 #include "mirror_download.h"
+#include "lif_file.h"
+#include "lif_dir.h"
 #include "tusb.h"
 #include "pico/time.h"
 #include "../lt7683_emu.hpp"
@@ -174,8 +176,22 @@ int main(int argc, char** argv) {
     tape[0] = 0x80; tape[1] = 0x00;
     for (int k = 8; k < 20; ++k) tape[k] = 0;
     tape[11] = 2;                                            // directory at block 2,
-    tape[19] = 4;                                            // 4 blocks long
+    tape[19] = 4;                                            // 4 blocks long, empty
+    std::fill(tape.begin() + 2 * 256, tape.begin() + 6 * 256, 0xFF);
+    // download: VECTOP on the cassette too -- sent on its own later (the
+    // Media map's Save on PC), as lifget -r gives it
+    std::vector<std::uint8_t> vectopRaw;
     if (downloadTest) {
+        std::ifstream rf("test/data/vectop.raw", std::ios::binary);
+        vectopRaw.assign(std::istreambuf_iterator<char>(rf), std::istreambuf_iterator<char>());
+        hipi::LifFileImage img;
+        std::string why;
+        hipi::lifFileFromPc("vectop.raw", vectopRaw, img, why);
+        hipi::lifAddFile([&](std::uint32_t b, std::uint8_t* o) { std::copy_n(tape.begin() + b * 256, 256, o); return true; },
+                         [&](std::uint32_t b, const std::uint8_t* d) { std::copy_n(d, 256, tape.begin() + b * 256); return true; },
+                         static_cast<std::uint32_t>(tape.size() / 256), img.bytes.data(),
+                         [&](std::uint32_t b, std::uint8_t* o) { std::copy_n(img.bytes.begin() + 32 + b * 256, 256, o); return true; },
+                         false, why);
         std::filesystem::remove_all("link_sim_saved");
         std::filesystem::create_directories("link_sim_saved");
         std::FILE* f = std::fopen("link_sim_input.txt", "w");
@@ -186,7 +202,24 @@ int main(int argc, char** argv) {
         std::fwrite(tape.data(), 1, tape.size(), tf);
         std::fclose(tf);
         std::FILE* f = std::fopen("link_sim_input.txt", "w");
-        std::fputs("2.0 answer yes\n2.0 drop link_sim_tape.dat\n", f);
+        // The cassette, then two HP-41 programs onto it, dropped at once
+        // ("Add all" for the first: the second isn't asked about)
+        {
+            std::ifstream rf("test/data/vectop.raw", std::ios::binary);
+            std::vector<std::uint8_t> raw((std::istreambuf_iterator<char>(rf)), std::istreambuf_iterator<char>());
+            raw[5] = 'Q';                                    // LBL "SQH"
+            std::ofstream("link_sim_second.raw", std::ios::binary).write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+            raw[5] = 'R';                                    // LBL "SRH"
+            std::ofstream("link_sim_third.raw", std::ios::binary).write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+            raw[5] = 'X';                                    // (a changed VECTOP: must not go on)
+            std::ofstream("vectop.raw", std::ios::binary).write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+        }
+        std::fputs("2.0 answer yes\n2.0 drop link_sim_tape.dat\n"
+                   "6.0 answer all\n6.0 drop test/data/vectop.raw\n6.0 drop link_sim_input.txt\n6.0 drop link_sim_second.raw\n"   // (the .txt: refused, said at the end)
+                   // Again: a new one ("Add all"), then VECTOP once more -- on the
+                   // cassette already: asked about all the same ("Add all" never
+                   // replaces), and skipped
+                   "11.0 answer all\n11.0 answer no\n11.0 drop link_sim_third.raw\n11.0 drop vectop.raw\n", f);
         std::fclose(f);
     } else if (inputTest) {
         // Times in seconds from when hipiview's picture is in step
@@ -245,6 +278,17 @@ int main(int argc, char** argv) {
         bool quiet() const override { return true; }
         void open() override { calls.push_back("open " + media); }
         void insert(const std::string& f) override { media = f; calls.push_back("insert " + f); }
+        bool readBlock(std::uint32_t block, std::uint8_t* out) override {
+            std::ifstream in("lif/" + media, std::ios::binary);
+            in.seekg(static_cast<std::streamoff>(block) * 256);
+            in.read(reinterpret_cast<char*>(out), 256);
+            return in.gcount() == 256;
+        }
+        std::uint32_t fileSize() const override {
+            std::error_code ec;
+            const auto n = std::filesystem::file_size("lif/" + media, ec);
+            return ec ? 0 : static_cast<std::uint32_t>(n);
+        }
     };
     auto simDrive = std::make_shared<SimDrive>();
 
@@ -321,10 +365,17 @@ int main(int argc, char** argv) {
             // (Control all the time)
         } else if (downloadTest) {
             // (View all the time.) Later, once more from "HIPI's menu"
-            if (!menuSent && now() > seconds * 0.6) {
+            if (!menuSent && now() > seconds * 0.5) {
                 std::string why;
                 menuSent = true;
                 if (!hipi::displayMirror_sendMedia(why)) std::printf("FAIL download: Save media on PC: %s\n", why.c_str());
+            }
+            // ... and one file of it (the Media map's file box)
+            static bool fileSent = false;
+            if (!fileSent && now() > seconds * 0.75) {
+                std::string why;
+                fileSent = true;
+                if (!hipi::displayMirror_sendFile("VECTOP", why)) std::printf("FAIL download: Save on PC (VECTOP): %s\n", why.c_str());
             }
         } else if (inputTest) {
             // After "previous view" (the last key before the View part): View
@@ -464,25 +515,53 @@ int main(int argc, char** argv) {
         else if (first != tape) fail("M key: SIMTAPE.DAT differs from the drive's file");
         if (second.empty()) fail("Save media on PC: link_sim_saved/SIMTAPE (2).DAT not saved");
         else if (second != tape) fail("Save media on PC: SIMTAPE (2).DAT differs from the drive's file");
+        // VECTOP on its own: the program and its checksum (lifget -r)
+        std::vector<std::uint8_t> want = vectopRaw;
+        unsigned sum = 0;
+        for (auto b : vectopRaw) sum += b;
+        want.push_back(static_cast<std::uint8_t>(sum));
+        const auto one = read("link_sim_saved/VECTOP.raw");
+        if (one.empty()) fail("Save on PC: link_sim_saved/VECTOP.raw not saved");
+        else if (one != want) fail("Save on PC: VECTOP.raw isn't the program + checksum (as lifget -r)");
         if (fails) return 1;
-        std::printf("ok   download: twice %zu bytes over the lossy link (M key, HIPI's menu), saved whole\n", tape.size());
+        std::printf("ok   download: twice %zu bytes over the lossy link (M key, HIPI's menu), saved whole; VECTOP.raw on its own\n", tape.size());
     } else if (uploadTest) {
         int fails = 0;
         auto fail = [&](const std::string& what) { std::printf("FAIL upload: %s\n", what.c_str()); ++fails; };
         std::ifstream in("link_sim_sd/lif/link_sim_tape.dat", std::ios::binary);
         const std::vector<std::uint8_t> got((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         if (got.empty()) fail("lif/link_sim_tape.dat not on the SD card");
-        else if (got != tape) fail("lif/link_sim_tape.dat differs from the file dropped");
+        // The cassette as dropped -- with VECTOP and LINKSIMSEC added after
+        // each other (as lif_dir.cpp adds them, checked against lifutils)
+        else {
+            std::vector<std::uint8_t> want = tape;
+            for (const char* p : { "test/data/vectop.raw", "link_sim_second.raw", "link_sim_third.raw" }) {
+                std::ifstream rf(p, std::ios::binary);
+                const std::vector<std::uint8_t> raw((std::istreambuf_iterator<char>(rf)), std::istreambuf_iterator<char>());
+                hipi::LifFileImage img;
+                std::string why;
+                hipi::lifFileFromPc(p, raw, img, why);
+                hipi::lifAddFile([&](std::uint32_t b, std::uint8_t* o) { std::copy_n(want.begin() + b * 256, 256, o); return true; },
+                                 [&](std::uint32_t b, const std::uint8_t* d) { std::copy_n(d, 256, want.begin() + b * 256); return true; },
+                                 static_cast<std::uint32_t>(want.size() / 256), img.bytes.data(),
+                                 [&](std::uint32_t b, std::uint8_t* o) { std::copy_n(img.bytes.begin() + 32 + b * 256, 256, o); return true; },
+                                 false, why);
+            }
+            if (got != want) fail("lif/link_sim_tape.dat isn't the cassette dropped with VECTOP, LINKSIMSEC and LINKSIMTHI added (VECTOP not replaced)");
+        }
         if (std::filesystem::exists("link_sim_sd/lif/.upload.tmp")) fail("the temporary file left behind");
         if (!std::filesystem::exists("link_sim_sd/lif/OLD.DAT")) fail("the old cassette's file gone");
-        const std::vector<std::string> want = { "open OLD.DAT", "insert link_sim_tape.dat" };
+        const std::vector<std::string> want = { "open OLD.DAT", "insert link_sim_tape.dat",
+                                                "open link_sim_tape.dat", "insert link_sim_tape.dat",
+                                                "open link_sim_tape.dat", "insert link_sim_tape.dat",
+                                                "open link_sim_tape.dat", "insert link_sim_tape.dat" };
         if (simDrive->calls != want) {
             std::string c;
             for (const auto& x : simDrive->calls) c += " [" + x + "]";
-            fail("the drive: expected [open OLD.DAT] [insert link_sim_tape.dat], got" + c);
+            fail("the drive: expected [open OLD.DAT] [insert link_sim_tape.dat] [open ...] [insert ...], got" + c);
         }
         if (fails) return 1;
-        std::printf("ok   upload: %zu bytes over the lossy link, in the drive, the old cassette out first\n", tape.size());
+        std::printf("ok   upload: %zu bytes over the lossy link, in the drive, the old cassette out first; then programs (.raw) dropped several at once: added, an existing one asked about and skipped\n", tape.size());
     } else if (inputTest) {
         int fails = 0;
         auto fail = [&](const char* what) { std::printf("FAIL input: %s\n", what); ++fails; };

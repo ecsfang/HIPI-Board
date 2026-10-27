@@ -204,6 +204,7 @@ add_executable(${EXE_TARGET}
     src/ili2c.cpp
     src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
     src/lif_create.cpp          # File picker -> Create media: an empty LIF image
+    src/lif_dir.cpp             # A LIF volume's directory: a file added (from hipiview)
     src/media_create_ui.cpp     # ... its dialogs (CREATE MEDIA, MEDIA NAME)
     src/mediamap.cpp            # Tape view -> Media map: the medium as rings
     src/printout.cpp            # Printer: the torn-off paper saved (BMP + text)

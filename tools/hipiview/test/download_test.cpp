@@ -7,6 +7,10 @@
 //   make download_test && ./download_test   (in tools/hipiview)
 #include "../download.hpp"
 #include "mirror_download.h"
+#include "lif_dir.h"
+#include "lif_file.h"
+#include <fstream>
+#include <iterator>
 
 #include <cstdio>
 #include <cstring>
@@ -319,6 +323,90 @@ int main() {
         std::vector<std::uint8_t> d;
         std::string name, drv;
         check(l.got(d, name, drv) && d == l.drive->file, "2 MB: arrives whole");
+    }
+    // ── One file of the cassette (the Media map's Save on PC) ─────────────
+    {
+        // A cassette with VECTOP and SECOND on it (as hipiview would add them)
+        std::ifstream rf("test/data/vectop.raw", std::ios::binary);
+        const std::vector<std::uint8_t> raw((std::istreambuf_iterator<char>(rf)), std::istreambuf_iterator<char>());
+        std::vector<std::uint8_t> cass(512 * 256, 0);
+        cass[0] = 0x80; cass[11] = 2; cass[19] = 8;          // directory at 2, 8 blocks (no medium size: a cassette)
+        std::fill(cass.begin() + 2 * 256, cass.begin() + 10 * 256, 0xFF);
+        auto add = [&](const char* pcName, const std::vector<std::uint8_t>& in) {
+            hipi::LifFileImage img;
+            std::string why;
+            hipi::lifFileFromPc(pcName, in, img, why);
+            hipi::lifAddFile([&](std::uint32_t b, std::uint8_t* o) { std::copy_n(cass.begin() + b * 256, 256, o); return true; },
+                             [&](std::uint32_t b, const std::uint8_t* d) { std::copy_n(d, 256, cass.begin() + b * 256); return true; },
+                             512, img.bytes.data(),
+                             [&](std::uint32_t b, std::uint8_t* o) { std::copy_n(img.bytes.begin() + 32 + b * 256, 256, o); return true; },
+                             false, why);
+        };
+        std::vector<std::uint8_t> raw2 = raw;
+        raw2[5] = 'Q';
+        add("vectop.raw", raw);
+        add("second.raw", raw2);
+        // ... and a write-all (ALL41, E040): 336 registers, 2689 bytes in 11 blocks
+        std::vector<std::uint8_t> all(32 + 11 * 256, 0);
+        {
+            const char* n = "WALL      ";
+            std::copy(n, n + 10, all.begin());
+            all[10] = 0xE0; all[11] = 0x40; all[19] = 11; all[26] = 0x80; all[27] = 0x01;
+            all[28] = 0x01; all[29] = 0x50; all[31] = 0x20;
+            for (std::size_t i = 32; i < all.size(); ++i) all[i] = static_cast<std::uint8_t>(i * 7);
+            std::string why;
+            hipi::lifAddFile([&](std::uint32_t b, std::uint8_t* o) { std::copy_n(cass.begin() + b * 256, 256, o); return true; },
+                             [&](std::uint32_t b, const std::uint8_t* d) { std::copy_n(d, 256, cass.begin() + b * 256); return true; },
+                             512, all.data(),
+                             [&](std::uint32_t b, std::uint8_t* o) { std::copy_n(all.begin() + 32 + b * 256, 256, o); return true; },
+                             false, why);
+        }
+        // What lifutils' lifget -r gives: the program and its checksum
+        std::vector<std::uint8_t> want = raw2;
+        unsigned sum = 0;
+        for (auto b : raw2) sum += b;
+        want.push_back(static_cast<std::uint8_t>(sum));
+
+        Link l;
+        l.drive->file = cass;
+        l.drive->media = "TAPE1.DAT";
+        std::string why;
+        check(l.hipiSide.startFile("SECOND", why), "Save on PC: SECOND on TAPE1.DAT");
+        l.run(5);
+        std::vector<std::uint8_t> d;
+        std::string name, drv;
+        check(l.got(d, name, drv), "... arrives");
+        check(name == "SECOND.raw" && drv == "TAPE1.DAT in TFDRIVE", "... as SECOND.raw, from TAPE1.DAT in TFDRIVE");
+        check(d == want, "... 389 bytes: the program and its checksum, as lifget -r gives it");
+        check(!l.hipiSide.busy(), "... HIPI's side idle again");
+        // Not a program: NAME.lif, its directory entry first -- as lifget writes it
+        Link w;
+        w.drive->file = cass;
+        w.drive->media = "TAPE1.DAT";
+        check(w.hipiSide.startFile("WALL", why), "Save on PC: WALL (a write-all)");
+        w.run(5);
+        check(w.got(d, name, drv) && name == "WALL.lif", "... arrives as WALL.lif");
+        std::vector<std::uint8_t> wantAll(cass.begin() + 2 * 256 + 2 * 32, cass.begin() + 2 * 256 + 3 * 32);   // its entry (3rd)
+        wantAll.insert(wantAll.end(), all.begin() + 32, all.begin() + 32 + 336 * 8 + 1);
+        check(d == wantAll, "... its entry, then 2689 bytes (336 registers x 8 + 1): as lifget writes it");
+        hipi::LifFileImage back;
+        check(hipi::lifIsSingleFile(d) && hipi::lifFileFromLifget(d, back, why) && back.name == "WALL" && back.type == 0xE040 &&
+              back.blocks() == 11 && std::equal(back.bytes.begin() + 16, back.bytes.begin() + 32, all.begin() + 16),
+              "... and is taken back as it was (a drop on the Tape view): WALL, E040, 11 blocks, its entry's bytes");
+        Link m;
+        m.drive->file = cass;
+        check(!m.hipiSide.startFile("NOSUCH", why) && why.find("isn't on") != std::string::npos,
+              "a file that isn't there: \"isn't on\"");
+        // Written to meanwhile: from the start again, the file as it is then
+        Link k;
+        k.drive->file = cass;
+        k.room = 0;
+        k.hipiSide.startFile("VECTOP", why);
+        k.run(0.1);
+        k.drive->write(500, 0x11);                         // (a block somewhere else)
+        k.room = -1;
+        k.run(5);
+        check(k.got(d, name, drv) && d.size() == 389 && k.viewer.restarts() == 1, "written meanwhile: started over, arrives whole");
     }
     std::printf(failures ? "%d FAILED\n" : "ALL PASSED\n", failures);
     return failures ? 1 : 0;

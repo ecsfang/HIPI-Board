@@ -645,6 +645,19 @@ files are all known (BASIC, BIN, FORTH, LEX, key and data files ...).
 
 - **A cassette** has two rings — its two tracks, track 0 outside. One step
   around a ring is one record.
+- **Save on PC** — with hipiview connected, a tapped file's box has a
+  button **Save on PC**: the file goes to hipiview, which opens *Save as*
+  with its name filled in. Saved as lifutils saves files:
+  - an HP-41 program as `NAME.raw`, like `lifget -r`: the program and its
+    checksum byte — what V41, `decomp41` and hipiview's drag-in take;
+  - anything else (a write-all, key assignments, status, data, HP-71
+    files …) as `NAME.lif`, like `lifget`: its directory entry first, then
+    its data — its type and lengths go with it, so it can be put back
+    unchanged, with lifutils' `lifput` or by dropping it on the Tape view.
+- **Files one after the other** of the same kind (several programs, say)
+  are told apart by a thin line in a slightly darker shade where one ends
+  and the next begins. Very small files close together don't all get one,
+  so the map stays calm.
 - **A disk** has eight rings, outside in, like the cylinders of a disk. On a
   large disk a step holds several blocks (20 on a 16 MB disk); it shows the
   most important thing in them, so even a one-block file is never lost.
@@ -1277,6 +1290,36 @@ shows how it goes; if something is wrong (not a LIF volume, another view
 shown, a menu open, the SD card lent to the PC as a USB drive, the file in
 another drive), a message says why and nothing changes on HIPI. Only the
 drive whose Tape view is shown gets it. Needs HIPI firmware 1.6.0 or newer.
+
+**A file with its directory entry** (`NAME.lif` from **Save on PC**, or
+from lifutils' `lifget` without `-r`) dropped on the window is added as it
+is — with its own name and type (a write-all, data, an HP-71 file …).
+
+**A program onto the cassette.** Drop an HP-41 program saved as a *raw*
+file (`.raw`, as V41, go41cv or lifutils' `lifget -r` make them) on the
+hipiview window in the same way: it is added to the cassette in the drive
+whose Tape view is shown, as a *PGM41* file the HP-41 reads with `READP`.
+
+- Its name on the cassette comes from the file's name: upper case, letters
+  and digits only, at most 10 (`vector-ops.raw` becomes `VECTOROPS`; a
+  digit first gets a `P` in front).
+- hipiview asks first: **Add** VECTOP to the cassette? If a file of that
+  name is on it already: **Replace** it, or **Skip** (nothing changes).
+- An empty drive gets a new, empty cassette for it (`CASS01.DAT`, as
+  **Create media** makes one) — hipiview says its name when it asks.
+- No room on the cassette, or its directory full: hipiview says so before
+  anything is sent.
+- As with a whole cassette, HIPI waits until the drive is idle; the
+  cassette is taken out, the program put on it, and the cassette put back.
+
+**Several files at once:** drop them together and they are taken one after
+the other, each asked about as above. While more are waiting, the question
+has a third button, **Add all**, which answers it for the rest as well. A
+file that is on the cassette already is still asked about — **Add all**
+never replaces anything; that takes its own **Replace all**. The title bar shows *file 2 of 5*, and at the end a
+message lists any that weren't sent (skipped, not a `.raw`, no room …).
+
+More kinds of files (text, data …) can follow the same way.
 
 **A cassette to the PC.** The other way round, with **Mirror to PC** *View*
 or *Control*: **Save media on PC** in the Tape view's menu (it's there while

@@ -23,7 +23,10 @@ struct FIL { std::FILE* f = nullptr; };
 inline FRESULT f_open(FIL* fp, const char* path, int mode) {
     if (mode & FA_WRITE) {
         if ((mode & FA_CREATE_NEW) && std::filesystem::exists(path)) return FR_EXIST;
-        fp->f = std::fopen(path, "wb");
+        // (as FatFs: without a create flag an existing file is opened as it
+        // is -- read and written in place)
+        if (mode & (FA_CREATE_NEW | FA_CREATE_ALWAYS)) fp->f = std::fopen(path, (mode & FA_READ) ? "w+b" : "wb");
+        else fp->f = std::fopen(path, "r+b");
     } else {
         fp->f = std::fopen(path, "rb");
     }

@@ -547,8 +547,16 @@ and buffer files): name, description, machine (`LifMachine`), sort
 (`byMachine_`, a tap on a tab) and a tap on a row highlights one group
 (`highlight_`, the rest `kDim`). Runs in a ring are cut where kind or
 machine changes (`sameRun()`) -- the same in every mode, so a ring redrawn
-in other colours covers exactly the same pixels. Arcs are drawn as triangles
-(`fillArc()`). The drive is reached through `mediamap_setSource()`
+in other colours covers exactly the same pixels. Within a run, where one
+file ends and the next begins (programs one after the other) a hair is drawn
+in a shade of the run's colour (`drawBoundaries()`, `boundaryShade()`: 3/4
+of it, a quarter lighter on a dark one) -- left out closer than 2 steps to
+the last one or to a change of kind, so many small files don't become a
+pattern; `eraseHead()` puts those beside the head back. A tapped file's box
+has **Save on PC** while hipiview is connected (`mediamap_setSaveOnPc()`,
+from pico_main.cpp: `displayMirror_active()` / `displayMirror_sendFile()`);
+the answer replaces the button. Arcs are drawn as
+triangles (`fillArc()`). The drive is reached through `mediamap_setSource()`
 (pico_main.cpp): `CDrive::headBlock()/lastOp()/blocksWritten()` and
 `CDrive::peekBlock()`, which reads through the drive's own open file and
 puts its position back (FatFs locks a file open for writing). A medium
@@ -1398,6 +1406,24 @@ register level, so new drawing code needs nothing extra to be mirrored.
      `insert()`: `setMediaFile()` (saved, the label redrawn, as the file
      picker does) and the lid closed. *Done* to the viewer.
   
+  A single file for the cassette (`what` = *kUpFile*): hipiview converts
+  it to a LIF file first (`lif_file.h`: by its extension -- `.raw`, an
+  HP-41 program, becomes a PGM41 file exactly as lifutils' `raw41lif`
+  makes it: the program up to its END, a checksum byte, the length in the
+  entry's bytes 28-29, 0x0020 in 30-31) and sends its 32-byte directory
+  entry and its blocks. *Ask* reads the cassette's directory through the
+  drive (`UploadDrive::readBlock()`, `lif_dir.h`) and answers whether a
+  file of that name is there (*kUpExists*: Skip / Replace, *Begin* then
+  carries *kUpReplace*), refuses a full directory or too little room, and
+  with no cassette names the one that will be made (`lifSuggestName()`).
+  Once the drive is quiet: the cassette out, `lifAddFile()` (lifutils'
+  `lifput`: the first deleted entry or the end mark's place -- the end mark
+  then one on --, the data in the first gap big enough; a replaced file
+  keeps its entry; the data before the directory, so a failure leaves the
+  directory as it was), the cassette in again. A cassette made for it
+  (`LifCreator`, an HP82161A with 64 entries, dated from the clock) is
+  deleted again if that fails. Another kind of file is one more entry in
+  `kLifFileKinds` (`lif_file.h`); HIPI's side stays the same.
   Anything wrong: *Error* with a text for hipiview's message box, the
   temporary file deleted, the old cassette left as it was. The session
   ending (the viewer gone) drops a file half-way. The glue to the drives
@@ -1406,7 +1432,13 @@ register level, so new drawing code needs nothing extra to be mirrored.
   `what` (`kUpVolume`, `kUpFile`); `kUpFile` is refused for now.
   `make upload_test` runs hipiview's `Uploader` against the receiver
   directly (losses, damage, a busy drive, cancel, refusals);
-  `./link_sim 0.02 10 upload` drops a file on the real hipiview.
+  `./link_sim 0.02 18 upload` drops a cassette on the real hipiview, then
+  three files at once (two programs, one refused), then two more ("Add all"
+  doesn't replace: the one already there is asked about and skipped). Several dropped files are
+  queued in hipiview (`startNextDrop()`) and sent one after the other --
+  each its own Ask / Begin / End, so HIPI's side needs nothing for it. The conversion and `lifAddFile()` were checked
+  against lifutils (`lifdir`, `lifget -r`, `decomp41`, `lifpurge` + add
+  again): byte for byte the same as `raw41lif` + `lifput`.
 - **A cassette to the viewer** (View or Control): the Tape view's menu
   **Save media on PC** (`displayMirror_sendMedia()`, only while a session
   runs) or the viewer's `'F'` *kDlAsk* (hipiview's **M** key) starts
@@ -1425,9 +1457,24 @@ register level, so new drawing code needs nothing extra to be mirrored.
   is `download.hpp`, its *Save as* dialog `save_dialog.cpp` (GTK 3 through a few
   lines of Python -- zenity 4 ignores a proposed name --, else zenity /
   kdialog; `GetSaveFileNameW`; osascript -- in a thread of its own).
+  One file of the cassette (`MediaSender::startFile()`, the Media map's
+  **Save on PC**): its entry found in the directory (`lif_dir.h`), its data
+  sent as lifutils' `lifget -r` writes it -- as long as its type says
+  (`lifFileLength()`, lifutils' `file_length()`: a PGM41 its bytes + the
+  checksum, HP-41 register files 8 a register + 1, HP-71 files their
+  nibbles / 2, the rest whole blocks) --, named `NAME.raw` (*Begin*:
+  `drive|NAME.raw|cassette`) for a PGM41; any other type with its 32-byte
+  entry first, as `lifget` without `-r` writes it, `NAME.lif` (`head_`)
+  -- its type and its entry's length bytes go with it. Both checked against
+  lifutils byte for byte. hipiview takes such a `.lif` back on a drop
+  (`lifIsSingleFile()` by its content: a printable name, a type, 0x8001,
+  its length within its blocks), name and type its own; HP-41 names that
+  lifutils won't take ("41CV-AL") are fine (`lifFileNameOk()`). The Media map's drive counts as the Tape
+  view's here (`DriveForDownload`).
   `make download_test` runs both sides directly (a full ring, a busy drive,
-  writes meanwhile, refusals, 2 MB); `./link_sim 0.02 10 download` asks
-  with the real hipiview's M key and from "the menu", in View.
+  writes meanwhile, refusals, 2 MB); `./link_sim 0.02 12 download` asks
+  with the real hipiview's M key, from "the menu", and VECTOP on its own
+  (the same bytes as `lifget -r`), in View.
 - A session starts when the viewer sends `HIPIVIEW` plus the ids of the
   pictures in its cache. Just opening the port (ModemManager, terminals)
   starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a

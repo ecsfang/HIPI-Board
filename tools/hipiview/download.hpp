@@ -57,8 +57,12 @@ public:
             size_ = le32(p);
             const std::string id(reinterpret_cast<const char*>(p + 4), n - 4);
             const std::size_t bar = id.find('|');
+            // "drive|name" (a cassette), "drive|NAME.raw|cassette" (one file on it)
             drive_ = id.substr(0, bar);
             name_ = bar == std::string::npos ? id : id.substr(bar + 1);
+            const std::size_t bar2 = name_.find('|');
+            from_ = bar2 == std::string::npos ? std::string() : name_.substr(bar2 + 1);
+            if (bar2 != std::string::npos) name_.resize(bar2);
             data_.clear();
             data_.reserve(size_);
             if (step_ == Step::Receiving) ++restarts_;
@@ -84,7 +88,7 @@ public:
             if (data_.size() != size_) { fail(name_ + " arrived short -- try again"); return; }
             if (crc32(data_.data(), data_.size()) != le32(p)) { fail(name_ + " arrived damaged (CRC) -- try again"); return; }
             step_ = Step::Ready;
-            status_ = name_ + " from " + drive_ + ": where to save it?";
+            status_ = name_ + " from " + (from_.empty() ? drive_ : from_ + " in " + drive_) + ": where to save it?";
             return;
         }
         case kDlWait:
@@ -131,7 +135,10 @@ public:
     bool take(std::string& name, std::string& drive, std::vector<std::uint8_t>& data) {
         if (step_ != Step::Ready) return false;
         name = name_;
-        drive = drive_;
+        // (an HP-41 name may hold what a PC's file name can't: '/', ':' ...)
+        for (char& c : name)
+            if (std::string("<>:\"/\\|?*").find(c) != std::string::npos) c = '_';
+        drive = from_.empty() ? drive_ : from_ + " in " + drive_;   // ("tape1.dat in TFDRIVE" for one file)
         data.swap(data_);
         data_.clear();
         step_ = Step::Idle;
@@ -165,7 +172,7 @@ private:
     Send send_;
     Step step_ = Step::Idle;
     bool askedHere_ = false;
-    std::string name_, drive_, status_;
+    std::string name_, drive_, status_, from_;   // from_: the cassette (one file of it), "" = the whole
     std::uint32_t size_ = 0;
     std::vector<std::uint8_t> data_;
     int restarts_ = 0;

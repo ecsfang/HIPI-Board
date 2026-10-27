@@ -78,12 +78,12 @@ display_text_test: $(DT_SRC) ../../include/display_text.h ../../include/roman8.h
 # A file dropped on hipiview's Tape view, sent to HIPI: hipiview's side
 # (upload.hpp) against HIPI's (mirror_upload.cpp), a folder as the SD card
 # A drive's cassette to the PC: HIPI's sender against hipiview's receiver
-DOWN_SRC := test/download_test.cpp ../../src/mirror_download.cpp
+DOWN_SRC := test/download_test.cpp ../../src/mirror_download.cpp ../../src/lif_dir.cpp
 download_test: $(DOWN_SRC) download.hpp ../../include/mirror_download.h ../../include/mirror_protocol.h
 	$(CXX) $(CXXFLAGS) -Itest/stubs -Itest/pvstubs -I../../include $(DOWN_SRC) -o $@
 
-UP_SRC := test/upload_test.cpp ../../src/mirror_upload.cpp
-upload_test: $(UP_SRC) upload.hpp ../../include/mirror_upload.h ../../include/mirror_protocol.h ../../include/lif_check.h
+UP_SRC := test/upload_test.cpp ../../src/mirror_upload.cpp ../../src/lif_dir.cpp ../../src/lif_create.cpp
+upload_test: $(UP_SRC) upload.hpp ../../include/lif_file.h ../../include/lif_dir.h ../../include/mirror_upload.h ../../include/mirror_protocol.h ../../include/lif_check.h
 	$(CXX) $(CXXFLAGS) -Itest/stubs -Itest/pvstubs -I../../include $(UP_SRC) -o $@
 
 # The Hardware test page as HIPI draws it (a stand-in for the LEDs,
@@ -174,7 +174,7 @@ install: hipiview
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_input.txt
+	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
 	rm -rf link_sim_sd link_sim_saved
 
 .PHONY: test install clean windows
@@ -188,4 +188,4 @@ link_sim: test/link_sim.cpp hipiview lt7683_emu.cpp deframer.hpp ../../src/displ
           ../../src/mirror_download.cpp ../../include/mirror_download.h \
           ../../include/mirror_encoder.hpp ../../include/mirror_session.hpp ../../include/mirror_protocol.h
 	$(CXX) $(CXXFLAGS) -Itest/stubs -I../../include test/link_sim.cpp lt7683_emu.cpp \
-	    ../../src/display_mirror.cpp ../../src/mirror_upload.cpp ../../src/mirror_download.cpp ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz -lutil
+	    ../../src/display_mirror.cpp ../../src/mirror_upload.cpp ../../src/mirror_download.cpp ../../src/lif_dir.cpp ../../src/lif_create.cpp ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz -lutil

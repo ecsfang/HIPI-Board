@@ -564,6 +564,8 @@ int main() {
                 d_->setEjected(false);
                 if (d_ == hipi::plotterview_drive()) hipi::plotterview_setTapeEjected(false);
             }
+            bool readBlock(std::uint32_t block, std::uint8_t* out) override { return d_->peekBlock(block, out); }
+            std::uint32_t fileSize() const override { return d_->mediaFileSize(); }
         private:
             CDrive* d_;
         };
@@ -594,6 +596,9 @@ int main() {
             return "";
         };
         env.nowMs = [] { return static_cast<std::uint64_t>(to_ms_since_boot(get_absolute_time())); };
+        env.today = [](hipi::LifDate& t) {           // a new cassette's date (rtc.h)
+            return hipi::clock_dateTime(t.year, t.month, t.day, t.hour, t.minute, t.second);
+        };
         hipi::displayMirror_setUploadEnv(std::move(env));
     }
     // ... and the other way (mirror_download.h): the cassette of the drive
@@ -614,7 +619,9 @@ int main() {
         };
         hipi::DownloadEnv env;
         env.drive = []() -> std::shared_ptr<hipi::DownloadDrive> {
-            if (hipi::plotterview_output() != hipi::DisplayOutput::Tape) return nullptr;
+            // (the Tape view, or its Media map: a file from its box)
+            if (hipi::plotterview_output() != hipi::DisplayOutput::Tape &&
+                hipi::plotterview_output() != hipi::DisplayOutput::MediaMap) return nullptr;
             CDrive* d = hipi::plotterview_drive();
             return d != nullptr ? std::make_shared<DriveForDownload>(d) : nullptr;
         };
@@ -624,6 +631,9 @@ int main() {
         };
         env.nowMs = [] { return static_cast<std::uint64_t>(to_ms_since_boot(get_absolute_time())); };
         hipi::displayMirror_setDownloadEnv(std::move(env));
+        // The Media map's file box: Save on PC, while hipiview is there
+        hipi::mediamap_setSaveOnPc([] { return hipi::displayMirror_active(); },
+                                   [](const std::string& name, std::string& why) { return hipi::displayMirror_sendFile(name, why); });
     }
     hipi::displayMirror_setInputHandlers(
         [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },

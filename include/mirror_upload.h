@@ -19,14 +19,22 @@
 // Anything wrong: kUpError, the temporary file deleted, the old cassette
 // left as it was.
 //
-// Prepared for the next step -- a single file (an HP-41 program, .raw)
-// added to the cassette that's in: kUpAsk/kUpBegin carry `what`
-// (kUpVolume / kUpFile); kUpFile is refused for now.
+// ... or a single file added to the cassette that's in (kUpFile): an HP-41
+// program (.raw) dropped there, converted to a LIF file by hipiview
+// (lif_file.h) -- what comes is its 32-byte directory entry and its data
+// blocks. kUpAsk's answer then says whether a file of that name is on the
+// cassette (kUpExists: the user is asked Skip / Replace -- kUpBegin's
+// `what` gets kUpReplace) and, with the drive empty, the name of the new
+// cassette that will be made for it (CASSnn.DAT). Once the drive is quiet:
+// the cassette out, the file added to it (lif_dir.h, as lifutils' lifput),
+// the cassette in again. A cassette made for it is deleted again if adding
+// fails.
 //
 // No hardware here: the drive is behind UploadDrive and the SD card is
 // FatFs (ff.h), so it runs on the PC too (tools/hipiview/test/upload_test).
 #pragma once
 #include "mirror_protocol.h"
+#include "lif_create.h"
 #include "ff.h"
 #include <cstdint>
 #include <functional>
@@ -44,6 +52,10 @@ public:
     virtual bool quiet() const = 0;                     // no file access, no HP-IL message going on
     virtual void open() = 0;                            // the cassette out, as with OPEN (the lid opens)
     virtual void insert(const std::string& file) = 0;   // lif/<file> in, lid closed, remembered
+    // Its cassette, as it is (the drive's own open file, its position
+    // kept): for looking at the directory before asking the user
+    virtual bool readBlock(std::uint32_t block, std::uint8_t* out) = 0;
+    virtual std::uint32_t fileSize() const = 0;         // of its cassette's file, 0 = none
 };
 
 struct UploadEnv {
@@ -55,6 +67,8 @@ struct UploadEnv {
     // The drive (another one) that has lif/<file> in it, "" = none
     std::function<std::string(const std::string& file)> inOtherDrive;
     std::function<std::uint64_t()> nowMs;
+    // Today, for a new cassette's header (false: unknown, left empty)
+    std::function<bool(LifDate& d)> today;
 };
 
 class UploadReceiver {
@@ -79,6 +93,7 @@ public:
     // How long the change waits for a busy drive before giving up
     static constexpr std::uint64_t kSwapTimeoutMs = 30000;
     static constexpr const char* kTempFile = "lif/.upload.tmp";
+    static constexpr std::uint64_t kMaxFileBytes = 1u << 20;   // a single file for a cassette, at most
 
 private:
     enum class State : std::uint8_t { Idle, Receiving, Swapping, Done };
@@ -91,6 +106,9 @@ private:
     void text(std::uint8_t kind, const std::string& t);
     void finish();                         // kUpEnd: checks, then waits for the drive
     void swap();                           // the change itself
+    void addFile();                        // ... for a file added to the cassette
+    bool fileInfo(const std::shared_ptr<UploadDrive>& drive, const std::string& name, std::uint64_t size,
+                  std::uint8_t& flags, std::string& extra);
     void drop();                           // the temporary file gone, back to Idle
 
     UploadEnv env_;
@@ -98,6 +116,9 @@ private:
     State state_ = State::Idle;
     std::shared_ptr<UploadDrive> drive_;
     std::string name_;
+    std::uint8_t what_ = mirror::kUpVolume;
+    bool replace_ = false;
+    std::string doneText_;
     std::uint64_t size_ = 0, got_ = 0;
     std::uint32_t crc_ = 0, runningCrc_ = 0;
     FIL file_{};

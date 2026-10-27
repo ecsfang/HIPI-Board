@@ -6,6 +6,8 @@
 //   make upload_test && ./upload_test   (in tools/hipiview)
 #include "../upload.hpp"
 #include "mirror_upload.h"
+#include "lif_dir.h"
+#include "lif_create.h"
 
 #include <cstdio>
 #include <cstring>
@@ -38,7 +40,49 @@ struct FakeDrive : hipi::UploadDrive {
     bool quiet() const override { return isQuiet; }
     void open() override { ++opens; ejected = true; }
     void insert(const std::string& f) override { ++inserts; media = f; ejected = false; }
+    // (its cassette from the "SD card", as the drive's own file would read)
+    bool readBlock(std::uint32_t block, std::uint8_t* out) override {
+        std::ifstream f("lif/" + media, std::ios::binary);
+        f.seekg(static_cast<std::streamoff>(block) * 256);
+        f.read(reinterpret_cast<char*>(out), 256);
+        return f.gcount() == 256;
+    }
+    std::uint32_t fileSize() const override {
+        std::error_code ec;
+        const auto n = std::filesystem::file_size("lif/" + media, ec);
+        return ec || media.empty() ? 0 : static_cast<std::uint32_t>(n);
+    }
 };
+
+// A LIF volume's directory, read from the "SD card"
+hipi::LifDir dirOf(const std::string& file) {
+    hipi::LifDir d;
+    std::string why;
+    const std::string path = "lif/" + file;
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    hipi::lifReadDir([&](std::uint32_t b, std::uint8_t* out) {
+        std::ifstream f(path, std::ios::binary);
+        f.seekg(static_cast<std::streamoff>(b) * 256);
+        f.read(reinterpret_cast<char*>(out), 256);
+        return f.gcount() == 256;
+    }, ec ? 0 : static_cast<std::uint32_t>(size / 256), d, why);
+    return d;
+}
+// A file's blocks on a cassette
+std::vector<std::uint8_t> blocksOf(const std::string& file, const hipi::LifDirEntry& e) {
+    const std::vector<std::uint8_t> all = [&] {
+        std::ifstream f("lif/" + file, std::ios::binary);
+        return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }();
+    return std::vector<std::uint8_t>(all.begin() + e.start * 256, all.begin() + (e.start + e.blocks) * 256);
+}
+// An empty cassette, as Create media makes it
+void newCassette(const std::string& name, int dirEntries = 64) {
+    hipi::LifCreator c;
+    c.begin(name, hipi::kLifMediaTypes[0], dirEntries, nullptr);
+    while (c.step() == hipi::LifCreator::State::Running) {}
+}
 
 // A LIF volume: header (0x8000, directory at block 2, 2 blocks), the rest
 std::vector<std::uint8_t> lifVolume(std::size_t blocks, std::uint8_t fill) {
@@ -295,6 +339,200 @@ int main() {
         k.hipiSide.viewerGone();
         check(!k.hipiSide.receiving() && !std::filesystem::exists(hipi::UploadReceiver::kTempFile) &&
               !std::filesystem::exists("lif/HALF.DAT"), "... the viewer gone: dropped, nothing left behind");
+    }
+
+    // ── A single file: an HP-41 program (.raw) added to the cassette ─────
+    {
+        const std::vector<std::uint8_t> raw = readFile(std::string(cwd) + "/test/data/vectop.raw");
+        hipi::LifFileImage ref;
+        std::string why;
+        check(raw.size() == 388 && hipi::lifFileFromPc("vectop.raw", raw, ref, why) && ref.name == "VECTOP" &&
+              ref.type == 0xE080 && ref.blocks() == 2, "vectop.raw: an HP-41 program, VECTOP, PGM41, 2 blocks");
+        check(ref.bytes[28] == 0x01 && ref.bytes[29] == 0x84 && ref.bytes[31] == 0x20 &&
+              ref.bytes[32 + 388] == [&] { unsigned s = 0; for (auto b : raw) s += b; return static_cast<std::uint8_t>(s); }(),
+              "... its length (388) in the entry, the checksum after the program (as lifutils' raw41lif)");
+
+        newCassette("T1");
+        Link k;
+        k.drive->media = "T1.DAT";
+        check(k.viewer.startWith("vectop.raw", raw, k.t, why), "vectop.raw dropped: converted, HIPI asked");
+        k.runUntilSettled(3);
+        std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
+        check(k.viewer.step() == Uploader::Step::Confirm &&
+              k.viewer.question() == "Add VECTOP (HP-41 program, vectop.raw) to T1.DAT in TFDRIVE?" &&
+              k.viewer.yesText() == "Add", "\"Add VECTOP (HP-41 program, vectop.raw) to T1.DAT in TFDRIVE?\" [Add]");
+        k.viewer.answer(true, k.t);
+        k.runUntilSettled(10);
+        std::printf("     %s\n", k.viewer.status().c_str());
+        hipi::LifDir d = dirOf("T1.DAT");
+        const hipi::LifDirEntry* e = d.find("VECTOP");
+        check(k.viewer.step() == Uploader::Step::Done && k.viewer.status() == "VECTOP is on T1.DAT in TFDRIVE now",
+              "done: \"VECTOP is on T1.DAT in TFDRIVE now\"");
+        check(e != nullptr && e->type == 0xE080 && e->blocks == 2 && e->start == 2 + 8 && d.files.size() == 1,
+              "T1.DAT: VECTOP in its directory, PGM41, 2 blocks, right after the directory");
+        check(e != nullptr && blocksOf("T1.DAT", *e) == std::vector<std::uint8_t>(ref.bytes.begin() + 32, ref.bytes.end()),
+              "... its blocks are the program, byte for byte");
+        check(d.firstFree == 1 && d.freeIsEnd, "... the end mark one on");
+        check(k.drive->opens == 1 && k.drive->inserts == 1 && k.drive->media == "T1.DAT",
+              "TFDRIVE: the cassette out and in again (as OPEN), still T1.DAT");
+        check(!std::filesystem::exists(hipi::UploadReceiver::kTempFile), "the temporary file is gone");
+
+        // Again: there already -- Skip leaves it
+        Link k2;
+        k2.drive->media = "T1.DAT";
+        std::vector<std::uint8_t> raw2 = raw;
+        raw2[5] = 'Q';                                                // LBL "SQH"
+        k2.viewer.startWith("VECTOP.RAW", raw2, k2.t, why);
+        k2.runUntilSettled(3);
+        std::printf("     \"%s\" [%s] [%s]\n", k2.viewer.question().c_str(), k2.viewer.noText().c_str(), k2.viewer.yesText().c_str());
+        check(k2.viewer.question().find("T1.DAT in TFDRIVE has a file VECTOP already") != std::string::npos &&
+              k2.viewer.yesText() == "Replace" && k2.viewer.noText() == "Skip", "there already: \"... Replace it?\" [Skip] [Replace]");
+        k2.viewer.answer(false, k2.t);
+        k2.runUntilSettled(2);
+        check(k2.viewer.status().rfind("skipped", 0) == 0 && blocksOf("T1.DAT", *dirOf("T1.DAT").find("VECTOP"))[5] == 'P',
+              "Skip: nothing changed");
+        // ... Replace puts the new one in its place
+        Link k3;
+        k3.drive->media = "T1.DAT";
+        k3.viewer.startWith("VECTOP.RAW", raw2, k3.t, why);
+        k3.runUntilSettled(3);
+        k3.viewer.answer(true, k3.t);
+        k3.runUntilSettled(10);
+        d = dirOf("T1.DAT");
+        check(k3.viewer.step() == Uploader::Step::Done && d.files.size() == 1 && d.find("VECTOP") != nullptr &&
+              blocksOf("T1.DAT", *d.find("VECTOP"))[5] == 'Q', "Replace: the new VECTOP in the old one's place, still one file");
+
+        // Another program: a second entry, its blocks after the first
+        Link k4;
+        k4.drive->media = "T1.DAT";
+        check(k4.viewer.startWith("a very long name, 2.raw", raw, k4.t, why), "\"a very long name, 2.raw\" dropped");
+        k4.runUntilSettled(3);
+        k4.viewer.answer(true, k4.t);
+        k4.runUntilSettled(10);
+        d = dirOf("T1.DAT");
+        const hipi::LifDirEntry* e2 = d.find("AVERYLONGN");
+        check(e2 != nullptr && d.files.size() == 2 && e2->index == 1 && e2->start == 12 && d.firstFree == 2,
+              "... named AVERYLONGN (letters and digits, 10 at most), entry 2, blocks 12-13");
+
+        // Refused on the PC: no END in it; an extension HIPI doesn't know
+        Link k5;
+        std::vector<std::uint8_t> noEnd(raw.begin(), raw.end() - 3);
+        check(!k5.viewer.startWith("HALF.RAW", noEnd, k5.t, why) && why.find("END") != std::string::npos,
+              "a .raw without END: refused on the PC");
+        check(!k5.viewer.startWith("NOTES.TXT", raw, k5.t, why) && why.find(".raw") != std::string::npos,
+              "a .txt: refused (the message names .raw too)");
+    }
+    // ── A file with its directory entry (lifget's NAME.lif, a Save on PC):
+    // added as it is -- its own name (HP-41 style, "41CV-AL") and type
+    {
+        newCassette("T2");
+        std::vector<std::uint8_t> lif(32, 0);
+        const char* n = "41CV-AL   ";
+        std::copy(n, n + 10, lif.begin());
+        lif[10] = 0xE0; lif[11] = 0x40; lif[15] = 9; lif[19] = 11; lif[26] = 0x80; lif[27] = 0x01;
+        lif[28] = 0x01; lif[29] = 0x50; lif[31] = 0x20;
+        for (int i = 0; i < 2689; ++i) lif.push_back(static_cast<std::uint8_t>(i * 13));
+        Link k;
+        k.drive->media = "T2.DAT";
+        std::string why;
+        check(k.viewer.startWith("41CV-AL.lif", lif, k.t, why), "41CV-AL.lif (an ALL41, its entry first) dropped");
+        k.runUntilSettled(3);
+        std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
+        check(k.viewer.question() == "Add 41CV-AL (HP-41 write all, 41CV-AL.lif) to T2.DAT in TFDRIVE?",
+              "\"Add 41CV-AL (HP-41 write all, 41CV-AL.lif) to T2.DAT in TFDRIVE?\"");
+        k.viewer.answer(true, k.t);
+        k.runUntilSettled(10);
+        const hipi::LifDir d = dirOf("T2.DAT");
+        const hipi::LifDirEntry* e = d.find("41CV-AL");
+        check(k.viewer.step() == Uploader::Step::Done && e != nullptr && e->type == 0xE040 && e->blocks == 11 &&
+              e->start == 10 && e->entry[28] == 0x01 && e->entry[29] == 0x50 && e->entry[31] == 0x20,
+              "... on T2.DAT: 41CV-AL, ALL41, 11 blocks, its entry's own bytes (336 registers)");
+        check(e != nullptr && [&] { const auto got = blocksOf("T2.DAT", *e); return std::equal(lif.begin() + 32, lif.end(), got.begin()); }(),
+              "... its data as it was");
+        if (e == nullptr) std::printf("     (%s)\n", k.viewer.status().c_str());
+    }
+    // ── No cassette: a new one made for it ──────────────────────────────
+    {
+        const std::vector<std::uint8_t> raw = readFile(std::string(cwd) + "/test/data/vectop.raw");
+        Link k;
+        std::string why;
+        k.viewer.startWith("vectop.raw", raw, k.t, why);
+        k.runUntilSettled(3);
+        std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
+        check(k.viewer.question().find("TFDRIVE is empty") != std::string::npos &&
+              k.viewer.question().find("a new cassette, CASS01.DAT") != std::string::npos,
+              "the drive empty: \"... on a new cassette, CASS01.DAT?\"");
+        k.viewer.answer(true, k.t);
+        k.runUntilSettled(10);
+        const hipi::LifDir d = dirOf("CASS01.DAT");
+        check(k.viewer.step() == Uploader::Step::Done && k.drive->media == "CASS01.DAT" && d.mediumBlocks == 512 &&
+              d.dirBlocks == 8 && d.find("VECTOP") != nullptr, "CASS01.DAT made (512 blocks, 64 entries), VECTOP on it, in TFDRIVE");
+    }
+    // ── A short image (it ends after its last file): the header's size counts
+    {
+        const std::vector<std::uint8_t> raw = readFile(std::string(cwd) + "/test/data/vectop.raw");
+        newCassette("SHORT");
+        std::filesystem::resize_file("lif/SHORT.DAT", 10 * 256);       // header, directory -- no data blocks
+        Link k;
+        k.drive->media = "SHORT.DAT";
+        std::string why;
+        k.viewer.startWith("vectop.raw", raw, k.t, why);
+        k.runUntilSettled(3);
+        check(k.viewer.step() == Uploader::Step::Confirm, "SHORT.DAT (10 blocks of 512 in the file): room enough, asked");
+        k.viewer.answer(true, k.t);
+        k.runUntilSettled(10);
+        const hipi::LifDir d = dirOf("SHORT.DAT");
+        check(k.viewer.step() == Uploader::Step::Done && d.mediumBlocks == 512 && d.find("VECTOP") != nullptr &&
+              d.find("VECTOP")->start == 10 && std::filesystem::file_size("lif/SHORT.DAT") == 12 * 256,
+              "... VECTOP added at block 10, the file 12 blocks long now");
+    }
+    // ── A cassette the HP-41 made (NEWM 40): no medium size in its header,
+    // the file only as long as written -- a cassette, 512 blocks
+    {
+        const std::vector<std::uint8_t> raw = readFile(std::string(cwd) + "/test/data/vectop.raw");
+        std::vector<std::uint8_t> img(7 * 256, 0);
+        img[0] = 0x80; img[11] = 2; img[12] = 0x10; img[19] = 5;   // directory at 2, 5 blocks; tracks etc. 0
+        std::fill(img.begin() + 2 * 256, img.end(), 0xFF);
+        { std::ofstream("lif/NEWM.DAT", std::ios::binary).write(reinterpret_cast<const char*>(img.data()), static_cast<std::streamsize>(img.size())); }
+        Link k;
+        k.drive->media = "NEWM.DAT";
+        std::string why;
+        k.viewer.startWith("vectop.raw", raw, k.t, why);
+        k.runUntilSettled(3);
+        k.viewer.answer(true, k.t);
+        k.runUntilSettled(10);
+        const hipi::LifDir d = dirOf("NEWM.DAT");
+        check(k.viewer.step() == Uploader::Step::Done && d.mediumBlocks == 512 && d.find("VECTOP") != nullptr &&
+              d.find("VECTOP")->start == 7, "a cassette from the HP-41's NEWM (no size in its header, 7 blocks long): VECTOP added at block 7");
+    }
+    // ── No room: said when asked, nothing sent ──────────────────────────
+    {
+        const std::vector<std::uint8_t> raw = readFile(std::string(cwd) + "/test/data/vectop.raw");
+        newCassette("FULL", 8);
+        // 8 files fill its directory
+        hipi::LifFileImage img;
+        std::string why;
+        hipi::lifFileFromPc("x.raw", raw, img, why);
+        for (int i = 0; i < 8; ++i) {
+            img.bytes[1] = static_cast<std::uint8_t>('A' + i);       // XA, XB ...
+            std::fstream f("lif/FULL.DAT", std::ios::binary | std::ios::in | std::ios::out);
+            auto rd = [&](std::uint32_t b, std::uint8_t* out) {
+                f.seekg(static_cast<std::streamoff>(b) * 256); f.read(reinterpret_cast<char*>(out), 256); return f.gcount() == 256;
+            };
+            auto wr = [&](std::uint32_t b, const std::uint8_t* in) {
+                f.seekp(static_cast<std::streamoff>(b) * 256); f.write(reinterpret_cast<const char*>(in), 256); return f.good();
+            };
+            hipi::lifAddFile(rd, wr, 512, img.bytes.data(),
+                             [&](std::uint32_t b, std::uint8_t* out) { std::memcpy(out, img.bytes.data() + 32 + b * 256, 256); return true; },
+                             false, why);
+        }
+        check(dirOf("FULL.DAT").files.size() == 8 && dirOf("FULL.DAT").firstFree < 0, "FULL.DAT: 8 files, its directory full");
+        Link k;
+        k.drive->media = "FULL.DAT";
+        k.viewer.startWith("vectop.raw", raw, k.t, why);
+        k.runUntilSettled(3);
+        check(k.viewer.step() == Uploader::Step::Failed && k.viewer.status().find("directory is full") != std::string::npos,
+              "a ninth: \"HIPI: FULL.DAT: the directory is full\" -- before anything is sent");
     }
 
     if (chdir(cwd) != 0) return 1;

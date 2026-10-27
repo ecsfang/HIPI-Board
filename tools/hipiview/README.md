@@ -176,6 +176,16 @@ a message box says why. It needs HIPI firmware 1.6.0 or newer (protocol
 version 7). The protocol: `mirror_protocol.h` (FILES); the details: GUIDE.md
 §7.1.
 
+An HP-41 program (`.raw`) dropped the same way is added to the cassette
+instead: converted here to a PGM41 file (`lif_file.h`, as lifutils'
+`raw41lif`), named after the file (upper case, letters and digits, at most
+10). hipiview asks **Add**, or **Replace** / **Skip** if a file of that name
+is on the cassette, or — the drive empty — whether to put it on a new
+cassette (`CASS01.DAT` ...). Several files dropped at once go one after the
+other; with more waiting, the question also offers **Add all** / **Replace
+all** (each only for its own sort of question: Add all never replaces), and
+a message at the end lists those that weren't sent.
+
 ### Saving a cassette on the PC
 
 The other way round, with **View** or **Control**: **Save media on PC** in
@@ -190,6 +200,12 @@ own on Linux (else `zenity` or `kdialog`; without any: the usual folder, a
 free name, and a message), the system's own on Windows and macOS. With
 `--save-to DIR` cassettes go to DIR without asking. Needs HIPI firmware
 1.6.0 or newer.
+
+A single file works the same way: tap it in HIPI's Media map, then **Save on
+PC** in its box. An HP-41 program arrives as `NAME.raw`, as lifutils'
+`lifget -r` writes it (the program and its checksum); any other file as
+`NAME.lif`, as `lifget` writes it (its directory entry first) -- dropped on
+the Tape view again, it goes back onto a cassette unchanged.
 
 ### Options
 
@@ -306,15 +322,23 @@ as touches and buttons with **Control** — and nothing with **View**.
 whole and goes into a stand-in drive, the old cassette taken out first
 (HIPI's SD card is `link_sim_sd/` meanwhile).
 
-`./link_sim 0.02 10 download` asks for a cassette with the M key and once
-more from "HIPI's menu", with **View**, and checks both files hipiview saved
-(`--save-to link_sim_saved`).
+`./link_sim 0.02 12 download` asks for a cassette with the M key and once
+more from "HIPI's menu", then VECTOP on its own ("Save on PC"), with **View**,
+and checks the files hipiview saved (`--save-to link_sim_saved`; VECTOP.raw
+the same bytes as `lifget -r`).
+
+`./link_sim 0.02 18 upload` drops a cassette, then three files at once:
+`test/data/vectop.raw`, a `.txt` (refused, listed at the end) and a second
+program ("Add all" for the first); then a third program ("Add all") with
+VECTOP again -- asked about anyway, and skipped.
 
 `make upload_test` (part of `make test`) runs hipiview's side of sending a
 file (`upload.hpp`) against HIPI's (`mirror_upload.cpp`) in one program,
 in simulated time: an empty drive, replacing while the drive is busy, the
 same name, cancel, HIPI's refusals, 20 % of the messages lost, a damaged
-piece, a drive busy for too long, the viewer going away. `make
+piece, a drive busy for too long, the viewer going away; and the HP-41
+program `test/data/vectop.raw`: added, Skip, Replace, a second one with a long
+name, an empty drive (a new cassette), a full directory, no END. `make
 download_test` does the same for a cassette to the PC (`download.hpp`
 against `mirror_download.cpp`): asked for here or from HIPI's menu, a full
 ring, a busy drive, the cassette written to meanwhile (it starts over) or all
@@ -337,6 +361,9 @@ the time (given up), refusals, the session ending, 2 MB.
 | `test/host_test.cpp` | The test (`make test`) |
 | `test/link_sim.cpp`, `test/stubs/` | The lossy-USB test (`make link_sim`) |
 | `test/upload_test.cpp` | Sending a file: hipiview's side against HIPI's receiver (part of `make test`) |
+| `test/data/vectop.raw` | An HP-41 program (raw), for the tests |
+| `../../include/lif_file.h` | A file from the PC as a LIF file (`.raw`: an HP-41 program), by its extension |
+| `../../include/lif_dir.h`, `../../src/lif_dir.cpp` | A LIF volume's directory: a file found, a file added (as lifutils' lifput) |
 | `test/download_test.cpp` | A cassette to the PC: HIPI's sender against hipiview's side (part of `make test`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures (part of `make test`; saves `printer_view_*.png`) |
 | `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |

@@ -222,6 +222,14 @@ std::uint32_t nextRetry_ = 0;      // not LIF: when to look again
 std::uint32_t nextPoll_ = 0;
 // The tapped file's box (instead of MEDIUM) until fileUntil_
 int fileShown_ = -1;                    // index in model_.ext, -2 = free space
+// Its box's "Save on PC" (mediamap_setSaveOnPc()): shown while hipiview is
+// connected; after a tap, what came of it instead
+std::function<bool()> saveAvailable_;
+std::function<bool(const std::string&, std::string&)> saveFile_;
+bool saveShown_ = false;
+int saveX_ = 0, saveY_ = 0;
+constexpr int kSaveW = 150, kSaveH = 34;
+std::string saveMsg_;
 std::uint32_t fileUntil_ = 0;
 bool fileTimed_ = false;
 
@@ -299,8 +307,58 @@ void fillArc(int r0, int r1, double a0, double a1, std::uint16_t col) {
     }
 }
 
+// Where one file ends and the next begins inside a run of one kind (several
+// programs after each other, that looked like one): a hair in a shade of
+// the run's own colour, a little darker (a little lighter on a dark one) --
+// seen when looked for, without turning a medium of many small files into
+// a pattern: one closer than kMinBoundarySteps to the last one drawn, or to
+// a change of kind (a black hair already), is left out.
+constexpr double kMinBoundarySteps = 2.0;
+std::uint16_t boundaryShade(std::uint16_t c) {
+    int r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
+    if (r * 2 + g + b * 2 < 60) {                          // dark: a little lighter
+        r += (31 - r) / 4; g += (63 - g) / 4; b += (31 - b) / 4;
+    } else {
+        r = r * 3 / 4; g = g * 3 / 4; b = b * 3 / 4;
+    }
+    return static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
+}
+// The boundaries in a ring, as steps (fractions: where in its step the file
+// starts), steps from `from` to `to` only
+void drawBoundaries(int ring, double from = -1.0, double to = 1e9) {
+    if (bpr_ == 0) return;
+    const int r1 = ringOuter(ring), r0 = ringInner(ring);
+    const std::size_t base = static_cast<std::size_t>(ring * steps_);
+    std::vector<std::pair<double, std::size_t>> at;          // (step, step index)
+    for (const Extent& x : model_.ext) {
+        if (x.kind == Vol || x.kind == Dir || x.kind == Free || x.start == 0 || x.start >= model_.total) continue;
+        if (x.start / bpr_ != static_cast<std::uint32_t>(ring) || x.start % bpr_ == 0) continue;
+        const int g = stepOf(x.start), gp = stepOf(x.start - 1);
+        if (!sameRun(static_cast<std::size_t>(g), static_cast<std::size_t>(gp))) continue;   // (a cut there already)
+        at.emplace_back(static_cast<double>(x.start % bpr_) * steps_ / bpr_, static_cast<std::size_t>(g));
+    }
+    std::sort(at.begin(), at.end());
+    double last = -1e9;
+    for (const auto& p : at) {
+        const double s = p.first;
+        if (s - last < kMinBoundarySteps) continue;
+        // Not right beside a change of kind
+        bool nearCut = false;
+        for (int c = static_cast<int>(s) - 1; c <= static_cast<int>(s) + 2 && !nearCut; ++c) {
+            if (c <= 0 || c >= steps_) continue;
+            if (!sameRun(base + static_cast<std::size_t>(c - 1), base + static_cast<std::size_t>(c)) && std::fabs(c - s) < 1.0)
+                nearCut = true;
+        }
+        if (nearCut) continue;
+        last = s;
+        if (s < from || s > to) continue;
+        fillArc(r0, r1, angleOf(s) - 0.002, angleOf(s) + 0.002, boundaryShade(stepColour(p.second)));
+    }
+}
+
 // A ring, straight over what's there (no clearing first: it would flash):
-// each run of one kind, then a hair of black where the kind changes
+// each run of one kind, then a hair of black where the kind changes, and
+// the files' boundaries within a run (drawBoundaries())
 void drawRing(int ring) {
     const int r1 = ringOuter(ring), r0 = ringInner(ring);
     const std::size_t base = static_cast<std::size_t>(ring * steps_);
@@ -314,6 +372,7 @@ void drawRing(int ring) {
     }
     if (cuts.size() > 1)
         for (int c : cuts) fillArc(r0, r1, angleOf(c) - 0.0015, angleOf(c) + 0.0015, kBlack);
+    drawBoundaries(ring);
 }
 
 const char* opWord(MediaOp op) {
@@ -416,6 +475,7 @@ void eraseHead() {
         const double gl = !sameRun(idx(k - 1), idx(k)) ? 0.0015 : 0.0, gr = !sameRun(idx(k + 1), idx(k)) ? 0.0015 : 0.0;
         fillArc(r0, r1, angleOf(k) + gl, angleOf(k + 1) - gr, stepColour(idx(k)));
     }
+    drawBoundaries(ring, g % steps_ - 1, g % steps_ + 2);
 }
 
 void card(const Box& c, const char* name) {
@@ -486,6 +546,7 @@ void padlock(int x, int y, std::uint16_t col) {
 
 void drawMedium() {
     clearInside(mediumCard_);
+    saveShown_ = false;
     const int x = mediumCard_.x + 16;
     int y = mediumCard_.y + 22;
     auto row = [&](const char* k, const std::string& v, std::uint16_t col = kWhite) {
@@ -535,6 +596,20 @@ void drawMedium() {
         row("at", b);
         std::snprintf(b, sizeof(b), "%lu %s", static_cast<unsigned long>(e.len), unitWord());
         row("size", b);
+        // A file: Save on PC (hipiview connected) -- or what came of it
+        saveShown_ = false;
+        const bool aFile = e.kind != Dir && e.kind != Vol && e.kind != Deleted && e.name[0] != 0;
+        const int by = mediumCard_.y + mediumCard_.h - 16 - kSaveH;
+        if (aFile && !saveMsg_.empty()) {
+            const std::size_t n = static_cast<std::size_t>((mediumCard_.w - 32) / 8);
+            text(x, by + 9, saveMsg_.size() > n ? saveMsg_.substr(0, n) : saveMsg_, 0, kYellow, kBlack);
+        } else if (aFile && saveAvailable_ && saveFile_ && saveAvailable_()) {
+            saveX_ = mediumCard_.x + mediumCard_.w - 16 - kSaveW;
+            saveY_ = by;
+            d_->fillRoundRect(i16(saveX_), i16(saveY_), kSaveW, kSaveH, 8, kYellow);
+            text(saveX_ + (kSaveW - 10 * 8) / 2, saveY_ + (kSaveH - 16) / 2, "Save on PC", 0, kBlack, kYellow);
+            saveShown_ = true;
+        }
         return;
     }
     d_->fillRect(i16(mediumCard_.x + 20), i16(mediumCard_.y - 9), 120, 18, kBlack);
@@ -749,6 +824,15 @@ void redrawRings() {
 MediaMapTap mediamap_tap(int x, int y) {
     if (x >= SCREEN_MAX_X - kCloseW && y < kTitleH + 12) return MediaMapTap::Close;
     if (!model_.ok) return MediaMapTap::None;
+    // The file box's Save on PC: the file to hipiview, the answer in its place
+    if (saveShown_ && fileShown_ >= 0 && x >= saveX_ && x < saveX_ + kSaveW && y >= saveY_ && y < saveY_ + kSaveH) {
+        const Extent& e = model_.ext[static_cast<std::size_t>(fileShown_)];
+        std::string why;
+        saveMsg_ = saveFile_(e.name, why) ? std::string(e.name) + " goes to hipiview" : why;
+        fileTimed_ = false;                   // (the box stays a while longer)
+        drawMedium();
+        return MediaMapTap::Handled;
+    }
     // The card: its tabs (BY TYPE / BY MACHINE) and its rows (highlight one)
     if (x >= typeCard_.x && x < typeCard_.x + typeCard_.w) {
         if (y >= typeCard_.y - 16 && y < typeCard_.y + 14) {
@@ -790,8 +874,21 @@ MediaMapTap mediamap_tap(int x, int y) {
     }
     fileShown_ = best;
     fileTimed_ = false;
+    saveMsg_.clear();
     drawMedium();
     return MediaMapTap::Handled;
+}
+
+void mediamap_setSaveOnPc(std::function<bool()> available, std::function<bool(const std::string&, std::string&)> save) {
+    saveAvailable_ = std::move(available);
+    saveFile_ = std::move(save);
+}
+
+bool mediamap_savePoint(int& x, int& y) {
+    if (!saveShown_) return false;
+    x = saveX_ + kSaveW / 2;
+    y = saveY_ + kSaveH / 2;
+    return true;
 }
 
 void mediamap_tabPoint(bool machine, int& x, int& y) {
