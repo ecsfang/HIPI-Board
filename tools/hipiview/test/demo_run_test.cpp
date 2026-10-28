@@ -277,6 +277,15 @@ int main(int argc, char** argv) {
     bool fitAxesShot = false, machineSeen = false, typeHighlight = false, machineShot = false, hwtestSeen = false;
     std::uint64_t machineAt = 0;
     bool fitSeen = false, digitized = false, digiShot = false, wasDigitizing = false;
+    // The Tape view's spinning reels: each step one copy per hub onto the
+    // panel -- never the bare drive photo there first (black squares for
+    // a moment on the real display)
+    static int reelSteps = 0, reelBareDrive = 0;
+    chip.onBteCopy = [](std::uint32_t src, std::uint32_t dst, int, int, int w, int h) {
+        if (dst != 0 || w != 38 || h != 38 || hipi::views_output() != hipi::DisplayOutput::Tape) return;
+        if (src == hipi::LT7683::kReelsAddr) ++reelSteps;
+        if (src == hipi::LT7683::kTapeLayerAddr) ++reelBareDrive;
+    };
     // The ERROR light: lit, its text shown (a touch on it), put out again
     bool errLit = false, errTextShown = false, errOut = false;
     std::uint64_t errAt = 0;
@@ -368,6 +377,9 @@ int main(int argc, char** argv) {
     for (const std::string& s : seen) order += s + " ";
     std::printf("     views: %s\n", order.c_str());
     check(order.find("video80") != std::string::npos, "the display as an HP 92198");
+    std::printf("     reels: %d frames drawn, %d times the bare drive under them\n", reelSteps, reelBareDrive);
+    check(reelSteps > 0 && reelBareDrive == 0, "Tape: the reels turn, a hub drawn in one copy (no black squares between)");
+    chip.onBteCopy = nullptr;
     check(order.find("tape") != std::string::npos && pickerShows == 1 && pickerMoves >= 1 && pickerHides == 1,
           "Tape: the cassette list shown, a cassette picked");
     check(!pickerFiles.empty() && pickerFiles[0].empty() && pickerFiles.size() >= 2, "... from the lif folder");

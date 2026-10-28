@@ -46,6 +46,11 @@ public:
     std::function<bool(std::uint32_t, std::vector<std::uint8_t>&)> loadAsset;
     std::function<void(std::uint32_t, const std::vector<std::uint8_t>&)> saveAsset;
 
+    // For the tests: told after each BTE memory copy (source, destination,
+    // where on the destination, the size) -- e.g. to see a picture built
+    // in steps on the visible panel
+    std::function<void(std::uint32_t src, std::uint32_t dst, int x, int y, int w, int h)> onBteCopy;
+
     // ── Raw SPI cycles (host test) ──────────────────────────────────────
     void hostCmd(std::uint8_t reg) { cmd(reg, true); }
     void hostWrite(std::uint8_t v) { dataWrite(v); }

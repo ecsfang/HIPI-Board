@@ -4,8 +4,10 @@
 # to build the firmware, run the PC tests (tools/hipiview) and update the
 # documents. Replaces bkup.sh.
 #
-#   scripts/pack_hipi.sh                 -> hipi.zip in the project folder
-#   scripts/pack_hipi.sh -o x.zip        -> another name
+#   scripts/pack_hipi.sh                 -> hipi.zip in the pack folder (below)
+#   scripts/pack_hipi.sh -o x.zip        -> another name (a relative one in
+#                                           the pack folder)
+#   scripts/pack_hipi.sh -d DIR          -> another pack folder
 #   scripts/pack_hipi.sh -c              -> only files changed since the last
 #                                           full pack (hipi-changes.zip)
 #   scripts/pack_hipi.sh --pcb           -> pcb/ too (schematics, BOM, photos)
@@ -20,6 +22,11 @@
 #     PicoLed/, pyilper2/
 #   - pcb/ (unless --pcb), documents/*.pdf
 #
+# The pack folder is OUTSIDE the project -- $HIPI_PACK_DIR, else
+# ~/hipi-packs -- so cleaning the project folder (git clean, a new clone)
+# loses neither the zips nor the time of the last full pack, which -c needs.
+# (An older .last_pack in the project folder is moved there.)
+#
 # Works from anywhere: the project folder is the one above scripts/.
 
 set -u
@@ -28,18 +35,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 OUT=""
+PACK_DIR="${HIPI_PACK_DIR:-$HOME/hipi-packs}"
 CHANGES=false
 WITH_PCB=false
 DRY=false
-STAMP=".last_pack"
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -o) OUT="$2"; shift 2 ;;
+        -d) PACK_DIR="$2"; shift 2 ;;
         -c|--changes) CHANGES=true; shift ;;
         --pcb) WITH_PCB=true; shift ;;
         -n|--dry-run) DRY=true; shift ;;
-        -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1 (try -h)"; exit 1 ;;
     esac
 done
@@ -47,7 +55,15 @@ done
 if [ -z "$OUT" ]; then
     if $CHANGES; then OUT="hipi-changes.zip"; else OUT="hipi.zip"; fi
 fi
-case "$OUT" in /*) ;; *) OUT="$ROOT/$OUT" ;; esac
+mkdir -p "$PACK_DIR" || { echo "Can't make $PACK_DIR"; exit 1; }
+PACK_DIR="$(cd "$PACK_DIR" && pwd)"
+case "$OUT" in /*) ;; *) OUT="$PACK_DIR/$OUT" ;; esac
+
+# When the last full pack was made: its file's time (in the pack folder)
+STAMP="$PACK_DIR/.last_pack"
+if [ ! -f "$STAMP" ] && [ -f "$ROOT/.last_pack" ]; then
+    mv "$ROOT/.last_pack" "$STAMP" && echo "Moved .last_pack to $PACK_DIR"
+fi
 
 # Folders never packed (anywhere in the tree unless they start with ./)
 PRUNE=(
@@ -62,7 +78,7 @@ $WITH_PCB || PRUNE+=(./pcb)
 SKIP=(
     '*.o' '*.a' '*.d' '*.obj' '*.elf' '*.uf2' '*.bin' '*.hex' '*.map' '*.dis'
     '*.zip' '*.tar.gz' '*.log' '*.tmp' '*.bak' '*.swp' '*.hvlog' '*.mp4'
-    CMakeCache.txt compile_commands.json "$STAMP"
+    CMakeCache.txt compile_commands.json .last_pack
 )
 
 prune_expr=()
@@ -128,5 +144,5 @@ rm -f "$OUT"
 zip -q -X "$OUT" -@ < "$LIST" || { echo "zip failed"; exit 1; }
 $CHANGES || touch "$STAMP"
 
-awk -v f="$(basename "$OUT")" -v n="$COUNT" -v b="$BYTES" -v z="$(stat -c %s "$OUT")" \
+awk -v f="$OUT" -v n="$COUNT" -v b="$BYTES" -v z="$(stat -c %s "$OUT")" \
     'BEGIN { printf "%s: %d files, %.1f MB -> %.1f MB\n", f, n, b / 1048576, z / 1048576 }'

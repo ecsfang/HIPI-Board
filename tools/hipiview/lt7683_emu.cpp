@@ -644,6 +644,7 @@ void LT7683Emu::bteStart() {
                     rop(code, pix(at(s0a, s0w, s0x + x, s0y + y)), pix(at(s1a, s1w, s1x + x, s1y + y)));
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x) setPix(at(dta, dtw, dtx + x, dty + y), tmp[static_cast<std::size_t>(y) * w + x]);
+        if (onBteCopy) onBteCopy(s0a, dta, dtx, dty, w, h);
         break;
     }
     case 0xC:                                            // solid fill

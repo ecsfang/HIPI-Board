@@ -482,6 +482,32 @@ void drawTapeRegion(std::int16_t x, std::int16_t y, std::int16_t w, std::int16_t
                                 // same MWCR0 restore as the plotter paths
 }
 
+// One reel hub at its current frame, in ONE copy to the panel: the frame
+// from reels.bmp, or (frame 0) the hub as the cassette picture has it.
+// Redrawing it with drawTapeRegion() instead puts the drive's photo there
+// first (the bare pins: black squares), then the cassette, then the frame
+// -- three copies onto the visible panel, and now and then the panel shows
+// the first one for a moment. The hub's box is opaque and inside the
+// cassette, nothing else is drawn over it, so one copy gives the same
+// picture. (A box not wholly inside the cassette: drawTapeRegion().)
+void drawReel(int i) {
+    const ReelPos& r = kReels[i];
+    const int x = tapeX_ + kCassetteX + r.x, y = tapeY_ + kCassetteY + r.y;
+    if (r.x < 0 || r.y < 0 || r.x + kReelBox > cassetteW_ || r.y + kReelBox > cassetteH_) {
+        drawTapeRegion(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), kReelBox, kReelBox);
+        return;
+    }
+    display_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    if (reelFrame_ != 0)
+        overlayPatch(LT7683::kReelsAddr, reelsStride_, x, y, kReelBox, kReelBox,
+                     x, y, kReelBox, kReelBox, reelFrame_ * kReelBox, i * kReelBox);
+    else
+        overlayPatch(LT7683::kCassetteLabelAddr, SCREEN_MAX_X,
+                     tapeX_ + kCassetteX, tapeY_ + kCassetteY, cassetteW_, cassetteH_,
+                     x, y, kReelBox, kReelBox);
+}
+
+
 // Redraws one status LED square if the Tape view is showing
 void refreshLed(const LedSprite& led) {
     if (output_ != DisplayOutput::Tape) return;
@@ -1814,11 +1840,7 @@ void views_poll() {
         const bool rewinding = !demoTape_ && drive_->isRewinding();
         reelNext_ = make_timeout_time_ms(rewinding ? kReelRewindFrameMs : kReelFrameMs);
         reelFrame_ = (reelFrame_ + (rewinding ? kReelFrames - 1 : 1)) % kReelFrames;
-        for (const ReelPos& r : kReels) {
-            drawTapeRegion(static_cast<std::int16_t>(tapeX_ + kCassetteX + r.x),
-                           static_cast<std::int16_t>(tapeY_ + kCassetteY + r.y),
-                           kReelBox, kReelBox);
-        }
+        for (int i = 0; i < 2; ++i) drawReel(i);
     }
     if (splashVisible_ && time_reached(splashHideDeadline_)) {
         splashVisible_ = false;

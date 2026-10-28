@@ -963,7 +963,13 @@ open with the drive empty. The **POWER** LED is lit while `TFDRIVE` is
 enabled (**Devices** menu), and **BUSY** follows the owner's manual: it is
 lit while the drive executes an operation (reading, writing, seeking,
 formatting, rewinding) or is addressed as talker or listener. The
-cassette's reels only spin while the tape actually moves. The power
+cassette's reels only spin while the tape actually moves. Each step of
+the animation draws a hub with one BTE copy straight onto the panel
+(`drawReel()`: the frame from reels.bmp, or the cassette's own hub for
+frame 0) -- built with `drawTapeRegion()` (the drive's photo, then the
+cassette, then the frame) the panel showed the bare drive pins as black
+squares now and then (`demo_run_test` checks it, with the emulator's
+`onBteCopy`). The power
 switch works like the real OFF-STANDBY-ON switch: each tap moves it one
 step (OFF -> STANDBY -> ON -> STANDBY -> OFF). OFF disables `TFDRIVE`
 (once it's idle); ON keeps it powered; in STANDBY the HP-41 can power it
