@@ -118,7 +118,7 @@ void makeChipFont() {
 void plot(const std::string& g, bool black, const char* png) {
     hipi::views_clearPlotter();
     hipi::views_setPaperBlack(black);
-    for (char c : g) plotter->put(c);
+    for (char c : g) plotter->hpgl().put(c);
     run(50);
     snapshot(png);
 }
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
     printer = new CPrinter("TFPRINT");
     devices = { plotter, printer };
     hipi::views_setPrinter(printer);
-    hipi::views_init(&d, &screen, plotter);
+    hipi::views_init(&d, &screen, plotter, &plotter->hpgl());
 
     // Display
     for (char c : hipi::demo::textIntro()) screen.pr_char(static_cast<std::uint8_t>(c));

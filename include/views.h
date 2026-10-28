@@ -1,6 +1,6 @@
 #pragma once
 // views.h -- the device views on the panel: the normal HP-41 text
-// display (Screen), a live rendering of the plotter's output (CPlotter),
+// display (Screen), a live rendering of the plotter's HP-GL (hpgl.h),
 // and (7" panel only) one Tape view per cassette drive: a picture of an
 // HP82161A with touch-sensitive areas. Each device says which view it has
 // (CDevice::viewKind()); swiping steps through them in loop order. See
@@ -11,7 +11,7 @@
 // Usage (see pico_main.cpp):
 //
 //   plotter = new CPlotter("TFPLOT");   // (done inside hipi_init())
-//   hipi::views_init(display, screen, plotter);
+//   hipi::views_init(display, screen, plotter, &plotter->hpgl());
 //
 // The UiDialog "Display" menu calls views_viewDevices()/
 // views_showDevice()/views_clearPlotter() directly (see
@@ -19,7 +19,7 @@
 
 #include "display_config.h"
 #include "Screen.hpp"
-#include "plotter.h"
+#include "hpgl.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -51,9 +51,11 @@ struct PrinterHit {
 };
 
 // Call once, after display/screen/plotter all exist (see hipi_init()).
+// The Plotter view shows `hpgl` (the drawing) as the view of
+// `plotterDevice` -- any plotter device with an HpglInterpreter.
 // On the 7" panel this also loads hp82161a.bmp from the SD card into its own
 // off-screen SDRAM layer (LT7683::kTapeLayerAddr) for the Tape view.
-void views_init(DisplayDriver* display, Screen* screen, CPlotter* plotter);
+void views_init(DisplayDriver* display, Screen* screen, CDevice* plotterDevice, HpglInterpreter* hpgl);
 
 // Tape view cassette (7" only; needs tape-in.bmp on the SD card): the
 // cassette shows the selected .dat file's name on its label. Call
@@ -257,7 +259,7 @@ bool views_paperBlack();
 // The pen's tip (Plotter -> Pen): thin (1 pixel) or wide (3 pixels, a
 // round tip), like putting a pen with a broader tip in the real plotter:
 // only what's drawn from now on gets it, so thin and wide lines mix in one
-// plot. Thin at start-up (not saved). CPlotter::setWideTip().
+// plot. Thin at start-up (not saved). HpglInterpreter::setWideTip().
 void views_setPenWide(bool wide);
 bool views_penWide();
 
@@ -292,7 +294,7 @@ bool views_digitizing();               // the panel is showing
 bool views_digitizeTap(int x, int y);  // true: the touch was taken
 
 // The plotter's ERROR light (the 7470A's front-panel LED), top centre of
-// the Plotter view while CPlotter::errorCode() isn't 0. A touch on it
+// the Plotter view while HpglInterpreter::errorCode() isn't 0. A touch on it
 // shows views_errorText() in a message box: true if it was there.
 bool views_errorLightTap(int x, int y);
 // Where the light is (its LED), for the demo's touch: false while it's out

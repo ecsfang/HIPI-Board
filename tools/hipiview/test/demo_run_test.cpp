@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
     devices = { videoDisplay, drive, plotter, printer };
     hipi::views_setPrinter(printer);
     hipi::views_setDrive(drive);
-    hipi::views_init(&d, screen, plotter);
+    hipi::views_init(&d, screen, plotter, &plotter->hpgl());
     hipi::views_setVideo80(video80Term);
     hipi::hwtest_init(&d);
     hipi::hpil_diag_init(&d);
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
 
     // Something on the screen and the plot before: gone afterwards
     for (char c : std::string("BEFORE THE DEMO\r\n")) screen->pr_char(static_cast<std::uint8_t>(c));
-    for (char c : std::string("IN;SP1;PU0,0;PD1000,1000;")) plotter->put(c);
+    for (char c : std::string("IN;SP1;PU0,0;PD1000,1000;")) plotter->hpgl().put(c);
     const IL_CMD_t addrBefore = plotter->addr();
 
     hipi::demo_start();
@@ -303,13 +303,13 @@ int main(int argc, char** argv) {
             snapshot(png);
             shotDone = true;
         }
-        if (!plotter->segments().empty()) plotted = true;
-        if (o == hipi::DisplayOutput::Plotter && hipi::views_plotFit() && plotter->segments().size() > 100) fitSeen = true;
+        if (!plotter->hpgl().segments().empty()) plotted = true;
+        if (o == hipi::DisplayOutput::Plotter && hipi::views_plotFit() && plotter->hpgl().segments().size() > 100) fitSeen = true;
         // Digitizing: a picture while the panel is up, then where the point went
         const bool digi = hipi::views_digitizing();
         if (digi && !wasDigitizing) digiFrom = fakeNowUs;
         if (digi && !digiShot && fakeNowUs - digiFrom > 3000000) { snapshot("../demo_run_digitize.png"); digiShot = true; }
-        if (!digi && wasDigitizing) { digitized = true; digX = plotter->penX(); digY = plotter->penY(); digiFrom = fakeNowUs; }
+        if (!digi && wasDigitizing) { digitized = true; digX = plotter->hpgl().penX(); digY = plotter->hpgl().penY(); digiFrom = fakeNowUs; }
         if (digitized && digY >= 0 && fakeNowUs - digiFrom > 2800000) {      // the point marked
             snapshot("../demo_run_digitized.png");
             digY = -digY - 1;                                  // (once)
@@ -325,11 +325,11 @@ int main(int argc, char** argv) {
                 run(200);
                 snapshot("../demo_run_error_text.png");
             }
-            if (errTextShown && !lit && plotter->errorCode() == 0) errOut = true;
+            if (errTextShown && !lit && plotter->hpgl().errorCode() == 0) errOut = true;
         }
         // The Fit view while the axes are drawn, a piece at a time
         if (!fitAxesShot && o == hipi::DisplayOutput::Plotter && hipi::views_plotFit() &&
-            plotter->segments().size() >= 22 && plotter->segments().size() < 30) {
+            plotter->hpgl().segments().size() >= 22 && plotter->hpgl().segments().size() < 30) {
             snapshot("../demo_run_fit_axes.png");
             fitAxesShot = true;
         }
@@ -382,7 +382,7 @@ int main(int argc, char** argv) {
     check(plotted, "the plotter draws");
     check(fitSeen, "a plot in the Fit view");
     if (digY < 0) digY = -digY - 1;
-    check(errLit && plotter->errorLog().size() >= 1 && plotter->errorLog().back().code == 2,
+    check(errLit && plotter->hpgl().errorLog().size() >= 1 && plotter->hpgl().errorLog().back().code == 2,
           "an HP-GL error (SC with two numbers): the ERROR light lit, error 2");
     check(errTextShown, "... touched: the message box says what it was");
     check(errOut, "... OE: the light out again");
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
     run(10);
     check(!hipi::demo_running(), "HP-IL traffic stops it");
     check(hipi::views_output() == hipi::DisplayOutput::Display, "back to the view it started from");
-    check(plotter->segments().empty() && printer->lines().empty(), "the plot and the paper are empty");
+    check(plotter->hpgl().segments().empty() && printer->lines().empty(), "the plot and the paper are empty");
     check(plotter->addr() == addrBefore, "the devices' loop addresses put back");
     check(drive->mediaFile().empty(), "the cassette wasn't really changed");
     snapshot("../demo_run_99_after.png");

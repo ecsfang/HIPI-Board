@@ -72,7 +72,7 @@ CDevice* hipiDeviceAt(int addr) {
 // HIPI's plotter's ERROR light: its error number, 0 = out (or no plotter)
 int plotterError() {
     for (CDevice* d : devices)
-        if (d->type() == PLOTTER && d->enabled()) return static_cast<CPlotter*>(d)->errorCode();
+        if (d->type() == PLOTTER && d->enabled()) return static_cast<CPlotter*>(d)->hpgl().errorCode();
     return 0;
 }
 
@@ -419,7 +419,7 @@ void drawCard(const Card& c) {
     roleFrame(c.x, c.y, c.w, c.h, 8, role);
     // HIPI's plotter with its ERROR light lit: a yellow LED on the card
     if (CDevice* d = hipiDeviceAt(c.addr)) {
-        if (d->type() == PLOTTER && static_cast<CPlotter*>(d)->errorCode() != 0) {
+        if (d->type() == PLOTTER && static_cast<CPlotter*>(d)->hpgl().errorCode() != 0) {
             const int lx = c.x + c.w - 14, ly = c.y + 13;
             d_->fillCircle(static_cast<std::int16_t>(lx), static_cast<std::int16_t>(ly), 6, kLedYellow);
             d_->circle(static_cast<std::int16_t>(lx), static_cast<std::int16_t>(ly), 7, kBlack);
@@ -482,9 +482,9 @@ void drawDetails() {
         }
     }
     if (CDevice* d = hipiDeviceAt(selected_)) {
-        if (d->type() == PLOTTER && static_cast<CPlotter*>(d)->errorCode() != 0) {
-            const int e = static_cast<CPlotter*>(d)->errorCode();
-            status = "ERROR " + std::to_string(e) + ": " + CPlotter::errorText(e);
+        if (d->type() == PLOTTER && static_cast<CPlotter*>(d)->hpgl().errorCode() != 0) {
+            const int e = static_cast<CPlotter*>(d)->hpgl().errorCode();
+            status = "ERROR " + std::to_string(e) + ": " + HpglInterpreter::errorText(e);
         }
     }
     rows[r++] = { "Status", status };

@@ -34,7 +34,7 @@ CPilBox* pilbox = nullptr;      // Need to be global for UI indication
 CDisplay* videoDisplay = nullptr;  // Same pattern -- needed for pico_main.cpp's
                                      // own periodic fifoSize() diagnostic (see
                                      // display.h's own comment on fifoSize()).
-CPlotter* plotter = nullptr;    // Need to be global for views.cpp
+CPlotter* plotter = nullptr;    // Global: the views, menus and LEDs reach its HP-GL (plotter.h)
 CPrinter* printer = nullptr;    // TFPRINT, shown in the Printer view
 extern hipi::Video80* video80Term;   // TFDISPLAY's HP 92198 screen (pico_main.cpp)
 CBmp280* bmp280Sensor = nullptr;  // Constructed in hipi_init() rather than as

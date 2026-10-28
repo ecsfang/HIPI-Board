@@ -4,7 +4,7 @@
 // list of (pen, x, y) triples in a normalized 0-32 unit character cell
 // (pen: 0 = pen-up move, 1 = pen-down draw relative to the previous
 // point), exactly matching the original's chagra. table format -- see
-// plotter.cpp's drawLabelChar() for the interpreter. Indexed directly by
+// hpgl.cpp's drawGlyph() for the interpreter. Indexed directly by
 // ASCII code; nullptr where no glyph is defined (falls back to a blank
 // advance in the renderer).
 #pragma once

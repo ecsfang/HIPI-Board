@@ -74,6 +74,7 @@ extern void init_spi(void);
 
 #include "boardui.h"
 #include "views.h"
+#include "plotter.h"
 #include "screendump.h"
 #include "display_text.h"
 #include "bootscreen.h"
@@ -511,7 +512,7 @@ int main() {
     // 7" panel this also loads the Tape and Printer pictures -- slow, so
     // the start-up screen says so first.
     bitmapsRow = hipi::bootscreen_row("Bitmaps", hipi::BootState::Info, "Loading ...");
-    hipi::views_init(display, screen, plotter);
+    hipi::views_init(display, screen, plotter, plotter != nullptr ? &plotter->hpgl() : nullptr);
     // The media map shows the drive of the Tape view (views_drive())
     hipi::mediamap_setSource(
         [](hipi::MediaMapLive& l) {
@@ -778,7 +779,7 @@ int main() {
         hipi::crashlog_poll();       // a new stack depth, logged (crashlog.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
         pixelStrip.poll();           // TFPIXEL effects (pixels.h)
-        plotter_led_poll(plotter != nullptr && plotter->errorCode() != 0);   // ERROR light on LED 3 (leds.h)
+        plotter_led_poll(plotter != nullptr && plotter->hpgl().errorCode() != 0);   // ERROR light on LED 3 (leds.h)
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw
         hipi::hwtest_poll();         // Hardware test: running lights, I2C list (while open)

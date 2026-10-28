@@ -153,7 +153,7 @@ int main(int argc, char** argv) {
     printer = new CPrinter("TFPRINT");
     devices = { plotter, printer };
     hipi::views_setPrinter(printer);
-    hipi::views_init(&d, &screen, plotter);
+    hipi::views_init(&d, &screen, plotter, &plotter->hpgl());
     hipi::hwtest_init(&d);
 
     using S = hipi::I2cState;

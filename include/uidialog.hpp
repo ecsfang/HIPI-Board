@@ -7,6 +7,7 @@
 #include "usb_serial.h"  // LOGF, used by applyTrace()/applyFile()
 #include "hpil.h"        // CDevice, for the "Devices" enable/disable menu
 #include "views.h" // DisplayOutput, for the "Display" output-mode menu
+#include "plotter.h"
 #include "hpil_diag.h"    // BitCells, for the HP-IL signals "Bit cells" setting
 #include "hipi_features.h"  // HIPI_MIRROR_PORT/TRANSPORT, for Settings -> Screen -> Mirror
 #include "display_mirror.h" // displayMirror_setMode(), Settings -> Screen -> Mirror to PC
@@ -1616,11 +1617,11 @@ private:
             m.push_back(paperItem());
             m.push_back(penItem());
             // The plotter's errors (the ERROR light), once there has been one
-            if (plotter != nullptr && (plotter->errorCode() != 0 || !plotter->errorLog().empty())) {
+            if (plotter != nullptr && (plotter->hpgl().errorCode() != 0 || !plotter->hpgl().errorLog().empty())) {
                 const int row = static_cast<int>(m.size());
                 m.push_back(Item{ [] {
-                                      return plotter->errorCode() != 0
-                                                 ? "Errors (ERROR " + std::to_string(plotter->errorCode()) + ") >"
+                                      return plotter->hpgl().errorCode() != 0
+                                                 ? "Errors (ERROR " + std::to_string(plotter->hpgl().errorCode()) + ") >"
                                                  : std::string("Errors >");
                                   },
                                   [this, row] { openPlotterErrors(row); } });
@@ -1745,19 +1746,19 @@ private:
     // message box. `backRow`: the Errors row in the Plotter menu.
     void openPlotterErrors(int backRow) {
         std::vector<Item> m;
-        if (plotter->errorCode() != 0)
+        if (plotter->hpgl().errorCode() != 0)
             m.push_back(item("Clear error", [this, backRow] {
-                plotter->clearError();               // (the light goes out from views_poll())
+                plotter->hpgl().clearError();               // (the light goes out from views_poll())
                 openPlotterErrors(backRow);
             }));
-        const auto& log = plotter->errorLog();
+        const auto& log = plotter->hpgl().errorLog();
         for (auto it = log.rbegin(); it != log.rend(); ++it) {
             const int code = it->code;
             const std::string cmd = it->command;
-            std::string label = std::to_string(code) + " " + CPlotter::errorText(code);
+            std::string label = std::to_string(code) + " " + HpglInterpreter::errorText(code);
             if (!cmd.empty()) label += ": " + cmd;
             if (label.size() > 32) label = label.substr(0, 31) + "~";
-            const std::string full = "Error " + std::to_string(code) + ": " + CPlotter::errorText(code) +
+            const std::string full = "Error " + std::to_string(code) + ": " + HpglInterpreter::errorText(code) +
                                      (cmd.empty() ? std::string() : " -- " + cmd);
             m.push_back(item(label, [this, full] {
                 withMainCanvas([&] { views_showMessage(full.c_str()); });

@@ -1166,10 +1166,10 @@ void views_impl::showSplashBox(const char* text, std::uint8_t scale, std::uint32
     if (!boardui_isMenuOpen()) views_refreshCursor();
 }
 
-void views_init(DisplayDriver* display, Screen* screen, CPlotter* plotter) {
+void views_init(DisplayDriver* display, Screen* screen, CDevice* plotterDevice, HpglInterpreter* hpgl) {
     display_ = display;
     screen_ = screen;
-    plotInit(plotter);
+    plotInit(plotterDevice, hpgl);
     mediamap_init(display);
     loadTapeLayer();
     if (tapeLoaded_) {

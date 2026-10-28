@@ -19,6 +19,7 @@
 #include "mediamap.h"
 #include "demo.h"
 #include "views.h"
+#include "plotter.h"
 #include "views.h"
 
 #include "boardui.h"
@@ -343,9 +344,9 @@ void showInfoBox() {
     }
 
     // The plotter's ERROR light, while it's lit
-    if (plotter != nullptr && plotter->errorCode() != 0) {
-        std::snprintf(buf, sizeof(buf), "%s: ERROR %d (%s)", plotter->name(), plotter->errorCode(),
-                      CPlotter::errorText(plotter->errorCode()));
+    if (plotter != nullptr && plotter->hpgl().errorCode() != 0) {
+        std::snprintf(buf, sizeof(buf), "%s: ERROR %d (%s)", plotter->name(), plotter->hpgl().errorCode(),
+                      HpglInterpreter::errorText(plotter->hpgl().errorCode()));
         display_->txtSetCursor(boxX + 20, y); display_->txtWrite(buf); y += lineStep;
     }
 

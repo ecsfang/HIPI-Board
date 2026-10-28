@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
     printer->hpil(AAD + 1);
     devices = { plotter, printer };
     hipi::views_setPrinter(printer);
-    hipi::views_init(&d, &screen, plotter);
+    hipi::views_init(&d, &screen, plotter, &plotter->hpgl());
     check(hipi::views_isAvailable(hipi::DisplayOutput::Printer), "Printer view loaded (hp82162a.bmp, prtparts.bmp)");
     const int closedBefore = hipi::pipBoxesClosedStub();
     hipi::views_showDevice(printer);
@@ -391,8 +391,8 @@ int main(int argc, char** argv) {
     //    arrows move it a pixel, ENTER gives the point, X cancels ─────────
     hipi::views_setPlotFit(false);                    // Page: the whole paper, known mapping
     for (char c : std::string("IN;SP1;PA1000,1000;PD;PA9000,1000,9000,6500,1000,6500,1000,1000;"
-                              "PU;PA2000,2000;PD;CI1500;PU;PA5150,3825;")) plotter->put(c);
-    for (char c : std::string("DP;")) plotter->put(c);
+                              "PU;PA2000,2000;PD;CI1500;PU;PA5150,3825;")) plotter->hpgl().put(c);
+    for (char c : std::string("DP;")) plotter->hpgl().put(c);
     run(100);
     check(hipi::views_output() == hipi::DisplayOutput::Plotter && hipi::views_digitizing(),
           "DP: the Plotter view with the digitize panel");
@@ -400,7 +400,7 @@ int main(int argc, char** argv) {
     hipi::views_digitizeMarker(mx, my);
     std::printf("     marker at the pen: %d,%d\n", mx, my);
     check(mx == 367 && my == 300, "... the marker starts at the pen (5150,3825)");
-    check(hipi::views_digitizeTap(200, 400) && plotter->digitizing(), "a touch on the plot: the marker moves, no point yet");
+    check(hipi::views_digitizeTap(200, 400) && plotter->hpgl().digitizing(), "a touch on the plot: the marker moves, no point yet");
     hipi::views_digitizeMarker(mx, my);
     check(mx == 200 && my == 400, "... the marker where the finger was");
     hipi::views_digitizeTap(72, 501);                 // the frame's corner (1000,1000): in the loupe
@@ -428,19 +428,19 @@ int main(int argc, char** argv) {
     const int wantX = static_cast<int>(std::lround(200 / sc)), wantY = static_cast<int>(std::lround((dy + 7650 * sc - 399) / sc));
     hipi::views_digitizeControl(4, bx, by);           // ENTER
     hipi::views_digitizeTap(bx, by);
-    std::printf("     ENTER: %d,%d (expected %d,%d)\n", plotter->penX(), plotter->penY(), wantX, wantY);
-    check(!plotter->digitizing() && std::abs(plotter->penX() - wantX) <= 2 && std::abs(plotter->penY() - wantY) <= 2,
+    std::printf("     ENTER: %d,%d (expected %d,%d)\n", plotter->hpgl().penX(), plotter->hpgl().penY(), wantX, wantY);
+    check(!plotter->hpgl().digitizing() && std::abs(plotter->hpgl().penX() - wantX) <= 2 && std::abs(plotter->hpgl().penY() - wantY) <= 2,
           "ENTER: the point under the marker, given to the plotter");
     check(!hipi::views_digitizing(), "... and the panel gone");
     run(1500);
     hipi::views_setPaperBlack(true);
-    for (char c : std::string("DP;")) plotter->put(c);
+    for (char c : std::string("DP;")) plotter->hpgl().put(c);
     run(100);
     hipi::views_digitizeTap(185, 327);                // on the circle
     snapshot("tools/hipiview/digitize_2_black.png");
     hipi::views_digitizeControl(5, bx, by);           // X
     hipi::views_digitizeTap(bx, by);
-    check(!plotter->digitizing() && !hipi::views_digitizing(), "X: cancelled, the panel gone");
+    check(!plotter->hpgl().digitizing() && !hipi::views_digitizing(), "X: cancelled, the panel gone");
     hipi::views_setPaperBlack(false);
     check(!hipi::views_digitizeTap(100, 100), "no DP: a touch isn't a point");
     // DP right after IN: the pen at 0,0 -- on the Page view that's the
@@ -448,7 +448,7 @@ int main(int argc, char** argv) {
     // (given to the chip as negative / too large corners they drew magenta
     // lines along the left and bottom edges on the real panel; the emulator
     // clips them anyway, so this only shows the case)
-    for (char c : std::string("IN;DP;")) plotter->put(c);
+    for (char c : std::string("IN;DP;")) plotter->hpgl().put(c);
     run(100);
     hipi::views_digitizeMarker(mx, my);
     chip.render(panel.data(), 0.0);
@@ -468,7 +468,7 @@ int main(int argc, char** argv) {
     // ── Plotter: the pen's tip -- only what's drawn after the change gets
     //    it: a thin and a wide line in one plot, kept through a redraw ──
     check(!hipi::views_penWide(), "Pen: thin at start");
-    for (char c : std::string("IN;")) plotter->put(c);
+    for (char c : std::string("IN;")) plotter->hpgl().put(c);
     run(100);
     chip.render(panel.data(), 0.0);
     std::vector<std::uint32_t> blankCol(SCREEN_MAX_Y);
@@ -480,13 +480,13 @@ int main(int argc, char** argv) {
         for (int y = yFrom; y < yTo; ++y) if (at(500, y) != blankCol[static_cast<std::size_t>(y)]) ++n;
         return n;
     };
-    for (char c : std::string("SP1;PU;PA1000,5000;PD;PA9000,5000;PU;")) plotter->put(c);   // thin (upper)
+    for (char c : std::string("SP1;PU;PA1000,5000;PD;PA9000,5000;PU;")) plotter->hpgl().put(c);   // thin (upper)
     hipi::views_setPenWide(true);
-    for (char c : std::string("PA1000,3000;PD;PA9000,3000;PU;")) plotter->put(c);          // wide (lower)
+    for (char c : std::string("PA1000,3000;PD;PA9000,3000;PU;")) plotter->hpgl().put(c);          // wide (lower)
     hipi::views_setPenWide(false);
-    for (char c : std::string("SP2;PA2000,2000;PD;CI1500;PU;")) plotter->put(c);           // thin again
+    for (char c : std::string("SP2;PA2000,2000;PD;CI1500;PU;")) plotter->hpgl().put(c);           // thin again
     hipi::views_setPenWide(true);
-    for (char c : std::string("PA4000,1500;SI0.4,0.6;LBWIDE PEN\x03;PU;")) plotter->put(c);
+    for (char c : std::string("PA4000,1500;SI0.4,0.6;LBWIDE PEN\x03;PU;")) plotter->hpgl().put(c);
     hipi::views_setPenWide(false);
     run(100);
     const int thinRows = rowsNear(0, 300), wideRows = rowsNear(300, 400);
@@ -499,9 +499,9 @@ int main(int argc, char** argv) {
     // ── Plotter: Fit after IN -- a new, smaller plot inside the old one's
     //    area is fitted afresh, not drawn at the old scale ───────────────
     hipi::views_setPlotFit(true);
-    for (char c : std::string("IN;SP1;PU;PA0,0;PD;PA10000,0,10000,7000,0,7000,0,0;PU;")) plotter->put(c);
+    for (char c : std::string("IN;SP1;PU;PA0,0;PD;PA10000,0,10000,7000,0,7000,0,0;PU;")) plotter->hpgl().put(c);
     run(100);
-    for (char c : std::string("IN;SP1;PU;PA3000,2000;PD;PA6000,2000,6000,4000,3000,4000,3000,2000;PU;")) plotter->put(c);
+    for (char c : std::string("IN;SP1;PU;PA3000,2000;PD;PA6000,2000,6000,4000,3000,4000,3000,2000;PU;")) plotter->hpgl().put(c);
     run(100);
     {
         int ax = 0, ay = 0, bx = 0, by = 0;
@@ -515,7 +515,7 @@ int main(int argc, char** argv) {
     // ── Plotter: the ERROR light -- lit by an HP-GL error, on top of the
     //    plot, a touch says what it was, OE puts it out ───────────────────
     {
-        for (char c : std::string("IN;SP1;PU;PA1000,1000;PD;PA9000,7000;PU;")) plotter->put(c);
+        for (char c : std::string("IN;SP1;PU;PA1000,1000;PD;PA9000,7000;PU;")) plotter->hpgl().put(c);
         run(100);
         int lx = 0, ly = 0;                  // the LED: top centre, 18 px into the box
         lx = ((1024 - 112) / 2 & ~3) + 18;
@@ -523,7 +523,7 @@ int main(int argc, char** argv) {
         chip.render(panel.data(), 0.0);
         const std::uint32_t paper = at(lx, ly);
         check(((paper >> 16) & 0xFF) < 200 || (paper & 0xFF) > 60, "no error: no ERROR light");
-        for (char c : std::string("SC0,100;")) plotter->put(c);   // error 2
+        for (char c : std::string("SC0,100;")) plotter->hpgl().put(c);   // error 2
         run(50);
         chip.render(panel.data(), 0.0);
         const std::uint32_t led = at(lx, ly);
@@ -531,7 +531,7 @@ int main(int argc, char** argv) {
         check(((led >> 16) & 0xFF) > 150 && ((led >> 8) & 0xFF) > 150 && (led & 0xFF) < 60, "SC with two numbers: the ERROR light is lit (yellow)");
         snapshot("tools/hipiview/printer_view_error_light.png");
         // A line drawn right through it: the light stays on top
-        for (char c : std::string("PU;PA0,7600;PD;PA10300,7600;PU;")) plotter->put(c);
+        for (char c : std::string("PU;PA0,7600;PD;PA10300,7600;PU;")) plotter->hpgl().put(c);
         run(50);
         chip.render(panel.data(), 0.0);
         check(at(lx, ly) == led, "a line drawn through it: the light stays on top");
@@ -541,17 +541,17 @@ int main(int argc, char** argv) {
         check(hipi::views_errorLightTap(lx, ly) && hipi::views_isSplashVisible(),
               "a touch on it: the message box");
         run(3000);
-        for (char c : std::string("OE;")) plotter->put(c);         // reading the error puts it out
+        for (char c : std::string("OE;")) plotter->hpgl().put(c);         // reading the error puts it out
         run(50);
         chip.render(panel.data(), 0.0);
-        check(at(lx, ly) != led && plotter->errorCode() == 0, "OE: the light goes out, the plot under it back");
+        check(at(lx, ly) != led && plotter->hpgl().errorCode() == 0, "OE: the light goes out, the plot under it back");
         check(!hipi::views_errorLightTap(lx, ly), "... and a touch there does nothing");
-        for (char c : std::string("ZZ;")) plotter->put(c);
+        for (char c : std::string("ZZ;")) plotter->hpgl().put(c);
         run(50);
         hipi::views_redraw();
         chip.render(panel.data(), 0.0);
         check(at(lx, ly) == led, "an error, then the plot redrawn: the light is drawn again");
-        plotter->clearError();
+        plotter->hpgl().clearError();
         run(50);
         chip.render(panel.data(), 0.0);
         check(at(lx, ly) != led, "Clear error (the menu): out");

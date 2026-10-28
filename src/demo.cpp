@@ -188,7 +188,7 @@ Step hpgl(std::function<std::string()> make, std::size_t n) {
         if (first) { g = make(); i = 0; next = nowMs(); }
         if (static_cast<std::int32_t>(nowMs() - next) < 0) return false;
         next = nowMs() + 15;
-        for (std::size_t k = 0; k < n && i < g.size(); ++k) plotter->put(g[i++]);
+        for (std::size_t k = 0; k < n && i < g.size(); ++k) plotter->hpgl().put(g[i++]);
         if (i >= g.size()) { g.clear(); g.shrink_to_fit(); return true; }
         return false;
     };
@@ -719,7 +719,7 @@ void buildScript() {
     add(wait(1500));
     add(digitizePoint());
     add(wait(1200));
-    add(hpgl([] { return demo::hpglDigitizedMark(plotter->penX(), plotter->penY()); }, 4));
+    add(hpgl([] { return demo::hpglDigitizedMark(plotter->hpgl().penX(), plotter->hpgl().penY()); }, 4));
     add(wait(3500));
     // An HP-GL error: the ERROR light, a touch on it says what it was, OE
     // (as a program reads it) puts it out

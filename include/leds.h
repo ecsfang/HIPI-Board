@@ -107,7 +107,7 @@ int hpil_leds_mode();
 void hpil_leds_hold(bool held);     // (LED 3's plotter error too)
 
 // The plotter's ERROR light on LED 3 (a yellow LED), as the HP 7470A's
-// front panel: lit while the plotter has an HP-GL error (CPlotter::
+// front panel: lit while the plotter has an HP-GL error (HpglInterpreter::
 // errorCode() != 0), out once it's read (OE) or cleared (IN, the menu).
 // Off: LED 3 is left to TFLEDS. Only a change is written to the LED, so
 // TFLEDS can still use LED 3 in between when no error comes or goes.

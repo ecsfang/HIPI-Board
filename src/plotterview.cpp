@@ -1,7 +1,9 @@
-// plotterview.cpp -- the Plotter view (views.h): the plot drawn from
-// CPlotter's segments, Page or Fit, the pens and the paper colour, the
-// ERROR light and the digitize panel (HP-GL DP). The rest of the views,
-// and switching between them, is views.cpp.
+// plotterview.cpp -- the Plotter view (views.h): the plot drawn from an
+// HP-GL interpreter's segments (hpgl.h), Page or Fit, the pens and the
+// paper colour, the ERROR light and the digitize panel (HP-GL DP). It knows
+// the plotter device only as the CDevice whose view it is: any plotter with
+// an HpglInterpreter can be shown. The rest of the views, and switching
+// between them, is views.cpp.
 #include "views.h"
 #include "views_impl.h"
 #include "boardui.h"
@@ -22,22 +24,27 @@ namespace {
 
 std::int16_t i16(long v) { return static_cast<std::int16_t>(v); }
 
-CPlotter* plotter_ = nullptr;
+HpglInterpreter* hpgl_ = nullptr;         // the plotter's HP-GL: what's drawn, its pen, errors
+CDevice* plotDev_ = nullptr;              // the plotter device (whose view this is)
 
 // Page mapping from plotter units to screen pixels -- fits the plotter's
-// whole area (0,0 .. 10300,7650: the paper -- text may start left of the
-// factory P1 at 250,279) into the panel, keeping the aspect ratio
-// (letterboxed). IP only moves where user units (SC) land on that paper.
-constexpr double kP1X = 0.0, kP1Y = 0.0, kP2X = CPlotter::kMaxX, kP2Y = CPlotter::kMaxY;
-constexpr double kPlotW = kP2X - kP1X;   // 10300
-constexpr double kPlotH = kP2Y - kP1Y;   // 7650
-constexpr double kScaleX = static_cast<double>(SCREEN_MAX_X) / kPlotW;
-constexpr double kScaleY = static_cast<double>(SCREEN_MAX_Y) / kPlotH;
-constexpr double kScale = (kScaleX < kScaleY) ? kScaleX : kScaleY;
-constexpr double kFitW = kPlotW * kScale;
-constexpr double kFitH = kPlotH * kScale;
-constexpr double kOffsetX = (SCREEN_MAX_X - kFitW) / 2.0;
-constexpr double kOffsetY = (SCREEN_MAX_Y - kFitH) / 2.0;
+// whole area (0,0 .. the model's maxX,maxY -- 10300,7650 on the 7470A: the
+// paper; text may start left of the factory P1 at 250,279) into the panel,
+// keeping the aspect ratio (letterboxed). IP only moves where user units
+// (SC) land on that paper. Set from the model in plotInit().
+double pageW_ = 10300, pageH_ = 7650;     // the area, plotter units
+double pageScale_ = 1;                    // pixels per plotter unit (the whole screen)
+double pageFitH_ = 0;                     // its height on the screen, pixels
+double pageOffX_ = 0, pageOffY_ = 0;      // where it starts on the screen
+
+void setPage(double w, double h) {
+    pageW_ = w;
+    pageH_ = h;
+    pageScale_ = std::min(static_cast<double>(SCREEN_MAX_X) / w, static_cast<double>(SCREEN_MAX_Y) / h);
+    pageFitH_ = h * pageScale_;
+    pageOffX_ = (SCREEN_MAX_X - w * pageScale_) / 2.0;
+    pageOffY_ = (SCREEN_MAX_Y - pageFitH_) / 2.0;
+}
 
 // The mapping in use. Two ways to show the plot (Display -> Plot view):
 //  Page -- the plotter's whole area (10300 x 7650 units) fitted to the screen,
@@ -50,18 +57,18 @@ constexpr double kOffsetY = (SCREEN_MAX_Y - kFitH) / 2.0;
 // The screen width the plot gets: all of it, but while digitizing (DP)
 // the panel on the right takes its part (see "Digitizing" below)
 int plotAreaW_ = SCREEN_MAX_X;
-double mapOX_ = kP1X, mapOY_ = kP1Y;      // plotter units at the content's left / bottom
-double mapScale_ = kScale;                // pixels per plotter unit
-double mapDX_ = kOffsetX, mapDY_ = kOffsetY, mapH_ = kFitH;
+double mapOX_ = 0, mapOY_ = 0;            // plotter units at the content's left / bottom
+double mapScale_ = 1;                     // pixels per plotter unit
+double mapDX_ = 0, mapDY_ = 0, mapH_ = 0;
 double fitX0_ = 0, fitY0_ = 0, fitX1_ = -1, fitY1_ = -1;   // Fit: the area shown (units)
 
 void setPageMapping() {
-    mapOX_ = kP1X; mapOY_ = kP1Y; mapScale_ = kScale;
-    mapDX_ = kOffsetX; mapDY_ = kOffsetY; mapH_ = kFitH;
+    mapOX_ = 0; mapOY_ = 0; mapScale_ = pageScale_;
+    mapDX_ = pageOffX_; mapDY_ = pageOffY_; mapH_ = pageFitH_;
     if (plotAreaW_ < SCREEN_MAX_X) {          // (narrower: the page fitted to what's left)
-        mapScale_ = std::min(plotAreaW_ / kPlotW, SCREEN_MAX_Y / kPlotH);
-        mapH_ = kPlotH * mapScale_;
-        mapDX_ = (plotAreaW_ - kPlotW * mapScale_) / 2;
+        mapScale_ = std::min(plotAreaW_ / pageW_, SCREEN_MAX_Y / pageH_);
+        mapH_ = pageH_ * mapScale_;
+        mapDX_ = (plotAreaW_ - pageW_ * mapScale_) / 2;
         mapDY_ = (SCREEN_MAX_Y - mapH_) / 2;
     }
     fitX0_ = 0; fitY0_ = 0; fitX1_ = -1; fitY1_ = -1;
@@ -77,7 +84,7 @@ void setFitMapping(double x0, double y0, double x1, double y1, double margin) {
     fitX0_ = cx - w / 2; fitX1_ = cx + w / 2;
     fitY0_ = cy - h / 2; fitY1_ = cy + h / 2;
     double s = std::min(plotAreaW_ / w, SCREEN_MAX_Y / h);
-    s = std::min(s, kScale * 4);                       // a tiny plot: not more than 4x the page
+    s = std::min(s, pageScale_ * 4);                       // a tiny plot: not more than 4x the page
     mapScale_ = s;
     mapOX_ = fitX0_;
     mapOY_ = fitY0_;
@@ -190,23 +197,23 @@ void plotWindow() {
 
 // ── The ERROR light ─────────────────────────────────────────────────────
 // The 7470A's front-panel ERROR LED: lit while the plotter has an HP-GL
-// error (CPlotter::errorCode() -- OE, IN or Plotter -> Errors -> Clear
+// error (HpglInterpreter::errorCode() -- OE, IN or Plotter -> Errors -> Clear
 // error put it out). Drawn on the plot, top centre, in a small dark box
 // with the error number; a touch on it says what the error was.
 constexpr int kErrW = 112, kErrH = 32, kErrY = 8;
 bool errLit_ = false;                     // drawn now
-std::uint32_t errSerial_ = 0;             // CPlotter::errorSerial() when drawn
+std::uint32_t errSerial_ = 0;             // HpglInterpreter::errorSerial() when drawn
 int errX() { return ((plotAreaW_ - kErrW) / 2) & ~3; }
 void drawErrorLight() {
     errLit_ = false;
-    if (plotter_ == nullptr || plotter_->errorCode() == 0) return;
+    if (hpgl_ == nullptr || hpgl_->errorCode() == 0) return;
     const int x = errX(), y = kErrY;
     display_->fillRoundRect(static_cast<std::int16_t>(x), y, kErrW, kErrH, 8, 0x18E3);
     display_->roundRect(static_cast<std::int16_t>(x), y, kErrW, kErrH, 8, 0x4208);
     display_->fillCircle(static_cast<std::int16_t>(x + 18), y + kErrH / 2, 8, 0xFFE0);   // the LED, lit
     display_->circle(static_cast<std::int16_t>(x + 18), y + kErrH / 2, 9, 0x8400);
     char t[16];
-    std::snprintf(t, sizeof(t), "ERROR %d", plotter_->errorCode());
+    std::snprintf(t, sizeof(t), "ERROR %d", hpgl_->errorCode());
     display_->selectBuiltinFont();
     display_->txtSize(0);
     display_->txtColor(0xFFFF, 0x18E3);
@@ -225,11 +232,11 @@ bool overErrorLight(int x0, int y0, int x1, int y1) {
 void drawDigitizeMarker();                  // (Digitizing, below)
 void drawDigitizePanel();
 
-// Live per-segment draw, called from CPlotter's onDraw_ callback as HP-GL
-// commands stream in. No-ops entirely (segments() still records it for a
-// later redraw) unless Plotter output is what's actually showing right now.
-void onPlotterDraw(std::int16_t x0, std::int16_t y0,
-                   std::int16_t x1, std::int16_t y1, std::uint8_t pen) {
+// Live per-segment draw, called from the interpreter's draw callback as
+// HP-GL commands stream in. No-ops entirely (segments() still records it
+// for a later redraw) unless Plotter output is what's actually showing.
+void onPlotterDraw(const PlotSegment& seg) {
+    const std::int16_t x0 = seg.x0, y0 = seg.y0, x1 = seg.x1, y1 = seg.y1;
     backlight_activity();        // new drawing: screen in use (backlight.h)
     if (output_ != DisplayOutput::Plotter) return;
     // Fit: a segment outside what's shown -- fit again, with slack so it
@@ -249,7 +256,7 @@ void onPlotterDraw(std::int16_t x0, std::int16_t y0,
         }
     }
     plotWindow();
-    drawMappedSegment(x0, y0, x1, y1, penColor(pen), plotter_->wideTip());   // (this segment's tip)
+    drawMappedSegment(x0, y0, x1, y1, penColor(seg.pen), seg.wide);
     if (overErrorLight(mapX(x0), mapY(y0), mapX(x1), mapY(y1))) drawErrorLight();   // (kept on top)
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizeMarker();   // (kept on top)
     // line()/pixel() go through gfxMode(), which blindly zeros MWCR0 (the
@@ -323,8 +330,8 @@ void digiLayout() {
 void digiPoint(double& px, double& py) {
     px = mapOX_ + (digiMX_ - mapDX_) / mapScale_;
     py = mapOY_ + (mapDY_ + mapH_ - digiMY_) / mapScale_;
-    px = std::max(0.0, std::min(px, static_cast<double>(CPlotter::kMaxX)));
-    py = std::max(0.0, std::min(py, static_cast<double>(CPlotter::kMaxY)));
+    px = std::max(0.0, std::min(px, pageW_));
+    py = std::max(0.0, std::min(py, pageH_));
 }
 
 void digiText(int x, int y, const char* t, std::uint8_t size, std::uint16_t fg, std::uint16_t bg) {
@@ -394,7 +401,7 @@ void drawDigitizeLoupe() {
     const double half = (r.w / 2.0) / s;       // plotter units from the centre to the edge
     display_->setActiveWindow(static_cast<std::uint16_t>(r.x), static_cast<std::uint16_t>(r.y),
                               static_cast<std::uint16_t>(r.x + r.w - 1), static_cast<std::uint16_t>(r.y + r.h - 1));
-    for (const PlotSegment& seg : plotter_->segments()) {
+    for (const PlotSegment& seg : hpgl_->segments()) {
         if (std::max(seg.x0, seg.x1) < mx - half || std::min(seg.x0, seg.x1) > mx + half ||
             std::max(seg.y0, seg.y1) < my - half || std::min(seg.y0, seg.y1) > my + half) continue;
         double x0 = cx + (seg.x0 - mx) * s, y0 = cy - (seg.y0 - my) * s;
@@ -420,7 +427,7 @@ void drawDigitizeCoords() {
     digiText(r.x, r.y, b, 1, 0xFFFF, kDigiBg);
     std::snprintf(b, sizeof(b), "Y %5ld", std::lround(py));
     digiText(r.x, r.y + 34, b, 1, 0xFFFF, kDigiBg);
-    if (plotter_->userUnits(px, py, ux, uy)) {
+    if (hpgl_->userUnits(px, py, ux, uy)) {
         std::snprintf(b, sizeof(b), "user %.4g, %.4g", ux, uy);
         digiText(r.x, r.y + 70, b, 0, 0xAD55, kDigiBg);
     }
@@ -483,10 +490,13 @@ void digiMoveTo(int x, int y) {
 
 }  // namespace
 
-void views_impl::plotInit(CPlotter* plotter) {
-    plotter_ = plotter;
-    plotter_->setDrawCallback(onPlotterDraw);
-    plotter_->setClearCallback(onPlotterClear);
+void views_impl::plotInit(CDevice* plotterDevice, HpglInterpreter* hpgl) {
+    plotDev_ = plotterDevice;
+    hpgl_ = hpgl;
+    if (hpgl_ == nullptr) return;
+    setPage(hpgl_->model().maxX, hpgl_->model().maxY);
+    hpgl_->setDrawCallback(onPlotterDraw);
+    hpgl_->setClearCallback(onPlotterClear);
 }
 
 void views_impl::plotRedraw() {
@@ -494,9 +504,9 @@ void views_impl::plotRedraw() {
     // -- 5 % when fitted afresh here, so it has room to grow a little
     // (15 % when it grew out of what was shown: fitMargin_)
     setPageMapping();
-    if (plotFit_ && !plotter_->segments().empty()) {
+    if (plotFit_ && !hpgl_->segments().empty()) {
         double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-        for (const PlotSegment& seg : plotter_->segments()) {
+        for (const PlotSegment& seg : hpgl_->segments()) {
             x0 = std::min(x0, static_cast<double>(std::min(seg.x0, seg.x1)));
             x1 = std::max(x1, static_cast<double>(std::max(seg.x0, seg.x1)));
             y0 = std::min(y0, static_cast<double>(std::min(seg.y0, seg.y1)));
@@ -506,11 +516,11 @@ void views_impl::plotRedraw() {
     }
     plotWindow();
     display_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, paperColor());
-    for (const PlotSegment& seg : plotter_->segments()) {
+    for (const PlotSegment& seg : hpgl_->segments()) {
         drawMappedSegment(seg.x0, seg.y0, seg.x1, seg.y1, penColor(seg.pen), seg.wide);
     }
     drawErrorLight();
-    errSerial_ = plotter_->errorSerial();
+    errSerial_ = hpgl_->errorSerial();
     if (plotAreaW_ < SCREEN_MAX_X) drawDigitizePanel();      // (and the marker)
     screen_->refreshCursor();
 }
@@ -552,7 +562,7 @@ void views_impl::plotRedrawRegion(std::int16_t x0, std::int16_t y0, std::int16_t
     // register-write sequence per skipped segment.
     const std::int16_t regionRight = static_cast<std::int16_t>(x0 + w);
     const std::int16_t regionBottom = static_cast<std::int16_t>(y0 + h);
-    for (const PlotSegment& seg : plotter_->segments()) {
+    for (const PlotSegment& seg : hpgl_->segments()) {
         const std::int16_t sx0 = mapX(seg.x0), sy0 = mapY(seg.y0);
         const std::int16_t sx1 = mapX(seg.x1), sy1 = mapY(seg.y1);
         const std::int16_t segLeft = std::min(sx0, sx1);
@@ -573,7 +583,7 @@ void views_impl::plotRedrawRegion(std::int16_t x0, std::int16_t y0, std::int16_t
 }
 
 bool views_errorLightTap(int x, int y) {
-    if (output_ != DisplayOutput::Plotter || !errLit_ || plotter_ == nullptr) return false;
+    if (output_ != DisplayOutput::Plotter || !errLit_ || hpgl_ == nullptr) return false;
     if (x < errX() || x >= errX() + kErrW || y < kErrY || y >= kErrY + kErrH) return false;
     views_showMessage(views_errorText().c_str());
     return true;
@@ -587,10 +597,10 @@ bool views_errorLightPoint(int& x, int& y) {
 }
 
 std::string views_errorText() {
-    if (plotter_ == nullptr || plotter_->errorCode() == 0) return "No error";
-    const int code = plotter_->errorCode();
-    std::string t = "Error " + std::to_string(code) + ": " + CPlotter::errorText(code);
-    const auto& log = plotter_->errorLog();
+    if (hpgl_ == nullptr || hpgl_->errorCode() == 0) return "No error";
+    const int code = hpgl_->errorCode();
+    std::string t = "Error " + std::to_string(code) + ": " + HpglInterpreter::errorText(code);
+    const auto& log = hpgl_->errorLog();
     if (!log.empty() && log.back().code == code && log.back().command[0] != 0)
         t += " -- " + std::string(log.back().command);
     return t;
@@ -599,7 +609,7 @@ std::string views_errorText() {
 // DP: the Plotter view comes up with the panel (see "Digitizing" above);
 // when the plotter stops waiting (ENTER, X, DC, IN) the panel goes
 static void pollDigitize() {
-    const bool waiting = plotter_ != nullptr && plotter_->digitizing();
+    const bool waiting = hpgl_ != nullptr && hpgl_->digitizing();
     if (waiting && !digiActive_) {
         digiActive_ = true;
         backlight_activity();                // (a screen saver ends: the touch is wanted)
@@ -607,13 +617,13 @@ static void pollDigitize() {
         plotAreaW_ = digi_.x0;
         digiRepeatDx_ = digiRepeatDy_ = 0;
         if (output_ != DisplayOutput::Plotter && views_isAvailable(DisplayOutput::Plotter)) {
-            switchView(DisplayOutput::Plotter, plotter_, /*splash=*/false);   // (draws it, panel too)
+            switchView(DisplayOutput::Plotter, plotDev_, /*splash=*/false);   // (draws it, panel too)
         } else if (output_ == DisplayOutput::Plotter) {
             views_redraw();
         }
         // The marker starts at the pen -- if that's on the plot shown, else
         // in the middle (after IN the pen is at 0,0, often far off a Fit view)
-        const int px = mapX(plotter_->penX()), py = mapY(plotter_->penY());
+        const int px = mapX(hpgl_->penX()), py = mapY(hpgl_->penY());
         if (px >= 0 && px < plotAreaW_ && py >= 0 && py < SCREEN_MAX_Y) digiMoveTo(px, py);
         else digiMoveTo(plotAreaW_ / 2, SCREEN_MAX_Y / 2);
         LOGF("\r\n * Plotter: digitizing -- touch the point, arrows to adjust, ENTER");
@@ -640,11 +650,11 @@ static void digiArrow(int dx, int dy) {
 static void digiEnter() {
     double px, py;
     digiPoint(px, py);
-    plotter_->digitize(static_cast<std::int16_t>(std::lround(px)), static_cast<std::int16_t>(std::lround(py)));
+    hpgl_->digitize(static_cast<std::int16_t>(std::lround(px)), static_cast<std::int16_t>(std::lround(py)));
     digiRepeatDx_ = digiRepeatDy_ = 0;
     pollDigitize();                          // (the panel goes now)
     char b[40];
-    std::snprintf(b, sizeof(b), "POINT %d,%d", plotter_->penX(), plotter_->penY());
+    std::snprintf(b, sizeof(b), "POINT %d,%d", hpgl_->penX(), hpgl_->penY());
     showSplashBox(b, 1, 1200);
 }
 
@@ -660,7 +670,7 @@ bool views_digitizeTap(int x, int y) {
     else if (L.right.hit(x, y)) digiArrow(1, 0);
     else if (L.enter.hit(x, y)) digiEnter();
     else if (L.cancel.hit(x, y)) {
-        plotter_->cancelDigitize();
+        hpgl_->cancelDigitize();
         LOGF("\r\n * Plotter: digitizing cancelled");
         pollDigitize();
     }
@@ -675,7 +685,7 @@ bool views_digitizeButton(int code, bool repeat) {
         case 2: if (!repeat) digiEnter(); return true;                               // OK
         case 3: digiMoveTo(digiMX_, digiMY_ - 1); return true;                       // Up
         case 4: digiMoveTo(digiMX_, digiMY_ + 1); return true;                       // Down
-        case 5: if (!repeat) { plotter_->cancelDigitize(); pollDigitize(); } return true;   // X
+        case 5: if (!repeat) { hpgl_->cancelDigitize(); pollDigitize(); } return true;   // X
         default: return false;
     }
 }
@@ -704,9 +714,9 @@ void views_plotToScreen(int px, int py, int& x, int& y) {
 void views_impl::plotPoll() {
     pollDigitize();
     // The ERROR light: an error came or went
-    if (output_ == DisplayOutput::Plotter && plotter_ != nullptr && plotter_->errorSerial() != errSerial_) {
-        errSerial_ = plotter_->errorSerial();
-        if (plotter_->errorCode() != 0) {
+    if (output_ == DisplayOutput::Plotter && hpgl_ != nullptr && hpgl_->errorSerial() != errSerial_) {
+        errSerial_ = hpgl_->errorSerial();
+        if (hpgl_->errorCode() != 0) {
             plotWindow();
             drawErrorLight();
         } else if (errLit_) {
@@ -724,9 +734,9 @@ void views_setPlotFit(bool fit) {
 bool views_plotFit() { return plotFit_; }
 
 void views_setPenWide(bool wide) {
-    if (plotter_ != nullptr) plotter_->setWideTip(wide);   // (what's drawn from now on)
+    if (hpgl_ != nullptr) hpgl_->setWideTip(wide);   // (what's drawn from now on)
 }
-bool views_penWide() { return plotter_ != nullptr && plotter_->wideTip(); }
+bool views_penWide() { return hpgl_ != nullptr && hpgl_->wideTip(); }
 
 void views_setPaperBlack(bool black) {
     paperBlack_ = black;
@@ -735,7 +745,7 @@ void views_setPaperBlack(bool black) {
 bool views_paperBlack() { return paperBlack_; }
 
 void views_clearPlotter() {
-    plotter_->clear();   // resets state + segments_; fires onPlotterClear() above
+    if (hpgl_ != nullptr) hpgl_->reset();   // as IN / a device clear; fires onPlotterClear() above
 }
 
 }  // namespace hipi

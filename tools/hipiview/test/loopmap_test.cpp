@@ -30,7 +30,7 @@
 #include <vector>
 
 std::uint64_t fakeNowUs = 1000000;
-bool bTrace = false, bExtTrace = false;   // (plotter.cpp logs under trace)
+bool bTrace = false, bExtTrace = false;   // (hpgl.cpp logs under trace)
 std::vector<CDevice*> devices;
 
 // The views: the loop map is shown; a device's view is "opened" here only
@@ -271,19 +271,19 @@ int main() {
             for (int y = 280; y < 310; ++y) for (int x = 380; x < 760; ++x) row.push_back(at(x, y));
             return row;
         };
-        check(plot.errorCode() == 0, "TFPLOT: no error yet");
+        check(plot.hpgl().errorCode() == 0, "TFPLOT: no error yet");
         hipi::loopmap_drawAll();
         hipi::loopmap_tap(470, 510);
         const std::vector<std::uint32_t> before = statusRow();
         hipi::loopmap_closeDetails();
-        for (char ch : std::string("SC 0,100;")) plot.put(ch);
-        check(plot.errorCode() == 2, "SC 0,100: error 2 (wrong number of parameters)");
+        for (char ch : std::string("SC 0,100;")) plot.hpgl().put(ch);
+        check(plot.hpgl().errorCode() == 2, "SC 0,100: error 2 (wrong number of parameters)");
         hipi::loopmap_drawAll();
         hipi::loopmap_tap(470, 510);
         snapshot("loopmap_5b_error.png");
         check(statusRow() != before, "... and the details box's Status row shows it");
         hipi::loopmap_closeDetails();
-        plot.clearError();
+        plot.hpgl().clearError();
     }
     hipi::loopmap_tap(470, 510);
     check(hipi::loopmap_tap(60, 60) && !hipi::loopmap_detailsOpen(), "a tap beside the box: closed");

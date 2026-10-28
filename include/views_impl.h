@@ -17,7 +17,7 @@ void switchView(DisplayOutput mode, CDevice* dev, bool splash = true);
 void showSplashBox(const char* text, std::uint8_t scale, std::uint32_t ms);
 
 // plotterview.cpp: the Plotter view
-void plotInit(CPlotter* plotter);          // (from views_init())
+void plotInit(CDevice* plotterDevice, HpglInterpreter* hpgl);   // (from views_init())
 void plotRedraw();                         // the whole plot (views_redraw())
 void plotRedrawRegion(std::int16_t x0, std::int16_t y0, std::int16_t w, std::int16_t h);
 void plotPoll();                           // digitizing, the ERROR light (views_poll())

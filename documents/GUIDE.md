@@ -473,7 +473,8 @@ view without its name box, and X on the strip
 to the map unless that view is scrolled back; any other view change
 forgets it. PC test: `tools/hipiview/test/loopmap_test.cpp` (made-up
 traffic through `test/lmstubs/analyzer.h`). Its plotter is a real
-`CPlotter`: loopmap.cpp casts a `PLOTTER` device to one to read its error,
+`CPlotter`: loopmap.cpp casts a `PLOTTER` device to one to read its error
+(`hpgl().errorCode()`),
 so a stand-in `CDevice` of that type would be read as garbage.
 
 **HP-IL signals view.** `src/hpil_diag.cpp` + `src/hpil_diag.pio`, on
@@ -832,7 +833,7 @@ HP7470A-style plotter canvas (`TFPLOT`), or the Tape view.
 Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
-**Plotter errors and the ERROR light.** `CPlotter::setError()` sets
+**Plotter errors and the ERROR light.** `HpglInterpreter::setError()` sets
 OE's error number as the 7470A manual has it (1 unknown instruction, 2
 wrong number of parameters, 3 out of range, 6 position overflow; 5 and 8
 don't occur here -- CS/CA out of range gives 3, as the CS/CA pages say,
@@ -849,14 +850,15 @@ from `boardui_handleTap()`) shows `views_errorText()`. The loop map
 draws a yellow LED on the plotter's card (and the error in its details;
 `rolesNow()` includes it, so it redraws); the info box has a line. AP, AF,
 AH, EC, VA and VN are no-ops (no error). On HP-IL, SDI answers "HP7470A"
-CR LF (`CPlotter::deviceId()`) and SST the OS byte without clearing bit 3,
+CR LF (`CPlotter::deviceId()`) and SST the OS byte
+(`HpglInterpreter::statusByte()`) without clearing bit 3,
 then ETO. DCL/SDC still clear the plot (the real plotter ignores them).
 Tests: `plotter_test` (the errors, IM, SDI, SST), `printer_view_test` (the
 light; `printer_view_error_light.png`).
 
 **Plotter pen.** Plotter -> Pen changes the pen's tip for what's drawn
 from then on, like a pen with a broader tip: `views_setPenWide()` ->
-`CPlotter::setWideTip()`, and every new `PlotSegment` keeps it (`wide`, in
+`HpglInterpreter::setWideTip()`, and every new `PlotSegment` keeps it (`wide`, in
 what was padding -- the struct is still 10 bytes). So thin and wide lines
 mix in one plot, and a redraw keeps each one's width. Thin at start-up,
 not saved; IN and clearing don't change it. `drawMappedSegment()`
@@ -1155,7 +1157,7 @@ with `all` (`kHpilLedAll`, every frame) the LED looked lit permanently;
 `off` leaves LED 4 alone. The config reads the old `0` / `1` as `off` /
 `all`. LED 3 (`PLOT_ERR_LED`) is the plotter's ERROR light
 (`plotter_led=plotter|off`): `plotter_led_poll()` in the main loop lights
-it while `CPlotter::errorCode() != 0`. It writes the LED only when that
+it while `plotter->hpgl().errorCode() != 0`. It writes the LED only when that
 changes (and once after the setting is switched on, or the Hardware test
 page gives the LEDs back -- `hpil_leds_hold()` holds it too), so `TFLEDS`
 can still use LED 3 otherwise.
@@ -1222,7 +1224,7 @@ it drives and saves `hwtest_*.png`.
 run from `demo_poll()`: each step is a function called every poll until it
 says it's done (`Step`), built by helpers -- `type()` (characters to
 `Screen` or `Video80`, n ms apart), `hpgl()` (HP-GL to the plotter, n
-characters per 15 ms, through `CPlotter::put()`), `print()` (lines to
+characters per 15 ms, through `HpglInterpreter::put()`), `print()` (lines to
 `CPrinter::put()`), `view()` (`views_showView()`: a view without the
 name box), `caption()` (a yellow band at the bottom, drawn in the menu
 layer and shown as PIP-1), `wait()`, `call()`. What is shown lives in
@@ -1814,13 +1816,25 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
 
 ### 9.6 Example: a device with graphical output (like `TFPLOT`)
 
-`CPlotter` shows how to split a device that draws on the screen:
+`TFPLOT` shows how to split a device that draws on the screen. It is
+three parts, so a part can be replaced or reused on its own (another
+plotter -- an HP 7475A, another interface -- is a new device class with
+an `HpglInterpreter` of its own; the interpreter and the view stay):
 
-- **`CPlotter`** (`src/plotter.cpp`) — pure HP-IL device and HP-GL
-  interpreter. It keeps plotter state and a list of line segments, and
-  reports what happens through callbacks (`setDrawCallback()`,
-  `setClearCallback()`, `setMoveCallback()`, `setPenChangedCallback()`).
-  It never touches the display. The tokenizer (`feed_char()`) ignores CR
+- **`CPlotter`** (`include/plotter.h`, `src/plotter.cpp`) — only the HP-IL
+  device: its identity (AID 0x60, address 5, SDI "HP7470A" CR LF), the
+  listener's bytes to the interpreter (`hpgl().put()`), the talker sending
+  the interpreter's answers byte by byte (its output callback fills
+  `outQueue_`), SST (`statusByte()`), DCL/SDC (`reset()`). The interpreter's
+  reset callback empties the talker when IN comes.
+- **`HpglInterpreter`** (`include/hpgl.h`, `src/hpgl.cpp`) — HP-GL itself,
+  no HP-IL and no display. It keeps the plotter state and the drawing
+  (`segments()`), and reports through callbacks: `setOutputCallback()` (an
+  O.. answer), `setResetCallback()` (IN, `reset()`), `setDrawCallback()`
+  (a `PlotSegment`), `setClearCallback()`. What differs between models --
+  OI, OF (units per mm, also SI's sizes), OO, the paper's size, the
+  factory P1/P2 -- is an `HpglModel` (`kHp7470A`). The stroke font is
+  `include/hpgl_font.h`. The tokenizer (`feed()`) ignores CR
   and LF outside LB/DT -- also inside a number, since HP-GL from a file
   with fixed-length lines is broken anywhere; a command still open after a
   line end is carried out by `idle()` once nothing more has come for
@@ -1840,7 +1854,7 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   `views_digitizeRelease()` (from `boardui_handleRelease()`); strip
   buttons go through `views_digitizeButton()` when no menu is open.
   ENTER maps the marker back to plotter units and calls
-  `CPlotter::digitize()` (OS bit 2, `OD`); X calls `cancelDigitize()`.
+  `HpglInterpreter::digitize()` (OS bit 2, `OD`); X calls `cancelDigitize()`.
   PC test: `printer_view_test` (digitize_1_white.png, digitize_2_black.png).
   OS bit 1 = P1/P2 changed by IP; IP also re-applies a relative (SR /
   default) character size (`applyRelativeSize()`), SI's absolute one stays.
@@ -1861,13 +1875,15 @@ test** (its I2C list, or **Scan I2C**) to see the chip's address first.
   (accents overstrike the previous character). SM centres the symbol on its
   strokes' centre. Unknown mnemonics: logged once per `IN`
   with `LOGF` (not only under trace), listed in `show()`.
-  IW stays in plotter units, its default the factory P1-P2. PC test:
+  IW stays in plotter units, its default the whole area. PC test:
   `tools/hipiview/test/plotter_test.cpp`.
 - **`plotterview`** (`src/plotterview.cpp`) — the Plotter view, part of
   the `views` module (`include/views.h`, `src/views.cpp`: the views and
-  switching between them). `views_init()` registers the callbacks
-  (`plotInit()`), plotter coordinates are scaled to screen coordinates, and
-  everything is redrawn from `segments()` when the view is switched in.
+  switching between them). It knows only an `HpglInterpreter` and the
+  `CDevice` whose view it is: `views_init(display, screen, plotterDevice,
+  hpgl)` registers the callbacks (`plotInit()`), the page is the model's
+  area (`setPage()`), plotter coordinates are scaled to screen coordinates,
+  and everything is redrawn from `segments()` when the view is switched in.
   What the two files share is in `include/views_impl.h`.
 
 To add your own graphical device:
@@ -1884,7 +1900,7 @@ To add your own graphical device:
 4. Call the view's `init()` from `pico_main.cpp`, after `hipi_init()`
    (the device must exist) — the same place `views_init()` is called.
 
-Store what you draw (as `CPlotter` does with `segments_`) so the view can be
+Store what you draw (as `HpglInterpreter` does with `segments_`) so the view can be
 redrawn completely when the user switches back to it.
 
 ### 9.7 Checklist

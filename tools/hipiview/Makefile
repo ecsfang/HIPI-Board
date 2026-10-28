@@ -57,7 +57,7 @@ host_test: test/host_test.cpp lt7683_emu.cpp lt7683_emu.hpp ../../src/LT7683.cpp
 # printer_view_*.png to look at
 PV_SRC := test/printer_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/Screen.cpp \
           ../../src/views.cpp ../../src/plotterview.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
-          ../../src/plotter.cpp ../../src/device.cpp ../../src/video80.cpp \
+          ../../src/plotter.cpp ../../src/hpgl.cpp ../../src/device.cpp ../../src/video80.cpp \
           ../../src/hwtest.cpp test/hwio_stub.cpp ../../src/mediamap.cpp ../../src/lif_create.cpp \
           ../../src/printout.cpp ../../src/hpil_signals.cpp ../../src/hpil.cpp
 printer_view_test: $(PV_SRC) $(wildcard test/pvstubs/*.h test/pvstubs/*/*.h) ../../include/printer.h ../../include/views.h ../../include/views_impl.h
@@ -122,15 +122,15 @@ DL_SRC := test/devicelist_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src
 devicelist_test: $(DL_SRC) ../../include/devicelist.h ../../include/device_info.h ../../include/menu_frame.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(DL_SRC) -o $@ -lz
 
-# The HP-GL parser (plotter.cpp), no display
-PLOT_SRC := test/plotter_test.cpp ../../src/plotter.cpp ../../src/device.cpp ../../src/hpil.cpp
-plotter_test: $(PLOT_SRC) ../../include/plotter.h
+# HP-GL (hpgl.cpp) and the plotter on HP-IL (plotter.cpp), no display
+PLOT_SRC := test/plotter_test.cpp ../../src/plotter.cpp ../../src/hpgl.cpp ../../src/device.cpp ../../src/hpil.cpp
+plotter_test: $(PLOT_SRC) ../../include/plotter.h ../../include/hpgl.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -I../../include $(PLOT_SRC) -o $@
 
 # The loop map, fed made-up HP-41 traffic -- saves loopmap_*.png
 LM_SRC := test/loopmap_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/loopmap.cpp ../../src/device.cpp ../../src/hpil.cpp \
-          ../../src/demo_content.cpp ../../src/plotter.cpp
-loopmap_test: $(LM_SRC) ../../include/loopmap.h ../../include/plotter.h $(wildcard test/lmstubs/*.h)
+          ../../src/demo_content.cpp ../../src/plotter.cpp ../../src/hpgl.cpp
+loopmap_test: $(LM_SRC) ../../include/loopmap.h ../../include/plotter.h ../../include/hpgl.h $(wildcard test/lmstubs/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/lmstubs -Itest/pvstubs -I../../include $(LM_SRC) -o $@ -lz
 
 # The real-time clock chips (rtc.cpp, rtc_probe.cpp, the chip list's
