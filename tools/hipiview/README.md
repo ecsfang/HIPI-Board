@@ -225,7 +225,7 @@ HIPI's setting **Screen saver → Clock from PC** decides:
 
 The clock gets the PC's local time, so summer and winter time come along.
 On Linux hipiview doesn't set it by itself if `timedatectl` says the PC's
-clock isn't synchronised. Needs HIPI's firmware newer than 1.7.0; with an
+clock isn't synchronised. Needs HIPI's firmware 1.7.1 or newer; with an
 older one nothing is asked.
 
 ### Options

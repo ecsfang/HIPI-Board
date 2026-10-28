@@ -235,7 +235,7 @@ at all (**Off**); **Set clock from PC** in the same menu — or on the
 Hardware test page — sets it right now, whatever the setting. The clock
 gets the PC's local time. hipiview doesn't set it by itself if the PC says
 its own clock isn't synchronised (Linux: `timedatectl`); **Set clock from
-PC** still does. Needs HIPI's firmware and hipiview both newer than 1.7.0
+PC** still does. Needs HIPI's firmware and hipiview both 1.7.1 or newer
 (with an older one of either, nothing happens).
 
 **Setting the time by hand:** connect HIPI to a computer with USB, open the debug
