@@ -183,6 +183,30 @@ struct Row {
 Row rowTime_, rowDate_, rowName_;
 Style rowStyle_{ 0, 0 };
 
+// The time's colon blinks with the seconds: lit for a second, dark for the
+// next (even seconds lit), changing as the chip's second changes.
+// In the clock font it has no width of its own -- it sits in the empty
+// right part of the digit before it -- so it's drawn and blanked on its
+// own without touching the digits.
+int colonPen_ = -1, colonY_ = 0;         // where it is (-1: no time shown)
+bool colonLit_ = true;
+int lastSecond_ = -1;
+constexpr std::uint32_t kSecondPollMs = 40;  // the chip read this often, to see its second change
+
+void drawColon(bool lit) {
+    if (colonPen_ < 0 || lit == colonLit_) return;
+    colonLit_ = lit;
+    const Style s = style();
+    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    if (lit) {
+        drawGlyphText(d_, colonPen_, colonY_, kClockFontBig, ":", s.fg, s.bg);
+    } else {
+        int mn = 0, mx = 0;                   // (its pixels: [pen + mn, pen + mx))
+        kClockFontBig.textExtent(":", mn, mx);
+        d_->fillRect(colonPen_ + mn, colonY_, mx - mn, kClockFontBig.height, s.bg);   // (x, y, w, h)
+    }
+}
+
 void invalidateRows() {
     rowTime_ = rowDate_ = rowName_ = Row();
 }
@@ -205,10 +229,13 @@ void paintRow(Row& row, const std::string& key, int y, int h, int nx0, int nx1,
               std::uint16_t bg, F draw) {
     if (row.valid && row.key == key && row.x0 == nx0 && row.x1 == nx1) return;
     if (row.valid) {
+        // (fillRect takes width and height)
         if (row.x0 < nx0)
-            d_->fillRect(row.x0, y, std::min(row.x1, nx0) - 1, y + h - 1, bg);
-        if (row.x1 > nx1)
-            d_->fillRect(std::max(row.x0, nx1), y, row.x1 - 1, y + h - 1, bg);
+            d_->fillRect(row.x0, y, std::min(row.x1, nx0) - row.x0, h, bg);
+        if (row.x1 > nx1) {
+            const int cx = std::max(row.x0, nx1);
+            d_->fillRect(cx, y, row.x1 - cx, h, bg);
+        }
     }
     draw();
     row.valid = true;
@@ -263,7 +290,15 @@ void draw(const DateTime* t, bool full) {
         paintRow(rowTime_, key, timeY, big.height, a0, a1, s.bg, [&] {
             drawGlyphText(d_, x0, timeY, big, timeText, s.fg, s.bg);
             if (ampm) drawGlyphText(d_, x0 + timeW + 16, timeY + 8, small, ampm, s.fg, s.bg);
+            colonLit_ = true;                 // (drawn with it)
         });
+        // Where the colon is: after the hours (none while the time is unknown)
+        const char* colon = std::strchr(timeText, ':');
+        colonPen_ = t != nullptr && colon != nullptr
+                        ? x0 + big.textWidth(std::string(timeText, static_cast<std::size_t>(colon - timeText)).c_str())
+                        : -1;
+        colonY_ = timeY;
+        if (t != nullptr && t->second % 2 != 0) drawColon(false);   // (repainted in a dark second)
     }
 
     // Date, then weekday and month
@@ -373,6 +408,37 @@ bool clock_dateTime(int& year, int& month, int& day, int& hour, int& minute, int
     return true;
 }
 
+bool clock_present() {
+    return rtcPresent();
+}
+
+bool clock_read(int& year, int& month, int& day, int& hour, int& minute, int& second, bool& valid) {
+    DateTime t;
+    if (!rtcRead(t)) return false;
+    valid = rtcValid();
+    year = t.year; month = t.month; day = t.day;
+    hour = t.hour; minute = t.minute; second = t.second;
+    return true;
+}
+
+bool clock_set(int year, int month, int day, int hour, int minute, int second) {
+    DateTime t;
+    t.year = year; t.month = month; t.day = day;
+    t.hour = hour; t.minute = minute; t.second = second;
+    t.weekday = weekdayOf(year, month, day);
+    if (!rtcPresent() || !rtcSet(t)) return false;
+    shownValid_ = false;                     // the clock screen saver shows the new time
+    return true;
+}
+
+const char* clock_chipName() {
+#if HIPI_FAKE_RTC
+    return "stand-in";
+#else
+    return rtc_ != nullptr && rtc_->present() ? rtc_->chipName() : "";
+#endif
+}
+
 std::string clock_nowText() {
     DateTime t;
     if (!rtcRead(t)) return "";
@@ -407,14 +473,21 @@ void clock_poll() {
         anim_step();
         return;
     }
-    if (!visible() || !time_reached(nextRead_)) return;
-    nextRead_ = make_timeout_time_ms(1000);      // the RTC is read once a second
+    if (!visible()) return;
+    if (!time_reached(nextRead_)) return;
+    // The chip read often enough to see its second change (the colon lights
+    // with it); the rest of the screen only changes with the minute
+    nextRead_ = make_timeout_time_ms(kSecondPollMs);
     DateTime t;
     if (!clock_available() || !rtcRead(t)) return;
     if (!shownValid_ || t.minute != shown_.minute || t.hour != shown_.hour || t.day != shown_.day) {
         draw(&t, false);                     // only what changed: no flashing
         shown_ = t;
         shownValid_ = true;
+    }
+    if (t.second != lastSecond_) {
+        lastSecond_ = t.second;
+        drawColon(t.second % 2 == 0);        // lit a second, dark a second
     }
 }
 

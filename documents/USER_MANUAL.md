@@ -189,12 +189,14 @@ screen, no touch — HIPI starts its screen saver. Choose what it does in
 
 | Setting | Choices |
 |---------|---------|
-| **Mode** | **Dim** (the default) — only the backlight goes down to 10 %; the screen keeps showing what it showed · **Clock** — a big clock fills the screen · **HP-IL rain** — HP-IL messages fall down the screen like in *The Matrix*, taken from the real traffic on the loop when there is any · **Goose** — the HP-41's "running" goose, in flocks of different sizes, flies across the screen · **Random** — HP-IL rain or Goose, picked anew each time the screen saver starts, in a random style (Dark or LCD) · **Off** |
+| **Mode** | **Dim** (the default) — only the backlight goes down to 10 %; the screen keeps showing what it showed · **Clock** — a big clock fills the screen, its colon blinking with the seconds (a second on, a second off) · **HP-IL rain** — HP-IL messages fall down the screen like in *The Matrix*, taken from the real traffic on the loop when there is any · **Goose** — the HP-41's "running" goose, in flocks of different sizes, flies across the screen · **Random** — HP-IL rain or Goose, picked anew each time the screen saver starts, in a random style (Dark or LCD) · **Off** |
 | **No clock** | What Clock mode shows when there's no clock chip or its time isn't set: **HP-IL rain**, **Goose**, **Random** or **Dim** |
 | **Style** | **Dark** — light on black · **LCD** — dark on a light background, like an old LCD (clock, rain and geese) |
 | **Date** | **EU** — `2026-10-03` · **US** — `10/03/2026` |
 | **Time** | **24 h** — `14:05` · **12 h** — `2:05 PM` |
 | **Show now** | Starts the screen saver right away (the clock if the mode is Dim or Off), to try the settings |
+| **Clock from PC** | **Auto** (the default) — hipiview sets the clock from the PC's clock by itself whenever it's off · **Ask** — HIPI asks first, on its screen · **Off** — only when you choose **Set clock from PC** (see below) |
+| **Set clock from PC** | Sets the clock from the PC's clock now (shown while hipiview is connected and there is a clock chip) |
 
 With the clock, the rain and the goose the backlight also slowly dims to
 10 %.
@@ -219,7 +221,24 @@ time", and setting the time (below) puts it right. Without it — or before its 
 the screen saver shows what **No clock** says instead: HP-IL rain, the geese,
 either of them at random, or just dimming.
 
-**Setting the time:** connect HIPI to a computer with USB, open the debug
+**Setting the time from the PC — the easy way:** run **hipiview** (see
+[Recording the screen on a PC](#recording-the-screen-on-a-pc)). As soon as
+it shows HIPI's screen it compares the clock with the PC's clock (which
+the PC keeps right over the internet) and, if it is more than a quarter of
+a second off or not set at all, sets it — to within a few thousandths of a
+second. It checks again once a day while it stays connected, so summer
+and winter time come along too. hipiview's title bar and its window say
+what it did ("HIPI's clock is 3.2 s slow -- setting it", "... set from this
+PC -- now +0.002 s"). **Clock from PC** chooses whether that happens by
+itself (**Auto**), after you say **Yes** on HIPI's screen (**Ask**), or not
+at all (**Off**); **Set clock from PC** in the same menu — or on the
+Hardware test page — sets it right now, whatever the setting. The clock
+gets the PC's local time. hipiview doesn't set it by itself if the PC says
+its own clock isn't synchronised (Linux: `timedatectl`); **Set clock from
+PC** still does. Needs HIPI's firmware and hipiview both newer than 1.7.0
+(with an older one of either, nothing happens).
+
+**Setting the time by hand:** connect HIPI to a computer with USB, open the debug
 serial port in a terminal program (on Linux usually `/dev/ttyACM0`), type
 
 ```
@@ -513,7 +532,8 @@ More > — HIPI's menu
 │   │                    Brightness < 100% > · Plot view < Fit > · Paper < White > ·
 │   │                    Mirror to PC < Off >  (Off / View / Control)
 │   ├── Screen saver >   Mode < Dim > · No clock < HP-IL rain > · Style < Dark > ·
-│   │                    Date < EU > · Time < 24 h > · Show now
+│   │                    Date < EU > · Time < 24 h > · Show now ·
+│   │                    Clock from PC < Auto > · Set clock from PC (with hipiview)
 │   ├── Devices >        Enable/disable > · Change order > · Drive at start < ON >
 │   ├── PC link >        CON loop < Cable > · Trace < Off >
 │   └── Shortcut         < Loop map >  (the view the left edge's middle opens)
@@ -1314,6 +1334,10 @@ shown, a menu open, the SD card lent to the PC as a USB drive, the file in
 another drive), a message says why and nothing changes on HIPI. Only the
 drive whose Tape view is shown gets it. Needs HIPI firmware 1.6.0 or newer.
 
+**HIPI's clock.** hipiview also keeps HIPI's clock chip right, from the
+PC's clock — see [Screen saver and clock](#43-screen-saver-and-clock). It
+works with **Mirror to PC** on **View** or **Control**.
+
 **A file with its directory entry** (`NAME.lif` from **Save on PC**, or
 from lifutils' `lifget` without `-r`) dropped on the window is added as it
 is — with its own name and type (a write-all, data, an HP-71 file …).
@@ -1580,6 +1604,11 @@ all. For the chips HIPI knows, it says what it is and checks it:
 **Scan I2C** shows every address in a grid, like Linux' `i2cdetect`;
 touch to close it.
 
+**Set clock from PC** (top right of the card) sets the clock chip from the
+PC's clock — usable while hipiview is connected and there is a clock chip
+(else it's greyed). A clock that shows *fault — time lost* shows **OK** and
+the right time a moment later.
+
 **Your own chips.** HIPI's own chip list (`chips.txt`) is built into the
 firmware, so a new firmware brings its new chips and measurements. Your
 own chips go in `.txt` files in the folder `i2c/` on the SD card — one
@@ -1733,6 +1762,7 @@ value.
 | `clock_style` | `0` / `1` | `0` | `0` Dark (light on black), `1` LCD (dark on light). |
 | `clock_us` | `0` / `1` | `0` | Date format: `0` EU `2026-10-03`, `1` US `10/03/2026`. |
 | `clock_12h` | `0` / `1` | `0` | Time: `0` 24 h, `1` 12 h with AM/PM. |
+| `clock_from_pc` | `auto` / `ask` / `off` | `auto` | The clock set from hipiview's PC: by itself, after asking, or only from the menu (**Screen saver → Clock from PC**). |
 
 **Devices and the loop**
 

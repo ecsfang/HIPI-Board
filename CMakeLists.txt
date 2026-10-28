@@ -222,6 +222,7 @@ add_executable(${EXE_TARGET}
     src/display_text_save.cpp   # ... in the SDRAM, saved to the SD card
     src/mirror_upload.cpp       # Files from hipiview (a LIF volume dropped on the Tape view)
     src/mirror_download.cpp     # A cassette to hipiview (Tape view -> Save media on PC)
+    src/mirror_clock.cpp        # The clock chip set from hipiview's PC
     src/buttons_image.cpp       # built-in button strip, see scripts/bmp_to_rgb565.py
     src/bootscreen.cpp
     src/analyzer.cpp

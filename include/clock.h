@@ -44,4 +44,11 @@ std::string clock_nowText();
 // image's creation date)
 bool clock_dateTime(int& year, int& month, int& day, int& hour, int& minute, int& second);
 
+// For setting the clock from the PC (mirror_clock.h): a clock chip answers;
+// its time whether set or not (valid: it is); write a time; its name
+bool clock_present();
+bool clock_read(int& year, int& month, int& day, int& hour, int& minute, int& second, bool& valid);
+bool clock_set(int year, int month, int day, int hour, int minute, int second);
+const char* clock_chipName();
+
 }  // namespace hipi

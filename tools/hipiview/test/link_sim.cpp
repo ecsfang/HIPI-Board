@@ -33,6 +33,12 @@
 // the viewer, not take the last ack (up to a second old) for "nobody's
 // reading" and end the session -- one session only.
 //
+// "clock": HIPI's clock chip (a stand-in, 3.2 s slow, counting with this
+// PC's clock) set from the PC by hipiview when the picture is in (Clock
+// from PC < Auto >, Mirror to PC < View >), then once more from "HIPI's
+// menu" (Set clock from PC): two sets, the chip right to a few hundredths
+// of a second afterwards.
+//
 // "stall": hipiview is frozen (SIGSTOP) for a while midway -- the port
 // stays open but nobody reads it, as when hipiview is suspended. HIPI
 // must notice, stop mirroring (no stalls of its main loop beyond the
@@ -42,6 +48,8 @@
 #include "display_mirror.h"
 #include "mirror_upload.h"
 #include "mirror_download.h"
+#include "mirror_clock.h"
+#include "../clock_sync.hpp"
 #include "lif_file.h"
 #include "lif_dir.h"
 #include "tusb.h"
@@ -51,6 +59,8 @@
 #include "../png.hpp"
 
 #include <chrono>
+#include <cmath>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -167,6 +177,7 @@ int main(int argc, char** argv) {
     const bool burst = argc > 3 && std::strcmp(argv[3], "burst") == 0;
     const bool busy = argc > 3 && std::strcmp(argv[3], "busy") == 0;
     const bool idleBurst = argc > 3 && std::strcmp(argv[3], "idleburst") == 0;
+    const bool clockTest = argc > 3 && std::strcmp(argv[3], "clock") == 0;
     int idleBursts = 0;
     double nextIdleBurst = seconds * 0.3;
     bool busyDone = false;
@@ -321,6 +332,41 @@ int main(int argc, char** argv) {
         hipi::displayMirror_setDownloadEnv(env);
     }
     bool menuSent = false;
+    // clock: the chip's time is this PC's local time + chipOffset
+    double chipOffset = -3.2;
+    int chipSets = 0;
+    bool chipValid = true, clockAsked = false;
+    auto localNow = [] {
+        const auto t = std::chrono::system_clock::now();
+        const std::time_t s = std::chrono::system_clock::to_time_t(t);
+        const double frac = std::chrono::duration<double>(t - std::chrono::system_clock::from_time_t(s)).count();
+        std::tm lt{};
+        localtime_r(&s, &lt);
+        return ClockSync::civilSeconds(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec) + frac;
+    };
+    if (clockTest) {
+        hipi::ClockEnv env;
+        env.present = [] { return true; };
+        env.read = [&](hipi::ClockTime& c, bool& v) {
+            int y, mo, dd, h, mi, se;
+            ClockSync::civilFromSeconds(static_cast<long long>(std::floor(localNow() + chipOffset)), y, mo, dd, h, mi, se);
+            c.year = y; c.month = mo; c.day = dd; c.hour = h; c.minute = mi; c.second = se;
+            v = chipValid;
+            return true;
+        };
+        env.set = [&](const hipi::ClockTime& c) {
+            chipOffset = ClockSync::civilSeconds(c.year, c.month, c.day, c.hour, c.minute, c.second) - localNow();
+            ++chipSets;
+            std::printf("     HIPI: clock set, now %+.4f s off\n", chipOffset);
+            return true;
+        };
+        env.chipName = [] { return "DS3231"; };
+        env.mode = [] { return hipi::ClockFromPc::Auto; };
+        env.notice = [](const std::string& t) { std::printf("     HIPI: [box] %s\n", t.c_str()); };
+        env.log = [](const std::string& t) { std::printf("     HIPI: %s\n", t.c_str()); };
+        env.nowUs = [] { return static_cast<std::uint64_t>(now() * 1e6); };
+        hipi::displayMirror_setClockEnv(env);
+    }
     if (uploadTest) {
         hipi::UploadEnv env;
         env.drive = [&]() -> std::shared_ptr<hipi::UploadDrive> { return simDrive; };
@@ -363,6 +409,14 @@ int main(int argc, char** argv) {
         // stop, and start again by itself (hipiview is still connected)
         if (uploadTest) {
             // (Control all the time)
+        } else if (clockTest) {
+            // (View all the time.) Later, Set clock from PC in "HIPI's menu"
+            if (!clockAsked && now() > seconds * 0.6) {
+                clockAsked = true;
+                std::string why;
+                if (!hipi::displayMirror_canSetClock()) std::printf("FAIL clock: Set clock from PC isn't offered\n");
+                else if (!hipi::displayMirror_setClockFromPc(why)) std::printf("FAIL clock: Set clock from PC: %s\n", why.c_str());
+            }
         } else if (downloadTest) {
             // (View all the time.) Later, once more from "HIPI's menu"
             if (!menuSent && now() > seconds * 0.5) {
@@ -613,6 +667,12 @@ int main(int argc, char** argv) {
             for (const auto& e : inputs) std::printf("  %.3f %c %d %d %d\n", e.t, e.kind, e.a, e.b, e.c);
             return 1;
         }
+    }
+    if (clockTest) {
+        std::printf("clock: %d set(s), the chip now %+.4f s off\n", chipSets, chipOffset);
+        if (chipSets != 2) { std::printf("FAIL clock: set %d times (expected: when the picture came, and from the menu)\n", chipSets); return 1; }
+        if (std::fabs(chipOffset) > 0.05) { std::printf("FAIL clock: %+.4f s off after setting\n", chipOffset); return 1; }
+        std::printf("ok   clock: set from the PC, right to %.0f ms\n", std::fabs(chipOffset) * 1000);
     }
     if (idleBurst) {
         std::printf("idleburst: %d bursts after idling, %llu session(s) seen by the viewer\n", idleBursts, link.sessions());

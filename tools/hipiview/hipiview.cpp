@@ -20,6 +20,7 @@
 #include "input.hpp"
 #include "upload.hpp"
 #include "download.hpp"
+#include "clock_sync.hpp"
 #include "save_dialog.hpp"
 #include "serial_port.hpp"
 #include "hipiview_version.h"   // generated from git (cmake/hipi_version.cmake)
@@ -56,6 +57,37 @@ namespace fs = std::filesystem;
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+// The PC's local time in seconds since 1970-01-01 as if it were UTC (whole
+// seconds = the local clock's), with the fraction -- for HIPI's clock
+// (clock_sync.hpp)
+static double localNowSeconds() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t t = std::chrono::system_clock::to_time_t(now);
+    const double frac = std::chrono::duration<double>(now - std::chrono::system_clock::from_time_t(t)).count();
+    std::tm lt{};
+#ifdef _WIN32
+    localtime_s(&lt, &t);
+#else
+    localtime_r(&t, &lt);
+#endif
+    return ClockSync::civilSeconds(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec) + frac;
+}
+
+// Whether the PC's clock is kept right (synchronised with the internet):
+// Linux asks systemd (timedatectl); elsewhere -- or if it can't say -- yes
+static bool pcClockSynchronised() {
+#if defined(__linux__)
+    FILE* f = popen("timedatectl show -p NTPSynchronized --value 2>/dev/null", "r");
+    if (f == nullptr) return true;
+    char b[16] = "";
+    const bool got = std::fgets(b, sizeof b, f) != nullptr;
+    pclose(f);
+    return !got || std::strncmp(b, "no", 2) != 0;
+#else
+    return true;
+#endif
+}
 
 // ── Options ─────────────────────────────────────────────────────────────
 struct Options {
@@ -374,6 +406,12 @@ public:
     std::string device() const { std::lock_guard<std::mutex> l(m_); return cur_; }
     Clock::time_point lastData() const { return Clock::time_point(Clock::duration(lastData_.load())); }
     std::uint64_t bytes() const { return bytes_; }
+    // A message for HIPI to go out at `due` (to the millisecond: the clock,
+    // clock_sync.hpp); dropped while there's no session
+    void sendInputAt(std::vector<std::uint8_t> msg, Clock::time_point due) {
+        std::lock_guard<std::mutex> l(inM_);
+        if (timedQ_.size() < 16) timedQ_.emplace_back(due, std::move(msg));
+    }
     // A message for HIPI (input.hpp); its session byte is filled in here.
     // Dropped while there's no session.
     void sendInput(std::vector<std::uint8_t> msg) {
@@ -384,6 +422,17 @@ public:
 private:
     std::mutex inM_;
     std::vector<std::vector<std::uint8_t>> inQ_;
+    std::vector<std::pair<Clock::time_point, std::vector<std::uint8_t>>> timedQ_;
+    // How long the port may be waited on: until the next timed message
+    int readTimeoutMs() {
+        std::lock_guard<std::mutex> l(inM_);
+        int ms = 10;
+        for (const auto& t : timedQ_) {
+            const auto left = std::chrono::duration_cast<std::chrono::microseconds>(t.first - Clock::now()).count();
+            ms = std::min<int>(ms, left <= 0 ? 0 : static_cast<int>((left + 999) / 1000));
+        }
+        return ms;
+    }
     // Sends the queued input messages in the current session
     // A touch is lifted no sooner than kMinHold after its press went out:
     // the press may have waited here a moment (the port busy), and HIPI's
@@ -391,7 +440,18 @@ private:
     void flushInput(SerialPort& port, const Link& link) {
         constexpr auto kMinHold = std::chrono::milliseconds(100);
         std::lock_guard<std::mutex> l(inM_);
-        if (!link.inSession()) { inQ_.clear(); return; }
+        if (!link.inSession()) { inQ_.clear(); timedQ_.clear(); return; }
+        // Timed messages, when their moment has come (spinning the last
+        // millisecond: the clock's second starts as it arrives)
+        for (std::size_t k = 0; k < timedQ_.size();) {
+            auto left = timedQ_[k].first - Clock::now();
+            if (left > std::chrono::milliseconds(1)) { ++k; continue; }
+            while (Clock::now() < timedQ_[k].first) {}
+            auto& m = timedQ_[k].second;
+            m[1] = static_cast<std::uint8_t>(link.sid());
+            port.write(m.data(), m.size());
+            timedQ_.erase(timedQ_.begin() + static_cast<std::ptrdiff_t>(k));
+        }
         std::size_t i = 0;
         for (; i < inQ_.size(); ++i) {
             auto& m = inQ_[i];
@@ -466,7 +526,7 @@ private:
                 flushInput(port, link);
                 // Wait for data at most 10 ms (acknowledgements and input go
                 // out from here, and stop_ is noticed promptly)
-                const int n = port.read(buf.data(), buf.size(), 10);
+                const int n = port.read(buf.data(), buf.size(), readTimeoutMs());
                 if (n < 0) break;                                  // unplugged / reset
                 if (n == 0) {
                     if (!port.stillThere()) break;
@@ -793,6 +853,23 @@ int main(int argc, char** argv) {
         cassette = Cassette();
     };
 
+    // HIPI's clock chip, set from this PC's clock (clock_sync.hpp; HIPI's
+    // side: mirror_clock.h) -- HIPI is asked when the picture is in
+    ClockSync::Env clockEnv;
+    clockEnv.localNow = localNowSeconds;
+    clockEnv.pcClockTrusted = !reader || pcClockSynchronised();
+    if (!clockEnv.pcClockTrusted)
+        std::printf("hipiview: this PC's clock isn't synchronised (timedatectl) -- HIPI's clock won't be set from it\n");
+    ClockSync clockSync(clockEnv, [&](std::vector<std::uint8_t> m, double atLocal) {
+        if (!reader) return;
+        if (atLocal < 0) { reader->sendInput(std::move(m)); return; }
+        const auto due = Clock::now() + std::chrono::duration_cast<Clock::duration>(
+                                            std::chrono::duration<double>(atLocal - localNowSeconds()));
+        reader->sendInputAt(std::move(m), due);
+    });
+    std::string clockStatus;
+    double clockShowUntil = -1;
+
     // Several files dropped at once: one after the other -- each asked
     // about (or "... all"), and at the end one message for those that
     // weren't done
@@ -962,6 +1039,7 @@ int main(int argc, char** argv) {
             for (Chunk& c : inbox.take()) {
                 if (c.restart) emu.powerOff();
                 if (c.desync) emu.desync();
+                emu.setFeedTime(c.ms);               // (when it arrived: HIPI's clock, clock_sync.hpp)
                 emu.feed(c.data.data(), c.data.size());
             }
         } else {
@@ -1014,6 +1092,25 @@ int main(int argc, char** argv) {
             if (SDL_ShowMessageBox(&box, &pressed) != 0) pressed = 0;
             if (pressed == 2) sayAll();
             upload.answer(pressed != 0, secsNow());
+        }
+        // HIPI's clock: asked once the picture is in (firmware with CLOCK)
+        for (const auto& r : emu.takeClockReports()) {
+            if (r.kind == 0) clockSync.sessionLost();
+            else clockSync.onPacket(r.kind, r.data.data(), r.data.size(),
+                                     localNowSeconds() - (secsNow() - r.ms / 1000.0));   // (the PC's time as it arrived)
+        }
+        if (reader && emu.connected() && !emu.syncing() && emu.version() >= 8 && !clockSync.askedThisSession())
+            clockSync.sessionReady(sec);
+        clockSync.tick(sec);
+        {
+            const std::string news = clockSync.takeNews();
+            if (!news.empty()) {
+                std::printf("hipiview: %s\n", news.c_str());
+                std::fflush(stdout);
+                clockStatus = news;
+                clockShowUntil = sec + 10;
+                lastTitle = Clock::time_point();
+            }
         }
         // A cassette from HIPI: the pieces, then where to save it
         for (const auto& r : emu.takeDownloads()) {
@@ -1158,6 +1255,7 @@ int main(int argc, char** argv) {
                 state = (batch.total > 1 && upload.busy() ? "file " + std::to_string(nth) + " of " + std::to_string(batch.total) + ": " : std::string()) +
                         upload.status() + "  |  " + state;
             }
+            if (clockShowUntil > sec) state = clockStatus + "  |  " + state;
             if (download.busy()) state = download.status() + "  |  " + state;
             else if (!cassette.data.empty() || downloadShowUntil > sec) state = downloadStatus + "  |  " + state;
             if (viewOnlyHintUntil > sec)

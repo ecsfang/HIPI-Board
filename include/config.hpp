@@ -156,6 +156,9 @@ public:
                           static_cast<unsigned>(saverMode_), static_cast<unsigned>(clockStyle_),
                           clockUs_ ? 1 : 0, clock12h_ ? 1 : 0, static_cast<unsigned>(clockFallback_));
         f_write(&file, line, static_cast<UINT>(n), &bw);
+        static const char* kClockFromPc[] = { "off", "auto", "ask" };
+        n = std::snprintf(line, sizeof(line), "clock_from_pc=%s\n", kClockFromPc[clockFromPc_ < 3 ? clockFromPc_ : 1]);
+        f_write(&file, line, static_cast<UINT>(n), &bw);
 
         n = std::snprintf(line, sizeof(line), "disabled_devices=%s\n",
                            disabledDevices_.c_str());
@@ -301,6 +304,9 @@ public:
     // PILBox CON mode: the loop closed inside HIPI (no cable needed)
     bool conInternal() const { return conInternal_; }
     void setConInternal(bool in) { conInternal_ = in; save(); }
+    // The clock chip set from hipiview's PC (mirror_clock.h): 0 off, 1 auto, 2 ask
+    std::uint8_t clockFromPc() const { return clockFromPc_; }
+    void setClockFromPc(std::uint8_t m) { clockFromPc_ = m; save(); }
     bool clock12h() const { return clock12h_; }                   // 12-hour time
     void setClock12h(bool h12) { clock12h_ = h12; save(); }
 
@@ -462,6 +468,8 @@ private:
                     conInternal_ = std::strcmp(value, "internal") == 0;
                 } else if (std::strcmp(key, "clock_12h") == 0) {
                     clock12h_ = std::atoi(value) != 0;
+                } else if (std::strcmp(key, "clock_from_pc") == 0) {
+                    clockFromPc_ = std::strcmp(value, "off") == 0 ? 0 : std::strcmp(value, "ask") == 0 ? 2 : 1;
                 } else if (std::strcmp(key, "clock_fallback") == 0) {
                     clockFallback_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "disabled_devices") == 0) {
@@ -505,6 +513,7 @@ private:
     std::uint8_t  clockStyle_ = 0;   // dark
     bool          clockUs_    = false;
     bool          clock12h_   = false;
+    std::uint8_t  clockFromPc_ = 1;  // clock_from_pc=off|auto|ask (auto)
     bool          conInternal_ = false;   // con_loop=cable|internal
     bool          plotFit_     = true;    // plot_fit=1|0
     bool          plotPaperBlack_ = false; // plot_paper=white|black

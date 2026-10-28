@@ -51,6 +51,9 @@ constexpr Layout L {
     296, 346, 26, 7, 534,
     36, 84, 100, 248, 440, 528, 792 };
 constexpr int kTitleH = 26;
+// "Set clock from PC": at the right of the I2C card's first row
+constexpr int kSetClockW = 176;
+constexpr int kSetClockX = 16 + 992 - 16 - kSetClockW;   // (L.i2c.x + L.i2c.w - 16 - w)
 constexpr int kCloseW = 64;              // the close button (title bar, right)
 constexpr int kMaxPixels = 16;           // shown and run on this page
 constexpr int kMaxFound = 32;
@@ -87,6 +90,7 @@ int foundN_ = 0;
 bool answered_[128] = {};
 absolute_time_t nextScan_ = nil_time;
 bool gridShown_ = false;
+bool setClockShown_ = false;             // "Set clock from PC" drawn as usable
 
 constexpr Rgb kColours[4] = { { kLevel, 0, 0 }, { 0, kLevel, 0 }, { 0, 0, kLevel }, { kLevel, kLevel, kLevel } };
 
@@ -99,6 +103,7 @@ enum class Id : std::uint8_t {
     PixFitted, Minus, Plus, Run, Red, Green, Blue, White, PixOff,
     Order0, Order1, Order2, Order3, Order4, Order5,      // the colour byte order (radio buttons)
     Scan,
+    SetClock,                                            // the clock chip from hipiview's PC
     Close,                                               // the X in the title bar: leaves the page
 };
 struct TestButton { Id id; int x, y, w, h; };
@@ -123,6 +128,7 @@ const std::vector<TestButton>& buttons() {
         b.push_back({ static_cast<Id>(static_cast<int>(Id::Order0) + i), L.orderX + i * L.orderGap, L.order,
                       L.orderGap - 6, L.orderH });
     b.push_back({ Id::Scan, L.i2c.x + 16, L.i2cHead, 120, L.headH });
+    b.push_back({ Id::SetClock, kSetClockX, L.i2cHead, kSetClockW, L.headH });
     // The close button: drawn in the title bar, touched a little below it too
     b.push_back({ Id::Close, SCREEN_MAX_X - kCloseW, 0, kCloseW, kTitleH + 12 });
     return b;
@@ -201,6 +207,7 @@ std::string label(Id id) {
         case Id::Blue:      return "Blue";
         case Id::White:     return "White";
         case Id::Scan:      return "Scan I2C";
+        case Id::SetClock:  return "Set clock from PC";
         case Id::Order0: case Id::Order1: case Id::Order2: case Id::Order3: case Id::Order4: case Id::Order5:
             return kOrderNames[orderOf(id)];
         default: {
@@ -221,6 +228,7 @@ int ledCount() { return led5Usable() ? 5 : 4; }
 
 bool enabled(Id id) {
     if (id == Id::Led5 && !led5Usable()) return false;
+    if (id == Id::SetClock) return hwio::canSetClock();
     if (inLeds(id)) return hwio::ledsFitted();
     if (inPixels(id)) {
         if (!hwio::pixelsFitted()) return false;
@@ -373,7 +381,7 @@ void drawI2cHeader() {
     std::snprintf(b, sizeof(b), "%d device%s answer%s   (scanned every %lu s)", answered, answered == 1 ? "" : "s",
                   answered == 1 ? "s" : "", static_cast<unsigned long>(kScanMs / 1000));
     const int x = L.i2c.x + 16 + 120 + 20, vx = x + 13 * 8;
-    const std::size_t n = static_cast<std::size_t>((L.i2c.x + L.i2c.w - 16 - vx) / 8);
+    const std::size_t n = static_cast<std::size_t>((kSetClockX - 8 - vx) / 8);   // (up to Set clock from PC)
     const int y = L.i2cHead + L.headH / 2;
     text(x, y - 17, "On the bus:", 0, kGrey, kBlack);
     text(vx, y - 17, pad(b, n).c_str(), 0, kWhite, kBlack);
@@ -452,6 +460,7 @@ void card(const Card& c, const char* name) {
 }
 
 void renderFull() {
+    setClockShown_ = hwio::canSetClock();
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     d_->selectBuiltinFont();
     d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kBlack);
@@ -636,6 +645,11 @@ void hwtest_poll() {
             part([] { drawDots(false); });
         }
     }
+    // "Set clock from PC" comes and goes with hipiview
+    if (hwio::canSetClock() != setClockShown_) {
+        setClockShown_ = !setClockShown_;
+        part([] { drawButton(*find(Id::SetClock)); });
+    }
     // I2C: look again now and then
     if (time_reached(nextScan_)) {
         const std::string before = listSignature();
@@ -753,6 +767,14 @@ bool hwtest_tap(int x, int y) {
         case Id::Scan:
             hwtest_showScan();
             break;
+        case Id::SetClock: {
+            // hipiview is asked for the PC's time; when it comes the clock is
+            // set (a message box says so) and the list shows it at the next scan
+            std::string why;                      // (the button is only usable when it can be)
+            hwio::setClockFromPc(why);
+            nextScan_ = make_timeout_time_ms(1500);
+            break;
+        }
         case Id::Close:
             views_leaveHwTest();                   // (the page is gone: nothing more to draw)
             return true;

@@ -143,12 +143,14 @@ std::size_t inLen_ = 0, inWant_ = 0;
 // it again.
 std::uint8_t fileMsg_[mirror::kMsgFileMax];
 std::size_t fileLen_ = 0, fileWant_ = 0;
-struct QueuedFileMsg { std::uint8_t kind; std::uint16_t len; std::uint8_t data[mirror::kUpChunk + 8]; };
+struct QueuedFileMsg { std::uint8_t kind; std::uint16_t len; std::uint8_t data[mirror::kUpChunk + 8];
+                       std::uint64_t atUs; };   // (when it arrived: the clock, mirror_clock.h)
 constexpr int kFileQueue = 8;
 QueuedFileMsg fileQueue_[kFileQueue];
 int fileQueueHead_ = 0, fileQueueCount_ = 0;
 std::unique_ptr<UploadReceiver> upload_;
 std::unique_ptr<MediaSender> download_;
+std::unique_ptr<MirrorClock> clock_;
 
 MirrorMode mode_ = MirrorMode::Off;   // the setting (config display_mirror)
 MirrorTouchHandler touchHandler_;
@@ -238,6 +240,7 @@ void handleFileMsg(const std::uint8_t* m, std::size_t n) {
     QueuedFileMsg& q = fileQueue_[(fileQueueHead_ + fileQueueCount_) % kFileQueue];
     q.kind = m[2];
     q.len = static_cast<std::uint16_t>(len);
+    q.atUs = time_us_64();
     std::memcpy(q.data, m + 5, len);
     ++fileQueueCount_;
 }
@@ -515,12 +518,20 @@ bool downloadRoom(std::size_t n) {
     return state_ == State::Live && encoder_.enabled() && ringFree() >= n + kRingSize / 2;
 }
 
+// HIPI's clock for the viewer, in the stream (kClock)
+void clockPacket(const std::uint8_t* p, std::size_t n) {
+    if (state_ == State::Off || !encoder_.enabled()) return;
+    encoder_.emit(p, n);
+}
+
 // The queued file messages: a file from the viewer to the receiver (only in
-// Control), the viewer asking for a cassette (View too)
+// Control), the viewer asking for a cassette or about the clock (View too)
 void deliverFiles() {
     while (fileQueueCount_ > 0) {
         const QueuedFileMsg& q = fileQueue_[fileQueueHead_];
-        if (q.kind == mirror::kDlAsk || q.kind == mirror::kDlAbort) {
+        if (q.kind == mirror::kClkAsk || q.kind == mirror::kClkSet) {
+            if (clock_) clock_->handle(q.kind, q.data, q.len, q.atUs);
+        } else if (q.kind == mirror::kDlAsk || q.kind == mirror::kDlAbort) {
             if (!download_) {
                 static const char kNo[] = "this HIPI can't send cassettes";
                 downloadPacket(mirror::kDlError, reinterpret_cast<const std::uint8_t*>(kNo), std::strlen(kNo));
@@ -543,6 +554,7 @@ void deliverFiles() {
     }
     if (upload_) upload_->poll();
     if (download_) download_->poll();
+    if (clock_) clock_->poll();
 }
 
 }  // namespace
@@ -561,6 +573,19 @@ void displayMirror_setUploadEnv(UploadEnv env) {
 
 void displayMirror_setDownloadEnv(DownloadEnv env) {
     download_ = std::make_unique<MediaSender>(std::move(env), downloadPacket, downloadRoom);
+}
+
+void displayMirror_setClockEnv(ClockEnv env) {
+    clock_ = std::make_unique<MirrorClock>(std::move(env), clockPacket);
+}
+
+bool displayMirror_canSetClock() {
+    return state_ != State::Off && clock_ && clock_->canSetFromPc();
+}
+
+bool displayMirror_setClockFromPc(std::string& why) {
+    if (state_ == State::Off || !clock_) { why = "hipiview isn't connected"; return false; }
+    return clock_->setFromPc(why);
 }
 
 bool displayMirror_sendMedia(std::string& why) {
@@ -585,6 +610,7 @@ static void pollMirror() {
         fileQueueCount_ = 0;
         if (upload_) upload_->viewerGone();  // (a file half-way is dropped)
         if (download_) download_->viewerGone();
+        if (clock_) clock_->viewerGone();
         encoder_.setEnabled(false);
         ringFree_();
         tud_cdc_n_write_clear(kItf);         // nothing stale for the next viewer
@@ -668,6 +694,7 @@ static void pollMirror() {
         }
         session_.setViewerAssets(ids_, idsWanted_);
         session_.start(*display_);
+        if (clock_) clock_->viewerGone();    // (the viewer asks about the clock again)
         inputSaid_ = false;
         sendMode();
         pumpUsb();

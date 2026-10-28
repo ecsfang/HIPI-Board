@@ -3,6 +3,7 @@
 #include "leds.h"
 #include "pixels.h"
 #include "config.hpp"
+#include "display_mirror.h"
 
 extern CLedDriver* leds[];      // leds.cpp: LED 1..5
 extern hipi::Config config;
@@ -84,6 +85,14 @@ void setPixelsFitted(bool f) {
 
 int scanI2c(I2cFound* out, int max, bool found[128]) { return i2c_identify(out, max, found); }
 std::string loadI2cChips() { return i2c_loadChips(); }
+
+#if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+bool canSetClock() { return displayMirror_canSetClock(); }
+bool setClockFromPc(std::string& why) { return displayMirror_setClockFromPc(why); }
+#else
+bool canSetClock() { return false; }
+bool setClockFromPc(std::string& why) { why = "no mirror to hipiview in this build"; return false; }
+#endif
 
 }  // namespace hwio
 }  // namespace hipi

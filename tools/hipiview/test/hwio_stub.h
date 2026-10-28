@@ -21,6 +21,8 @@ extern int hpilLeds;
 extern bool plotterLed;
 extern bool ledsFitted, pixelsFitted;
 extern int scans;                   // scanI2c() calls
+extern bool clockAvailable;         // canSetClock()
+extern int clockSets;               // setClockFromPc() calls
 // The I2C bus the page sees
 extern std::vector<hipi::I2cFound> bus;
 

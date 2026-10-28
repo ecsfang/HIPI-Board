@@ -391,7 +391,14 @@ handles) by
 HP-41, `:` `.` `,` take no room of their own -- they're drawn into the gap
 after the previous character (negative left bearing). 4-bit
 anti-aliased glyphs, drawn by `drawGlyphText()` (`src/glyph_font.cpp`)
-blended between the style's colours. To change font or sizes:
+blended between the style's colours. The time's colon blinks: `clock_poll()`
+reads the chip every 40 ms while the clock shows; when its second changes
+the colon is drawn on even seconds and its 52-px box filled with the
+background on odd ones (`drawColon()`; `fillRect()` takes width and height)
+-- the digits' ink ends before it (at most 159 of their 220 px), so they
+aren't touched. The rest is still only redrawn when the minute changes.
+PC test: `clock_view_test` (the real clock.cpp with its stand-in clock,
+`HIPI_FAKE_RTC`, stubs in `test/clockstubs/`; saves `clock_view_*.png`). To change font or sizes:
 
 ```bash
 scripts/ttf_to_glyphs.py resources/fonts/41charset_x.ttf 250 "0123456789: " src/clock_font_big.cpp kClockFontBig
@@ -1525,6 +1532,43 @@ register level, so new drawing code needs nothing extra to be mirrored.
   writes meanwhile, refusals, 2 MB); `./link_sim 0.02 12 download` asks
   with the real hipiview's M key, from "the menu", and VECTOP on its own
   (the same bytes as `lifget -r`), in View.
+- **HIPI's clock from the PC** (View or Control, protocol version 8):
+  `MirrorClock` (`mirror_clock.h/.cpp`, no SDK: `ClockEnv` in
+  `pico_main.cpp` -- `clock_present()` / `clock_read()` / `clock_set()` /
+  `clock_chipName()` from clock.cpp, `config.clockFromPc()`,
+  `boardui_askClock()`, `views_showMessage()`) and hipiview's `ClockSync`
+  (`tools/hipiview/clock_sync.hpp`).
+  - HIPI never sends a `kClock` report unasked: an older hipiview would
+    count the unknown packet as a stream error. A viewer that asked
+    (`'F'` *kClkAsk*) in the session also enables **Set clock from PC**
+    (`displayMirror_canSetClock()`: Screen saver menu, Hardware test page).
+  - The measurement goes one way only, PC to HIPI, so the stream's delay
+    back doesn't count. hipiview sends *kClkAsk* as a second begins on the
+    PC: `SerialReader::sendInputAt()` waits for it, spinning the last
+    millisecond. HIPI notes when it arrived (`QueuedFileMsg::atUs`, in
+    `serviceRx()`), reads the chip at once and then every 2 ms until its
+    second changes. It reports that second and the *phase*: ms from the
+    ask's arrival to that edge. HIPI minus PC = second - phase - (ask's
+    second + 1 ms on the way).
+  - Over 0.25 s off, not set (`valid()`), or *kClkPlease* (the menus, or
+    Ask's Yes): hipiview sends *kClkSet*, timed the same way, to the
+    second that begins as it arrives. HIPI writes it to the chip at once
+    (`deliverFiles()`), which restarts the chip's count of that second.
+  - HIPI takes a *kClkSet* when Clock from PC is Auto or a please is under
+    way (10 s); with Ask it puts the question up (`UiDialog::
+    openClockQuestion()`, asked again later if a menu is open) and reports
+    *kClkAsking*. Yes asks the viewer for the time afresh (*kClkPlease*),
+    No or Off report *kClkRefused*.
+  - After *kClkWasSet* hipiview measures once more and says how right it
+    is now (it sets it again if needed, at most 3 times in a session). It
+    asks again once a day, or when no answer comes within 3 s (a message
+    lost: 5 tries). hipiview doesn't set the clock by itself when the PC's
+    own clock isn't synchronised (`timedatectl` on Linux).
+  - `make clock_test` runs both sides against each other in simulated time:
+    Auto/Ask/Off, the menu, no chip, an older viewer, lost messages, an
+    answer 0.4 s late, midnight on New Year's Eve. `./link_sim 0.02 12
+    clock` does it with the real hipiview over the lossy link; the chip ends
+    up right to 1-2 ms.
 - A session starts when the viewer sends `HIPIVIEW` plus the ids of the
   pictures in its cache. Just opening the port (ModemManager, terminals)
   starts nothing. `mirror::Session` (`mirror_session.hpp`) then sends a

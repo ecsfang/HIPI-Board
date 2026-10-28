@@ -13,7 +13,7 @@ SDL_LIBS   := $(shell pkg-config --libs sdl2)
 .DEFAULT_GOAL := hipiview
 
 SOURCES := hipiview.cpp lt7683_emu.cpp serial_port.cpp save_dialog.cpp
-HEADERS := lt7683_emu.hpp deframer.hpp png.hpp input.hpp serial_port.hpp ../../include/mirror_protocol.h upload.hpp download.hpp save_dialog.hpp
+HEADERS := lt7683_emu.hpp deframer.hpp png.hpp input.hpp serial_port.hpp ../../include/mirror_protocol.h upload.hpp download.hpp clock_sync.hpp save_dialog.hpp
 
 # The version, from git (../../cmake/hipi_version.cmake, run every time; it
 # only rewrites gen/hipiview_version.h when the version changes). Without
@@ -147,6 +147,21 @@ SAVER_SRC := test/saver_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/s
 saver_test: $(SAVER_SRC) ../../include/saver_anim.h $(wildcard test/saverstubs/*.h test/saverstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/saverstubs -Itest/demostubs -Itest/pvstubs -Itest -I../../include $(SAVER_SRC) -o $@ -lz
 
+# The clock screen saver (clock.cpp, its stand-in clock) on the emulated
+# chip: the colon blinks, nothing else changes -- saves clock_view_*.png
+CVIEW_SRC := test/clock_view_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/clock.cpp ../../src/rtc.cpp ../../src/i2c_device.cpp ../../src/glyph_font.cpp \
+             ../../src/clock_font_big.cpp ../../src/clock_font_small.cpp ../../src/saver_anim.cpp \
+             ../../src/saver_font_rain.cpp ../../src/saver_font_goose40.cpp ../../src/saver_font_goose56.cpp \
+             ../../src/saver_font_goose72.cpp ../../src/saver_font_goose92.cpp ../../src/saver_font_goose112.cpp
+clock_view_test: $(CVIEW_SRC) ../../include/clock.h $(wildcard test/clockstubs/*.h test/clockstubs/*/*.h)
+	$(CXX) $(CXXFLAGS) -DHIPI_FAKE_RTC=1 -Itest/clockstubs -Itest/rtcstubs -Itest/saverstubs -Itest/pvstubs -Itest -I../../include $(CVIEW_SRC) -o $@ -lz
+
+# HIPI's clock chip set from the PC: HIPI's side (mirror_clock.cpp) and
+# hipiview's (clock_sync.hpp) against each other, in simulated time
+CLK_SRC := test/clock_test.cpp ../../src/mirror_clock.cpp lt7683_emu.cpp
+clock_test: $(CLK_SRC) clock_sync.hpp lt7683_emu.hpp ../../include/mirror_clock.h ../../include/mirror_protocol.h
+	$(CXX) $(CXXFLAGS) -I../../include $(CLK_SRC) -o $@ -lz
+
 # The PILBox (pilbox.cpp) against a stand-in PC: HIPI never waits for the PC
 # for long -- a frame it doesn't answer within 2 s is dropped, TDIS
 PIL_SRC := test/pilbox_test.cpp ../../src/pilbox.cpp ../../src/hpil.cpp ../../src/device.cpp
@@ -156,7 +171,7 @@ pilbox_test: $(PIL_SRC) ../../include/pilbox.h ../../include/hpil.h $(wildcard t
 rtc_test: $(RTC_SRC) ../../include/rtc.h ../../include/rtc_probe.h ../../sdcard/i2c/chips.txt $(wildcard test/rtcstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/rtcstubs -I../../include $(RTC_SRC) -o $@
 
-test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test upload_test download_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test pilbox_test
+test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test upload_test download_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test pilbox_test clock_test clock_view_test
 	./deframer_test
 	./saver_test
 	./host_test
@@ -173,6 +188,8 @@ test: deframer_test saver_test host_test printer_view_test video80_view_test dis
 	./loopmap_test
 	./plotter_test
 	./devicelist_test
+	./clock_view_test
+	./clock_test
 	./pilbox_test
 	./rtc_test
 
@@ -181,7 +198,7 @@ install: hipiview
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test pilbox_test *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
+	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test pilbox_test clock_test clock_view_test clock_view_*.png *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
 	rm -rf link_sim_sd link_sim_saved
 
 .PHONY: test install clean windows
@@ -189,10 +206,11 @@ clean:
 # The whole mirror over a lossy "USB": HIPI's real display_mirror.cpp
 # (TinyUSB stood in by test/link_sim.cpp) talks to the real hipiview
 # through a pseudo-terminal; the picture must come out right anyway.
-#   ./link_sim [loss-probability] [seconds] [stall|input|burst|upload]
+#   ./link_sim [loss-probability] [seconds] [stall|input|burst|upload|download|busy|idleburst|clock]
 link_sim: test/link_sim.cpp hipiview lt7683_emu.cpp deframer.hpp ../../src/display_mirror.cpp \
           ../../src/mirror_upload.cpp ../../include/mirror_upload.h ../../include/lif_check.h \
           ../../src/mirror_download.cpp ../../include/mirror_download.h \
+          ../../src/mirror_clock.cpp ../../include/mirror_clock.h clock_sync.hpp \
           ../../include/mirror_encoder.hpp ../../include/mirror_session.hpp ../../include/mirror_protocol.h
 	$(CXX) $(CXXFLAGS) -Itest/stubs -I../../include test/link_sim.cpp lt7683_emu.cpp \
-	    ../../src/display_mirror.cpp ../../src/mirror_upload.cpp ../../src/mirror_download.cpp ../../src/lif_dir.cpp ../../src/lif_create.cpp ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz -lutil
+	    ../../src/display_mirror.cpp ../../src/mirror_upload.cpp ../../src/mirror_download.cpp ../../src/mirror_clock.cpp ../../src/lif_dir.cpp ../../src/lif_create.cpp ../../src/LT7683.cpp ../../src/Screen.cpp -o $@ -lz -lutil

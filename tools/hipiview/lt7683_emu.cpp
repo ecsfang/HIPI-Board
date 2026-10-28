@@ -226,6 +226,7 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
         hello_ = true;
         version_ = p[8];
         if (downloads_.size() < 8192) downloads_.push_back(UploadReply{ 0, {} });   // (a new session)
+        if (clocks_.size() < 64) clocks_.push_back(UploadReply{ 0, {} });           // (likewise)
         mirrorMode_ = -1;                  // (the session says it again)
         bye_ = false;
         syncing_ = false;
@@ -277,6 +278,13 @@ std::size_t LT7683Emu::parse(const std::uint8_t* p, std::size_t n) {
         if (n < 4 + len) return 0;
         // (a whole cassette may come between two frames of the window: 32 MB at most)
         if (downloads_.size() < 40000) downloads_.push_back(UploadReply{ p[1], std::vector<std::uint8_t>(p + 4, p + 4 + len) });
+        return 4 + len;
+    }
+    case mp::kClock: {
+        if (n < 4) return 0;
+        const std::size_t len = static_cast<std::size_t>(p[2] | (p[3] << 8));
+        if (n < 4 + len) return 0;
+        if (clocks_.size() < 64) clocks_.push_back(UploadReply{ p[1], std::vector<std::uint8_t>(p + 4, p + 4 + len), feedMs_ });
         return 4 + len;
     }
     case mp::kUpload: {

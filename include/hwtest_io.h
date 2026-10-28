@@ -61,5 +61,10 @@ int scanI2c(I2cFound* out, int max, bool found[128]);
 // Reads the chip descriptions again (i2c_loadChips()): what was read
 std::string loadI2cChips();
 
+// The clock chip set from hipiview's PC (display_mirror.h, mirror_clock.h):
+// can it be (hipiview connected, a clock chip), and do it (false + why)
+bool canSetClock();
+bool setClockFromPc(std::string& why);
+
 }  // namespace hwio
 }  // namespace hipi

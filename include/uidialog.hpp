@@ -227,6 +227,22 @@ public:
     // another controller on the loop) that stays until the screen is
     // touched. Called from the main loop; does nothing while a menu or
     // another box is open (the warning is in the log anyway).
+    // Settings -> Screen saver -> Clock from PC < Ask >: the PC's time came
+    // (mirror_clock.h) -- set the clock? howOff: "3.2 s slow" ("" not known).
+    // false: a menu is open (asked again later)
+    bool openClockQuestion(const std::string& howOff, std::function<void(bool)> answer) {
+        if (state_ != State::Closed) return false;
+        d_->setTextCursorVisible(false, false);
+        d_->beginOverlayDraw();
+        const std::string yes = howOff.empty() ? "Yes, set it" : "Yes, set it (" + howOff + ")";
+        openList("CLOCK FROM PC", {
+            item(yes, [this, answer] { close(); answer(true); }),
+            item("No, leave it", [this, answer] { close(); answer(false); }),
+        }, [this, answer] { close(); answer(false); });
+        d_->endOverlayDraw();
+        return true;
+    }
+
     void showWarning(const char* title, const char* line1, const char* line2 = "") {
         if (state_ != State::Closed) return;
         d_->setTextCursorVisible(false, false);
@@ -1847,10 +1863,10 @@ private:
         }, [this] { openSettingsMenu(0); });
     }
 
-    void openSaverSettings() {
+    void openSaverSettings(int sel = 0) {
         static const char* kModes[] = { "Dim", "Clock", "Off", "HP-IL rain", "Goose", "Random" };
         auto name = [](std::uint8_t m) { return std::string(kModes[m < hipi::Config::kSaverModes ? m : 0]); };
-        openList("SETTINGS / SCREEN SAVER", {
+        std::vector<Item> items = {
             value("Mode", [name] { return name(config.saverMode()); }, [this] {
                 // Dim -> Clock -> HP-IL rain -> Goose -> Random -> Off -> Dim
                 static const std::uint8_t kNext[] = { hipi::Config::SaverClock, hipi::Config::SaverRain,
@@ -1875,8 +1891,33 @@ private:
             value("Time", [] { return std::string(config.clock12h() ? "12 h" : "24 h"); },
                   [this] { config.setClock12h(!config.clock12h()); refreshItems(); }),
             item("Show now", [this] { backlight_showClockNow(); close(); }),
-        }, [this] { openSettingsMenu(1); });
+        };
+#if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+        // The clock chip set from hipiview's PC (mirror_clock.h): by itself
+        // (Auto), after asking (Ask), or only when told here (Off)
+        items.push_back(value("Clock from PC", [] {
+            static const char* kNames[] = { "Off", "Auto", "Ask" };
+            return std::string(kNames[config.clockFromPc() < 3 ? config.clockFromPc() : 1]);
+        }, [this] {
+            config.setClockFromPc(static_cast<std::uint8_t>((config.clockFromPc() + 1) % 3));   // Off -> Auto -> Ask
+            refreshItems();
+        }));
+        if (displayMirror_canSetClock()) items.push_back(item("Set clock from PC", [this] { setClockFromPc(); }));
+#endif
+        openList("SETTINGS / SCREEN SAVER", std::move(items), [this] { openSettingsMenu(1); }, sel);
     }
+
+#if HIPI_MIRROR_PORT && HIPI_MIRROR_TRANSPORT
+    // "Set clock from PC": hipiview is asked for the PC's time; the clock
+    // is set when it comes (said in a message box)
+    void setClockFromPc() {
+        std::string why;
+        const bool ok = displayMirror_setClockFromPc(why);
+        LOGF("\r\n * Clock: %s", ok ? "asking hipiview for the PC's time" : why.c_str());
+        pendingMessage_ = ok ? "Asking hipiview for the time ..." : "Not set: " + why;
+        close();
+    }
+#endif
 
     void openDevicesMenu(int sel = 0) {
         openList("SETTINGS / DEVICES", {

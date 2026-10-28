@@ -83,6 +83,42 @@
 //        kDlEnd    crc32(4)                that's all
 //        kDlWait   text                    waiting (the drive is busy ...)
 //        kDlError  text                    refused / failed (it's over)
+// CLOCK (version 8, View and Control): the viewer sets HIPI's clock chip
+// (rtc.h, local time) from the PC's clock -- HIPI's side: mirror_clock.h,
+// the viewer's: tools/hipiview/clock_sync.hpp.
+//   'F' kind kClkAsk                       how is your clock? (HIPI answers
+//                                          kClkReport -- only then: an older
+//                                          viewer never gets one). Sent as a
+//                                          second begins on the PC: HIPI notes
+//                                          when it arrived, and how long after
+//                                          that its chip's next second begins
+//                                          (phase) -- the difference, without
+//                                          the stream's delay back to the PC
+//        kClkSet   year(2) month day hour minute second diffMs(4)
+//                                          set it to this: sent as that second
+//                                          begins on the PC; diffMs = HIPI's
+//                                          clock minus the PC's as the viewer
+//                                          measured it (kClkDiffUnknown: not
+//                                          known), for HIPI's log and question
+// HIPI answers in the stream: kClock kind(1) len(2) payload(len)
+//   kind kClkReport flags(1) year(2) month day hour minute second mode(1)
+//                   phase(2) chip
+//                                          its clock now; flags kClkPresent,
+//                                          kClkValid (the time is set), kClkEdge
+//                                          (the time is the second that began
+//                                          `phase` ms after the kClkAsk arrived
+//                                          -- 0xFFFF: not measured), kClkPlease (the
+//                                          user asked to set it: set it, whatever
+//                                          the difference), kClkWasSet (just set
+//                                          from the viewer's kClkSet),
+//                                          kClkRefused (not set: Clock from PC
+//                                          is Off, or the user said No),
+//                                          kClkAsking (Ask: the user is asked --
+//                                          kClkPlease or kClkRefused follows); mode:
+//                                          the setting (kClkOff, kClkAuto,
+//                                          kClkAskUser); chip: "DS3231" ...
+// The viewer asks again (kClkAsk) when no answer comes for a while: a
+// message may be lost on the way.
 // HIPI tells the viewer the setting -- kMode 0x1A mode(1), 1 = View,
 // 2 = Control -- at the start of a session and whenever it changes, so the
 // viewer can say when its clicks are going nowhere.
@@ -161,6 +197,7 @@
 //   t & 0x80 != 0: the next word repeats ((t & 0x7F) + 1) times
 // A trailing odd byte (if len is odd) follows as-is after the tokens.
 #pragma once
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 
@@ -192,9 +229,10 @@ constexpr std::uint8_t kBye       = 0x1B;   // HIPI restarts now (Bootsel mode):
 constexpr std::uint8_t kFont24    = 0x1C;
 constexpr std::uint8_t kUpload    = 0x1D;   // kind(1) len(2) payload: an answer about a file (FILES)
 constexpr std::uint8_t kDownload  = 0x1E;   // kind(1) len(2) payload: a cassette for the PC (FILES)
+constexpr std::uint8_t kClock     = 0x1F;   // kind(1) len(2) payload: HIPI's clock (CLOCK)
 constexpr int kMaxViewerAssets = 32;     // ids a request may list
 
-constexpr std::uint8_t kVersion   = 7;      // 7: files from the viewer (FILES)
+constexpr std::uint8_t kVersion   = 8;      // 7: files from the viewer (FILES); 8: CLOCK
 // Input from the viewer (see INPUT above)
 constexpr std::uint8_t kMsgTouch  = 'T';
 constexpr std::uint8_t kMsgButton = 'B';
@@ -212,6 +250,15 @@ constexpr std::uint8_t kUpHasMedia = 1, kUpExists = 2;
 constexpr std::uint8_t kDlAsk = 6, kDlAbort = 7;                       // 'F' kinds
 constexpr std::uint8_t kDlBegin = 1, kDlData = 2, kDlEnd = 3, kDlWait = 4, kDlError = 5;   // kDownload kinds
 constexpr std::size_t  kDlChunk = 1024;     // bytes in a kDlData piece, at most
+// HIPI's clock from the PC (CLOCK above)
+constexpr std::uint8_t kClkAsk = 8, kClkSet = 9;                       // 'F' kinds
+constexpr std::uint8_t kClkReport = 1;                                 // kClock kinds
+constexpr std::uint8_t kClkPresent = 1, kClkValid = 2, kClkEdge = 4, kClkPlease = 8, kClkWasSet = 16,
+                       kClkRefused = 32, kClkAsking = 64;              // kClkReport flags
+constexpr std::uint8_t kClkOff = 0, kClkAuto = 1, kClkAskUser = 2;     // kClkReport mode
+constexpr std::int32_t kClkDiffUnknown = INT32_MIN;
+constexpr std::size_t  kClkSetLen = 11, kClkReportLen = 11;            // (kClkReport: + the chip's name)
+constexpr std::uint16_t kClkNoPhase = 0xFFFF;
 
 // CRC-32 (IEEE, as zip), for a whole file
 inline std::uint32_t crc32(const std::uint8_t* p, std::size_t n, std::uint32_t crc = 0) {

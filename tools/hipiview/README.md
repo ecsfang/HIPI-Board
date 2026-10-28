@@ -207,6 +207,27 @@ PC** in its box. An HP-41 program arrives as `NAME.raw`, as lifutils'
 `NAME.lif`, as `lifget` writes it (its directory entry first) -- dropped on
 the Tape view again, it goes back onto a cassette unchanged.
 
+### Setting HIPI's clock
+
+With **View** or **Control**, hipiview keeps HIPI's clock chip right from
+this PC's clock (which the PC keeps right over the internet). Once HIPI's
+screen is in, hipiview asks how HIPI's clock is. If it is more than a
+quarter of a second off, or not set, hipiview sets it to within a few
+thousandths of a second; it checks again once a day. The title bar and the
+terminal say what happened: *HIPI's clock is 3.2 s slow -- setting it*,
+*... set from this PC -- now +0.002 s*, *HIPI's clock is right*.
+
+HIPI's setting **Screen saver → Clock from PC** decides:
+- **Auto** (the default): set by itself;
+- **Ask**: HIPI asks first, on its screen;
+- **Off**: only with **Set clock from PC** (that menu, or the Hardware test
+  page), which always works while hipiview is connected.
+
+The clock gets the PC's local time, so summer and winter time come along.
+On Linux hipiview doesn't set it by itself if `timedatectl` says the PC's
+clock isn't synchronised. Needs HIPI's firmware newer than 1.7.0; with an
+older one nothing is asked.
+
 ### Options
 
 | Option | Meaning |
@@ -327,6 +348,10 @@ more from "HIPI's menu", then VECTOP on its own ("Save on PC"), with **View**,
 and checks the files hipiview saved (`--save-to link_sim_saved`; VECTOP.raw
 the same bytes as `lifget -r`).
 
+`./link_sim 0.02 12 clock` lets the real hipiview set a stand-in clock chip
+that is 3.2 s slow (Clock from PC < Auto >), then once more from "HIPI's
+menu" (Set clock from PC): set twice, right to a few ms.
+
 `./link_sim 0.02 18 upload` drops a cassette, then three files at once:
 `test/data/vectop.raw`, a `.txt` (refused, listed at the end) and a second
 program ("Add all" for the first); then a third program ("Add all") with
@@ -342,7 +367,9 @@ name, an empty drive (a new cassette), a full directory, no END. `make
 download_test` does the same for a cassette to the PC (`download.hpp`
 against `mirror_download.cpp`): asked for here or from HIPI's menu, a full
 ring, a busy drive, the cassette written to meanwhile (it starts over) or all
-the time (given up), refusals, the session ending, 2 MB.
+the time (given up), refusals, the session ending, 2 MB. `make clock_test`
+runs hipiview's side of setting HIPI's clock (`clock_sync.hpp`) against
+HIPI's (`mirror_clock.cpp`) in simulated time.
 
 ## Files
 
@@ -355,6 +382,7 @@ the time (given up), refusals, the session ending, 2 MB.
 | `input.hpp` | Mouse and keys to HIPI; the touch rings |
 | `upload.hpp` | Sending a dropped LIF volume to HIPI |
 | `download.hpp`, `save_dialog.hpp/.cpp` | A cassette from HIPI, and the *Save as* dialog for it |
+| `clock_sync.hpp` | HIPI's clock chip set from this PC's clock |
 | `serial_port.hpp/.cpp` | The serial port and finding it: POSIX (Linux, macOS) and Win32 |
 | `CMakeLists.txt` | Building with CMake (Windows, Linux, macOS); the `Makefile` does Linux and the tests |
 | `ci/build-windows.sh` | The Windows build, as GitHub (and you) run it |
@@ -365,6 +393,8 @@ the time (given up), refusals, the session ending, 2 MB.
 | `../../include/lif_file.h` | A file from the PC as a LIF file (`.raw`: an HP-41 program), by its extension |
 | `../../include/lif_dir.h`, `../../src/lif_dir.cpp` | A LIF volume's directory: a file found, a file added (as lifutils' lifput) |
 | `test/download_test.cpp` | A cassette to the PC: HIPI's sender against hipiview's side (part of `make test`) |
+| `test/clock_test.cpp` | HIPI's clock from the PC: HIPI's side against hipiview's, in simulated time (part of `make test`) |
+| `test/clock_view_test.cpp`, `test/clockstubs/` | The clock screen saver on the emulated chip: the colon blinks, nothing else changes (part of `make test`; saves `clock_view_*.png`) |
 | `test/pilbox_test.cpp`, `test/pilboxstubs/` | The PILBox (`pilbox.cpp`) against a stand-in PC with a simulated clock: HIPI never waits long for the PC; a frame it doesn't answer within 2 s is dropped and the PILBox goes to TDIS, until the PC sends its mode again (part of `make test`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures; also the view HIPI starts with (`views_showStartView()`) (part of `make test`; saves `printer_view_*.png`) |
 | `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
@@ -377,3 +407,4 @@ the time (given up), refusals, the session ending, 2 MB.
 | `../../src/display_mirror.cpp` | Firmware: the mirror port |
 | `../../include/mirror_upload.h`, `../../src/mirror_upload.cpp`, `../../include/lif_check.h` | Firmware: a file from the viewer into a drive; the LIF check, shared |
 | `../../include/mirror_download.h`, `../../src/mirror_download.cpp` | Firmware: a drive's cassette to the viewer |
+| `../../include/mirror_clock.h`, `../../src/mirror_clock.cpp` | Firmware: its clock chip set from the viewer's PC |

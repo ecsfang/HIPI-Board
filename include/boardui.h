@@ -60,6 +60,10 @@ void boardui_poll();
 // showWarning()) -- e.g. PILBox CON: no frame came back. Not shown while a
 // menu or another box is open.
 void boardui_showWarning(const char* title, const char* line1, const char* line2 = "");
+// Clock from PC < Ask > (mirror_clock.h): "set the clock from the PC?" as a
+// menu (Yes / No), with the button strip to answer it. false: not now (a
+// menu or the screen saver is up) -- asked again later
+bool boardui_askClock(const std::string& howOff, std::function<void(bool yes)> answer);
 
 // Register these with touch_set_tap_callback()/touch_set_release_callback()
 // (see touch.h). boardui_handleTap() decides whether a confirmed touch

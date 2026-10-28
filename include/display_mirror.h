@@ -26,6 +26,7 @@
 #include "hipi_features.h"      // HIPI_MIRROR_PORT / HIPI_MIRROR_TRANSPORT
 #include "mirror_upload.h"
 #include "mirror_download.h"
+#include "mirror_clock.h"
 #include <string>
 #include <cstdint>
 #include <functional>
@@ -94,6 +95,15 @@ bool displayMirror_sendMedia(std::string& why);
 // One file on it (its LIF name; the Media map's file box -> Save on PC),
 // for the PC as <NAME>.raw (as lifutils' lifget -r)
 bool displayMirror_sendFile(const std::string& lifName, std::string& why);
+
+// The clock chip set from the PC (mirror_clock.h): what it needs to know
+// about the chip, the setting and the screen. Without it, the viewer's
+// clock messages are ignored. canSetClock(): "Set clock from PC" can be
+// offered (a viewer that knows how, and a clock chip); setClockFromPc():
+// do it -- false and why if it can't.
+void displayMirror_setClockEnv(ClockEnv env);
+bool displayMirror_canSetClock();
+bool displayMirror_setClockFromPc(std::string& why);
 
 // HIPI is about to restart (Bootsel mode): tells the viewer (kBye) and
 // keeps the mirror going for `ms` instead of a plain sleep, so the viewer

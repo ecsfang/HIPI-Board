@@ -8,3 +8,4 @@ inline bool time_reached(absolute_time_t t) { return get_absolute_time() >= t; }
 inline std::int64_t absolute_time_diff_us(absolute_time_t from, absolute_time_t to) {
     return static_cast<std::int64_t>(to) - static_cast<std::int64_t>(from);
 }
+inline std::uint64_t time_us_64() { return get_absolute_time(); }

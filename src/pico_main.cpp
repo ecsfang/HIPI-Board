@@ -640,6 +640,26 @@ int main() {
         [](bool down, std::uint16_t x, std::uint16_t y) { touch_remote(down, x, y); },
         [](std::uint8_t code, bool down) { hipi::boardui_remoteButton(code, down); });
     hipi::clock_init(display);               // RTC (rtc.h), clock screen saver
+    {
+        // The clock chip set from hipiview's PC (mirror_clock.h)
+        hipi::ClockEnv env;
+        env.present = [] { return hipi::clock_present(); };
+        env.read = [](hipi::ClockTime& t, bool& valid) {
+            return hipi::clock_read(t.year, t.month, t.day, t.hour, t.minute, t.second, valid);
+        };
+        env.set = [](const hipi::ClockTime& t) {
+            return hipi::clock_set(t.year, t.month, t.day, t.hour, t.minute, t.second);
+        };
+        env.chipName = [] { return hipi::clock_chipName(); };
+        env.mode = [] { return static_cast<hipi::ClockFromPc>(config.clockFromPc() < 3 ? config.clockFromPc() : 1); };
+        env.ask = [](const std::string& howOff, std::function<void(bool)> answer) {
+            return hipi::boardui_askClock(howOff, std::move(answer));
+        };
+        env.notice = [](const std::string& text) { hipi::views_showMessage(text.c_str()); };
+        env.log = [](const std::string& line) { LOGF("\r\n * %s", line.c_str()); };
+        env.nowUs = [] { return time_us_64(); };
+        hipi::displayMirror_setClockEnv(std::move(env));
+    }
     if (CDrive* d = hipi::views_drive())               // cassette in the Tape view
         hipi::views_setTapeFile(d->mediaFile());
     // Project escape sequences from the HP-41 (see

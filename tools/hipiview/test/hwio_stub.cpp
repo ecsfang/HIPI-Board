@@ -14,6 +14,8 @@ int hpilLeds = 2;
 bool plotterLed = true;
 bool ledsFitted = true, pixelsFitted = true;
 int scans = 0;
+bool clockAvailable = false;
+int clockSets = 0;
 std::vector<hipi::I2cFound> bus;
 
 }  // namespace hwstub
@@ -74,6 +76,13 @@ bool pixelsFitted() { return hwstub::pixelsFitted; }
 void setPixelsFitted(bool f) { hwstub::pixelsFitted = f; }
 
 std::string loadI2cChips() { return "27 descriptions  (built in + i2c/weather.txt)"; }
+
+bool canSetClock() { return hwstub::clockAvailable; }
+bool setClockFromPc(std::string& why) {
+    if (!hwstub::clockAvailable) { why = "hipiview isn't connected"; return false; }
+    ++hwstub::clockSets;
+    return true;
+}
 
 int scanI2c(I2cFound* out, int max, bool found[128]) {
     ++scans;

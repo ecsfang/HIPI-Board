@@ -76,11 +76,15 @@ public:
     bool saidBye() const { return bye_; }
     // HIPI's answers about a file sent to it (kUpload, upload.hpp): taken
     // out by the caller
-    struct UploadReply { std::uint8_t kind; std::vector<std::uint8_t> data; };
+    struct UploadReply { std::uint8_t kind; std::vector<std::uint8_t> data; std::uint32_t ms = 0; };
     std::vector<UploadReply> takeUploadReplies() { std::vector<UploadReply> v; v.swap(uploads_); return v; }
     // A cassette from HIPI (kDownload, download.hpp), the same way; kind 0:
     // a new session began here (what was coming is lost)
     std::vector<UploadReply> takeDownloads() { std::vector<UploadReply> v; v.swap(downloads_); return v; }
+    // HIPI's clock (kClock, clock_sync.hpp), the same way -- ms: when the
+    // bytes that completed it arrived (setFeedTime(), before feed())
+    std::vector<UploadReply> takeClockReports() { std::vector<UploadReply> v; v.swap(clocks_); return v; }
+    void setFeedTime(std::uint32_t ms) { feedMs_ = ms; }
     // The protocol version HIPI said in its greeting (0: none yet)
     int version() const { return version_; }
     int syncPercent() const;
@@ -148,6 +152,8 @@ private:
     bool bye_ = false;
     int version_ = 0;
     std::vector<UploadReply> uploads_;
+    std::vector<UploadReply> clocks_;
+    std::uint32_t feedMs_ = 0;
     std::vector<UploadReply> downloads_;
     std::uint32_t syncTotal_ = 0, syncDone_ = 0;
     struct AssetArea { std::uint32_t id, addr, rowBytes, rowStep; std::uint16_t rows; };

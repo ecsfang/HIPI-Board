@@ -307,6 +307,17 @@ int main(int argc, char** argv) {
     chip.render(panel.data(), 0.0);
     check(!yellowAt(SCREEN_MAX_X / 2 - 235 + 1, SCREEN_MAX_Y / 2), "a tap closes it");
 
+    // ── Set clock from PC (I2C card, right of its first row) ────────
+    constexpr Pt kSetClock { 816 + 88, 296 + 18 };
+    tap(kSetClock);
+    check(hwstub::clockSets == 0, "Set clock from PC without hipiview: greyed, does nothing");
+    hwstub::clockAvailable = true;                   // (hipiview asked, a clock chip is there)
+    run(100);
+    snapshot("tools/hipiview/hwtest_6_clock.png");
+    tap(kSetClock);
+    check(hwstub::clockSets == 1, "... with hipiview: asks it for the PC's time");
+    hwstub::clockAvailable = false;
+
     // ── Leaving: the close button (title bar, right) ─────────────────
     chip.render(panel.data(), 0.0);
     check(!yellowAt(SCREEN_MAX_X - 32, 13) && yellowAt(SCREEN_MAX_X - 120, 13), "the close button in the title bar");

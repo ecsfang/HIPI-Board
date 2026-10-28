@@ -667,6 +667,14 @@ void boardui_showWarning(const char* title, const char* line1, const char* line2
     if (dialog_ != nullptr) dialog_->showWarning(title, line1, line2);
 }
 
+bool boardui_askClock(const std::string& howOff, std::function<void(bool yes)> answer) {
+    if (dialog_ == nullptr || saverActive || dialog_->isOpen()) return false;
+    if (!dialog_->openClockQuestion(howOff, std::move(answer))) return false;
+    showButtonStrip();
+    buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);
+    return true;
+}
+
 void boardui_poll() {
     refreshDeviceList();                 // (only while the device list is open)
     if (dialog_ != nullptr) dialog_->poll();   // File picker -> Create media: writing the file
