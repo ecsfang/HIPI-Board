@@ -30,6 +30,26 @@ void selectRowFont(DisplayDriver* d) {
 
 }  // namespace
 
+std::string rowText(const DeviceInfo& info) {
+    char buf[96];
+    if (info.extMode[0] != '\0' && info.extDevices > 0) {
+        // PILBox: the link mode (COFF/COFI/CON, or TDIS when no PC
+        // program is connected) + the PC-side devices and their addresses
+        std::snprintf(buf, sizeof(buf), "%7s  %-10s %s: %d (addr %d-%d)", "--", info.devName, info.extMode,
+                      info.extDevices, info.extFirstAddr, info.extFirstAddr + info.extDevices - 1);
+    } else if (info.extMode[0] != '\0') {
+        std::snprintf(buf, sizeof(buf), "%7s  %-10s %s", "--", info.devName, info.extMode);
+    } else if (info.addr < 0) {
+        std::snprintf(buf, sizeof(buf), "%7s  %s", "--", info.devName);
+    } else {
+        // "addr NN": room for two-digit addresses (up to 30); the accessory
+        // ID in hex (as in the manuals) and decimal (HP-71: DEVADDR("%82"))
+        std::snprintf(buf, sizeof(buf), "addr %2d  %-10s 0x%02X (%u)", info.addr, info.devName, info.sai,
+                      static_cast<unsigned>(info.sai));
+    }
+    return buf;
+}
+
 void drawFrame(DisplayDriver* d) {
     MenuFrame::drawTitled(d, kX, kY, kW, kH, "HP-IL DEVICES");
     const int x = kX + kW - MenuFrame::BorderThickness - kCloseW - 6, y = kY + MenuFrame::BorderThickness + 3;
@@ -49,29 +69,16 @@ void drawRows(DisplayDriver* d, const std::vector<DeviceInfo>& list, int offset)
                 i16(rowsBottom - (kRowsTop - 4)), 0x0000);
     selectRowFont(d);
     const int textH = kRowPitch - 10;                 // the glyphs' height (24 / 16)
-    char buf[96];
     for (int i = 0; i < kRows; ++i) {
         const std::size_t idx = static_cast<std::size_t>(offset + i);
         if (idx >= list.size()) break;
         const DeviceInfo& info = list[idx];
         const int y = kRowsTop + i * kRowPitch;
         drawCheckbox(d, kX + 20, y + (textH - kCheck) / 2, info.enabled);
-        if (info.extMode[0] != '\0' && info.extDevices > 0) {
-            // PILBox: the link mode (COFF/COFI/CON, or TDIS when no PC
-            // program is connected) + the PC-side devices and their addresses
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s %s: %d (addr %d-%d)", "--", info.devName, info.extMode,
-                          info.extDevices, info.extFirstAddr, info.extFirstAddr + info.extDevices - 1);
-        } else if (info.extMode[0] != '\0') {
-            std::snprintf(buf, sizeof(buf), "%7s  %-10s %s", "--", info.devName, info.extMode);
-        } else if (info.addr < 0) {
-            std::snprintf(buf, sizeof(buf), "%7s  %s", "--", info.devName);
-        } else {
-            // "addr NN": room for two-digit addresses (up to 30)
-            std::snprintf(buf, sizeof(buf), "addr %2d  %-10s 0x%02X", info.addr, info.devName, info.sai);
-        }
+        const std::string text = rowText(info);
         d->txtColor(info.enabled ? 0xFFFF : 0x8410, 0x0000);   // switched-off devices dimmer
         d->txtSetCursor(static_cast<std::uint16_t>(kX + 20 + kCheck + 18), static_cast<std::uint16_t>(y));
-        d->txtWrite(buf);
+        d->txtWrite(text.c_str());
     }
     // More above / below: arrows at the right, in the rows' own margin
     const int ax = kX + kW - 34;

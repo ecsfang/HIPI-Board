@@ -125,6 +125,13 @@ int main() {
     const int midOff = px(kX + 20 + kCheck / 2, boxY + 3 * kRowPitch + kCheck / 2);
     check(midOn == 0xFFFFFF && midOff == 0, "switched on: an X in the box; off: empty");
     check(maxOffset(11) == 2, "eleven devices: two to scroll");
+    // The accessory ID in hex and decimal (the HP-71's DEVADDR("%82") takes the decimal)
+    {
+        const std::string t = rowText(dev("TFI2C", 6, 0x52, true));
+        std::printf("     \"%s\"\n", t.c_str());
+        check(t == "addr  6  TFI2C      0x52 (82)", "a row: address, name, accessory ID in hex and decimal");
+        check(rowText(dev("TFPIXEL", 5, 0xED, true)).find("0xED (237)") != std::string::npos, "... 0xED is 237");
+    }
     hipi::devlist::drawRows(&d, list, maxOffset(11));
     snapshot("devicelist_2.png");
 
