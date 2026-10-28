@@ -396,7 +396,16 @@ reads the chip every 40 ms while the clock shows; when its second changes
 the colon is drawn on even seconds and its 52-px box filled with the
 background on odd ones (`drawColon()`; `fillRect()` takes width and height)
 -- the digits' ink ends before it (at most 159 of their 220 px), so they
-aren't touched. The rest is still only redrawn when the minute changes.
+aren't touched. The rest is still only redrawn when the minute changes,
+and then off-screen: `offscreen()` draws the row's whole band into
+`LT7683::kBteLayer3Addr` and copies it to the panel with one BTE copy --
+the 200-row digits drawn straight onto the panel came down row by row. The
+colon's lit box goes the same way. The minute's goose (`moveGoose()`) is
+saver_anim's goose (`anim_gooseInit()` / `anim_gooseDraw()`, the largest
+size that fits below the date): its ink's left edge goes from -ink width at
+:00 to the screen's width at the next :00, from the second as the chip
+counts it plus the time since that second began; moved a pixel at a time,
+only the strip it uncovers cleared.
 PC test: `clock_view_test` (the real clock.cpp with its stand-in clock,
 `HIPI_FAKE_RTC`, stubs in `test/clockstubs/`; saves `clock_view_*.png`). To change font or sizes:
 
@@ -1553,7 +1562,15 @@ register level, so new drawing code needs nothing extra to be mirrored.
   - Over 0.25 s off, not set (`valid()`), or *kClkPlease* (the menus, or
     Ask's Yes): hipiview sends *kClkSet*, timed the same way, to the
     second that begins as it arrives. HIPI writes it to the chip at once
-    (`deliverFiles()`), which restarts the chip's count of that second.
+    (`deliverFiles()`). On a DS3231 that restarts the chip's count of
+    that second. A PCF85063A keeps counting the second it was in (its
+    prescaler is reset only by STOP: datasheet 7.2.1.2), so it would stay
+    off by the same fraction however often it is set. For it HIPI holds
+    the chip (`CRtc::hold()`: STOP + the time) and lets it run
+    (`release()`) 1 s − 507.874 ms after the arrival -- the chip's first
+    tick comes 0.507874 s after STOP is cleared, so it lands as the next
+    second begins on the PC (`MirrorClock::poll()`, the last 20 ms waited
+    for with `waitUntilUs`). Only then is *kClkWasSet* reported.
   - HIPI takes a *kClkSet* when Clock from PC is Auto or a please is under
     way (10 s); with Ask it puts the question up (`UiDialog::
     openClockQuestion()`, asked again later if a menu is open) and reports

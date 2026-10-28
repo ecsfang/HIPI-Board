@@ -1,8 +1,9 @@
 // clock_view_test.cpp -- the clock screen saver (clock.cpp, with its
 // stand-in clock: HIPI_FAKE_RTC) drawn on the emulated chip: the colon
-// blinks -- lit one second, dark the next -- and nothing else changes
-// within the minute; the minutes never go. Saves clock_view_lit.png and
-// clock_view_dark.png.
+// blinks -- lit one second, dark the next -- and nothing else of the time
+// and date changes within the minute; the minutes never go; a new minute
+// appears at once (drawn off-screen, copied in one go); the minute's goose
+// flies along the bottom. Saves clock_view_lit.png and clock_view_dark.png.
 //
 //   make clock_view_test && ./clock_view_test   (in tools/hipiview)
 #include "LT7683.hpp"
@@ -12,6 +13,7 @@
 #include "../lt7683_emu.hpp"
 #include "../png.hpp"
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <vector>
 
@@ -67,17 +69,18 @@ std::vector<std::uint32_t> panel() {
     return px;
 }
 // The columns where two pictures differ: [x0, x1), none: x0 = x1 = 0
+constexpr int kAboveGoose = 480;            // the time and the date: above the goose's band
 void diffColumns(const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b, int& x0, int& x1) {
     x0 = 1024; x1 = 0;
-    for (int y = 0; y < 600; ++y)
+    for (int y = 0; y < kAboveGoose; ++y)
         for (int x = 0; x < 1024; ++x)
             if (a[y * 1024 + x] != b[y * 1024 + x]) { x0 = std::min(x0, x); x1 = std::max(x1, x + 1); }
     if (x1 == 0) x0 = 0;
 }
 // Lit pixels in the columns [x0, x1) (the clock: light on black)
-int litIn(const std::vector<std::uint32_t>& p, int x0, int x1) {
+int litIn(const std::vector<std::uint32_t>& p, int x0, int x1, int y0 = 0, int y1 = kAboveGoose) {
     int n = 0;
-    for (int y = 0; y < 600; ++y)
+    for (int y = y0; y < y1; ++y)
         for (int x = x0; x < x1; ++x) n += (p[y * 1024 + x] & 0xFFFFFF) > 0x404040;
     return n;
 }
@@ -121,14 +124,59 @@ int main() {
     bool minutes = true;
     for (const auto& p : secs) if (litIn(p, x1, 1024) < 2000) minutes = false;
     check(minutes, "the minutes are shown all the time");
-    // A new minute: drawn, and the colon goes on blinking
+    // A new minute: drawn off-screen, then copied onto the panel in one go
+    // (drawn straight onto it, the digits came down row by row)
+    int timeCopies = 0;
+    chip.onBteCopy = [&](std::uint32_t src, std::uint32_t dst, int, int, int w, int h) {
+        if (src == hipi::LT7683::kBteLayer3Addr && dst == 0 && w == 1024 && h >= 150) ++timeCopies;
+    };
     for (int i = 0; i < 300; ++i) step();
+    chip.onBteCopy = nullptr;
+    check(timeCopies == 1, "a new minute: the time copied in at once (drawn off-screen)");
     const auto m1 = panel();
     for (int i = 0; i < 100; ++i) step();
     const auto m2 = panel();
     int a, b;
     diffColumns(m1, m2, a, b);
     check(b > a && b - a <= 52 && litIn(m2, b, 1024) > 2000, "after the minute changed: still only the colon blinks, minutes shown");
+    // The goose: in the band below, moving right with the seconds
+    auto gooseX = [](const std::vector<std::uint32_t>& p) {          // its left edge, -1: none on screen
+        for (int x = 0; x < 1024; ++x)
+            for (int y = kAboveGoose; y < 600; ++y)
+                if ((p[y * 1024 + x] & 0xFFFFFF) > 0x404040) return x;
+        return -1;
+    };
+    const int g1 = gooseX(m2);
+    for (int i = 0; i < 1000; ++i) step();      // 10 s on
+    const auto m3 = panel();
+    const int g2 = gooseX(m3);
+    std::printf("     the goose at x %d, 10 s later at x %d\n", g1, g2);
+    check(g1 >= 0 && g2 > g1 + 150 && g2 < g1 + 210, "the goose flies right, about 18 px a second (a minute across)");
+    // :30 -- in the middle (its centre)
+    hipi::clock_set(2026, 10, 28, 9, 20, 30);
+    hipi::clock_set(2026, 10, 28, 9, 21, 29);
+    for (int i = 0; i < 150; ++i) step();       // :30, half a second in
+    const auto mid = panel();
+    // (the middle of its ink; at :30.5 it's half a second -- 9 px -- past the centre)
+    int inkL = 1024, inkR = -1;
+    for (int x = 0; x < 1024; ++x)
+        for (int y = kAboveGoose; y < 600; ++y)
+            if ((mid[y * 1024 + x] & 0xFFFFFF) > 0x404040) { inkL = std::min(inkL, x); inkR = std::max(inkR, x); }
+    const int centre = (inkL + inkR + 1) / 2;   // (the speed: (1024 + ink) / 60 px a second)
+    std::printf("     at :30.5 the goose's ink %d..%d, its middle at x %d (screen centre 512 + half a second)\n", inkL, inkR, centre);
+    check(std::abs(centre - 521) <= 2, "at :30 it is in the middle of the screen");
+    // :59.9 -- almost gone on the right; :00 -- just coming in on the left
+    hipi::clock_set(2026, 10, 28, 9, 22, 58);
+    for (int i = 0; i < 199; ++i) step();       // :59.98
+    const int gEnd = gooseX(panel());
+    for (int i = 0; i < 2; ++i) step();         // :00.0
+    const auto start = panel();
+    const int gStart = gooseX(start);
+    std::printf("     at :59.98 its left edge at x %d; at :00 at x %d\n", gEnd, gStart);
+    check(gEnd > 1024 - 3 || gEnd < 0, "at :59.98 it has just left on the right (its ink, or nothing, at the very edge)");
+    check(gStart < 0 || gStart <= 1, "at :00 it just comes in on the left");
+    writePng("clock_view_goose.png", mid.data(), 1024, 600);
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

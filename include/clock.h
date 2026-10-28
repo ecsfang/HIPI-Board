@@ -13,6 +13,7 @@
 //     time 2026-10-03 14:05        (seconds optional: 14:05:30)
 // and Enter; "time" alone shows the current time.
 #pragma once
+#include <cstdint>
 
 // No RTC chip yet: 1 = a stand-in clock that starts at the firmware's build
 // time and counts with the Pico's timer ("time ..." still sets it, until
@@ -50,5 +51,11 @@ bool clock_present();
 bool clock_read(int& year, int& month, int& day, int& hour, int& minute, int& second, bool& valid);
 bool clock_set(int year, int month, int day, int hour, int minute, int second);
 const char* clock_chipName();
+// Set to the start of a second (CRtc::hold() / release() / startLeadUs()):
+// the time written with the clock held, then let run -- its first tick
+// comes clock_startLeadUs() after clock_release()
+bool clock_hold(int year, int month, int day, int hour, int minute, int second);
+bool clock_release();
+std::uint32_t clock_startLeadUs();
 
 }  // namespace hipi

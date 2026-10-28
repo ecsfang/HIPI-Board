@@ -78,7 +78,7 @@ void MirrorClock::handle(std::uint8_t kind, const std::uint8_t* p, std::size_t n
     if (!timeOk(t)) return;
     if (!env_.present()) { report(0); return; }
     if (pleaseActive() || env_.mode() == ClockFromPc::Auto) {
-        apply(t, diffMs);
+        apply(t, diffMs, atUs != 0 ? atUs : env_.nowUs());
         return;
     }
     if (env_.mode() == ClockFromPc::Off || declined_) {
@@ -95,11 +95,28 @@ void MirrorClock::handle(std::uint8_t kind, const std::uint8_t* p, std::size_t n
     report(mirror::kClkAsking);               // (the viewer waits for the answer)
 }
 
-void MirrorClock::apply(const ClockTime& t, std::int32_t diffMs) {
+// `t` is the second that began on the PC as the message arrived (atUs)
+void MirrorClock::apply(const ClockTime& t, std::int32_t diffMs, std::uint64_t atUs) {
     const bool user = fromUser_;
     pleaseUntil_ = 0;
     fromUser_ = false;
-    if (!env_.set(t)) {
+    const std::uint32_t lead = env_.startLeadUs ? env_.startLeadUs() : 0;
+    if (lead > 0 && lead < 1000000 && env_.hold && env_.release) {
+        // Held now, let run so that its first tick comes as the next second
+        // begins on the PC (poll())
+        if (!env_.hold(t)) { applied(t, diffMs, user, false); return; }
+        releasing_ = true;
+        releaseAt_ = atUs + 1000000ull - lead;
+        heldTime_ = t;
+        heldDiffMs_ = diffMs;
+        heldUser_ = user;
+        return;
+    }
+    applied(t, diffMs, user, env_.set(t));
+}
+
+void MirrorClock::applied(const ClockTime& t, std::int32_t diffMs, bool user, bool ok) {
+    if (!ok) {
         env_.log("Clock: writing the clock chip failed");
         if (user && env_.notice) env_.notice("Writing the clock failed");
         report(0);
@@ -146,6 +163,12 @@ void MirrorClock::sendReport(const ClockTime& t, bool valid, std::uint8_t flags,
 }
 
 void MirrorClock::poll() {
+    // A held chip: let run at its moment (the last few ms waited for here)
+    if (releasing_ && (env_.waitUntilUs ? env_.nowUs() + kSpinUs >= releaseAt_ : env_.nowUs() >= releaseAt_)) {
+        if (env_.waitUntilUs && env_.nowUs() < releaseAt_) env_.waitUntilUs(releaseAt_);
+        releasing_ = false;
+        applied(heldTime_, heldDiffMs_, heldUser_, env_.release());
+    }
     const std::uint64_t now = env_.nowUs();
     // Ask: the question when the screen is free
     if (askPending_ && env_.ask) {
@@ -199,6 +222,7 @@ void MirrorClock::viewerGone() {
     reportFlags_ = 0;
     askAt_ = 0;
     askPending_ = false;
+    if (releasing_) { releasing_ = false; env_.release(); }   // (never left held)
     declined_ = false;
     pleaseUntil_ = 0;
     fromUser_ = false;

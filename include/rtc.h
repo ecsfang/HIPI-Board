@@ -65,6 +65,17 @@ public:
 
     bool read(DateTime& t);
     bool set(const DateTime& t);
+    // Setting it to the start of a second (the time from the PC,
+    // mirror_clock.h): hold() writes the time with the clock stopped,
+    // release() lets it run, and its first tick comes startLeadUs() after
+    // that. The PCF85063A needs this: writing its seconds doesn't restart
+    // its count of the second (only STOP does -- the first tick then comes
+    // 0.507813 .. 0.507935 s after STOP is released, datasheet 7.2.1.2). The
+    // DS3231/DS1307 restart it whenever the seconds are written: hold() is
+    // set(), release() nothing, the lead 0.
+    bool hold(const DateTime& t);
+    bool release();
+    std::uint32_t startLeadUs() const { return chip_ == RtcChip::PCF85063A ? 507874u : 0u; }
 
     // After a begin() that found no chip: did something answer on 0x51
     // all the same (then regs = its registers 0x00..0x0A, for the log)?

@@ -189,7 +189,7 @@ screen, no touch — HIPI starts its screen saver. Choose what it does in
 
 | Setting | Choices |
 |---------|---------|
-| **Mode** | **Dim** (the default) — only the backlight goes down to 10 %; the screen keeps showing what it showed · **Clock** — a big clock fills the screen, its colon blinking with the seconds (a second on, a second off) · **HP-IL rain** — HP-IL messages fall down the screen like in *The Matrix*, taken from the real traffic on the loop when there is any · **Goose** — the HP-41's "running" goose, in flocks of different sizes, flies across the screen · **Random** — HP-IL rain or Goose, picked anew each time the screen saver starts, in a random style (Dark or LCD) · **Off** |
+| **Mode** | **Dim** (the default) — only the backlight goes down to 10 %; the screen keeps showing what it showed · **Clock** — a big clock fills the screen, its colon blinking with the seconds (a second on, a second off), and the HP-41's goose flying along the bottom once a minute — in from the left at :00, in the middle at :30, gone on the right as the next minute begins · **HP-IL rain** — HP-IL messages fall down the screen like in *The Matrix*, taken from the real traffic on the loop when there is any · **Goose** — the HP-41's "running" goose, in flocks of different sizes, flies across the screen · **Random** — HP-IL rain or Goose, picked anew each time the screen saver starts, in a random style (Dark or LCD) · **Off** |
 | **No clock** | What Clock mode shows when there's no clock chip or its time isn't set: **HP-IL rain**, **Goose**, **Random** or **Dim** |
 | **Style** | **Dark** — light on black · **LCD** — dark on a light background, like an old LCD (clock, rain and geese) |
 | **Date** | **EU** — `2026-10-03` · **US** — `10/03/2026` |

@@ -650,6 +650,12 @@ int main() {
         env.set = [](const hipi::ClockTime& t) {
             return hipi::clock_set(t.year, t.month, t.day, t.hour, t.minute, t.second);
         };
+        env.hold = [](const hipi::ClockTime& t) {
+            return hipi::clock_hold(t.year, t.month, t.day, t.hour, t.minute, t.second);
+        };
+        env.release = [] { return hipi::clock_release(); };
+        env.startLeadUs = [] { return hipi::clock_startLeadUs(); };
+        env.waitUntilUs = [](std::uint64_t us) { while (time_us_64() < us) {} };
         env.chipName = [] { return hipi::clock_chipName(); };
         env.mode = [] { return static_cast<hipi::ClockFromPc>(config.clockFromPc() < 3 ? config.clockFromPc() : 1); };
         env.ask = [](const std::string& howOff, std::function<void(bool)> answer) {

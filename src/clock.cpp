@@ -3,6 +3,7 @@
 #include "rtc.h"
 #include <algorithm>
 #include "glyph_font.h"
+#include "LT7683.hpp"
 #include "saver_anim.h"
 #include "config.hpp"
 #include "views.h"
@@ -11,6 +12,7 @@
 #include "tusb.h"
 #include "pico/time.h"
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 
 extern hipi::Config config;
@@ -193,18 +195,80 @@ bool colonLit_ = true;
 int lastSecond_ = -1;
 constexpr std::uint32_t kSecondPollMs = 40;  // the chip read this often, to see its second change
 
+// The minute's goose: flies along the bottom, from just off the left edge at
+// :00 to just off the right edge as the next minute begins -- in the middle
+// at :30 (all by its ink: the image has room around it). Moved a pixel at a time (only the strip it uncovers is cleared).
+int gooseSize_ = 2;                      // saver_anim's sizes 0..4: the largest that fits below the date
+constexpr int kNoGoose = -100000;
+int gooseY_ = 0;                         // its band (below the date)
+int gooseDrawnX_ = kNoGoose;             // where it was last drawn
+std::uint64_t secondAtUs_ = 0;           // when the chip's current second began (as seen)
+
+void clearCols(int x0, int x1, int y, int h, std::uint16_t bg) {
+    x0 = std::max(x0, 0);
+    x1 = std::min(x1, static_cast<int>(SCREEN_MAX_X));
+    if (x1 > x0) d_->fillRect(x0, y, x1 - x0, h, bg);    // (x, y, w, h)
+}
+
+// The goose where it should be at `second` (+ the time since that second began)
+void moveGoose(int second) {
+    const int w = anim_gooseWidth(gooseSize_), h = anim_gooseHeight(gooseSize_);
+    int inkL = 0, inkR = w;
+    anim_gooseInk(gooseSize_, inkL, inkR);
+    const int inkW = inkR - inkL;
+    // (until a second has been seen to begin: from its start)
+    const double frac = secondAtUs_ == 0 ? 0.0 : std::min(0.999, static_cast<double>(time_us_64() - secondAtUs_) / 1e6);
+    // its ink's left edge: -inkW at :00 (just coming in) .. the screen's
+    // width at the next :00 (just gone); the image starts inkL before it
+    const int x = static_cast<int>(std::floor(-inkW + (SCREEN_MAX_X + inkW) * (second + frac) / 60.0)) - inkL;
+    if (x == gooseDrawnX_) return;
+    const std::uint16_t bg = style().bg;
+    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    if (gooseDrawnX_ != kNoGoose && x < gooseDrawnX_) {      // (a new minute: back to the left)
+        clearCols(gooseDrawnX_, gooseDrawnX_ + w, gooseY_, h, bg);
+        gooseDrawnX_ = kNoGoose;
+    }
+    anim_gooseDraw(gooseSize_, x, gooseY_);
+    if (gooseDrawnX_ != kNoGoose) clearCols(gooseDrawnX_, x, gooseY_, h, bg);   // the strip it left
+    gooseDrawnX_ = x;
+}
+
+// Draws into an off-screen layer, then copies the area (x, y, w, h) to the
+// panel in one go: the big digits are some 200 rows of glyph pixels each,
+// drawn straight onto the panel they came down the screen row by row
+// ("running" in) -- now they appear at once. The layer is free while the
+// clock shows (the Hardware test page and the loop map use it too).
+template <typename F>
+void offscreen(int x, int y, int w, int h, std::uint16_t bg, F draw) {
+    d_->beginLayerDraw(LT7683::kBteLayer3Addr);
+    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    d_->fillRect(x, y, w, h, bg);                     // (x, y, w, h)
+    draw();
+    d_->endOverlayDraw();                             // canvas back to the panel
+    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    d_->copyLayerRegion(LT7683::kBteLayer3Addr, SCREEN_MAX_X, static_cast<std::int16_t>(x), static_cast<std::int16_t>(y),
+                        0, SCREEN_MAX_X, static_cast<std::int16_t>(x), static_cast<std::int16_t>(y),
+                        static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(h));
+}
+
+// The colon's box: [pen + mn, pen + mx) (it has no width of its own)
+void colonBox(int& x, int& w) {
+    int mn = 0, mx = 0;
+    kClockFontBig.textExtent(":", mn, mx);
+    x = colonPen_ + mn;
+    w = mx - mn;
+}
+
 void drawColon(bool lit) {
     if (colonPen_ < 0 || lit == colonLit_) return;
     colonLit_ = lit;
     const Style s = style();
+    int x, w;
+    colonBox(x, w);
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
-    if (lit) {
-        drawGlyphText(d_, colonPen_, colonY_, kClockFontBig, ":", s.fg, s.bg);
-    } else {
-        int mn = 0, mx = 0;                   // (its pixels: [pen + mn, pen + mx))
-        kClockFontBig.textExtent(":", mn, mx);
-        d_->fillRect(colonPen_ + mn, colonY_, mx - mn, kClockFontBig.height, s.bg);   // (x, y, w, h)
-    }
+    if (lit) offscreen(x, colonY_, w, kClockFontBig.height, s.bg,
+                       [&] { drawGlyphText(d_, colonPen_, colonY_, kClockFontBig, ":", s.fg, s.bg); });
+    else d_->fillRect(x, colonY_, w, kClockFontBig.height, s.bg);   // (x, y, w, h)
 }
 
 void invalidateRows() {
@@ -219,25 +283,15 @@ void extentOf(const GlyphFont& f, const char* text, int x, int& x0, int& x1) {
     x1 = x + mx;
 }
 
-// Repaints a row if its content or position changed. Drawing the text
-// paints its own background over the new extent, so only the part of the
-// old extent that the new text doesn't cover needs clearing -- the screen
-// is never blanked in between. `y`/`h`: the row's band; `nx0`/`nx1`: the
-// new text's extent; `draw`: paints it.
+// Repaints a row if its content or position changed: its whole band (the
+// screen's width -- whatever was there before goes) drawn off-screen and
+// copied in at once, so it's never seen half-drawn or blanked. `y`/`h`:
+// the row's band; `nx0`/`nx1`: the new text's extent; `draw`: paints it.
 template <typename F>
 void paintRow(Row& row, const std::string& key, int y, int h, int nx0, int nx1,
               std::uint16_t bg, F draw) {
     if (row.valid && row.key == key && row.x0 == nx0 && row.x1 == nx1) return;
-    if (row.valid) {
-        // (fillRect takes width and height)
-        if (row.x0 < nx0)
-            d_->fillRect(row.x0, y, std::min(row.x1, nx0) - row.x0, h, bg);
-        if (row.x1 > nx1) {
-            const int cx = std::max(row.x0, nx1);
-            d_->fillRect(cx, y, row.x1 - cx, h, bg);
-        }
-    }
-    draw();
+    offscreen(0, y, SCREEN_MAX_X, h, bg, draw);
     row.valid = true;
     row.key = key;
     row.x0 = nx0;
@@ -250,9 +304,12 @@ void draw(const DateTime* t, bool full) {
     const Style s = style();
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     if (full || s.fg != rowStyle_.fg || s.bg != rowStyle_.bg) {
+        if (s.fg != rowStyle_.fg || s.bg != rowStyle_.bg)
+            anim_gooseInit(d_, config.clockStyle() == 1);     // (the goose in the new style)
         d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, s.bg);
         invalidateRows();
         rowStyle_ = s;
+        gooseDrawnX_ = kNoGoose;
     }
 
     // Time, 24 h "14:05" or 12 h " 2:05" + "PM" (small, beside it)
@@ -286,19 +343,24 @@ void draw(const DateTime* t, bool full) {
             a0 = std::min(a0, b0);
             a1 = std::max(a1, b1);
         }
-        const std::string key = std::string(timeText) + "|" + (ampm ? ampm : "");
-        paintRow(rowTime_, key, timeY, big.height, a0, a1, s.bg, [&] {
-            drawGlyphText(d_, x0, timeY, big, timeText, s.fg, s.bg);
-            if (ampm) drawGlyphText(d_, x0 + timeW + 16, timeY + 8, small, ampm, s.fg, s.bg);
-            colonLit_ = true;                 // (drawn with it)
-        });
         // Where the colon is: after the hours (none while the time is unknown)
         const char* colon = std::strchr(timeText, ':');
         colonPen_ = t != nullptr && colon != nullptr
                         ? x0 + big.textWidth(std::string(timeText, static_cast<std::size_t>(colon - timeText)).c_str())
                         : -1;
         colonY_ = timeY;
-        if (t != nullptr && t->second % 2 != 0) drawColon(false);   // (repainted in a dark second)
+        const std::string key = std::string(timeText) + "|" + (ampm ? ampm : "");
+        paintRow(rowTime_, key, timeY, big.height, a0, a1, s.bg, [&] {
+            drawGlyphText(d_, x0, timeY, big, timeText, s.fg, s.bg);
+            if (ampm) drawGlyphText(d_, x0 + timeW + 16, timeY + 8, small, ampm, s.fg, s.bg);
+            colonLit_ = true;                 // (drawn with it)
+            if (t != nullptr && t->second % 2 != 0 && colonPen_ >= 0) {   // a dark second: dark already
+                int cx, cw;
+                colonBox(cx, cw);
+                d_->fillRect(cx, timeY, cw, big.height, s.bg);
+                colonLit_ = false;
+            }
+        });
     }
 
     // Date, then weekday and month
@@ -312,6 +374,13 @@ void draw(const DateTime* t, bool full) {
         std::snprintf(nameText, sizeof(nameText), "%s  %s", kWeekdays[t->weekday % 7],
                       kMonths[(t->month + 11) % 12]);
     }
+    // The goose's band: the largest goose that fits below the names (with
+    // room around it), in the middle of that room
+    const int room = SCREEN_MAX_Y - timeY - blockH;
+    gooseSize_ = 0;
+    for (int z = 4; z > 0; --z) if (anim_gooseHeight(z) <= room - 24) { gooseSize_ = z; break; }
+    const int gooseH = anim_gooseHeight(gooseSize_);
+    gooseY_ = timeY + blockH + (SCREEN_MAX_Y - timeY - blockH - gooseH) / 2;
     const int dateY = timeY + big.height + 50;
     const int dateX = (SCREEN_MAX_X - small.textWidth(dateText)) / 2;
     const int nameY = dateY + small.height + 24;
@@ -431,6 +500,36 @@ bool clock_set(int year, int month, int day, int hour, int minute, int second) {
     return true;
 }
 
+bool clock_hold(int year, int month, int day, int hour, int minute, int second) {
+#if HIPI_FAKE_RTC
+    return clock_set(year, month, day, hour, minute, second);
+#else
+    DateTime t;
+    t.year = year; t.month = month; t.day = day;
+    t.hour = hour; t.minute = minute; t.second = second;
+    t.weekday = weekdayOf(year, month, day);
+    if (!rtcPresent() || !rtc_->hold(t)) return false;
+    shownValid_ = false;
+    return true;
+#endif
+}
+
+bool clock_release() {
+#if HIPI_FAKE_RTC
+    return true;
+#else
+    return rtcPresent() && rtc_->release();
+#endif
+}
+
+std::uint32_t clock_startLeadUs() {
+#if HIPI_FAKE_RTC
+    return 0;
+#else
+    return rtc_ != nullptr && rtc_->present() ? rtc_->startLeadUs() : 0;
+#endif
+}
+
 const char* clock_chipName() {
 #if HIPI_FAKE_RTC
     return "stand-in";
@@ -460,6 +559,9 @@ void clock_drawAll() {
         anim_drawAll();
         return;
     }
+    anim_gooseInit(d_, config.clockStyle() == 1);     // the minute's goose (in this style)
+    lastSecond_ = -1;                                 // (its second's start: seen afresh)
+    secondAtUs_ = 0;
     DateTime t;
     const bool ok = clock_available() && rtcRead(t);
     draw(ok ? &t : nullptr, true);           // the view was (re)entered: full repaint
@@ -487,8 +589,10 @@ void clock_poll() {
     }
     if (t.second != lastSecond_) {
         lastSecond_ = t.second;
+        secondAtUs_ = time_us_64();
         drawColon(t.second % 2 == 0);        // lit a second, dark a second
     }
+    moveGoose(t.second);
 }
 
 }  // namespace hipi

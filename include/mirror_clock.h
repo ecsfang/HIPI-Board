@@ -3,8 +3,10 @@
 // clock is (kClkAsk); HIPI answers (kClkReport) as a second begins on the
 // chip, so the viewer can measure the difference to a few ms. If it's off
 // (or not set at all), the viewer sends the PC's time (kClkSet) as a second
-// begins on the PC, and HIPI writes it to the chip -- which also restarts the
-// chip's count of that second, so the clock is then right to a few ms.
+// begins on the PC, and HIPI writes it to the chip so that its count of that
+// second starts then (a DS3231 restarts it on the write; a PCF85063A is held
+// and let run at the right moment: ClockEnv::hold() / release()), so the
+// clock is then right to a few ms.
 //
 // Clock from PC (Settings -> Screen saver): Auto -- set it whenever the
 // viewer says so; Ask -- ask on the screen first; Off -- never by itself.
@@ -32,6 +34,16 @@ struct ClockEnv {
     std::function<bool()> present;                             // a clock chip answers
     std::function<bool(ClockTime& t, bool& valid)> read;      // false: couldn't be read
     std::function<bool(const ClockTime& t)> set;
+    // To the start of a second (optional): hold() writes the time with the
+    // chip's count of the second held, release() lets it run; its first tick
+    // comes startLeadUs() after that (0, or no hold: set() restarts the
+    // count itself -- DS3231)
+    std::function<bool(const ClockTime& t)> hold;
+    std::function<bool()> release;
+    std::function<std::uint32_t()> startLeadUs;
+    // Waits until nowUs() reaches `us` (optional; the last few ms before a
+    // release, so it's let run to the µs -- without it: at the next poll())
+    std::function<void(std::uint64_t us)> waitUntilUs;
     std::function<const char*()> chipName;                    // "DS3231"
     std::function<ClockFromPc()> mode;                        // the setting
     // Ask: "set the clock from the PC?" on the screen (Yes / No); howOff:
@@ -74,7 +86,8 @@ public:
 private:
     void report(std::uint8_t flags);          // as the next second begins (poll())
     void sendReport(const ClockTime& t, bool valid, std::uint8_t flags, std::uint16_t phaseMs);
-    void apply(const ClockTime& t, std::int32_t diffMs);
+    void apply(const ClockTime& t, std::int32_t diffMs, std::uint64_t atUs);
+    void applied(const ClockTime& t, std::int32_t diffMs, bool user, bool ok);
     bool pleaseActive() const { return pleaseUntil_ != 0 && env_.nowUs() < pleaseUntil_; }
 
     ClockEnv env_;
@@ -94,6 +107,13 @@ private:
     bool askPending_ = false;
     std::string question_;
     bool declined_ = false;                    // No: not asked again in this session
+    // A held chip (hold()) waiting to be let run at releaseAt_
+    bool releasing_ = false;
+    std::uint64_t releaseAt_ = 0;
+    ClockTime heldTime_;
+    std::int32_t heldDiffMs_ = 0;
+    bool heldUser_ = false;
+    static constexpr std::uint32_t kSpinUs = 20000;   // the last bit before releasing: waited for here
 };
 
 }  // namespace hipi

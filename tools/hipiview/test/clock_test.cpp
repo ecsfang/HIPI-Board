@@ -29,6 +29,13 @@ struct World {
     bool present = true, valid = true;
     double offset = -3.2;
     int sets = 0;
+    // A PCF85063A: writing the time doesn't restart the count of the second
+    // (its next tick comes when it would have anyway); STOP (hold) does --
+    // the first tick comes kPcfLead after it's let run (release)
+    bool pcf = false, pcfHold = true;
+    bool held = false;
+    double heldAt = 0;
+    static constexpr double kPcfLead = 0.507874;
     hipi::ClockFromPc mode = hipi::ClockFromPc::Auto;
     bool trusted = true;
     // Ask: the question waits here; answered by the test
@@ -50,17 +57,33 @@ struct World {
         env.present = [this] { return present; };
         env.read = [this](hipi::ClockTime& c, bool& v) {
             int y, mo, d, h, mi, s;
-            ClockSync::civilFromSeconds(static_cast<long long>(std::floor(t + offset)), y, mo, d, h, mi, s);
+            ClockSync::civilFromSeconds(static_cast<long long>(held ? heldAt : std::floor(t + offset)), y, mo, d, h, mi, s);
             c.year = y; c.month = mo; c.day = d; c.hour = h; c.minute = mi; c.second = s;
             v = valid;
             return present;
         };
         env.set = [this](const hipi::ClockTime& c) {
-            offset = ClockSync::civilSeconds(c.year, c.month, c.day, c.hour, c.minute, c.second) - t;
+            const double n = ClockSync::civilSeconds(c.year, c.month, c.day, c.hour, c.minute, c.second);
+            const double frac = t + offset - std::floor(t + offset);
+            offset = n + (pcf ? frac : 0.0) - t;     // (a PCF85063A keeps its count of the second)
             valid = true;
             ++sets;
             return true;
         };
+        env.hold = [this](const hipi::ClockTime& c) {
+            heldAt = ClockSync::civilSeconds(c.year, c.month, c.day, c.hour, c.minute, c.second);
+            held = true;
+            valid = true;
+            ++sets;
+            return true;
+        };
+        env.release = [this] {
+            if (held) offset = heldAt + 1.0 - kPcfLead - t;   // its first tick kPcfLead from now
+            held = false;
+            return true;
+        };
+        env.waitUntilUs = [this](std::uint64_t us) { if (us / 1e6 > t) t = us / 1e6; };
+        env.startLeadUs = [this] { return pcf && pcfHold ? static_cast<std::uint32_t>(kPcfLead * 1e6) : 0u; };
         env.chipName = [] { return "DS3231"; };
         env.mode = [this] { return mode; };
         env.ask = [this](const std::string& h, std::function<void(bool)> a) {
@@ -118,7 +141,7 @@ struct World {
             }
         }
     }
-    double chipOff() const { return offset; }   // the chip minus the true time
+    double chipOff() const { return held ? 99.0 : offset; }   // the chip minus the true time
     bool said(const std::string& part) const {
         for (const auto& s : news) if (s.find(part) != std::string::npos) return true;
         return false;
@@ -145,6 +168,25 @@ int main() {
         w.offset += 0.8;
         w.run(ClockSync::kRecheckSec + 3);
         check(w.sets == 2 && std::fabs(w.chipOff()) < 0.01, "a day later, 0.8 s fast: set again");
+    }
+    {
+        // A PCF85063A: held, let run so that it ticks with the PC -- right
+        // in one set (written the plain way it stays off by up to a second:
+        // hipiview tried 3 times, "now 0.3 s fast")
+        World w;
+        w.pcf = true;
+        w.pcSide->sessionReady(w.t);
+        w.run(6);
+        std::printf("     PCF85063A: the chip is now %+.4f s off (%d set)\n", w.chipOff(), w.sets);
+        check(w.sets == 1 && std::fabs(w.chipOff()) < 0.01, "PCF85063A, 3.2 s slow: one set, to within 10 ms");
+        check(w.said("set from this PC -- now") && !w.said("fast"), "... and hipiview finds it right");
+        World o;
+        o.pcf = true;
+        o.pcfHold = false;                    // (as before: the time just written)
+        o.pcSide->sessionReady(o.t);
+        o.run(10);
+        std::printf("     PCF85063A written the plain way: %+.4f s off after %d sets\n", o.chipOff(), o.sets);
+        check(o.sets == 3 && std::fabs(o.chipOff()) > 0.25, "... written the plain way: still off after 3 sets (the old way)");
     }
     {
         // Right already (within the tolerance): not set

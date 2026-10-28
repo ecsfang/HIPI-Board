@@ -187,6 +187,12 @@ bool CRtc::read(DateTime& t) {
 
 bool CRtc::set(const DateTime& t) {
     if (!present_) return false;
+    if (chip_ == RtcChip::PCF85063A) return hold(t) && release();
+    return hold(t);
+}
+
+bool CRtc::hold(const DateTime& t) {
+    if (!present_) return false;
     const int wd = weekdayOf(t.year, t.month, t.day);
     if (chip_ == RtcChip::PCF85063A) {
         // Garbled registers (no time in them, or EXT_TEST set): start from
@@ -199,11 +205,11 @@ bool CRtc::set(const DateTime& t) {
             !writeReg8(kPcfControl1, kPcfSoftReset))
             return false;
         // 24-hour mode before the hours are written (they're read in the
-        // mode set), and the clock running; the other bits as they were
+        // mode set), and STOP: the count of the second held at its start
+        // until release(); the other bits as they were
         std::uint8_t c1 = 0;
         if (!readReg8(kPcfControl1, c1)) return false;
-        constexpr std::uint8_t kClear = kPcfStop | kPcf12h | kPcfExtTest;
-        if ((c1 & kClear) != 0 && !writeReg8(kPcfControl1, static_cast<std::uint8_t>(c1 & ~kClear)))
+        if (!writeReg8(kPcfControl1, static_cast<std::uint8_t>((c1 & ~(kPcf12h | kPcfExtTest)) | kPcfStop)))
             return false;
         // Seconds with OS clear: the time is valid from now on
         const std::uint8_t buf[8] = {
@@ -225,6 +231,14 @@ bool CRtc::set(const DateTime& t) {
         if (readReg8(kRegStatus, status)) writeReg8(kRegStatus, status & ~kOscStopped);
     }
     return true;
+}
+
+bool CRtc::release() {
+    if (!present_) return false;
+    if (chip_ != RtcChip::PCF85063A) return true;            // (it runs already)
+    std::uint8_t c1 = 0;
+    if (!readReg8(kPcfControl1, c1)) return false;
+    return writeReg8(kPcfControl1, static_cast<std::uint8_t>(c1 & ~kPcfStop));
 }
 
 }  // namespace hipi

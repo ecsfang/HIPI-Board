@@ -23,4 +23,15 @@ constexpr AnimKind kRandomAnims[] = { AnimKind::Rain, AnimKind::Goose };
 void anim_drawAll();        // full redraw
 void anim_step();           // main loop: the next bit of animation (a few ms at most)
 
+// One goose for the clock (clock.cpp, the minute's goose): anim_gooseInit()
+// puts the geese, in the style, into the display's memory; then
+// anim_gooseDraw() copies one (size 0 = smallest .. 4) to (x, y), clipped to
+// the screen -- nothing else of the animation runs
+void anim_gooseInit(DisplayDriver* display, bool lcd);
+int anim_gooseWidth(int size);
+int anim_gooseHeight(int size);
+// Where the goose's ink is in its image: columns [left, right)
+void anim_gooseInk(int size, int& left, int& right);
+void anim_gooseDraw(int size, int x, int y);
+
 }  // namespace hipi

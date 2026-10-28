@@ -156,7 +156,7 @@ const char kGoose = static_cast<char>(0xFE);
 // Pre-rendered in the current style into the display's SDRAM
 // (LT7683::kGooseAddr): every size side by side, x = its column there.
 // (They were kept in the MCU's RAM before: 36 kB, for good.)
-struct GooseImage { int x = 0, w = 0, h = 0; };
+struct GooseImage { int x = 0, w = 0, h = 0, inkL = 0, inkR = 0; };   // inkL..inkR: its ink's columns
 GooseImage images_[kGooseSizes];
 std::uint16_t gooseStride_ = 4;                  // pixels a row of the goose layer
 std::uint16_t gooseBg_ = 0;
@@ -190,6 +190,14 @@ void renderGooseImages() {
         im.x = x;
         im.w = g ? g->width : 1;
         im.h = f.height;
+        im.inkL = im.w;
+        im.inkR = 0;
+        for (int r = 0; g != nullptr && r < im.h; ++r)
+            for (int i = 0; i < im.w; ++i) {
+                const std::uint8_t b = f.data[g->offset + r * ((im.w + 1) / 2) + i / 2];
+                if (((i & 1) ? (b & 0x0F) : (b >> 4)) != 0) { im.inkL = std::min(im.inkL, i); im.inkR = std::max(im.inkR, i + 1); }
+            }
+        if (im.inkR <= im.inkL) { im.inkL = 0; im.inkR = im.w; }
         x += im.w;
         maxH = std::max(maxH, im.h);
     }
@@ -335,6 +343,22 @@ void anim_start(AnimKind kind, DisplayDriver* display, bool lcd) {
     lcd_ = lcd;
     if (kind_ == AnimKind::Rain) rainStart();
     else                         geeseStart();
+}
+
+void anim_gooseInit(DisplayDriver* display, bool lcd) {
+    d_ = display;
+    lcd_ = lcd;
+    renderGooseImages();
+}
+int anim_gooseWidth(int size) { return images_[size < 0 ? 0 : size % kGooseSizes].w; }
+int anim_gooseHeight(int size) { return images_[size < 0 ? 0 : size % kGooseSizes].h; }
+void anim_gooseInk(int size, int& left, int& right) {
+    const GooseImage& im = images_[size < 0 ? 0 : size % kGooseSizes];
+    left = im.inkL;
+    right = im.inkR;
+}
+void anim_gooseDraw(int size, int x, int y) {
+    if (d_ != nullptr) drawGooseAt(images_[size < 0 ? 0 : size % kGooseSizes], x, y);
 }
 
 void anim_drawAll() {
