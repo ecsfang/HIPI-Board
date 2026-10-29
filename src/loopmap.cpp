@@ -47,7 +47,43 @@ int hipiFirst_ = 0, hipiNext_ = 0;   // HIPI's range at the last auto-addressing
 std::uint64_t aadT_ = 0;
 std::uint32_t cursor_ = 0;           // into the analyzer's capture
 std::uint64_t lastFrameT_ = 0;
-std::uint64_t roundTripUs_ = 0;      // time between two frames during a transfer
+// ── Timing (the title bar): HIPI and the loop ───────────────────────────
+// HIPI: how long a frame stays in HIPI, PIO in -> PIO out (its devices,
+// and the PC behind PILBOX in COFF/COFI) -- average and longest.
+// Loop: HIPI sees each frame once, as it passes; one frame to the next is
+// a whole round of the loop -- every device on it and the controller,
+// with the controller's own time before it sends the next one. The
+// shortest such gap (not IDY polling) is the nearest to the loop itself.
+// In CON (the PC controls the loop through PILBOX) HIPI sends the frame
+// and gets it back: the loop's own time, exactly.
+// Each over 2 s; the last 2 s with samples are shown (kept while it's quiet).
+constexpr std::uint64_t kWindowUs = 2000000;
+constexpr std::uint64_t kGapMaxUs = 100000;      // longer: a pause, not a round
+struct Window {
+    std::uint64_t start = 0, sum = 0;
+    std::uint32_t n = 0, max = 0, min = 0xFFFFFFFFu;
+};
+struct Shown { bool valid = false; std::uint32_t avg = 0, max = 0, min = 0; std::uint64_t at = 0; };
+Window hipiW_, loopW_, conW_;
+Shown hipi_, loop_, con_;
+std::uint64_t lastGapT_ = 0;                // the previous frame's time (not IDY), 0: none
+std::uint64_t timingNow() { return time_us_64(); }
+void sample(Window& w, std::uint32_t us) {
+    if (w.n == 0) w.start = timingNow();
+    w.sum += us;
+    ++w.n;
+    w.max = std::max(w.max, us);
+    w.min = std::min(w.min, us);
+}
+void roll(Window& w, Shown& s, std::uint64_t now) {
+    if (w.n == 0 || now - w.start < kWindowUs) return;
+    s.valid = true;
+    s.avg = static_cast<std::uint32_t>(w.sum / w.n);
+    s.max = w.max;
+    s.min = w.min;
+    s.at = now;
+    w = Window();
+}
 
 // Protocol state, to know who answers what
 int talker_ = -1;
@@ -178,6 +214,24 @@ void keepDeviceId() {
         dirty_ = true;
     }
 }
+void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t);
+// A frame from the capture: timed (the round trip), then taken in. (Not
+// in onFrame(): it calls itself for a frame HIPI changed, with the same
+// time -- which made the round trip 0.)
+void frameIn(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
+    // The loop: frame to frame, neither of them IDY (polling comes at the
+    // controller's own, slow pace)
+    if (IS_IDLE(in)) {
+        lastGapT_ = 0;
+    } else {
+        if (lastGapT_ != 0 && t > lastGapT_ && t - lastGapT_ < kGapMaxUs)
+            sample(loopW_, static_cast<std::uint32_t>(t - lastGapT_));
+        lastGapT_ = t;
+    }
+    lastFrameT_ = t;
+    onFrame(in, out, t);
+}
+
 void endTalk() {
     keepDeviceId();
     pending_ = 0;
@@ -186,8 +240,6 @@ void endTalk() {
 
 void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
     const bool absorbed = out == IL_NO_FRAME;
-    if (lastFrameT_ != 0 && pending_ != 0) roundTripUs_ = t - lastFrameT_;
-    lastFrameT_ = t;
 
     // The talker's last byte came back to it (on HIPI's side of the loop:
     // HIPI's own talker, or a PC device behind PILBOX) and it ended the
@@ -538,14 +590,28 @@ bool visible() {
 
 constexpr int kTitleBarH = 26;
 
+// 850 us, 1.3 ms, 42 ms
+std::string usText(std::uint32_t us) {
+    char b[16];
+    if (us < 1000) std::snprintf(b, sizeof(b), "%lu us", static_cast<unsigned long>(us));
+    else if (us < 100000) std::snprintf(b, sizeof(b), "%lu.%lu ms", static_cast<unsigned long>(us / 1000),
+                                        static_cast<unsigned long>((us / 100) % 10));
+    else std::snprintf(b, sizeof(b), "%lu ms", static_cast<unsigned long>(us / 1000));
+    return b;
+}
+
 // What the header line says (padded, so a shorter text overwrites a longer
 // one -- up to the close button)
 std::string headerText(int devices) {
     char b[96];
     if (haveAad_) {
-        std::snprintf(b, sizeof(b), "last auto-address %s   %d devices   frame round trip %lu.%lu ms",
-                      timeText(aadT_).c_str(), devices,
-                      static_cast<unsigned long>(roundTripUs_ / 1000), static_cast<unsigned long>((roundTripUs_ / 100) % 10));
+        // HIPI: average (longest); loop: the shortest gap -- in CON the
+        // exact round; none measured yet: --
+        const std::string h = hipi_.valid ? usText(hipi_.avg) + " (max " + usText(hipi_.max) + ")" : std::string("--");
+        const bool exact = con_.valid && (!loop_.valid || con_.at >= loop_.at);
+        const std::string l = exact ? usText(con_.avg) + " exact" : loop_.valid ? usText(loop_.min) : std::string("--");
+        std::snprintf(b, sizeof(b), "last auto-address %s   %d devices   HIPI %s   loop %s",
+                      timeText(aadT_).c_str(), devices, h.c_str(), l.c_str());
     } else {
         std::snprintf(b, sizeof(b), "waiting for the controller to set up the loop (auto-address)");
     }
@@ -569,6 +635,18 @@ std::vector<std::string> drawnSigs_;
 int drawnSelected_ = 0;
 std::string drawnHeader_;
 std::string drawnDetails_;
+
+// The title's text again, straight on the panel (padded: it covers the old one)
+void drawHeaderOnly() {
+    const std::uint32_t prevAddr = d_->canvasAddr();
+    const std::uint16_t prevStride = d_->canvasStride();
+    d_->endOverlayDraw();
+    d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+    d_->selectBuiltinFont();
+    drawnHeader_ = headerText(static_cast<int>(drawnOrder_.size()));
+    text(200, 5, drawnHeader_.c_str(), 0, kBlack, kYellow);
+    if (prevAddr != 0) d_->beginLayerDraw(prevAddr, prevStride);
+}
 
 std::string detailsSignature() {
     if (!selected_) return "";
@@ -680,6 +758,15 @@ void loopmap_drawAll() {
 
 
 bool loopmap_detailsOpen() { return selected_ != 0; }
+void loopmap_noteHipiUs(std::uint32_t us) { sample(hipiW_, us); }
+void loopmap_noteConRoundUs(std::uint32_t us) { sample(conW_, us); }
+LoopTiming loopmap_timing() {
+    LoopTiming t;
+    t.hipiValid = hipi_.valid; t.hipiAvgUs = hipi_.avg; t.hipiMaxUs = hipi_.max;
+    t.loopValid = loop_.valid; t.loopMinUs = loop_.min;
+    t.conValid = con_.valid; t.conAvgUs = con_.avg;
+    return t;
+}
 
 void loopmap_closeDetails() {
     if (!selected_) return;
@@ -703,7 +790,9 @@ void loopmap_reset() {
     for (Node& n : nodes_) n = Node{};
     haveAad_ = false;
     hipiFirst_ = hipiNext_ = 0;
-    aadT_ = lastFrameT_ = roundTripUs_ = 0;
+    aadT_ = lastFrameT_ = lastGapT_ = 0;
+    hipiW_ = loopW_ = conW_ = Window();
+    hipi_ = loop_ = con_ = Shown();
     talker_ = -1;
     listeners_ = 0;
     ctrlTalkEnd_ = ctrlListenEnd_ = 0;
@@ -717,12 +806,20 @@ void loopmap_reset() {
 void loopmap_poll() {
     IL_CMD_t in, out;
     std::uint64_t t;
-    for (int n = 0; n < 64 && analyzer_nextFrame(cursor_, in, out, t); ++n) onFrame(in, out, t);
+    for (int n = 0; n < 64 && analyzer_nextFrame(cursor_, in, out, t); ++n) frameIn(in, out, t);
+    const std::uint64_t now = timingNow();
+    roll(hipiW_, hipi_, now);
+    roll(loopW_, loop_, now);
+    roll(conW_, con_, now);
     // A role came or went (or its hold ran out): the cards again
     if (visible() && rolesNow() != drawnRoles_) dirty_ = true;
     if (dirty_ && visible() && time_reached(nextDraw_)) {
         nextDraw_ = make_timeout_time_ms(500);
         loopmap_drawAll();                   // off-screen + copy: no flicker
+    } else if (visible() && time_reached(nextDraw_) && headerText(static_cast<int>(drawnOrder_.size())) != drawnHeader_) {
+        // Only the title's numbers changed (the round trip): just its text
+        nextDraw_ = make_timeout_time_ms(500);
+        drawHeaderOnly();
     }
 }
 

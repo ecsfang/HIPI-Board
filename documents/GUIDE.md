@@ -479,7 +479,23 @@ into the corners. The bottom row ends left of the page's menu button
 (`kPageContentRight`), no card goes below `kPageContentBottom`. Full cards
 (<= 8), compact cards (<= 16) or tiles (<= 30). It is a page (see
 *Pages* below): taps go to `loopmap_tap()` before the corner checks in
-`boardui_handleTap()`, also at the right edge. Talker and listeners are framed (green /
+`boardui_handleTap()`, also at the right edge. The title's two times
+(`loopmap_timing()`): **HIPI** -- hipi.cpp stamps a frame as
+`receiveFrame()` gives it (`rxAtUs`) and calls `loopmap_noteHipiUs()` in
+`runDevices()` just before `sendFrame()` (so a frame that waited for the
+PC behind PILBOX, `pilboxWait()`, counts that wait); in CON, the time in
+`conInject()` before `sendFrame()` plus `conArrived()`'s devices.
+**loop** -- `frameIn()`, for each frame read from the capture: the gap
+since the previous frame, neither of them IDY, under 100 ms; the
+shortest is shown. **CON** -- `conArrived()` for a frame back from the
+cable: `loopmap_noteConRoundUs()`, from `sendFrame()` to its return; shown
+(as "exact") instead of the shortest gap while it's the newer. Each is
+gathered for 2 s (`Window`), then shown (`Shown`) until the next 2 s with
+samples (`roll()` in `loopmap_poll()`). When only the title's text
+changed, `loopmap_poll()` redraws just that (`drawHeaderOnly()`, at most
+every 0.5 s). (A frame HIPI changed is taken into `onFrame()` twice with
+the same time -- so the timing is in `frameIn()`, once per frame.) Not in `onFrame()`, which calls itself with the
+same time for a frame HIPI changed -- that made it 0. Talker and listeners are framed (green /
 blue, both at once magenta: `roleFrame()`) from `talker_` / `listeners_`; before either changes
 (LAD, UNL, TAD, UNT, IFC) `stampRoles()` gives the roles that are active
 then a `talkEnd` / `listenEnd` of frame time + the hold (`kLoopMapRoleHoldMs`,

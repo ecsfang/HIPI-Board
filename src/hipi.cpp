@@ -22,6 +22,7 @@
 #include "uidialog.hpp"
 #include "boardui.h"
 #include "analyzer.h"
+#include "loopmap.h"      // timing: HIPI's time per frame, a CON round
 #include "config.hpp"
 
 #include "usb_serial.h"
@@ -497,6 +498,12 @@ inline void postTrace(IL_CMD_t frame) {
 static bool bootDone();                   // the main loop runs (warning boxes allowed)
 static bool conInFlight = false;          // a frame of ours is out on the cable
 static IL_CMD_t conSent = 0;              // the frame that started the round (analyzer)
+// Timing (the loop map's title): when the frame went out on the loop, and
+// the time HIPI spent on it before (its devices after PILBOX)
+static std::uint64_t conOutAtUs = 0;
+static std::uint32_t conHipiUs = 0;
+// A frame from the loop: when it came in (HIPI's time per frame -- runDevices())
+static std::uint64_t rxAtUs = 0;
 static bool conWasActive = false;         // (to tell the analyzer when CON starts/ends)
 static absolute_time_t conDeadline = nil_time;
 static absolute_time_t conNextWarn = nil_time;
@@ -536,6 +543,7 @@ static void conArrived(HpIlLoop& loop, IL_CMD_t f, int depth, IL_CMD_t sent);
 
 // A frame from PILBOX's place onto the loop
 static void conInject(HpIlLoop& loop, IL_CMD_t f, int depth) {
+    const std::uint64_t startUs = time_us_64();
     const std::size_t p = pilboxIndex();
     const IL_CMD_t g = conRunDevices(f, p + 1, devices.size());
     // The analyzer sees each round ONCE, as it does with an HP-41 in
@@ -550,6 +558,8 @@ static void conInject(HpIlLoop& loop, IL_CMD_t f, int depth) {
         conArrived(loop, g, depth + 1, f);            // straight round to the start
     } else {
         TRC_LOGF("\r\n\t   CON ==> %03X", g);
+        conOutAtUs = time_us_64();
+        conHipiUs = static_cast<std::uint32_t>(conOutAtUs - startUs);
         loop.sendFrame(g);
         conInFlight = true;
         conDeadline = make_timeout_time_ms(kConReturnMs);
@@ -559,8 +569,15 @@ static void conInject(HpIlLoop& loop, IL_CMD_t f, int depth) {
 // A frame back from the loop (IN, or round inside HIPI)
 // (sent: internal loop -- the frame as the PC sent it, for the analyzer)
 static void conArrived(HpIlLoop& loop, IL_CMD_t f, int depth, IL_CMD_t sent) {
+    const std::uint64_t inUs = time_us_64();
+    // Round the loop and back (not HIPI's internal loop): the loop's own time
+    const bool fromCable = conInFlight && conOutAtUs != 0;
+    if (fromCable) hipi::loopmap_noteConRoundUs(static_cast<std::uint32_t>(inUs - conOutAtUs));
     conInFlight = false;
     const IL_CMD_t g = conRunDevices(f, 0, pilboxIndex());
+    // HIPI's time on the round: its devices on the way out and back
+    if (fromCable) hipi::loopmap_noteHipiUs(conHipiUs + static_cast<std::uint32_t>(time_us_64() - inUs));
+    conOutAtUs = 0;
 #if HIPI_ANALYZER
     // The whole round: what the PC sent -> what came back to it
     hipi::analyzer_capture(sent, g);
@@ -701,6 +718,8 @@ static void runDevices(HpIlLoop& loop, IL_CMD_t rx_frame, std::size_t from, IL_C
         TRC_LOGF("\r\n\t   <<< frame absorbed (device powering up)");
     } else {
         postTrace(rx_frame);
+        // HIPI's time on it: PIO in -> out (with the PC's, behind PILBOX)
+        if (rxAtUs != 0) hipi::loopmap_noteHipiUs(static_cast<std::uint32_t>(time_us_64() - rxAtUs));
         // Send the final frame back to the HP-IL loop using the PIO interface
         loop.sendFrame(rx_frame);
     }
@@ -753,6 +772,7 @@ bool hipi_loop(HpIlLoop& loop) {
     uint32_t rx_frame;
     // Check if any HP-IL frame from the PIO interface is available
     if( loop.receiveFrame(rx_frame) ) {
+        rxAtUs = time_us_64();               // (HIPI's time on it: runDevices())
         // HP-IL activity on LED 4 (as chosen, leds.h: IDY frames only with All)
         hpil_led_activity(IS_IDLE(static_cast<IL_CMD_t>(rx_frame)));
         // Real traffic: the demo stops (demo.h)

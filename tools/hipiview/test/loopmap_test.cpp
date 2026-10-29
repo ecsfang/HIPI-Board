@@ -339,6 +339,52 @@ int main() {
     hipi::loopmap_closeDetails();
     check(!hipi::loopmap_detailsOpen(), "X on the strip: closed");
 
+    // ── Timing in the title bar: HIPI's time per frame, the loop's ──────
+    // The loop: the shortest gap between frames as they pass (not IDY) --
+    // here HIPI's plotter answering SDI, 850 us round the loop each
+    {
+        run(2100);                             // (what came before: shown, a new 2 s begins)
+        frame(TAD + 3);
+        const char id[] = "HP7470A\r\n";
+        hipi::analyzer_capture(SDI, static_cast<IL_CMD_t>(id[0]));
+        for (int i = 1; id[i] != 0; ++i) {
+            fakeNowUs += 850;
+            hipi::analyzer_capture(static_cast<IL_CMD_t>(id[i - 1]), static_cast<IL_CMD_t>(id[i]));
+        }
+        fakeNowUs += 850;
+        hipi::analyzer_capture(static_cast<IL_CMD_t>('\n'), ETO);
+        frame(UNT);
+        // IDY polling, close together: not the loop (the controller's pace)
+        for (int i = 0; i < 10; ++i) { hipi::analyzer_capture(IDY, IDY); fakeNowUs += 200; }
+        // HIPI's time per frame (hipi.cpp tells it): 40, 60 and once 3.1 ms
+        hipi::loopmap_noteHipiUs(40);
+        hipi::loopmap_noteHipiUs(60);
+        hipi::loopmap_noteHipiUs(3100);
+        hipi::loopmap_drawAll();
+        chip.render(panel.data(), 0.0, false);
+        std::vector<std::uint32_t> title(panel.begin(), panel.begin() + 26 * 1024);
+        run(2100);                             // the 2 s are over: shown
+        hipi::LoopTiming tm = hipi::loopmap_timing();
+        std::printf("     loop %u us (shortest), HIPI %u us (max %u)\n", static_cast<unsigned>(tm.loopMinUs),
+                    static_cast<unsigned>(tm.hipiAvgUs), static_cast<unsigned>(tm.hipiMaxUs));
+        check(tm.loopValid && tm.loopMinUs == 850, "loop: the shortest gap between frames (850 us; IDY 200 us apart left out)");
+        check(tm.hipiValid && tm.hipiAvgUs == 1066 && tm.hipiMaxUs == 3100, "HIPI: its time per frame, average and longest");
+        chip.render(panel.data(), 0.0, false);
+        check(!std::equal(title.begin(), title.end(), panel.begin()), "... the title bar shows them by itself");
+        run(600);                              // (the title: at most every 0.5 s)
+        snapshot("loopmap_8_timing.png");
+        // Quiet for a while: still shown
+        run(5000);
+        tm = hipi::loopmap_timing();
+        check(tm.loopValid && tm.loopMinUs == 850 && tm.hipiValid, "... and kept while it's quiet");
+        // CON: a frame of the PC's out on the loop and back -- exact
+        hipi::loopmap_noteConRoundUs(1300);
+        hipi::loopmap_noteConRoundUs(1320);
+        run(2100);
+        tm = hipi::loopmap_timing();
+        check(tm.conValid && tm.conAvgUs == 1310, "CON: the loop's exact time (out and back), averaged");
+    }
+
     // ── Six devices: the right side's two cards spread over it, centred
     // (they sat up and down in the corners), nothing in the menu button's corner
     frame(TAD + 6); frame(UNT);

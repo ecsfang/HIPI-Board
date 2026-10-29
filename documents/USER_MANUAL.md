@@ -1506,6 +1506,34 @@ usual. The cards on each side of the ring are spread evenly over it.
 
 <a href="images/loopmap.png"><img src="images/loopmap.png" alt="The loop map" width="512"></a>
 
+**The title bar** says when the loop was last auto-addressed, how many
+devices there are, and two times — e.g.
+`HIPI 42 us (max 3.1 ms)   loop 1.3 ms`:
+
+- **HIPI** — how long a frame stays in HIPI: from the moment it comes in
+  on HP-IL IN until HIPI sends it on at HP-IL OUT. That is the time all of
+  HIPI's devices take to look at it and answer — and, while PILBOX passes
+  the loop on to a PC program (pyILPER in `COFF`/`COFI`), the PC's time
+  too, since the frame goes there and back first. Shown is the average
+  and, in brackets, the longest. A few tens of µs is normal; much more
+  (with a PC behind PILBOX: a slow PC program) slows the whole loop down.
+- **loop** — how long a frame takes to go **round the whole loop**: every
+  device on it, physical ones included, and the controller. HIPI only sees
+  a frame as it passes; the next one comes when the frame has been all the
+  way round and the controller has sent the next. That gap also holds the
+  controller's own time before it sends again, which varies — so the
+  **shortest** gap is shown: the closest to the loop's own time. IDY frames
+  (the controller only polling) are left out.
+- **loop … exact** — when a PC program controls the loop through PILBOX
+  (`CON`), HIPI sends each frame onto the loop itself and gets it back: the
+  time from out to back is the loop's own time, exactly, with no
+  controller time in it. Shown is the average.
+
+Each value covers 2 seconds; the last 2 seconds that had traffic are
+shown, so the numbers stay while the loop is quiet. Under a millisecond
+they are in µs (`850 us`), else in ms (`1.3 ms`); `--` until something
+has been measured.
+
 HIPI only listens, so the map fills in as the loop is used: the addresses
 come from the controller's auto-addressing, a device's type and ID once the
 controller has asked for them (until then the card shows `?`), and devices that

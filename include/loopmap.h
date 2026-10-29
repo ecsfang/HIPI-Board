@@ -40,6 +40,19 @@ bool loopmap_tap(int x, int y);
 bool loopmap_cardPoint(int addr, int& x, int& y);
 // The details box from the button strip: OK = its view, X = close
 bool loopmap_detailsOpen();
+// Timing, shown in the title bar (USER_MANUAL: "The loop map"):
+// HIPI -- a frame's time in HIPI, PIO in -> PIO out (hipi.cpp, each frame
+// sent on); CON -- a frame of the PC's out on the loop and back (exact).
+// The loop's own: the shortest gap between frames (not IDY) as they pass.
+// Each over 2 s, the last 2 s with samples shown.
+void loopmap_noteHipiUs(std::uint32_t us);
+void loopmap_noteConRoundUs(std::uint32_t us);
+struct LoopTiming {
+    bool hipiValid = false; std::uint32_t hipiAvgUs = 0, hipiMaxUs = 0;
+    bool loopValid = false; std::uint32_t loopMinUs = 0;
+    bool conValid = false;  std::uint32_t conAvgUs = 0;
+};
+LoopTiming loopmap_timing();
 void loopmap_detailsOk();
 void loopmap_closeDetails();
 // Forgets the loop (the demo, after its made-up session); it is learnt
