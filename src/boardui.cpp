@@ -16,6 +16,8 @@
 #include "loopmap.h"
 #include "devicelist.h"   // the HP-IL DEVICES list
 #include "hwtest.h"
+#include "page_chrome.h"     // a page's X and menu button
+#include "chartable.h"       // Character table: a touched character's box
 #include "mediamap.h"
 #include "demo.h"
 #include "views.h"
@@ -686,12 +688,18 @@ void boardui_poll() {
             dialog_->handleButton(repeatButton, /*repeat=*/true);
         buttonStripHideDeadline = make_timeout_time_ms(kButtonStripHideMs);  // keep the strip up
     }
-    // Hardware test page: no button strip over it (left up by the menu
-    // that opened the page, or a button from hipiview) -- the page's own
-    // buttons reach the right edge, and its X closes it
-    if (buttonStripVisible && pressedButton == Button::None && dialog_ != nullptr && !dialog_->isOpen() &&
-        views_output() == DisplayOutput::HwTest && !views_isSplashVisible()) {
-        hideButtonStrip();
+    // A page opened (views_isPage()): the button strip the menu that
+    // opened it left up goes -- the page's own buttons and cards reach the
+    // right edge; its menu button (bottom right) brings the strip back
+    {
+        static DisplayOutput lastOutput = DisplayOutput::Display;
+        const DisplayOutput o = views_output();
+        if (o != lastOutput && !views_isSplashVisible()) {
+            lastOutput = o;
+            if (buttonStripVisible && pressedButton == Button::None && dialog_ != nullptr && !dialog_->isOpen() &&
+                views_isPage(o))
+                hideButtonStrip();
+        }
     }
     // Auto-hide the info box after kInfoBoxShowMs, same idea as the button
     // strip's own countdown below.
@@ -907,9 +915,13 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
     // hidden by the splash's own timeout. See views.cpp.
     if (views_isSplashVisible()) return;
     // The button strip's zone (right edge) belongs to the strip -- a view's
-    // own touch areas under it (loop map cards reach the edge) don't get
-    // those touches, or OK on the strip would open a card instead of the menu
-    const bool stripZone = x >= buttonStripScreenX0;
+    // own touch areas under it don't get those touches, or OK on the strip
+    // would press something under it instead of opening the menu. On a page
+    // (views_isPage()) only its menu button (bottom right) is the strip's,
+    // and the right edge while the strip is up; the rest is the page's.
+    const bool page = views_isPage() && !(dialog_ != nullptr && dialog_->isOpen());
+    const bool stripZone = page ? (page_menuHit(x, y) || (buttonStripVisible && x >= buttonStripScreenX0))
+                                : x >= buttonStripScreenX0;
     // Printer view controls (nothing while a menu is open)
     const PrinterHit printerHit = (dialog_ != nullptr && dialog_->isOpen()) || stripZone
                                       ? PrinterHit{} : views_printerHitTest(x, y);
@@ -941,20 +953,22 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         if (devlist::isClose(x, y)) hideDeviceList();
         else toggleListedDevice(devlist::checkboxAt(x, y, deviceListScrollOffset,
                                                     static_cast<int>(deviceListCache.size())));
-    } else if (!dialog_->isOpen() && views_output() == DisplayOutput::CharTable) {
-        views_leaveCharTable();         // the character table: any touch closes it
-    } else if (!dialog_->isOpen() && views_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
+    } else if (page && !stripZone && page_closeHit(x, y)) {
+        // A page: the X at the right of its title bar leaves it
+        views_leavePage();
+    } else if (!dialog_->isOpen() && !stripZone && views_output() == DisplayOutput::CharTable && chartable_tap(x, y)) {
+        // Character table: a character -> its details box; the box's buttons
+    } else if (!dialog_->isOpen() && !stripZone && views_output() == DisplayOutput::HwTest && hwtest_tap(x, y)) {
         // Hardware test: its buttons (checked before the corners). Its
         // buttons reach the right edge (and its close button sits there):
         // they get the touch unless the strip is showing -- a touch there
         // that hits none of them still wakes the strip.
-    } else if (!dialog_->isOpen() && !(stripZone && buttonStripVisible) &&
-               views_output() == DisplayOutput::MediaMap && mediaMapTap(x, y)) {
+    } else if (!dialog_->isOpen() && !stripZone && views_output() == DisplayOutput::MediaMap && mediaMapTap(x, y)) {
         // Media map: a ring -> that file; the X in the title bar -> back
-    } else if (!dialog_->isOpen() && !stripZone && views_output() == DisplayOutput::LoopMap &&
-               loopmap_tap(x, y)) {
+    } else if (!dialog_->isOpen() && !stripZone && views_output() == DisplayOutput::LoopMap && loopmap_tap(x, y)) {
         // Loop map: a card -> its details; the details box -> closed
-        // (checked before the corners: cards may sit in them)
+        // (checked before the corners: cards may sit in them; a page's
+        // right edge is its own, so the cards there are touched too)
     } else if (!dialog_->isOpen() && !stripZone && views_digitizeTap(x, y)) {
         // Plotter view while the plotter waits for a point (HP-GL DP): the
         // touch is that point (checked before the corners: a point may be there)
@@ -966,13 +980,11 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
                views_openShortcut(static_cast<ShortcutView>(config.shortcut()))) {
         // The middle of the left edge: the view chosen in Settings ->
         // Shortcut (the loop map by default); touched again, back
-    } else if (isInfoCornerTouch(x, y) && views_output() != DisplayOutput::HwTest &&
-               views_output() != DisplayOutput::MediaMap) {
-        // (not on the Hardware test page: its buttons sit in the corners,
-        // and a touch just beside one shouldn't open the box instead)
+    } else if (isInfoCornerTouch(x, y) && !views_isPage()) {
+        // (not on a page: its buttons and cards sit in the corners, and a
+        // touch just beside one shouldn't open the box instead)
         showInfoBox();
-    } else if (isDeviceListCornerTouch(x, y) && views_output() != DisplayOutput::HwTest &&
-               views_output() != DisplayOutput::MediaMap) {
+    } else if (isDeviceListCornerTouch(x, y) && !views_isPage()) {
         showDeviceList();
     } else if (!dialog_->isOpen() &&
                views_tapeHitTest(x, y) == TapeHotspot::Open) {
@@ -1026,7 +1038,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         // not whether anything is actually drawn there yet), so a tap
         // within the strip's region wakes it even while nothing is drawn
         // there yet.
-        const bool inStripZone = (x >= buttonStripScreenX0);
+        const bool inStripZone = stripZone;      // (a page: its menu button only)
         if (bTrace) {
             mLOGF("TOUCH", "tap (%u,%u) inStripZone=%d stripVisible=%d",
                  x, y, inStripZone, buttonStripVisible);
@@ -1039,9 +1051,6 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
             return;
         }
         if (!inStripZone) return;
-        // Hardware test page: no button strip -- its own buttons reach the
-        // right edge (the close X, pixel Off), and the X closes the page
-        if (views_output() == DisplayOutput::HwTest && !dialog_->isOpen()) return;
 
         const bool wasHidden = !buttonStripVisible;
         if (wasHidden) {

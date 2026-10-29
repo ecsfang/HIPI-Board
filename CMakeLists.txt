@@ -229,6 +229,7 @@ add_executable(${EXE_TARGET}
     src/loopmap.cpp
     src/chartable.cpp
     src/chartable_font.cpp      # generated, see scripts/ttf_to_glyphs.py
+    src/hp41_segments.cpp       # generated, see resources/fonts/hp41_segments.py
     src/hpil_diag.cpp
     src/hpil_signals.cpp        # the signals view drawing (and its example)
     src/devicelist.cpp          # the HP-IL DEVICES list (corner touch)

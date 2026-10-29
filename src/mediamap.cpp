@@ -1,6 +1,7 @@
 // mediamap.cpp -- see mediamap.h
 #include "mediamap.h"
 #include "lif_create.h"          // the medium types (names)
+#include "page_chrome.h"         // the page's X and menu button
 #include "lif_types.h"           // the file types
 #include <algorithm>
 #include <cmath>
@@ -55,10 +56,9 @@ constexpr Row kMachineRows[] = { { Hp41, "HP-41" }, { Hp71, "HP-71" }, { Hp75, "
                                  { Deleted, "deleted" }, { Free, "free" }, { Dir, "directory, label" } };
 constexpr int kTypeRowCount = sizeof(kTypeRows) / sizeof(kTypeRows[0]);
 constexpr int kMachineRowCount = sizeof(kMachineRows) / sizeof(kMachineRows[0]);
-constexpr int kRowH = 26;
+constexpr int kRowH = 24;                 // (the cards end above the page's menu button)
 
 constexpr int kTitleH = 26;
-constexpr int kCloseW = 64;
 constexpr double kPi = 3.14159265358979323846;
 
 // ── The medium, from its LIF directory ─────────────────────────────────
@@ -254,7 +254,7 @@ void layout() {
     panelX_ = cx_ + rOut_ + 28;
     panelW_ = SCREEN_MAX_X - panelX_ - 12;
     typeCard_ = { panelX_, kTitleH + 20, panelW_, 22 + kTypeRowCount * kRowH + 32 };
-    mediumCard_ = { panelX_, typeCard_.y + typeCard_.h + 22, panelW_, SCREEN_MAX_Y - (typeCard_.y + typeCard_.h + 22) - 12 };
+    mediumCard_ = { panelX_, typeCard_.y + typeCard_.h + 22, panelW_, kPageContentBottom - (typeCard_.y + typeCard_.h + 22) };
 }
 
 void buildSteps() {
@@ -552,7 +552,7 @@ void drawMedium() {
     auto row = [&](const char* k, const std::string& v, std::uint16_t col = kWhite) {
         text(x, y, k, 0, kGrey, kBlack);
         text(x + 112, y, v, 0, col, kBlack);
-        y += 26;
+        y += kRowH;
     };
     char b[64];
     if (fileShown_ != -1) {
@@ -585,7 +585,7 @@ void drawMedium() {
                 if (locked) { padlock(nx, y, kYellow); nx += 22; }
                 std::snprintf(b, sizeof(b), "%04X", e.type);
                 text(nx, y, b, 0, kGrey, kBlack);
-                y += 26;
+                y += kRowH;
                 row("", t != nullptr ? t->what : "unknown type");
                 if (locked) row("", t->secure && t->priv ? "secure + private" : t->secure ? "secure" : "private");
             }
@@ -650,14 +650,7 @@ void drawTitle() {
         info += b;
     }
     text(140, 5, info, 0, kBlack, kYellow);
-    // The close button: black on the title bar, a white X in it
-    const int x = SCREEN_MAX_X - kCloseW + 6, y = 2, w = kCloseW - 8, h = kTitleH - 4;
-    d_->fillRoundRect(i16(x), i16(y), i16(w), i16(h), 6, kBlack);
-    const int cx = x + w / 2, cy = y + h / 2;
-    for (int t = -1; t <= 1; ++t) {
-        d_->line(i16(cx - 7 + t), i16(cy - 7), i16(cx + 7 + t), i16(cy + 7), kWhite);
-        d_->line(i16(cx - 7 + t), i16(cy + 7), i16(cx + 7 + t), i16(cy - 7), kWhite);
-    }
+    page_drawClose(d_, kTitleH);
 }
 
 void drawRingsAndCentre() {
@@ -721,6 +714,7 @@ void mediamap_drawAll() {
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kBlack);
     drawTitle();
+    page_drawMenu(d_);                       // (page_chrome.h: the strip from here)
     if (!model_.ok) {
         textCentred(SCREEN_MAX_X / 2, SCREEN_MAX_Y / 2 - 16, model_.error, 1, kWhite, kBlack);
         return;
@@ -822,7 +816,7 @@ void redrawRings() {
 }  // namespace
 
 MediaMapTap mediamap_tap(int x, int y) {
-    if (x >= SCREEN_MAX_X - kCloseW && y < kTitleH + 12) return MediaMapTap::Close;
+    if (page_closeHit(x, y)) return MediaMapTap::Close;
     if (!model_.ok) return MediaMapTap::None;
     // The file box's Save on PC: the file to hipiview, the answer in its place
     if (saveShown_ && fileShown_ >= 0 && x >= saveX_ && x < saveX_ + kSaveW && y >= saveY_ && y < saveY_ + kSaveH) {

@@ -471,10 +471,15 @@ other addresses add devices after HIPI; SAI/SDI/SST answers fill in type,
 ID and status. A device ID is kept on ETO/ETE -- or when the talker
 changes (TAD/UNT, `endTalk()`): a device after HIPI ends with an ETO that
 goes on to the controller without passing HIPI. A device before HIPI
-answers before HIPI sees the question, so its type and ID stay unknown. The layout (`layout()`) spreads the cards evenly over the
-ring's top, right and bottom sides and picks full cards (<= 8), compact
-cards (<= 16) or tiles (<= 30). Taps go to `loopmap_tap()` before the corner
-checks in `boardui_handleTap()`. Talker and listeners are framed (green /
+answers before HIPI sees the question, so its type and ID stay unknown. The layout (`layout()`) shares the cards out over the
+ring's top, right side and bottom as an even spread over the whole ring
+would (top, side, a bottom as long as the top), then spreads each side's
+cards evenly over that side, centred -- so the side's cards aren't pushed
+into the corners. The bottom row ends left of the page's menu button
+(`kPageContentRight`), no card goes below `kPageContentBottom`. Full cards
+(<= 8), compact cards (<= 16) or tiles (<= 30). It is a page (see
+*Pages* below): taps go to `loopmap_tap()` before the corner checks in
+`boardui_handleTap()`, also at the right edge. Talker and listeners are framed (green /
 blue, both at once magenta: `roleFrame()`) from `talker_` / `listeners_`; before either changes
 (LAD, UNL, TAD, UNT, IFC) `stampRoles()` gives the roles that are active
 then a `talkEnd` / `listenEnd` of frame time + the hold (`kLoopMapRoleHoldMs`,
@@ -626,7 +631,23 @@ file is deleted. PC test: `tools/hipiview/test/media_create_test.cpp`
 TrueType font **by HP-41 code**: the font is laid out like ASCII, with the
 HP-41's special characters at 128+ (code 0, the overbar, is the font's 134;
 code 1, x-bar, its 139 ...) -- the script's `KMAP` holds that mapping, and
-draws the "starburst" (all segments) for codes the HP-41 can't show.
+draws the "starburst" (all segments) for codes the HP-41 can't show. (That
+script isn't in the repository any more; the mapping is kept in the
+comments of `chartable_font.cpp`.)
+
+A touched character's details box (`chartable_tap()` from
+`boardui_handleTap()`; ▲/▼/X on the strip: `chartable_step()` /
+`chartable_closeDetails()` in uidialog.hpp) draws the character large from
+its segments: `src/hp41_segments.cpp` (`include/hp41_segments.h`), made by
+`resources/fonts/hp41_segments.py` from the TTF -- the font's `.notdef`
+glyph is the whole starburst, 14 segment contours; each character's glyph
+is made of some of those very contours, so the script records which
+(`kHp41Lit[code]`, a bit per shape) and the shapes as triangles
+(`kHp41Triangles`, ear-clipped; the dot, the comma's tail and the colon's
+upper dot added from '.', ',' and ':'). `drawSegments()` fills the lit
+shapes' triangles at any scale -- 80 triangles and 128 masks instead of a
+large bitmap font. The printer's dots come from `kPrinterFontHp41`
+(`printer_font.h`). PC test: `page_chrome_test` (`page_chardetails*.png`).
 
 **Backlight dimming.** `src/backlight.cpp`: after `kDimAfterMs` (10 min,
 `include/backlight.h`) without activity the backlight goes to `kDimLevel`
@@ -708,7 +729,8 @@ commands sent by the HP-41.
 |-----------------------------|--------|
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
 | Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, the HP device it emulates (`deviceModel()` in `device.cpp`, also the loop map's ID line; `DeviceInfo::sdiName`), accessory ID (SAI, hex and decimal: `devlist::rowText()`), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (12x24 font, 34 px rows, nine rows), PC test `devicelist_test` |
-| Tap **middle of the left edge** | The shortcut: the view in **Settings → Shortcut** (`shortcut=` in CONFIG.TXT, `Config::shortcut()`, a `ShortcutView` -- `views.h`; default the loop map). `views_shortcutTouch()` is the zone (`kShortcutW` x `kShortcutH`, centred between the corners; off on the Hardware test page and the media map), `views_openShortcut()` shows the view, or leaves it if it's showing. Checked in `boardui_handleTap()` just before the corners (after the views' own touch areas). PC test `printer_view_test` |
+| Tap **middle of the left edge** | The shortcut: the view in **Settings → Shortcut** (`shortcut=` in CONFIG.TXT, `Config::shortcut()`, a `ShortcutView` -- `views.h`; default the loop map). `views_shortcutTouch()` is the zone (`kShortcutW` x `kShortcutH`, centred between the corners; off on a page -- `views_isPage()` -- and the media map), `views_openShortcut()` shows the view, or leaves it if it's showing. Checked in `boardui_handleTap()` just before the corners (after the views' own touch areas). PC test `printer_view_test` |
+| Tap **right edge**          | The button strip (`showButtonStrip()`); on a page only the **☰** corner (`page_menuHit()`) -- see *Pages* below |
 | Vertical swipe              | Scroll the device list (when it is open) |
 | Horizontal swipe            | Switch view: each device with a view (display, plotter, every cassette drive) in loop order -- left = next device, right = previous |
 
@@ -739,6 +761,25 @@ squares on the hardware.) The title band is rounded at the top like the
 frame's inside, so nothing of it sticks out past the rounding. Test:
 `media_create_test` (only the old background's pixels change;
 `media_0_corners.png`, 8x).
+
+
+**Pages.** `views_isPage()` (views.cpp) lists HIPI's own views with touch
+areas all over them: Hardware test, Loop map, Media map, Character table,
+Analyzer, HP-IL signals. Each draws `page_chrome.h`'s two buttons:
+`page_drawClose()` at the right of its title bar and `page_drawMenu()` (a
+"hamburger", the menus' yellow frame) in the bottom right corner, and keeps
+its content above `kPageContentBottom` / left of `kPageContentRight` there.
+`boardui_handleTap()` on a page (no menu open): the strip's zone is only
+`page_menuHit()` -- or the right edge while the strip is up -- so the rest
+of the edge is the page's; `page_closeHit()` calls `views_leavePage()`
+(each page's own `views_leave...()`); no info box / device list corners;
+`views_shortcutTouch()` is off. `boardui_poll()` hides the strip once when
+a page comes up (left up by the menu that opened it). Swipes as on every
+view. A new page: add it to `views_isPage()` and `views_leavePage()`, draw
+both buttons, keep the corner free. PC test: `page_chrome_test` (the
+analyzer and the character table drawn, both buttons there, nothing else
+in the menu button's corner), `loopmap_test`, `hwtest_view_test`,
+`mediamap_test`.
 
 ### 5.4 Status LEDs
 
@@ -1146,8 +1187,8 @@ and copied; small changes (a button, a pixel
 dot, the I2C rows -- padded text, no clearing) are drawn on the panel when
 nothing else owns the canvas, else the whole page is redrawn later. Touches
 go to `hwtest_tap()` (boardui.cpp) -- also at the right edge: no button
-strip on this page (a tap there doesn't bring it up, and `boardui_poll()`
-hides one left up by the menu), its X closes it. The pixel dots run from
+strip over the page unless its ☰ is touched (it's a page, see *Pages*;
+`boardui_poll()` hides one the menu that opened it left up), its X closes it. The pixel dots run from
 right to left (pixel 1 on the right, as on the board). `hwtest_poll()` runs the LED chase
 (150 ms), the pixel run (60 ms a step) and the I2C rescan (3 s).
 

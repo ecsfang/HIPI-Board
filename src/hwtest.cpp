@@ -1,6 +1,7 @@
 // hwtest.cpp -- see hwtest.h
 #define MODULE "HWTEST"
 #include "hwtest.h"
+#include "page_chrome.h"     // the page's menu button
 #include "hwtest_io.h"
 #include "i2c_ident.h"
 #include "views.h"
@@ -43,12 +44,12 @@ struct Layout {
     int cAddr, cDot, cName, cWhat, cState, cDetail, cFile;
 };
 constexpr Layout L {
-    { 16, 46, 484, 204 }, { 516, 46, 492, 204 }, { 16, 278, 992, 294 },
+    { 16, 46, 484, 204 }, { 516, 46, 492, 204 }, { 16, 278, 992, 278 },   // (I2C: ends above the menu button)
     36,
     64, 116, 170, 42, 56, 66,
     64, 108, 26, 620, 62, 142, 29, 12, 178, 36, 70, 77, 224,
     132, 680, 728, 780, 814,
-    296, 346, 26, 7, 534,
+    296, 346, 24, 7, 522,
     36, 84, 100, 248, 440, 528, 792 };
 constexpr int kTitleH = 26;
 // "Set clock from PC": at the right of the I2C card's first row
@@ -487,6 +488,7 @@ void renderFull() {
         x += 18 + static_cast<int>(std::strlen(l.t)) * 8 + 24;
     }
     if (gridShown_) drawGrid();
+    page_drawMenu(d_);                       // (page_chrome.h: the strip from here)
 }
 
 // ── Hardware ────────────────────────────────────────────────────────────

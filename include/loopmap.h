@@ -33,6 +33,8 @@ void loopmap_drawAll();
 // the button strip comes back to the map; X CLOSE or a tap beside the box
 // -> closed. Returns false if the tap hit nothing of the map.
 bool loopmap_tap(int x, int y);
+// (The map is a page -- views_isPage(), page_chrome.h: the X at the right
+// of its title bar leaves it, its menu button bottom right)
 // The middle of a device's card, as drawn last (the demo's "touch");
 // false: no card for that address
 bool loopmap_cardPoint(int addr, int& x, int& y);

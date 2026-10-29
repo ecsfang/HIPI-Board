@@ -5,9 +5,11 @@
 #include "plotter.h"
 #include "drive.h"
 #include "pilbox.h"
+#include "page_chrome.h"     // the page's X and menu button
 #include "backlight.h"
 #include "usb_serial.h"
 #include "pico/time.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -338,15 +340,41 @@ void layout(const std::vector<int>& order) {
     if (n <= 8)       { mode_ = CardMode::Full;    cw = 186; ch = 88; }
     else if (n <= 16) { mode_ = CardMode::Compact; cw = 150; ch = 52; }
     else              { mode_ = CardMode::Tile;    cw = 72;  ch = 44; }
-    const int L = 150, T = 50 + ch / 2, R = SCREEN_MAX_X - 20 - cw / 2, B = SCREEN_MAX_Y - 44 - ch / 2;
-    const int top = R - L, side = B - T, per = top + side + top;
+    // The ring: top from L to R, the right side from T to B, the bottom
+    // back from R to L. The bottom row's cards stay clear of the page's
+    // menu button (bottom right) -- the row ends at bR; no card below
+    // kPageContentBottom.
+    const int L = 150, T = 50 + ch / 2, R = SCREEN_MAX_X - 20 - cw / 2, B = kPageContentBottom - ch / 2;
+    const int bR = std::min(R, kPageContentRight - 8 - cw / 2);
+    const int top = R - L, side = B - T, bottom = bR - L;
+    // How many on each side: as many as fall on it when the whole ring
+    // (top, right side, bottom as long as the top) is shared out evenly --
+    // then each side's cards spread evenly over it and centred, so a
+    // side's first and last card aren't pushed up into the corners
+    const int sideRoom = std::max(side - ch, 1);
+    const double per = static_cast<double>(top + side + top);
+    int nTop = 0, nSide = 0;
+    for (int i = 0; i < n; ++i) {
+        const double s = (i + 0.5) * per / n;
+        if (s < top) ++nTop;
+        else if (s < top + side) ++nSide;
+    }
+    const int nBottom = n - nTop - nSide;
     cards_.clear();
     for (int i = 0; i < n; ++i) {
-        const int s = static_cast<int>((i + 0.5) * per / n);
         int x, y;
-        if (s < top)              { x = L + s;                y = T; }
-        else if (s < top + side)  { x = R;                    y = T + (s - top); }
-        else                      { x = R - (s - top - side); y = B; }
+        if (i < nTop) {
+            x = L + static_cast<int>((i + 0.5) * top / nTop);
+            y = T;
+        } else if (i < nTop + nSide) {
+            const int k = i - nTop;
+            x = R;
+            y = T + ch / 2 + static_cast<int>((k + 0.5) * sideRoom / nSide);
+        } else {
+            const int k = i - nTop - nSide;
+            x = bR - static_cast<int>((k + 0.5) * bottom / nBottom);
+            y = B;
+        }
         cards_.push_back(Card{ order[static_cast<std::size_t>(i)], x - cw / 2, y - ch / 2, cw, ch });
     }
     ctrlX_ = 14;
@@ -508,7 +536,10 @@ bool visible() {
     return d_ != nullptr && views_output() == DisplayOutput::LoopMap && !views_isSplashVisible();
 }
 
-// What the header line says (padded, so a shorter text overwrites a longer one)
+constexpr int kTitleBarH = 26;
+
+// What the header line says (padded, so a shorter text overwrites a longer
+// one -- up to the close button)
 std::string headerText(int devices) {
     char b[96];
     if (haveAad_) {
@@ -519,7 +550,7 @@ std::string headerText(int devices) {
         std::snprintf(b, sizeof(b), "waiting for the controller to set up the loop (auto-address)");
     }
     std::string s(b);
-    s.resize(96, ' ');
+    s.resize(94, ' ');                               // (200 + 94 * 8 = 952: left of the X)
     return s;
 }
 
@@ -587,10 +618,11 @@ void renderFull() {
     d_->selectBuiltinFont();
     d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kBlack);
     // Title bar
-    d_->fillRect(0, 0, SCREEN_MAX_X, 26, kYellow);
+    d_->fillRect(0, 0, SCREEN_MAX_X, kTitleBarH, kYellow);
     text(8, 5, "HP-IL LOOP MAP", 0, kBlack, kYellow);
     const std::vector<int> order = loopOrder();
     text(200, 5, headerText(static_cast<int>(order.size())).c_str(), 0, kBlack, kYellow);
+    page_drawClose(d_, kTitleBarH);
     // Controller, ring, devices
     if (!order.empty()) {
         layout(order);
@@ -622,7 +654,8 @@ void renderFull() {
         text(x + 22, SCREEN_MAX_Y - 26, l.t, 0, kWhite, kBlack);
         x += 22 + static_cast<int>(std::strlen(l.t)) * 8 + 22;
     }
-    text(SCREEN_MAX_X - 132, SCREEN_MAX_Y - 26, "tap: details", 0, kGrey, kBlack);
+    text(kPageContentRight - 8 - 12 * 8, SCREEN_MAX_Y - 26, "tap: details", 0, kGrey, kBlack);
+    page_drawMenu(d_);
     if (selected_) drawDetails();
     rememberDrawn(order);
     drawnRoles_ = rolesNow();

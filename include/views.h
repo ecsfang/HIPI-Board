@@ -203,6 +203,16 @@ void views_leaveSignals();
 // goes back to the view before
 void views_showHwTest();
 void views_leaveHwTest();
+// A page: a view of HIPI's own with touch areas all over it -- Hardware
+// test, Loop map, Media map, Character table, Analyzer, HP-IL signals. The
+// X at the right of its title bar (or a swipe) leaves it; only its menu
+// button in the bottom right corner brings up the button strip (on the
+// other views the whole right edge does); no info box / device list
+// corners, no shortcut at the left edge. page_chrome.h draws both buttons.
+bool views_isPage(DisplayOutput o);
+inline bool views_isPage() { return views_isPage(views_output()); }
+// The page's X: back to the view before (its views_leave...())
+void views_leavePage();
 // Media map (mediamap.h): the drive's cassette/disk as rings; leaving goes
 // back to the view before
 void views_showMediaMap();

@@ -1,5 +1,6 @@
 #define MODULE "ANLZ"
 #include "analyzer.h"
+#include "page_chrome.h"     // the page's X and menu button
 #include "sd_paths.h"
 #include "usb_msc.h"
 #include "usb_serial.h"
@@ -630,7 +631,7 @@ void reanalyse() {
 constexpr int kTitleH = 20;
 constexpr int kRowH = 16;
 constexpr int kRows = (SCREEN_MAX_Y - kTitleH - 4) / kRowH;
-constexpr int kCols = (SCREEN_MAX_X - 16) / 8;
+constexpr int kCols = (kPageContentRight - 16) / 8;   // (clear of the page's menu button)
 
 bool visible() {
     if (views_output() != DisplayOutput::Analyzer || views_isSplashVisible()) return false;
@@ -656,7 +657,11 @@ void draw() {
                   relative_ ? "relative" : "since start-up", showIdle_ ? "shown" : "hidden",
                   logging_ ? logName_.c_str() : "off", static_cast<unsigned long>(frames_),
                   paused_ ? "   [PAUSED]" : "", scroll_ > 0 ? "   [SCROLLED]" : "");
-    drawText(4, 2, b, 0x0000, kYellow);
+    std::string title = b;
+    const std::size_t titleMax = static_cast<std::size_t>((SCREEN_MAX_X - kPageCloseW - 12) / 8);
+    if (title.size() > titleMax) title.resize(titleMax);
+    drawText(4, 2, title, 0x0000, kYellow);
+    page_drawClose(d_, kTitleH);
     // Lines
     d_->fillRect(0, kTitleH, SCREEN_MAX_X, SCREEN_MAX_Y - kTitleH, 0x0000);
     // Lines too long for the screen are wrapped (at a space where
@@ -703,6 +708,7 @@ void draw() {
         drawText(x + 8, kTitleH + 14, msg, kWhite, kRed);
         d_->txtSize(0);
     }
+    page_drawMenu(d_);                       // (page_chrome.h: the strip from here)
     dirty_ = false;
 }
 

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "LT7683.hpp"
+#include "page_chrome.h"     // the page's X and menu button
 
 namespace hipi {
 namespace signals {
@@ -192,6 +193,7 @@ void renderFull() {
     std::snprintf(b, sizeof(b), "HP-IL IN as the receiver sees it: up = GPIO%u, down = GPIO%u",
                   static_cast<unsigned>(kPinPlus), static_cast<unsigned>(kPinMinus));
     text(190, 5, b, kBlack, kYellow);
+    page_drawClose(d_, 26);
 
     if (example_) {
         // No traffic yet: an example rather than an empty page, marked as one
@@ -203,7 +205,7 @@ void renderFull() {
     if (frames.empty()) {
         text(12, 200, "Something arrived, but no frame start (a pulse on the receiver's plus line) was found.", kRed);
         waveform(12, 1000, 300, 30, 0, kSamples, 1, kYellow);
-        text(12, SCREEN_MAX_Y - 24, "A new capture every 0.5 s while traffic comes in.   X: leave", kGrey);
+        text(12, SCREEN_MAX_Y - 24, "A new capture every 0.5 s while traffic comes in.   X (top right): leave", kGrey);
         return;
     }
 
@@ -352,8 +354,8 @@ void renderFull() {
     d_->fillRect(hx0, oy + 24, std::max(2, hx1 - hx0), 3, kCyan);
     text(hx0, oy + 30, "^ shown above", kCyan);
 
-    text(12, SCREEN_MAX_Y - 24, example_ ? "The real signals replace the example as soon as traffic comes in.   X: leave"
-                                         : "A new capture every 0.5 s while traffic comes in.   X: leave", kGrey);
+    text(12, SCREEN_MAX_Y - 24, example_ ? "The real signals replace the example as soon as traffic comes in.   X (top right): leave"
+                                         : "A new capture every 0.5 s while traffic comes in.   X (top right): leave", kGrey);
 }
 
 
@@ -378,6 +380,7 @@ void draw(DisplayDriver* d, const std::uint32_t* capture, std::uint32_t captureN
     const std::uint16_t prevStride = d_->canvasStride();
     d_->beginLayerDraw(LT7683::kBteLayer3Addr);
     renderFull();
+    page_drawMenu(d_);                       // (page_chrome.h: the strip from here)
     if (prevAddr == 0) d_->endOverlayDraw();
     else               d_->beginLayerDraw(prevAddr, prevStride);
     d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);

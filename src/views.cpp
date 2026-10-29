@@ -1685,6 +1685,7 @@ void views_showCharTable() {
     if (output_ == DisplayOutput::CharTable) return;
     beforeCharTable_ = viewDevice_;
     beforeCharTableOutput_ = output_;
+    chartable_reset();                       // (the table, no character's box)
     switchView(DisplayOutput::CharTable, nullptr, /*splash=*/false);
 }
 
@@ -1737,10 +1738,26 @@ void views_leaveAnalyzer() {
     }
 }
 
+bool views_isPage(DisplayOutput o) {
+    return o == DisplayOutput::HwTest || o == DisplayOutput::LoopMap || o == DisplayOutput::MediaMap ||
+           o == DisplayOutput::CharTable || o == DisplayOutput::Analyzer || o == DisplayOutput::Signals;
+}
+
+void views_leavePage() {
+    switch (output_) {
+        case DisplayOutput::HwTest:    views_leaveHwTest(); break;
+        case DisplayOutput::LoopMap:   views_leaveLoopMap(); break;
+        case DisplayOutput::MediaMap:  views_leaveMediaMap(); break;
+        case DisplayOutput::CharTable: views_leaveCharTable(); break;
+        case DisplayOutput::Analyzer:  views_leaveAnalyzer(); break;
+        case DisplayOutput::Signals:   views_leaveSignals(); break;
+        default: break;
+    }
+}
+
 bool views_shortcutTouch(int x, int y) {
     const int y0 = (SCREEN_MAX_Y - kShortcutH) / 2;
-    return x >= 0 && x < kShortcutW && y >= y0 && y < y0 + kShortcutH &&
-           output_ != DisplayOutput::HwTest && output_ != DisplayOutput::MediaMap;
+    return x >= 0 && x < kShortcutW && y >= y0 && y < y0 + kShortcutH && !views_isPage(output_);
 }
 
 bool views_openShortcut(ShortcutView v) {

@@ -151,6 +151,8 @@ while it is switched on.
 
 The buttons are hidden to give the text more room. **Touch the right edge of the
 screen** to slide them in. They slide away again after 5 seconds without use.
+On a *page* (see [4.3](#43-pages)) only its **☰** button in the bottom right
+corner brings them in.
 
 <a href="images/screen-button-strip.png"><img src="images/screen-button-strip.png" alt="The button strip" width="512"></a>
 
@@ -167,12 +169,30 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 
 | Touch | What happens |
 |-------|--------------|
-| **Top-left corner** | Info box: current file, settings, version (not on the Hardware test page) |
-| **Bottom-left corner** | List of HIPI's HP-IL devices: their addresses, the HP device each one emulates (`TFPLOT` — `HP7470A`; blank for HIPI's own, like `TFI2C`) and accessory IDs, in hex and decimal (`0x52 (82)` — an HP-71 finds a device by it: `DEVADDR("%82")`). The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on the Hardware test page.) |
-| **Middle of the left edge** | The shortcut: opens the view chosen in **Settings → Shortcut** — the **Loop map** unless you choose another (Analyzer, HP-IL signals, Characters, Hardware test, or Off). Touch the same place again to go back to the view you came from. (Not on the Hardware test page or the media map: their own buttons are there — leave them with their **✕**.) |
+| **Top-left corner** | Info box: current file, settings, version (not on a page, [4.3](#43-pages)) |
+| **Bottom-left corner** | List of HIPI's HP-IL devices: their addresses, the HP device each one emulates (`TFPLOT` — `HP7470A`; blank for HIPI's own, like `TFI2C`) and accessory IDs, in hex and decimal (`0x52 (82)` — an HP-71 finds a device by it: `DEVADDR("%82")`). The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on a page.) |
+| **Middle of the left edge** | The shortcut: opens the view chosen in **Settings → Shortcut** — the **Loop map** unless you choose another (Analyzer, HP-IL signals, Characters, Hardware test, or Off). Touch the same place again to go back to the view you came from. (Not on a page — the loop map, the analyzer ...: leave those with their **✕**.) |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
 <a href="images/screen-infobox.png"><img src="images/screen-infobox.png" alt="Info box" width="512"></a>
+
+### 4.3 Pages
+
+HIPI's own views with things to touch all over them are *pages*: the
+**Loop map**, the **Analyzer**, **HP-IL signals**, the **Media map**, the
+**Character table** and the **Hardware test**. On a page:
+
+- the **✕** at the right of the title bar closes it — back to the view you
+  came from (a swipe goes to another view, as everywhere);
+- the **☰** button in the bottom right corner brings in the button strip
+  (OK on it opens the page's menu, e.g. for a **Screendump**) — the rest of
+  the right edge belongs to the page, so a card or button there can be
+  touched;
+- the corners don't open the info box or the device list, and the middle
+  of the left edge isn't the shortcut — the page's own things may be there.
+
+The other views (Display, Plotter, Printer, Tape) work as before: the whole
+right edge brings in the button strip.
 
 <a href="images/screen-devicelist.png"><img src="images/screen-devicelist.png" alt="Device list" width="512"></a>
 
@@ -522,7 +542,7 @@ OK in a view — that view's menu
 ├── TAPE TFDRIVE     Select cassette > · Media map > · Rewind · Power < ON > · Screendump · More >
 ├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
 │                    Time < Relative > · Idle frames < Hidden > · More >
-├── LOOP MAP         Leave view · Screendump · More >
+├── LOOP MAP         Leave view · Screendump · More >   (a page: ☰ bottom right)
 └── HP-IL SIGNALS    Leave view · Screendump · Bit cells < Bands > · More >
 
 More > — HIPI's menu
@@ -565,7 +585,13 @@ All settings are remembered, also after power off.
   over the whole screen. (Codes the HP-41 can't show appear with all
   segments on; for 102–125 the lower-case letters and `{|}` are shown
   instead.) Handy with `XTOA`/`ATOX` or when sending text to HIPI's devices.
-  Touch the screen (or any button) to close it.
+  **Touch a character** for its details: the character large, as the
+  display's segments light it, its code in decimal, hex and binary, what
+  the same code is in ASCII (`DEL`, a control code, or the character), and
+  what the HP 82162A printer prints for it, dot by dot. **<** and **>** (or
+  ▲/▼ on the buttons) go to the code before / after; **CLOSE**, its **✕**,
+  a touch beside it or **X** close it. A page ([4.3](#43-pages)): the table's
+  **✕** closes it.
 - **Settings → Devices → Drive at start** — where the cassette drive's power
   switch is when HIPI starts: **ON**, **STANDBY** or **OFF** (switched off,
   like in *Enable/disable* — not on the loop). To switch the drive right now,
@@ -669,7 +695,9 @@ Scroll with ▲/▼ (Shift for a page), **OK** to use the cassette, **X** to go 
 as rings, coloured by what is stored where: programs, data, text, status /
 key assignments / write-all, ROM and LEX files, other, **deleted** files,
 free space, and the directory with the volume label. HP-41, HP-71 and HP-75
-files are all known (BASIC, BIN, FORTH, LEX, key and data files ...).
+files are all known (BASIC, BIN, FORTH, LEX, key and data files ...). It is
+a page ([4.3](#43-pages)): **✕** at the top right goes back to the Tape view,
+**☰** in the bottom right corner brings the buttons.
 
 <a href="images/view-mediamap.png"><img src="images/view-mediamap.png" alt="Media map, a cassette" width="512"></a>
 
@@ -1402,7 +1430,8 @@ and see what led up to it.
 
 Open it with **More → Go to view → Analyzer**. **▲/▼** scroll back and forth (Shift for
 a page, hold to keep scrolling), **X** jumps to the newest line (already there: hides the buttons), **Shift + X**
-clears it. **Touch the middle of the screen** to pause: the screen freezes
+clears it. It is a page ([4.3](#43-pages)): **✕** at the top right leaves it, **☰** in the
+bottom right corner brings the buttons. **Touch the middle of the screen** to pause: the screen freezes
 with a red PAUSED banner while recording goes on; touch again to resume.
 
 <a href="images/analyzer-overview.png"><img src="images/analyzer-overview.png" alt="The analyzer view in overview mode" width="512"></a>
@@ -1466,9 +1495,14 @@ unaddressed (UNL, UNT) — long enough to see who it was.
 its address, device ID and type, its status, when it was last used and how
 much it has sent and received. For a device with a view of its own
 (display, cassette drive, printer, plotter) the box has a **GO TO … VIEW**
-button (or **OK** on the button strip): it shows that view, and **X** there
-brings you back to the loop map. **X CLOSE** (or **X**, or a touch beside the
-box) closes it. With no box open, **X** leaves the map.
+button: it shows that view, and **X** there brings you back to the loop map.
+**X CLOSE** (or a touch beside the box) closes it.
+
+**The loop map is a page** ([4.3](#43-pages)): the cards at the right edge
+can be touched, the **✕** at the right of its title bar leaves it (back to
+the view you came from), **☰** in the bottom right corner brings the
+buttons (its menu: **Screendump**), and a swipe goes to another view as
+usual. The cards on each side of the ring are spread evenly over it.
 
 <a href="images/loopmap.png"><img src="images/loopmap.png" alt="The loop map" width="512"></a>
 
@@ -1492,7 +1526,9 @@ length, and the whole capture (about 4 ms) small, with the name of every
 frame found in it. If the receiver can't make a frame of what arrived, the
 view says after how many bits it gave up.
 
-A new capture every half second while traffic comes in. **X** leaves.
+A new capture every half second while traffic comes in. It is a page
+([4.3](#43-pages)): **✕** at the top right leaves, **☰** in the bottom
+right corner brings the buttons.
 
 **No traffic yet?** Until the first capture since start-up the view shows
 an **example** instead of an empty page — a made-up capture of an HP-41
@@ -1512,11 +1548,11 @@ anything arrives on HP-IL IN.
 
 **System → Hardware test** is a page for trying out what's connected to
 HIPI: the five LEDs, the colour pixels and the chips on the I2C bus. Touch
-the buttons; the **✕** at the top right closes the page. The page's
-buttons reach the right edge, so the button strip stays away while the
-page is shown (also when the menu that opened it had it up) — a touch at
-the edge only goes to the page's buttons. The corners don't open the info
-box or the device list here (the page's buttons are there).
+the buttons; the **✕** at the top right closes the page. It is a page
+([4.3](#43-pages)): the button strip that the menu that opened it had up
+goes away, and only **☰** in the bottom right corner brings it back (a
+**Screendump** from its menu); the corners don't open the info box or the
+device list here (the page's buttons are there).
 
 **It shows what your program does.** When the page opens it only
 *looks*: the LED buttons light up and the row of circles shows the

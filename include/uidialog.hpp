@@ -18,6 +18,7 @@
 #include "printer.h"      // CPrinter -- the Printer view's menu
 #include "video80.h"      // the display's HP 92198 mode (80-column screen)
 #include "display.h"      // TFDISPLAY -- Settings -> Screen -> Emulate
+#include "chartable.h"    // Character table: the strip's buttons in a character's box
 #include "screendump.h"   // Display -> Screendump
 #include "display_text.h" // Display -> Text
 #include "analyzer.h"     // Display -> Analyzer
@@ -487,8 +488,14 @@ public:
                     else if (b == Button::X)    views_paperToLive();
                 } else if (views_output() == DisplayOutput::MediaMap && b == Button::X) {
                     views_leaveMediaMap();
-                } else if (views_output() == DisplayOutput::CharTable) {
-                    withMainCanvas([] { views_leaveCharTable(); });   // any button closes it
+                } else if (views_output() == DisplayOutput::CharTable && b != Button::Ok) {
+                    // The character table: X closes a character's box, else
+                    // the table; ▲/▼ step through the characters in the box
+                    // (OK: its menu)
+                    withMainCanvas([b] {
+                        if (b == Button::X) { if (chartable_detailsOpen()) chartable_closeDetails(); else views_leaveCharTable(); }
+                        else if (chartable_detailsOpen()) chartable_step(b == Button::Up ? -1 : 1);
+                    });
                 } else if (views_output() == DisplayOutput::Video80 && b != Button::Ok) {
                     // The display as an HP 92198: the arrows look back
                     // through its 48-line memory (Shift: a screen at a
@@ -1725,6 +1732,10 @@ private:
             title = "HARDWARE TEST";
             m.push_back(item("Leave view", [this] { doAndClose([] { views_leaveHwTest(); }); }));
             m.push_back(item("Scan I2C", [this] { doAndClose([] { hwtest_showScan(); }); }));
+            m.push_back(item("Screendump", [this] { screendumpAction(); }));
+        } else if (out == DisplayOutput::CharTable) {
+            title = "CHARACTER TABLE";
+            m.push_back(item("Leave view", [this] { doAndClose([] { views_leaveCharTable(); }); }));
             m.push_back(item("Screendump", [this] { screendumpAction(); }));
         } else if (out == DisplayOutput::LoopMap || out == DisplayOutput::Signals) {
             const bool map = out == DisplayOutput::LoopMap;

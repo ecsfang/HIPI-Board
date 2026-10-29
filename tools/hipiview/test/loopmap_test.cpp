@@ -15,6 +15,7 @@
 //   make loopmap_test && ./loopmap_test   (in tools/hipiview)
 #include "LT7683.hpp"
 #include "loopmap.h"
+#include "page_chrome.h"
 #include "demo_content.h"
 #include "analyzer.h"
 #include "views.h"
@@ -239,6 +240,35 @@ int main() {
     chip.render(panel.data(), 0.0, false);
     check(inBox(140, 30, 1024, 560, lc) > 300 && c.both == 0, "... then listener only (still addressed)");
 
+    // ── A page: the X at the right of the title bar closes it ──────────
+    hipi::loopmap_drawAll();
+    chip.render(panel.data(), 0.0, false);
+    {
+        // The X: white strokes in a black box on the yellow bar; the
+        // header's text stops left of it
+        int white = 0, black = 0;
+        for (int y = 2; y < 24; ++y)
+            for (int x = 966; x < 1022; ++x) {
+                const std::uint32_t v = at(x, y);
+                if (v == 0xFFFFFF) ++white; else if (v == 0) ++black;
+            }
+        check(white > 40 && black > 600, "the title bar: a close button (an X) at the right");
+        bool headerClear = true;
+        for (int y = 2; y < 24; ++y)
+            for (int x = 953; x < 962; ++x)
+                if (at(x, y) == 0) headerClear = false;
+        check(headerClear, "... the header's text stops before it");
+        check(hipi::page_closeHit(1000, 10) && hipi::page_closeHit(965, 35) && !hipi::page_closeHit(900, 10) &&
+              !hipi::page_closeHit(1000, 60), "page_closeHit(): the X (and a little below), nothing else");
+        // The menu button, bottom right: its yellow frame there
+        int frame = 0;
+        for (int y = hipi::kPageMenuY; y < hipi::kPageMenuY + hipi::kPageMenuH; ++y)
+            for (int x = hipi::kPageMenuX; x < hipi::kPageMenuX + hipi::kPageMenuW; ++x)
+                if (at(x, y) != 0 && at(x, y) != 0xFFFFFF) ++frame;
+        check(frame > 400 && hipi::page_menuHit(1010, 590) && !hipi::page_menuHit(900, 590),
+              "the menu button bottom right (its touch area round it)");
+    }
+
     // ── The details box: a tap on a card ────────────────────────────────
     // (three devices: TFPLOT's card at the bottom, about x 380..566)
     hipi::loopmap_drawAll();
@@ -296,7 +326,11 @@ int main() {
     frame(UNT);
     run(600);
     hipi::loopmap_drawAll();
-    hipi::loopmap_tap(470, 510);              // (four devices now: card 5 sits there)
+    {
+        int cx = 0, cy = 0;                   // (four devices now: card 5's middle)
+        hipi::loopmap_cardPoint(5, cx, cy);
+        hipi::loopmap_tap(cx, cy);
+    }
     chip.render(panel.data(), 0.0, false);
     snapshot("loopmap_5_no_view.png");
     check(hipi::loopmap_detailsOpen() && inBox(512, 380, 752, 425, yellow) == 0, "a device after HIPI: no view button");
@@ -304,6 +338,36 @@ int main() {
     check(viewOpened == nullptr && hipi::loopmap_detailsOpen(), "... OK does nothing");
     hipi::loopmap_closeDetails();
     check(!hipi::loopmap_detailsOpen(), "X on the strip: closed");
+
+    // ── Six devices: the right side's two cards spread over it, centred
+    // (they sat up and down in the corners), nothing in the menu button's corner
+    frame(TAD + 6); frame(UNT);
+    frame(TAD + 7); frame(UNT);
+    run(600);
+    hipi::loopmap_drawAll();
+    {
+        std::vector<std::pair<int, int>> right, all;
+        for (int a = 1; a <= 30; ++a) {
+            int cx = 0, cy = 0;
+            if (!hipi::loopmap_cardPoint(a, cx, cy)) continue;
+            all.push_back({ cx, cy });
+            if (cx > 880) right.push_back({ cx, cy });
+        }
+        std::printf("     %zu cards, %zu on the right side", all.size(), right.size());
+        for (auto& p : right) std::printf("  (%d,%d)", p.first, p.second);
+        std::printf("\n");
+        snapshot("loopmap_7_six.png");
+        const int mid = (94 + 512) / 2;       // the ring's right side: T..B (full cards)
+        check(all.size() == 6 && right.size() == 2 && std::abs((right[0].second + right[1].second) / 2 - mid) <= 4 &&
+              std::abs(right[1].second - right[0].second) > 150 && std::min(right[0].second, right[1].second) > 94 + 88 &&
+              std::max(right[0].second, right[1].second) < 512 - 88,
+              "six devices: the right side's two spread evenly over it, clear of the corners");
+        chip.render(panel.data(), 0.0, false);
+        bool clear = true;
+        for (auto& p : all)
+            if (p.first + 93 > hipi::kPageMenuTouchX && p.second + 44 > hipi::kPageMenuTouchY) clear = false;
+        check(clear, "... no card in the menu button's corner");
+    }
 
     // ── The demo's made-up loop (demo_content.h): HIPI's three, 3 behind
     // PILBOX, 3 after -- all asked for their IDs
