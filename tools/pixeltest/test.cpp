@@ -1,6 +1,8 @@
 // pixeltest -- TFPIXEL on the PC (see Makefile): pixel count, effects and
 // the current limit, with the real PicoLED library; PIO and clock stood in
 #include "pixels.h"
+#include "leds.h"
+#include "hardware/gpio.h"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -8,6 +10,9 @@
 uint64_t g_fakeUs = 1000000;
 pio_hw_t g_pio0{0}, g_pio1{1};
 std::vector<uint32_t> g_wire;
+int g_gpioFunction[48] = {};              // (stubs/hardware/gpio.h)
+static CLedDriver g_led5;                 // LED 5 (stubs/leds.h): shares GPIO26 with the strip
+CLedDriver* leds[5] = { nullptr, nullptr, nullptr, nullptr, &g_led5 };
 bool bTrace = true, bExtTrace = false;
 extern CPixelParser pixelParser;
 

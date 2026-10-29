@@ -49,8 +49,13 @@ static std::uint16_t readStatus(CPrinter& p) {
     return static_cast<std::uint16_t>((lo & 0xFF) | ((hi & 0xFF) << 8));
 }
 
-static std::string lastLine(const CPrinter& p) { return p.lines().empty() ? "<none>" : p.lines().back().text; }
-static const CPrinter::Line& last(const CPrinter& p) { return p.lines().back(); }
+// The newest line on the paper (CPrinter keeps them in its PaperStore;
+// line() reads one into a buffer that lasts until the next call)
+static std::string lastLine(const CPrinter& p) {
+    const CPrinter::Line* l = p.keptLines() == 0 ? nullptr : p.line(p.lineCount() - 1);
+    return l == nullptr ? "<none>" : l->text;
+}
+static const CPrinter::Line& last(const CPrinter& p) { return *p.line(p.lineCount() - 1); }
 
 static void checkLine(const CPrinter& p, const std::string& want, const char* what) {
     ++checks;
@@ -135,7 +140,11 @@ int main() {
     checkLine(p, "K", "0xFC: back from 8-bit mode");
     sendText(p, "\x1b*b2G" "\xFF\x81" "\r");
     check(last(p).dots[0] == 0xFF && last(p).dots[1] == 0x81, "ESC *b2G: two graphics columns, all 8 rows");
-    check(p.line(p.lineCount() - 1) == &last(p) && p.line(p.lineCount()) == nullptr, "line(n)");
+    {
+        const CPrinter::Line* n = p.line(p.lineCount() - 1);
+        const std::string t = n != nullptr ? n->text : "";
+        check(n != nullptr && t == last(p).text && p.line(p.lineCount()) == nullptr, "line(n)");
+    }
     const std::uint32_t before = p.lineCount();
     sendText(p, "PARTIAL");
     checkEq(readStatus(p) >> 8, 0x40, "a line being built: not EL, not BE");

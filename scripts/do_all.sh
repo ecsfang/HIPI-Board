@@ -46,6 +46,9 @@ COPIED=()
 # Indikerar om vi skall flasha Picon eller inte. Sätts till 1 om vi inte vill flasha.
 NO_FLASH=0
 
+# Indikerar om vi skall köra hela test-suiten eller inte. Sätts till 1 om vi vill köra testerna.
+RUN_TESTS=0
+
 # ------------------------------------------------------------
 # Väntetest
 # ------------------------------------------------------------
@@ -181,6 +184,10 @@ for ARG in "$@"; do
 
         NO-FLASH|NF)
             NO_FLASH=1
+            ;;
+
+        TESTS)
+            RUN_TESTS=1
             ;;
 
         *.zip|*.ZIP)
@@ -543,6 +550,16 @@ if [ ! -f "$UF2_FILE" ]; then
     popd > /dev/null
     exit 1
 
+fi
+
+# Om vi inte flashar Picon, avsluta här.
+if [ "$RUN_TESTS" -eq 1 ]; then
+    echo
+    echo "RUN-TESTS: Bygget är klart och alla tester körs!"
+    for d in hipiview printertest i2ctest pixeltest; do
+        echo "== $d"; make -C tools/$d test || { echo "!! $d FAILED"; break; }
+    done
+    exit 0
 fi
 
 # Om vi inte flashar Picon, avsluta här.
