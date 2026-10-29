@@ -263,7 +263,8 @@ private:
     // entirely if it's fully outside.
     void emitSegment(std::int16_t x0, std::int16_t y0, std::int16_t x1, std::int16_t y1);
 
-    // Cohen-Sutherland line clipping against [iw1x_,iw1y_]-[iw2x_,iw2y_].
+    // Cohen-Sutherland line clipping against [iw1x_,iw1y_]-[iw2x_,iw2y_],
+    // within the paper (0,0 .. the model's maxX,maxY: the hard-clip limits).
     // Returns false if the segment is entirely outside (nothing to draw);
     // otherwise x0/y0/x1/y1 are adjusted in place to the clipped endpoints.
     bool clipToWindow(double& x0, double& y0, double& x1, double& y1) const;

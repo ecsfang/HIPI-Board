@@ -389,6 +389,19 @@ int main() {
         p.hpil(UNT);
     }
 
+    {
+        // IW beyond the paper: lines still cut at the paper's edge (the
+        // hard-clip limits) -- they used to be drawn off it
+        CPlotter p("TFPLOT");
+        send(p, "IN;IW-5000,-5000,20000,20000;SP1;PA10000,1000;PD;PA12000,1000;PU;PA1000,500;PD;PA1000,-500;PU;");
+        check(p.hpgl().segments().size() == 2 && has(p, 10000, 1000, 10300, 1000) && has(p, 1000, 500, 1000, 0),
+              "IW beyond the paper: cut at the paper's edge");
+        send(p, "PA11000,8000;PD;PA12000,9000;PU;");
+        check(p.hpgl().segments().size() == 2, "... a line all off the paper: not drawn");
+        send(p, "OW;");
+        check(p.outputText() == "-5000,-5000,20000,20000\r\n", "... OW still answers the window as given");
+    }
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

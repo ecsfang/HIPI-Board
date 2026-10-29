@@ -1926,7 +1926,9 @@ an `HpglInterpreter` of its own; the interpreter and the view stay):
   OS bit 1 = P1/P2 changed by IP; IP also re-applies a relative (SR /
   default) character size (`applyRelativeSize()`), SI's absolute one stays.
   IW's default is the whole area (0,0..10300,7650), and the Plotter view's
-  Page shows that area too. LB leaves the pen at the label's end; CP moves
+  Page shows that area too. `clipToWindow()` cuts to IW and to that area
+  both (the hard-clip limits), so an IW set beyond the paper doesn't let
+  lines off it; OW still answers IW as it was given. LB leaves the pen at the label's end; CP moves
   the pen by cells of 1.5 w x 2 h (the font's own advance and LF). The
   tokenizer starts a new number at a sign after a number ("-9.-1"); SM's
   argument is one character (state 5, as DT's). LT: `patternedSegment()`,

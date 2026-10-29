@@ -384,6 +384,11 @@ bool HpglInterpreter::clipToWindow(double& x0, double& y0, double& x1, double& y
     double ymin = iw1y_, ymax = iw2y_;
     if (xmin > xmax) std::swap(xmin, xmax);
     if (ymin > ymax) std::swap(ymin, ymax);
+    // ... and the paper (the hard-clip limits): an IW beyond them doesn't
+    // let the pen off it
+    xmin = std::max(xmin, 0.0); ymin = std::max(ymin, 0.0);
+    xmax = std::min<double>(xmax, model_.maxX); ymax = std::min<double>(ymax, model_.maxY);
+    if (xmin > xmax || ymin > ymax) return false;
 
     int code0 = outcode(x0, y0, xmin, ymin, xmax, ymax);
     int code1 = outcode(x1, y1, xmin, ymin, xmax, ymax);
