@@ -746,6 +746,17 @@ bool paperDirty_ = false;                 // redraw it all (too much to catch up
 int paperOff_ = 0;
 bool paperDrag_ = false;
 int dragY0_ = 0, dragOff0_ = 0;
+// Held still after dragging: the paper goes on by itself in the drag's
+// direction (pollPaper()) until the finger moves or lets go, or the end
+// is reached -- a line every kAutoStepMs, faster the longer it's held
+int holdY_ = 0;                           // where the finger stopped ...
+absolute_time_t holdSince_ = nil_time;    // ... and since when
+int dragDir_ = 0;                         // the last drag's direction: 1 down, -1 up, 0 none yet
+bool autoScroll_ = false;
+absolute_time_t autoStart_ = nil_time, autoNext_ = nil_time;
+constexpr int kHoldSlop = 6;              // px: less is holding still
+constexpr int kHoldMs = 300;              // still this long: it goes on
+constexpr int kAutoStepMs = 60;
 bool paperReturn_ = false;                // gliding back to the print head
 absolute_time_t returnNext_ = nil_time;
 constexpr int kReturnStepMs = 15;
@@ -1001,8 +1012,25 @@ void pollPaper() {
     }
     const std::uint32_t total = printer_->lineCount();
     const bool showing = output_ == DisplayOutput::Printer;
-    // Held by a finger: nothing moves it meanwhile (new lines wait)
-    if (paperDrag_) return;
+    // Held by a finger: nothing else moves it meanwhile (new lines wait) --
+    // but held still after a drag, it goes on in that direction
+    if (paperDrag_) {
+        if (!showing || dragDir_ == 0 || paperPhase_ != PaperPhase::Idle) return;
+        if (!autoScroll_) {
+            if (absolute_time_diff_us(holdSince_, get_absolute_time()) < kHoldMs * 1000ll) return;
+            autoScroll_ = true;
+            autoStart_ = get_absolute_time();
+            autoNext_ = nil_time;
+        }
+        if (!time_reached(autoNext_)) return;
+        autoNext_ = make_timeout_time_ms(kAutoStepMs);
+        // A line a step; after 1.5 s two, after 3 s four, after 5 s eight
+        // (8192 lines: about a minute)
+        const std::int64_t heldMs = absolute_time_diff_us(autoStart_, get_absolute_time()) / 1000;
+        const int lines = heldMs >= 5000 ? 8 : heldMs >= 3000 ? 4 : heldMs >= 1500 ? 2 : 1;
+        setPaperOff(paperOff_ + dragDir_ * lines * kLinePx);   // (stops at either end: clamped)
+        return;
+    }
     // Tearing off: the paper slides away sideways, then it's empty
     if (tearDir_ != 0) {
         if (!time_reached(tearNext_)) return;
@@ -1270,12 +1298,26 @@ bool views_paperDragBegin(int x, int y) {
     paperReturn_ = false;
     dragY0_ = y;
     dragOff0_ = paperOff_;
+    holdY_ = y;
+    holdSince_ = get_absolute_time();
+    dragDir_ = 0;
+    autoScroll_ = false;
     atEdge_ = false;
     tearGesture_ = 0;
     return true;
 }
 void views_paperDragMove(int x, int y) {
     if (!paperDrag_) return;
+    // Moved (more than a finger's tremble): its direction, and the hold
+    // starts again from here; going on by itself ends -- the finger has it
+    if (std::abs(y - holdY_) > kHoldSlop) {
+        dragDir_ = y > holdY_ ? 1 : -1;
+        // (going on ends: the finger takes the paper from where it was held)
+        if (autoScroll_) { autoScroll_ = false; dragY0_ = holdY_; dragOff0_ = paperOff_; }
+        holdY_ = y;
+        holdSince_ = get_absolute_time();
+    }
+    if (autoScroll_) return;                  // (held still: the paper goes on by itself)
     // While a line is still on its way (the head, the feed) it finishes first
     if (paperPhase_ != PaperPhase::Idle) { dragY0_ = y; dragOff0_ = paperOff_; return; }
     setPaperOff(dragOff0_ + (y - dragY0_));
@@ -1288,7 +1330,8 @@ void views_paperDragMove(int x, int y) {
         atEdge_ = false;
     }
 }
-void views_paperDragEnd() { paperDrag_ = false; }
+void views_paperDragEnd() { paperDrag_ = false; autoScroll_ = false; }
+int views_paperOffset() { return paperOff_; }
 bool views_takeTearGesture(int& dir) {
     if (tearGesture_ == 0) return false;
     dir = tearGesture_;

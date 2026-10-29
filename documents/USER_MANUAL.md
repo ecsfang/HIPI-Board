@@ -430,7 +430,11 @@ down — it follows the finger and stays where you let go. Down shows older
 lines, back to the first one (the last 8192 lines are kept — some 340
 screens — until the paper is torn off; they are kept in the display's own
 memory, not in HIPI's); up pulls the newest line out above the tear-off edge, where it
-can be read. On the button strip: ▲/▼ a line, Shift+▲/▼ a window. As soon as
+can be read. **Drag, then hold the finger still**: after a moment the
+paper goes on by itself the way you dragged it — faster the longer you
+hold — until you let go, move the finger again (then it follows the finger
+as before), or the first line / the tear-off edge is reached. On the
+button strip: ▲/▼ a line, Shift+▲/▼ a window. As soon as
 something is printed — or PRINT / PAPER ADVANCE, or **X** — the paper glides
 back to the print head and printing goes on from there. Swiping sideways
 still changes the view.

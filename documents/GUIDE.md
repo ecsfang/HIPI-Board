@@ -587,7 +587,15 @@ the staging area) and only the rows that come into view are rendered
 (`renderInkRows()`), so dragging is smooth. The finger comes from
 `touch_set_drag_callback()` (touch.h): a press that its Begin claims is
 neither tap nor swipe. `pollPaper()` waits while the paper is held and
-glides it back (`paperReturn_`) before anything new is printed.
+glides it back (`paperReturn_`) before anything new is printed. Held
+still after a drag (the finger within `kHoldSlop`, 6 px, of where it
+stopped for `kHoldMs`, 300 ms; `dragDir_` the last move's direction),
+`pollPaper()` moves it on by itself (`autoScroll_`): every `kAutoStepMs`
+(60 ms) 1 line, 2 after 1.5 s, 4 after 3 s, 8 after 5 s, clamped at
+either end by `setPaperOff()`. A move beyond the slop ends that and the
+finger takes the paper from where it was held; `views_paperDragEnd()`
+ends it too. The touch driver may not send moves while the finger is
+still -- hence the timing in `pollPaper()`.
 Tearing off: at the edge (`paperOff_ == -kMaxPullUp`) a sideways move of
 `kTearDx` sets `tearGesture_`; boardui takes it at the drag's end and opens
 `UiDialog::openTearOff()` (State::TearOff: Save / Discard / Cancel, touch or

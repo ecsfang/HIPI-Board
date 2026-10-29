@@ -129,7 +129,9 @@ int  views_paperLines();                   // lines on the paper (kept)
 // The printer's paper was replaced (a printout loaded): drawn afresh,
 // back at the print head
 void views_reloadPaper();
-void views_paperScrollBy(int lines);       // > 0: older lines (▲), < 0: newer (▼)
+void views_paperScrollBy(int lines);
+// How far the paper is from where it prints, pixels (> 0: older lines in view)
+int views_paperOffset();       // > 0: older lines (▲), < 0: newer (▼)
 int  views_paperWindowLines();             // lines the window shows (Shift+▲/▼)
 bool views_paperScrolled();                // not where it prints
 void views_paperToLive();                  // back there (glides)

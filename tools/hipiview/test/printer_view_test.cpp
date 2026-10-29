@@ -393,6 +393,51 @@ int main(int argc, char** argv) {
         if (std::system(("rm -rf '" + tmp + "'").c_str()) != 0) ++failures;
     }
 
+    // ── Held still after dragging: the paper goes on by itself ──────────
+    for (int i = 0; i < 150; ++i) send("MORE " + std::to_string(i) + "\r");
+    run(3000);
+    {
+        const int start = hipi::views_paperOffset();
+        // Held without having moved: nothing
+        hipi::views_paperDragBegin(620, 200);
+        run(1000);
+        check(hipi::views_paperOffset() == start, "a finger held on the paper without moving: nothing");
+        // Down 30 px, then held: it goes on down (older lines)
+        hipi::views_paperDragMove(620, 215);
+        hipi::views_paperDragMove(620, 230);
+        run(20);
+        const int byFinger = hipi::views_paperOffset();
+        run(250);
+        check(hipi::views_paperOffset() == byFinger, "... dragged, then held: not at once (0.3 s)");
+        run(1000);
+        const int afterHold = hipi::views_paperOffset();
+        std::printf("     the finger moved it %d px, held 1.25 s: %d px\n", byFinger - start, afterHold - start);
+        check(afterHold > byFinger + 5 * 16, "... then it goes on by itself, the way it was dragged");
+        // The finger moves again: it has the paper again (going on ends)
+        hipi::views_paperDragMove(620, 200);
+        run(20);
+        const int moved = hipi::views_paperOffset();
+        check(moved == afterHold - 30, "the finger moves again: the paper follows it, no longer by itself");
+        hipi::views_paperDragMove(620, 199);       // (a tremble: it follows, but that's no new drag)
+        run(200);
+        check(hipi::views_paperOffset() == moved - 1, "... and doesn't go on by itself while it moves");
+        // Let go: stays where it is
+        hipi::views_paperDragEnd();
+        const int letGo = hipi::views_paperOffset();
+        run(500);
+        check(hipi::views_paperOffset() == letGo && hipi::views_paperScrolled(), "let go: the paper stays");
+        // Up and held: to the end (the newest line above the tear-off bar), then it stops
+        hipi::views_paperDragBegin(620, 300);
+        hipi::views_paperDragMove(620, 280);
+        run(6000);
+        const int top = hipi::views_paperOffset();
+        run(500);
+        hipi::views_paperDragEnd();
+        check(top < 0 && hipi::views_paperOffset() == top, "up and held: on to the end, and stops there");
+        hipi::views_paperToLive();
+        run(3000);
+    }
+
     // ── Plotter: DP -- the digitize panel; a touch sets the marker, the
     //    arrows move it a pixel, ENTER gives the point, X cancels ─────────
     hipi::views_setPlotFit(false);                    // Page: the whole paper, known mapping
