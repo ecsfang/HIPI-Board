@@ -1771,9 +1771,8 @@ private:
         for (auto it = log.rbegin(); it != log.rend(); ++it) {
             const int code = it->code;
             const std::string cmd = it->command;
-            std::string label = std::to_string(code) + " " + HpglInterpreter::errorText(code);
-            if (!cmd.empty()) label += ": " + cmd;
-            if (label.size() > 32) label = label.substr(0, 31) + "~";
+            // (the meaning always shown -- the command cut if need be)
+            const std::string label = HpglInterpreter::errorRow(code, cmd, 32);
             const std::string full = "Error " + std::to_string(code) + ": " + HpglInterpreter::errorText(code) +
                                      (cmd.empty() ? std::string() : " -- " + cmd);
             m.push_back(item(label, [this, full] {

@@ -40,14 +40,18 @@ std::string rowText(const DeviceInfo& info) {
     } else if (info.extMode[0] != '\0') {
         std::snprintf(buf, sizeof(buf), "%7s  %-10s %s", "--", info.devName, info.extMode);
     } else if (info.addr < 0) {
-        std::snprintf(buf, sizeof(buf), "%7s  %s", "--", info.devName);
+        std::snprintf(buf, sizeof(buf), "%7s  %-10s %s", "--", info.devName, info.sdiName);
     } else {
-        // "addr NN": room for two-digit addresses (up to 30); the accessory
-        // ID in hex (as in the manuals) and decimal (HP-71: DEVADDR("%82"))
-        std::snprintf(buf, sizeof(buf), "addr %2d  %-10s 0x%02X (%u)", info.addr, info.devName, info.sai,
-                      static_cast<unsigned>(info.sai));
+        // "addr NN": room for two-digit addresses (up to 30); the HP device
+        // it emulates (its ID, blank for HIPI's own); the accessory ID in
+        // hex (as in the manuals) and decimal (HP-71: DEVADDR("%82"))
+        std::snprintf(buf, sizeof(buf), "addr %2d  %-10s %-9s 0x%02X (%u)", info.addr, info.devName, info.sdiName,
+                      info.sai, static_cast<unsigned>(info.sai));
     }
-    return buf;
+    // (no blanks at the end: a row without the accessory ID)
+    std::string s = buf;
+    while (!s.empty() && s.back() == ' ') s.pop_back();
+    return s;
 }
 
 void drawFrame(DisplayDriver* d) {

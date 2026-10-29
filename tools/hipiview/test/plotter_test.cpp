@@ -402,6 +402,22 @@ int main() {
         check(p.outputText() == "-5000,-5000,20000,20000\r\n", "... OW still answers the window as given");
     }
 
+    {
+        // Plotter -> Errors: a row says what the error is, the command cut
+        // if need be ("1 instruction not recognized: R~" didn't)
+        const std::string r1 = HpglInterpreter::errorRow(1, "RO 90", 32);
+        std::printf("     \"%s\"\n", r1.c_str());
+        check(r1 == "1 unknown instruction: RO 90", "an error row: number, meaning, command");
+        const std::string r2 = HpglInterpreter::errorRow(2, "PA 1000,1000,2000,3000,4000", 32);
+        std::printf("     \"%s\"\n", r2.c_str());
+        check(r2.size() == 32 && r2.rfind("2 wrong param. count: PA 1000", 0) == 0 && r2.back() == '~',
+              "... a long command cut, the meaning kept");
+        bool fits = true;
+        for (int c : { 0, 1, 2, 3, 5, 6, 8, 9 })
+            if (HpglInterpreter::errorRow(c, "XXXXXXXX", 32).find(": XXX") == std::string::npos) fits = false;
+        check(fits, "... every meaning leaves room for the command");
+    }
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

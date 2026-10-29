@@ -204,4 +204,9 @@ public:
     void toggleEnabled() { m_enabled = !m_enabled; }
 };
 
+// The HP device a HIPI device emulates, as its ID reads ("HP7470A",
+// "MC00701A" for TFDISPLAY as the HP 92198) -- "" for HIPI's own devices
+// (TFI2C, TFLEDS ...). For the device list and the loop map.
+const char* deviceModel(CDevice* d);
+
 #endif//__HPIL_H__

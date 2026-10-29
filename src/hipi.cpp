@@ -248,7 +248,7 @@ std::vector<DeviceInfo> hipi_enumerateDevices() {
     for (CDevice* dev : devices) {
         DeviceInfo info{};
         std::snprintf(info.devName, sizeof(info.devName), "%s", dev->name());
-        std::snprintf(info.sdiName, sizeof(info.sdiName), "%s", dev->name());
+        std::snprintf(info.sdiName, sizeof(info.sdiName), "%s", deviceModel(dev));
         info.enabled = dev->enabled();
         const int a = static_cast<int>(dev->addr());
         // Only devices on the loop have an address; 31 = unaddressed

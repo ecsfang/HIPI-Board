@@ -1,6 +1,6 @@
 // devicelist.h -- the HP-IL DEVICES list (a touch in the bottom-left
 // corner, boardui.cpp): every one of HIPI's devices in loop order with its
-// address, accessory ID and whether it's switched on -- a box in front of
+// address, the HP device it emulates, accessory ID and whether it's switched on -- a box in front of
 // it to switch it on or off. Only the drawing and where things are; what a
 // touch does is boardui.cpp's. Apart from boardui.cpp so it can be tried
 // on the PC (tools/hipiview/test/devicelist_test.cpp).
@@ -28,8 +28,10 @@ constexpr int kCloseW = 44;                      // the close button in the titl
 void drawFrame(DisplayDriver* d);
 // The rows from `offset` on (and the more-above / more-below arrows)
 void drawRows(DisplayDriver* d, const std::vector<DeviceInfo>& list, int offset);
-// A row's text: "addr  6  TFI2C      0x52 (82)" -- the accessory ID in hex
-// and decimal (the HP-71's DEVADDR("%82") takes the decimal one)
+// A row's text: "addr  5  TFPLOT     HP7470A   0x60 (96)" -- what it
+// emulates (DeviceInfo::sdiName, blank for HIPI's own: TFI2C), the
+// accessory ID in hex and decimal (the HP-71's DEVADDR("%82") takes the
+// decimal one)
 std::string rowText(const DeviceInfo& info);
 // The close button (with a margin around it)
 bool isClose(int x, int y);

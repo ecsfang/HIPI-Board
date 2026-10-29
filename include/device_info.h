@@ -7,7 +7,7 @@
 
 struct DeviceInfo {
     char devName[16];   // dev->name() -- our own local identifier
-    char sdiName[32];   // whatever the device's SDI response actually said
+    char sdiName[32];   // the HP device it emulates ("HP7470A", deviceModel()), "" for HIPI's own
     int addr;           // -1 if not addressed (AAD left it at 31, "unaddressed")
     std::uint8_t sai;   // only meaningful if addr >= 0
     bool enabled;

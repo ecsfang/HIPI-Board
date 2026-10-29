@@ -95,6 +95,8 @@ int main() {
         dev("TFPRINT", -1, 0x20, false), dev("TFPLOT", 3, 0x60, true), dev("TFLEDS", 4, 0xEE, true),
         dev("TFPIXEL", 5, 0xED, true), dev("TFTERM", -1, 0, false), dev("TFEXTRA1", 6, 0x00, true),
         dev("TFEXTRA2", 7, 0x00, true), dev("TFEXTRA3", 8, 0x00, true) };
+    const char* const models[] = { "", "HP82163", "HP82161A", "HP82162A", "HP7470A" };
+    for (int i = 0; i < 5; ++i) std::snprintf(list[i].sdiName, sizeof(list[i].sdiName), "%s", models[i]);
     std::snprintf(list[0].extMode, sizeof(list[0].extMode), "COFF");
     list[0].extDevices = 3;
     list[0].extFirstAddr = 9;
@@ -129,7 +131,15 @@ int main() {
     {
         const std::string t = rowText(dev("TFI2C", 6, 0x52, true));
         std::printf("     \"%s\"\n", t.c_str());
-        check(t == "addr  6  TFI2C      0x52 (82)", "a row: address, name, accessory ID in hex and decimal");
+        check(t == "addr  6  TFI2C                0x52 (82)", "a row: address, name, accessory ID in hex and decimal");
+        DeviceInfo pl = dev("TFPLOT", 5, 0x60, true);
+        std::snprintf(pl.sdiName, sizeof(pl.sdiName), "HP7470A");
+        const std::string tp = rowText(pl);
+        std::printf("     \"%s\"\n", tp.c_str());
+        check(tp == "addr  5  TFPLOT     HP7470A   0x60 (96)", "... and what it emulates (HP7470A), columns lined up");
+        DeviceInfo off = dev("TFPRINT", -1, 0x20, false);
+        std::snprintf(off.sdiName, sizeof(off.sdiName), "HP82162A");
+        check(rowText(off) == "     --  TFPRINT    HP82162A", "... not on the loop: name and what it emulates");
         check(rowText(dev("TFPIXEL", 5, 0xED, true)).find("0xED (237)") != std::string::npos, "... 0xED is 237");
     }
     hipi::devlist::drawRows(&d, list, maxOffset(11));

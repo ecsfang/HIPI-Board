@@ -68,6 +68,27 @@ const char* HpglInterpreter::errorText(int code) {
     }
 }
 
+const char* HpglInterpreter::errorShort(int code) {
+    switch (code) {
+        case 0: return "no error";
+        case 1: return "unknown instruction";
+        case 2: return "wrong param. count";
+        case 3: return "bad parameter";
+        case 5: return "unknown char. set";
+        case 6: return "position overflow";
+        case 8: return "pinch wheels up";
+        default: return "unknown error";
+    }
+}
+
+std::string HpglInterpreter::errorRow(int code, const std::string& command, std::size_t width) {
+    std::string row = std::to_string(code) + " " + errorShort(code);
+    if (command.empty() || row.size() + 3 > width) return row.substr(0, width);
+    row += ": ";
+    const std::size_t room = width - row.size();
+    return row + (command.size() <= room ? command : command.substr(0, room - 1) + "~");
+}
+
 void HpglInterpreter::resetDefaults() {
     // Everything DF is documented to reset -- see execute()'s "DF" branch.
     tickLenPos_ = tickLenNeg_ = 0.5;  // HP-GL default: 0.5% of the P1-P2 span

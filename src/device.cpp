@@ -119,3 +119,14 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
     // Command not handled here, send to the device
     return false;
 }
+
+const char* deviceModel(CDevice* d) {
+    switch (d->type()) {
+        case DISPLAY: return d->accessoryId() == 0x32 ? "MC00701A" : "HP82163";   // (its model setting)
+        case DRIVE:   return "HP82161A";
+        case PLOTTER: return "HP7470A";
+        case PRINTER: return "HP82162A";
+        case PILBOX:  return "PIL-Box";
+        default:      return "";
+    }
+}

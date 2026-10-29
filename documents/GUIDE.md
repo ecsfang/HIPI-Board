@@ -707,7 +707,7 @@ commands sent by the HP-41.
 | Gesture                     | Action |
 |-----------------------------|--------|
 | Tap **top-left corner**     | Info box with the current settings (auto-hides after 5 s, or tap to close) |
-| Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, accessory ID (SAI, hex and decimal: `devlist::rowText()`), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (12x24 font, 34 px rows, nine rows), PC test `devicelist_test` |
+| Tap **bottom-left corner**  | Live list of HP-IL devices: address, name, the HP device it emulates (`deviceModel()` in `device.cpp`, also the loop map's ID line; `DeviceInfo::sdiName`), accessory ID (SAI, hex and decimal: `devlist::rowText()`), an on/off box per device (touch: `UiDialog::toggleDeviceEnabled()`, as Devices / On-Off). Drawn by `src/devicelist.cpp` (12x24 font, 34 px rows, nine rows), PC test `devicelist_test` |
 | Tap **middle of the left edge** | The shortcut: the view in **Settings → Shortcut** (`shortcut=` in CONFIG.TXT, `Config::shortcut()`, a `ShortcutView` -- `views.h`; default the loop map). `views_shortcutTouch()` is the zone (`kShortcutW` x `kShortcutH`, centred between the corners; off on the Hardware test page and the media map), `views_openShortcut()` shows the view, or leaves it if it's showing. Checked in `boardui_handleTap()` just before the corners (after the views' own touch areas). PC test `printer_view_test` |
 | Vertical swipe              | Scroll the device list (when it is open) |
 | Horizontal swipe            | Switch view: each device with a view (display, plotter, every cassette drive) in loop order -- left = next device, right = previous |
@@ -856,7 +856,9 @@ don't occur here -- CS/CA out of range gives 3, as the CS/CA pages say,
 though appendix C lists 5) -- only if IM's E-mask (default 223, all but 6;
 IN and DF set it back) lets it through, else it's never known. It's kept
 in `error_` (OS bit 5, `errorCode()`) until OE, IN or
-`clearError()` (Plotter -> Errors -> Clear error), and in a log of the last
+`clearError()` (Plotter -> Errors -> Clear error; its rows are
+`HpglInterpreter::errorRow()`: number, `errorShort()` meaning, the command
+cut to fit), and in a log of the last
 eight with the command (`errorLog()`; kept over IN). `errorSerial()`
 changes with each, so `views_poll()` draws or removes the light: a
 small box top centre of the plot (`drawErrorLight()`), drawn again after

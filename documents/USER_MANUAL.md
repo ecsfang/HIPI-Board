@@ -168,7 +168,7 @@ screen** to slide them in. They slide away again after 5 seconds without use.
 | Touch | What happens |
 |-------|--------------|
 | **Top-left corner** | Info box: current file, settings, version (not on the Hardware test page) |
-| **Bottom-left corner** | List of HIPI's HP-IL devices: their addresses and accessory IDs, in hex and decimal (`0x52 (82)` — an HP-71 finds a device by it: `DEVADDR("%82")`). The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on the Hardware test page.) |
+| **Bottom-left corner** | List of HIPI's HP-IL devices: their addresses, the HP device each one emulates (`TFPLOT` — `HP7470A`; blank for HIPI's own, like `TFI2C`) and accessory IDs, in hex and decimal (`0x52 (82)` — an HP-71 finds a device by it: `DEVADDR("%82")`). The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on the Hardware test page.) |
 | **Middle of the left edge** | The shortcut: opens the view chosen in **Settings → Shortcut** — the **Loop map** unless you choose another (Analyzer, HP-IL signals, Characters, Hardware test, or Off). Touch the same place again to go back to the view you came from. (Not on the Hardware test page or the media map: their own buttons are there — leave them with their **✕**.) |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
@@ -353,7 +353,9 @@ plotter has received something it couldn't carry out:
 - **Touch the light** to see what went wrong, e.g. *Error 2: wrong number
   of parameters -- SC 0,100* — the error and the command that caused it.
 - **Errors** in the Plotter view's menu (it appears after the first error)
-  lists the last eight errors, newest first, each with its command.
+  lists the last eight errors, newest first: the number, what it means in
+  short and the command, e.g. `1 unknown instruction: RO 90` (a long
+  command is cut, `~`). Touch a row for the whole text.
   **Clear error** there puts the light out.
 - A program reads the error with `OE` (output error), which also puts the
   light out, as on the real plotter. `IN` puts it out too. Just looking at

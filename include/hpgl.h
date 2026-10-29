@@ -200,6 +200,12 @@ public:
     int errorCode() const { return error_; }
     // What an error number means (OE's table): "bad parameter"
     static const char* errorText(int code);
+    // ... in short, for a narrow row: "unknown instruction"
+    static const char* errorShort(int code);
+    // A row in Plotter -> Errors, at most `width` characters: the number,
+    // what it means (short) and the command -- the command cut ("~") if
+    // need be, never the meaning: "1 unknown instruction: RO 90"
+    static std::string errorRow(int code, const std::string& command, std::size_t width);
     // The light put out from HIPI's menu (Plotter -> Errors -> Clear
     // error): as if OE had been read, without the answer
     void clearError() { error_ = 0; ++errorSerial_; }
