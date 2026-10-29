@@ -34,6 +34,7 @@ bool views_isSplashVisible() { return false; }
 namespace {
 
 LT7683Emu chip;
+std::size_t spiBytes = 0;                // what's sent to the chip (how much work a drawing is)
 
 class ChipTransport : public hipi::DisplayTransport {
 public:
@@ -42,6 +43,7 @@ public:
     void rstLow() override {}
     void rstHigh() override {}
     void spiTransfer(const std::uint8_t* tx, std::uint8_t* rx, std::size_t len) override {
+        spiBytes += len;
         for (std::size_t i = 0; i < len; ++i) {
             const std::uint8_t b = tx ? tx[i] : 0;
             if (first_) { type_ = b & 0xC0; first_ = false; if (rx) rx[i] = 0; continue; }
@@ -167,6 +169,27 @@ int main() {
     };
     const int charBox[4] = { 156, 120, 456, 410 };      // (the large character's place in the box)
     check(!hipi::chartable_tap(500, 15) && !hipi::chartable_detailsOpen(), "a touch in the title bar: no box");
+    // The table is drawn once; a box is put together from it by the chip
+    // (it used to draw the whole table again for every touch: slow)
+    std::size_t before = spiBytes;
+    hipi::chartable_drawAll();
+    const std::size_t tableBytes = spiBytes - before;
+    chip.render(panel.data(), 0.0, false);
+    const std::vector<std::uint32_t> table = panel;
+    before = spiBytes;
+    hipi::chartable_tap(3 * 64 + 30, 30 + 4 * 65 + 30);      // 67
+    const std::size_t boxBytes = spiBytes - before;
+    before = spiBytes;
+    hipi::chartable_step(1);
+    const std::size_t stepBytes = spiBytes - before;
+    before = spiBytes;
+    hipi::chartable_closeDetails();
+    const std::size_t closeBytes = spiBytes - before;
+    chip.render(panel.data(), 0.0, false);
+    std::printf("     SPI bytes: the table %zu, a box %zu, the next %zu, closed %zu\n", tableBytes, boxBytes, stepBytes, closeBytes);
+    check(boxBytes * 5 < tableBytes && stepBytes * 5 < tableBytes && closeBytes * 50 < tableBytes,
+          "a box, the next character, closing: a fraction of drawing the table");
+    check(panel == table, "... closed: the table exactly as before");
     check(hipi::chartable_tap(15 * 64 + 30, 30 + 7 * 65 + 30) && hipi::chartable_selected() == 127,
           "a touch on 127: its details box");
     snapshot("page_chardetails.png");

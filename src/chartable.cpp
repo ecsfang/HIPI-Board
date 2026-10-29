@@ -4,6 +4,7 @@
 #include "hp41_segments.h"   // the details box: a character drawn large
 #include "printer_font.h"    // ... and as the printer prints it
 #include "menu_frame.h"
+#include "display_mirror.h"  // the drawn table: a layer a PC viewer needs
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -16,7 +17,7 @@ namespace {
 DisplayDriver* d_ = nullptr;
 constexpr std::uint16_t kYellow = 0xEDC0, kBlack = 0x0000, kWhite = 0xFFFF;
 constexpr std::uint16_t kGrey = 0x7BEF, kGrid = 0x2104;
-constexpr std::uint16_t kDimText = 0x39E7, kDimGlyph = 0x528A;   // the table behind the details box
+constexpr std::uint16_t kDimMask = 0x39E7;   // the table behind a character's box: ANDed with this
 constexpr std::uint16_t kBoxBg = 0x18E3, kButton = 0x2945;
 
 // The table: 8 rows of 16 cells, code = row * 16 + column (above the
@@ -139,8 +140,8 @@ void drawDetails() {
     drawButton(button(2), b);
 }
 
-void render() {
-    const bool dim = selected_ >= 0;
+// The table (into the current canvas -- kCharTableAddr, drawAll())
+void renderTable() {
     d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
     d_->selectBuiltinFont();
     d_->fillRect(0, 0, SCREEN_MAX_X, SCREEN_MAX_Y, kBlack);
@@ -159,22 +160,48 @@ void render() {
     for (int code = 0; code < 128; ++code) {
         const int x = (code % 16) * kCellW, y = kTop + (code / 16) * kCellH;
         std::snprintf(num, sizeof(num), "%d", code);
-        text(x + 4, y + 4, num, dim ? kDimText : kGrey, kBlack);
+        text(x + 4, y + 4, num, kGrey, kBlack);
         const GlyphFont::Glyph* g = kCharTableFont.find(static_cast<char>(code));
         if (g == nullptr) continue;
         // The character in the cell's lower right part (one glyph = one box)
         const int gx = x + kCellW - 6 - g->width;
         const int gy = y + kCellH - 6 - kCharTableFont.height;
-        drawGlyphChar(d_, gx, gy, kCharTableFont, static_cast<char>(code), dim ? kDimGlyph : kWhite, kBlack);
+        drawGlyphChar(d_, gx, gy, kCharTableFont, static_cast<char>(code), kWhite, kBlack);
     }
     text(8, SCREEN_MAX_Y - 26, "Touch a character for more.  X (top right) or a swipe closes the table.", kGrey, kBlack);
-    if (dim) {
-        // The touched cell framed, then its box
+    page_drawMenu(d_);
+}
+
+// The screen from the table drawn once (kCharTableAddr), by the display
+// chip: as it is -- or, with a character's box, dimmed (ANDed with a grey:
+// in layer 3), the touched cell framed and the box drawn over it -- then
+// copied to the panel in one go. Drawing the table again (128 characters
+// and their numbers) is what took the time.
+void compose() {
+    const std::uint32_t prevAddr = d_->canvasAddr();
+    const std::uint16_t prevStride = d_->canvasStride();
+    if (selected_ < 0) {
+        d_->copyLayerRegion(LT7683::kCharTableAddr, SCREEN_MAX_X, 0, 0, 0, SCREEN_MAX_X, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
+    } else {
+        // The grey to AND with: in layer 2 (a scratch layer)
+        d_->beginLayerDraw(LT7683::kBteLayer2Addr);
+        d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+        d_->fillRect(0, 0, SCREEN_MAX_X, kPageContentBottom, kDimMask);
+        d_->copyLayerRegion(LT7683::kCharTableAddr, SCREEN_MAX_X, 0, 0, LT7683::kBteLayer3Addr, SCREEN_MAX_X, 0, 0,
+                            SCREEN_MAX_X, SCREEN_MAX_Y);
+        // (the title bar and the menu button's row stay bright: the page's buttons)
+        d_->andLayerRegion(LT7683::kBteLayer2Addr, SCREEN_MAX_X, 0, 28, LT7683::kBteLayer3Addr, SCREEN_MAX_X, 0, 28,
+                           SCREEN_MAX_X, static_cast<std::uint16_t>(kPageContentBottom - 28));
+        d_->beginLayerDraw(LT7683::kBteLayer3Addr);
+        d_->setActiveWindow(0, 0, SCREEN_MAX_X - 1, SCREEN_MAX_Y - 1);
+        d_->selectBuiltinFont();
         const int x = (selected_ % 16) * kCellW, y = kTop + (selected_ / 16) * kCellH;
         for (int k = 0; k < 3; ++k) d_->rect(i16(x + k), i16(y + k), i16(kCellW + 1 - 2 * k), i16(kCellH + 1 - 2 * k), kYellow);
         drawDetails();
+        d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
     }
-    page_drawMenu(d_);
+    if (prevAddr == 0) d_->endOverlayDraw();
+    else               d_->beginLayerDraw(prevAddr, prevStride);
 }
 }  // namespace
 
@@ -182,14 +209,23 @@ void chartable_init(DisplayDriver* display) { d_ = display; }
 
 void chartable_drawAll() {
     if (d_ == nullptr) return;
-    // Off-screen, then copied in one go (no flicker), like the loop map
+    // The table in its own layer (the slow part: once), then the screen from it
     const std::uint32_t prevAddr = d_->canvasAddr();
     const std::uint16_t prevStride = d_->canvasStride();
-    d_->beginLayerDraw(LT7683::kBteLayer3Addr);
-    render();
+    d_->beginLayerDraw(LT7683::kCharTableAddr);
+    renderTable();
     if (prevAddr == 0) d_->endOverlayDraw();
     else               d_->beginLayerDraw(prevAddr, prevStride);
-    d_->copyLayerToPanel(LT7683::kBteLayer3Addr, 0, 0, SCREEN_MAX_X, SCREEN_MAX_Y);
+    // A viewer that connects later needs it (the boxes are made from it):
+    // always the same table -- cached by the viewer, per build of this file
+    static bool told = false;
+    if (!told) {
+        std::uint32_t id = 2166136261u;
+        for (const char* p = "CHARTABLE " __DATE__ " " __TIME__; *p; ++p) id = (id ^ static_cast<std::uint8_t>(*p)) * 16777619u;
+        displayMirror_addLayer(LT7683::kCharTableAddr, SCREEN_MAX_X * 2UL * SCREEN_MAX_Y, 0, 1, id | 1u);
+        told = true;
+    }
+    compose();
 }
 
 bool chartable_tap(int x, int y) {
@@ -203,7 +239,7 @@ bool chartable_tap(int x, int y) {
     }
     if (y < kTop || y >= kTop + 8 * kCellH || x < 0 || x >= 16 * kCellW) return false;
     selected_ = ((y - kTop) / kCellH) * 16 + x / kCellW;
-    chartable_drawAll();
+    compose();
     return true;
 }
 
@@ -213,13 +249,13 @@ int chartable_selected() { return selected_; }
 void chartable_step(int by) {
     if (selected_ < 0) return;
     selected_ = ((selected_ + by) % 128 + 128) % 128;
-    chartable_drawAll();
+    compose();
 }
 
 void chartable_closeDetails() {
     if (selected_ < 0) return;
     selected_ = -1;
-    chartable_drawAll();
+    compose();
 }
 
 void chartable_reset() { selected_ = -1; }

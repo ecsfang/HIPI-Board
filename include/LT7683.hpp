@@ -650,6 +650,10 @@ public:
     // written and read with writeSdram() / readSdram(). Slot 8, 1 MB.
     static constexpr std::uint32_t kTextLogAddr = 1024UL * 600UL * 2UL * 8UL;
     static constexpr std::uint32_t kTextLogBytes = 0x100000UL;
+    // The Character table, drawn once (chartable.cpp): a character's
+    // details box is put together from it by BTE, not by drawing the
+    // table again. Slot 9, a full layer.
+    static constexpr std::uint32_t kCharTableAddr = 1024UL * 600UL * 2UL * 9UL;
 
     // Memory Copy with ROP: DT = rop(S0, S1) -- bteMemoryCopy() and
     // andLayerRegion() (rop: REG[91h] bits 7:4)

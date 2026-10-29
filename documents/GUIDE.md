@@ -647,7 +647,14 @@ is made of some of those very contours, so the script records which
 upper dot added from '.', ',' and ':'). `drawSegments()` fills the lit
 shapes' triangles at any scale -- 80 triangles and 128 masks instead of a
 large bitmap font. The printer's dots come from `kPrinterFontHp41`
-(`printer_font.h`). PC test: `page_chrome_test` (`page_chardetails*.png`).
+(`printer_font.h`). The table itself is drawn once, into its own layer
+(`LT7683::kCharTableAddr`, slot 9; told to the mirror as a cached layer);
+the screen is put together from it by the chip (`compose()`): copied as it
+is, or -- with a box -- copied to layer 3, dimmed by ANDing with a grey
+(`andLayerRegion()`), the cell framed and the box drawn there, then copied
+to the panel. A touch, a step or closing costs about 16 kB over SPI
+instead of the table's 430 kB (that redraw made a touch slow). PC test:
+`page_chrome_test` (`page_chardetails*.png`, and the SPI bytes counted).
 
 **Backlight dimming.** `src/backlight.cpp`: after `kDimAfterMs` (10 min,
 `include/backlight.h`) without activity the backlight goes to `kDimLevel`
