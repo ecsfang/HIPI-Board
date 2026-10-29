@@ -196,6 +196,7 @@ add_executable(${EXE_TARGET}
     src/views.cpp
     src/plotterview.cpp
     src/printer.cpp
+    src/printer_paper.cpp       # its paper in the display's SDRAM
     src/printer_font.cpp
     src/video80.cpp
     src/hwtest.cpp

@@ -857,13 +857,9 @@ void showHeadArea(int x0, int x1) {
                       static_cast<std::int16_t>(x1 - x0 + kPrtHead.w), kPrtHead.h);
 }
 
-// The oldest line still kept (the printer keeps the last kMaxLines;
-// tearing off drops them all)
-std::uint32_t firstKept() {
-    const std::uint32_t kept = static_cast<std::uint32_t>(printer_->lines().size());
-    const std::uint32_t total = printer_->lineCount();
-    return total > kept ? total - kept : 0;
-}
+// The oldest line still kept (the printer keeps the last
+// CPrinter::paperCapacity(); tearing off drops them all)
+std::uint32_t firstKept() { return printer_->firstKept(); }
 // How far down the paper can go: the first line at the top of the window
 int maxPullDown() {
     const std::uint32_t first = firstKept();
@@ -1284,7 +1280,7 @@ void views_paperDragMove(int x, int y) {
     if (paperPhase_ != PaperPhase::Idle) { dragY0_ = y; dragOff0_ = paperOff_; return; }
     setPaperOff(dragOff0_ + (y - dragY0_));
     // At the tear-off edge, then sideways: tear it off (asked at the end)
-    if (paperOff_ == -kMaxPullUp && !printer_->lines().empty()) {
+    if (paperOff_ == -kMaxPullUp && printer_->keptLines() > 0) {
         if (!atEdge_) { atEdge_ = true; edgeX_ = x; edgeY_ = y; }
         if (y < edgeY_) edgeY_ = y;           // (the finger going on up: the paper stays at the edge)
         if (std::abs(x - edgeX_) >= kTearDx && std::abs(y - edgeY_) < kTearMaxDy) tearGesture_ = x > edgeX_ ? 1 : -1;
@@ -1306,7 +1302,7 @@ void views_tearOff(int dir) {
     tearStep_ = 0;
     tearNext_ = nil_time;
 }
-int views_paperLines() { return printer_ != nullptr ? static_cast<int>(printer_->lines().size()) : 0; }
+int views_paperLines() { return printer_ != nullptr ? static_cast<int>(printer_->keptLines()) : 0; }
 void views_reloadPaper() {
     // The printer's lines were replaced (a saved printout loaded): drawn
     // afresh, at the live position

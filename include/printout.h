@@ -18,7 +18,7 @@
 
 namespace hipi {
 
-// The kept lines (CPrinter::lines()). True and `message` the file name
+// The lines on the paper (CPrinter::firstKept() .. lineCount(), read one at a time). True and `message` the file name
 // (without the folder and extension), or false and why not.
 bool printout_save(const CPrinter& printer, std::string& message);
 

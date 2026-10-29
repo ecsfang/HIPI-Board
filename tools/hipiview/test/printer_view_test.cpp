@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
         std::vector<unsigned char> bmp;
         if (f) { int c; while ((c = std::fgetc(f)) != EOF) bmp.push_back(static_cast<unsigned char>(c)); std::fclose(f); }
         auto le32 = [&](std::size_t o) { return bmp[o] | bmp[o + 1] << 8 | bmp[o + 2] << 16 | bmp[o + 3] << 24; };
-        const std::size_t lines = printer->lines().size();
+        const std::size_t lines = printer->keptLines();
         check(bmp.size() > 62 && bmp[0] == 'B' && le32(18) == 352 && le32(22) == static_cast<int>(lines * 22 + 16) && bmp[28] == 1,
               "BMP: 352 wide (168 dots x 2 + margins), 22 px a line, 1 bit per pixel");
         long black = 0;
@@ -320,7 +320,12 @@ int main(int argc, char** argv) {
         if (chdir(cwd) != 0) return 1;
         if (std::system(("cp '" + tmp + "/printouts/printout_1.bmp' tools/hipiview/printer_view_printout.bmp").c_str()) != 0) ++failures;
     }
-    const std::deque<CPrinter::Line> savedPaper = printer->lines();
+    std::deque<CPrinter::Line> savedPaper;
+    for (std::uint32_t n = printer->firstKept(); n < printer->lineCount(); ++n) {
+        CPrinter::Line l;
+        printer->readLine(n, l);
+        savedPaper.push_back(l);
+    }
 
     // ── Tearing off: up to the edge, then sideways ─────────────────────
     hipi::views_paperDragBegin(620, 300);
@@ -358,9 +363,10 @@ int main(int argc, char** argv) {
               list[0].lines == static_cast<int>(savedPaper.size()), "listed: printout_2, printout_1 (newest first), with their lines");
         std::string msg;
         const bool ok = hipi::printout_load(1, *printer, msg);
-        bool same = ok && printer->lines().size() == savedPaper.size();
+        bool same = ok && printer->keptLines() == savedPaper.size();
         for (std::size_t i = 0; same && i < savedPaper.size(); ++i) {
-            const auto& a = printer->lines()[i];
+            CPrinter::Line a;
+            printer->readLine(printer->firstKept() + static_cast<std::uint32_t>(i), a);
             const auto& b = savedPaper[i];
             if (a.dots != b.dots) same = false;
             if (!b.text.empty() && a.text != b.text) same = false;
@@ -381,7 +387,7 @@ int main(int argc, char** argv) {
         if (f1) std::fclose(f1);
         if (f2) std::fclose(f2);
         check(hipi::printout_list().size() == 1, "... and it's no longer listed");
-        check(!hipi::printout_load(7, *printer, msg) && printer->lines().size() == savedPaper.size(),
+        check(!hipi::printout_load(7, *printer, msg) && printer->keptLines() == savedPaper.size(),
               "loading one that's not there: an error, the paper as it was");
         if (chdir(cwd) != 0) return 1;
         if (std::system(("rm -rf '" + tmp + "'").c_str()) != 0) ++failures;

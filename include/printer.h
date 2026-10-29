@@ -33,9 +33,14 @@
 // columns (24 characters of 7 columns: a blank, the 5x7 character, a
 // blank), built from characters (printer_font.h -- ASCII in escape mode,
 // the HP-41's own set in 8-bit mode), graphics columns (column mode, ESC
-// *b<n>G), skips, double wide and lower case, and printed -- kept in
-// lines() -- at CR, when it's full, or right justified. Bar codes are
+// *b<n>G), skips, double wide and lower case, and printed -- kept on the
+// paper -- at CR, when it's full, or right justified. Bar codes are
 // stepped over (not drawn). The Printer view shows the paper.
+//
+// The paper: the printed lines, numbered from 0 (lineCount() of them so
+// far), the last ones kept in a PaperStore -- in the firmware the display
+// chip's SDRAM (printer_paper.h: 8192 lines), else a small one in RAM (the
+// first kMaxLines; the PC tests). A line is one record of kRecordBytes.
 
 #include "hpil.h"
 #include "pico/time.h"
@@ -43,16 +48,30 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <string>
 
 enum class PrinterMode : std::uint8_t { Man = 0, Trace = 1, Norm = 2 };
+
+// Where the printed lines are kept: `capacity()` records of
+// CPrinter::kRecordBytes, line n in record n % capacity()
+class PaperStore {
+public:
+    virtual ~PaperStore() = default;
+    virtual std::uint32_t capacity() const = 0;
+    virtual void write(std::uint32_t record, const std::uint8_t* data) = 0;
+    virtual void read(std::uint32_t record, std::uint8_t* data) = 0;
+};
 
 class CPrinter : public CDevice {
 public:
     static constexpr int kColumns = 24;          // characters per line
     static constexpr int kDots = 168;            // dot columns per line (24 x 7)
     static constexpr int kIntensities = 5;       // INTENSITY switch positions
-    static constexpr std::size_t kMaxLines = 200; // lines kept (oldest dropped)
+    static constexpr std::size_t kMaxLines = 200; // lines kept without a store (RAM, the PC tests)
+    // A line's record: 168 dot columns, the text's length, the text
+    static constexpr std::size_t kRecordBytes = 256;
+    static constexpr std::size_t kMaxText = kRecordBytes - kDots - 1;   // 87
 
     // A printed line: its dot columns (bit 0 = top dot, bit 7 = the
     // eighth row graphics can use) and, for the log, its text
@@ -73,14 +92,21 @@ public:
 
     // One byte as if from the controller (the demo, demo.h)
     void put(std::uint8_t c) { feed(c); }
+    // Where the lines are kept (the firmware: the display's SDRAM,
+    // printer_paper.h); nullptr: kMaxLines in RAM. The paper starts empty.
+    void setPaperStore(PaperStore* store);
+    std::uint32_t paperCapacity() const;
     // Tears off the paper: the kept lines are dropped (lineCount() stays)
-    void clearPaper() { lines_.clear(); }
-    // Puts paper back in (a saved printout, printout.h): replaces what's
-    // there; the controller isn't told. Counted as printed (lineCount()).
-    void loadPaper(std::deque<Line> lines) {
-        while (lines.size() > kMaxLines) lines.pop_front();
-        lines_ = std::move(lines);
-        lineCount_ += static_cast<std::uint32_t>(lines_.size());
+    void clearPaper() { firstKept_ = lineCount_; cacheValid_ = false; }
+    // Puts paper back in (a saved printout, printout.h): n lines replace
+    // what's there (counted as printed: lineCount()); the controller isn't
+    // told. Then each written with setLine() -- they start blank. The
+    // number of the first; only the last paperCapacity() are kept.
+    std::uint32_t startPaper(std::uint32_t n);
+    // ... all at once (the tests)
+    void loadPaper(const std::deque<Line>& lines) {
+        const std::uint32_t first = startPaper(static_cast<std::uint32_t>(lines.size()));
+        for (std::size_t i = 0; i < lines.size(); ++i) setLine(first + static_cast<std::uint32_t>(i), lines[i]);
     }
     void clear() override;                       // DCL / SDC
     void doListener(IL_CMD_t cmd, IL_CMD_t* rtn) override;
@@ -106,14 +132,20 @@ public:
     void feedPaper();
 
     // ── What has been printed ─────────────────────────────────────────
-    // The lines so far, oldest first (at most kMaxLines). A paper advance
-    // is an empty line.
-    const std::deque<Line>& lines() const { return lines_; }
-    // Counts every line ever printed (also those dropped from lines())
+    // Counts every line ever printed (also those no longer kept)
     std::uint32_t lineCount() const { return lineCount_; }
+    // The lines on the paper: firstKept() .. lineCount() - 1 (keptLines()
+    // of them). A paper advance is an empty line.
+    std::uint32_t firstKept() const;
+    std::uint32_t keptLines() const { return lineCount_ - firstKept(); }
     // The line with number n (counted like lineCount(), the first is 0),
-    // nullptr if it's no longer kept (or not printed yet)
+    // nullptr if it's no longer kept (or not printed yet). The pointer is
+    // good until the next call (it's read from the store into one buffer).
     const Line* line(std::uint32_t n) const;
+    // ... copied; false if it isn't kept
+    bool readLine(std::uint32_t n, Line& out) const;
+    // A kept line replaced (a printout loaded: startPaper())
+    void setLine(std::uint32_t n, const Line& l);
     // Called for each new line (after it's added to lines())
     void setLineCallback(std::function<void(const Line&)> cb) { onLine_ = std::move(cb); }
 
@@ -166,8 +198,17 @@ private:
     Line building_;                  // the line being built
     int used_ = 0;                   // its columns so far
 
-    std::deque<Line> lines_;
+    void storeLine(std::uint32_t n, const Line& l);
+    PaperStore& store() const;
+
+    PaperStore* store_ = nullptr;            // nullptr: ramStore_
+    mutable std::unique_ptr<PaperStore> ramStore_;   // (made when first needed)
     std::uint32_t lineCount_ = 0;
+    std::uint32_t firstKept_ = 0;            // torn off / loaded before this
+    // line(): the last line read
+    mutable Line cache_;
+    mutable std::uint32_t cacheN_ = 0;
+    mutable bool cacheValid_ = false;
     std::function<void(const Line&)> onLine_;
 };
 

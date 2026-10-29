@@ -77,6 +77,7 @@ extern void init_spi(void);
 #include "plotter.h"
 #include "screendump.h"
 #include "display_text.h"
+#include "printer_paper.h"    // the printer's paper in the display's SDRAM
 #include "bootscreen.h"
 #include "boot_service.h"
 #include "backlight.h"
@@ -506,6 +507,7 @@ int main() {
 
     // Setup all devices in the HPIL loop (display, drive, LEDs, PILBox)
     hipi_init();
+    hipi::printerPaper_init(display, printer);   // the printer's paper: in the display's SDRAM (printer_paper.h)
 
     // Wire up the plotter's live-draw callbacks now that display/screen/
     // plotter all exist (plotter is set inside hipi_init() above). On the

@@ -1,6 +1,9 @@
 #define MODULE "PRINTER"
 
 #include "printer.h"
+#include <algorithm>
+#include <cstring>
+#include <vector>
 #include "printer_font.h"
 #include "usb_serial.h"
 #include <cctype>
@@ -287,16 +290,96 @@ void CPrinter::feedPaper() {
     addLine(Line());
 }
 
+// ── The paper ─────────────────────────────────────────────────────────
+
+namespace {
+// Without a store of the firmware's: kMaxLines records in RAM
+class RamPaperStore : public PaperStore {
+public:
+    std::uint32_t capacity() const override { return CPrinter::kMaxLines; }
+    void write(std::uint32_t record, const std::uint8_t* data) override {
+        std::memcpy(&mem_[record * CPrinter::kRecordBytes], data, CPrinter::kRecordBytes);
+    }
+    void read(std::uint32_t record, std::uint8_t* data) override {
+        std::memcpy(data, &mem_[record * CPrinter::kRecordBytes], CPrinter::kRecordBytes);
+    }
+private:
+    std::vector<std::uint8_t> mem_ = std::vector<std::uint8_t>(CPrinter::kMaxLines * CPrinter::kRecordBytes);
+};
+}  // namespace
+
+PaperStore& CPrinter::store() const {
+    if (store_ != nullptr) return *store_;
+    if (!ramStore_) ramStore_.reset(new RamPaperStore());
+    return *ramStore_;
+}
+
+void CPrinter::setPaperStore(PaperStore* store) {
+    store_ = store;
+    firstKept_ = lineCount_;                 // (the paper starts empty)
+    cacheValid_ = false;
+}
+
+std::uint32_t CPrinter::paperCapacity() const { return store().capacity(); }
+
+std::uint32_t CPrinter::firstKept() const {
+    const std::uint32_t cap = paperCapacity();
+    const std::uint32_t oldest = lineCount_ > cap ? lineCount_ - cap : 0;
+    return std::max(firstKept_, oldest);
+}
+
+void CPrinter::storeLine(std::uint32_t n, const Line& l) {
+    std::uint8_t rec[kRecordBytes] = {};
+    std::memcpy(rec, l.dots.data(), kDots);
+    const std::size_t len = std::min(l.text.size(), kMaxText);
+    rec[kDots] = static_cast<std::uint8_t>(len);
+    std::memcpy(rec + kDots + 1, l.text.data(), len);
+    PaperStore& s = store();
+    s.write(n % s.capacity(), rec);
+    if (cacheValid_ && cacheN_ == n) cacheValid_ = false;
+}
+
+bool CPrinter::readLine(std::uint32_t n, Line& out) const {
+    if (n < firstKept() || n >= lineCount_) return false;
+    if (cacheValid_ && cacheN_ == n) { out = cache_; return true; }
+    std::uint8_t rec[kRecordBytes];
+    PaperStore& s = store();
+    s.read(n % s.capacity(), rec);
+    std::memcpy(out.dots.data(), rec, kDots);
+    const std::size_t len = std::min<std::size_t>(rec[kDots], kMaxText);
+    out.text.assign(reinterpret_cast<const char*>(rec + kDots + 1), len);
+    return true;
+}
+
 const CPrinter::Line* CPrinter::line(std::uint32_t n) const {
-    const std::uint32_t first = lineCount_ - static_cast<std::uint32_t>(lines_.size());
-    if (n < first || n >= lineCount_) return nullptr;
-    return &lines_[n - first];
+    if (cacheValid_ && cacheN_ == n && n >= firstKept() && n < lineCount_) return &cache_;
+    if (!readLine(n, cache_)) return nullptr;
+    cacheN_ = n;
+    cacheValid_ = true;
+    return &cache_;
+}
+
+void CPrinter::setLine(std::uint32_t n, const Line& l) {
+    if (n < firstKept() || n >= lineCount_) return;
+    storeLine(n, l);
+}
+
+std::uint32_t CPrinter::startPaper(std::uint32_t n) {
+    // Blank lines first (a record left from before isn't shown as one of them)
+    const std::uint32_t first = lineCount_;
+    lineCount_ += n;
+    firstKept_ = first;
+    cacheValid_ = false;
+    const Line blank;
+    for (std::uint32_t k = firstKept(); k < lineCount_; ++k) storeLine(k, blank);
+    return first;
 }
 
 void CPrinter::addLine(Line&& line) {
     if (bTrace) MLOGF("|%s|", line.text.c_str());
-    lines_.push_back(std::move(line));
-    while (lines_.size() > kMaxLines) lines_.pop_front();
+    storeLine(lineCount_, line);
     ++lineCount_;
-    if (onLine_) onLine_(lines_.back());
+    // (the callback gets the line as it was kept: the text perhaps shortened)
+    if (line.text.size() > kMaxText) line.text.resize(kMaxText);
+    if (onLine_) onLine_(line);
 }

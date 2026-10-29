@@ -118,6 +118,13 @@ mediamap_test: $(MAP_SRC) ../../include/mediamap.h ../../include/lif_create.h
 	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(MAP_SRC) -o $@ -lz
 
 # The HP-IL DEVICES list (devicelist.cpp) -- saves devicelist_*.png
+# The printer's paper in the display's SDRAM (printer_paper.h): 8192 lines,
+# a printout of 3000 saved and loaded a line at a time
+PP_SRC := test/printer_paper_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/printer.cpp ../../src/printer_font.cpp \
+          ../../src/printer_paper.cpp ../../src/printout.cpp ../../src/device.cpp ../../src/hpil.cpp
+printer_paper_test: $(PP_SRC) ../../include/printer.h ../../include/printer_paper.h
+	$(CXX) $(CXXFLAGS) -Itest/pvstubs -Itest -I../../include $(PP_SRC) -o $@ -lz
+
 # The pages' close and menu buttons (page_chrome.h): the analyzer and the
 # character table drawn, and a character's details box -- saves page_*.png
 PC_SRC := test/page_chrome_test.cpp lt7683_emu.cpp ../../src/LT7683.cpp ../../src/analyzer.cpp ../../src/chartable.cpp \
@@ -179,7 +186,7 @@ pilbox_test: $(PIL_SRC) ../../include/pilbox.h ../../include/hpil.h $(wildcard t
 rtc_test: $(RTC_SRC) ../../include/rtc.h ../../include/rtc_probe.h ../../sdcard/i2c/chips.txt $(wildcard test/rtcstubs/*/*.h)
 	$(CXX) $(CXXFLAGS) -Itest/rtcstubs -I../../include $(RTC_SRC) -o $@
 
-test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test upload_test download_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test pilbox_test clock_test clock_view_test page_chrome_test
+test: deframer_test saver_test host_test printer_view_test video80_view_test display_text_test upload_test download_test hwtest_view_test demo_view_test demo_run_test media_create_test mediamap_test loopmap_test plotter_test devicelist_test rtc_test pilbox_test clock_test clock_view_test page_chrome_test printer_paper_test
 	./deframer_test
 	./saver_test
 	./host_test
@@ -201,13 +208,14 @@ test: deframer_test saver_test host_test printer_view_test video80_view_test dis
 	./pilbox_test
 	./rtc_test
 	./page_chrome_test
+	./printer_paper_test
 
 install: hipiview
 	install -m 755 hipiview /usr/local/bin/
 
 clean:
 	rm -rf gen
-	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test pilbox_test clock_test clock_view_test clock_view_*.png page_chrome_test page_*.png *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
+	rm -f hipiview hipiview.exe deframer_test saver_test saver_*.png host_test link_sim printer_view_test video80_view_test video80_*.png display_text_test upload_test download_test hwtest_view_test hwtest_*.png demo_view_test demo_run_test demo_*.png media_create_test media_*.png mediamap_test mediamap_*.png loopmap_test loopmap_*.png plotter_test devicelist_test devicelist_*.png rtc_test pilbox_test clock_test clock_view_test clock_view_*.png page_chrome_test page_*.png printer_paper_test *_viewer.png *_chip.png printer_view_*.png *.hvlog link_sim_tape.dat link_sim_second.raw link_sim_third.raw vectop.raw link_sim_input.txt
 	rm -rf link_sim_sd link_sim_saved
 
 .PHONY: test install clean windows

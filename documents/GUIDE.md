@@ -1104,8 +1104,24 @@ characters of 7: a blank, the 5x7 glyph, a blank), from characters
 -- the glyphs of pyILPER's emulation), graphics columns (column mode, ESC
 *b<n>G), skips, double wide and lower case; it's printed at CR, when the
 next item doesn't fit, right justified if asked. Bar codes are consumed,
-not drawn. The last `kMaxLines` (200) lines are kept, as dots and text
-(`CPrinter::lines()`, `line(n)`); with trace on each is in the log.
+not drawn. The printed lines are numbered from 0 (`lineCount()`); the last
+ones are kept, dots and text, in a `PaperStore` (printer.h): a record of
+`kRecordBytes` (256: 168 dot columns, the text's length, up to 87
+characters) per line, line n in record n % capacity. The firmware's store
+is the display chip's SDRAM (`printer_paper.cpp`,
+`LT7683::kPrinterPaperAddr`, 2 MB: 8192 lines), set by
+`printerPaper_init()` in pico_main after `hipi_init()`; each line written
+and read over SPI with `writeSdram()` / `readSdram()`, inside
+`displayMirror_quiet()` (a viewer isn't sent it, as the text log). Without
+a store (the PC tests) `kMaxLines` (200) records in RAM, made when first
+needed. `firstKept()` .. `lineCount()` are on the paper (`clearPaper()`
+moves `firstKept_`); `line(n)` reads one into a buffer (the same line
+again: no read -- the pointer is good until the next call), `readLine()`
+copies, `startPaper()` + `setLine()` put a printout back. printout.cpp
+saves and loads a line at a time (BMP rows gathered 4 kB per write, the
+text read in pieces) -- 8192 lines don't fit in RAM at once. With trace on
+each line is in the log. PC test: `printer_paper_test` (9000 lines into
+the emulated SDRAM, a 3000-line printout saved and loaded).
 
 **The paper.** The ink is kept in its own layer (`kPrinterInkAddr`): the
 print area as seen through the window, 252 x 323 pixels, ink on white,

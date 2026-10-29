@@ -427,8 +427,9 @@ like the real ones.
 
 **Looking back on the paper.** Put a finger on the paper and drag it up or
 down — it follows the finger and stays where you let go. Down shows older
-lines, back to the first one (the last 200 lines are kept, until the paper
-is torn off); up pulls the newest line out above the tear-off edge, where it
+lines, back to the first one (the last 8192 lines are kept — some 340
+screens — until the paper is torn off; they are kept in the display's own
+memory, not in HIPI's); up pulls the newest line out above the tear-off edge, where it
 can be read. On the button strip: ▲/▼ a line, Shift+▲/▼ a window. As soon as
 something is printed — or PRINT / PAPER ADVANCE, or **X** — the paper glides
 back to the print head and printing goes on from there. Swiping sideways
@@ -1074,7 +1075,8 @@ It prints like the 82162A: 24 characters per line (12 double wide), the
 HP-41 characters (◆, x̄, ←, α, β, Γ, Δ, σ, Σ, ∡ …) in 8-bit mode, lower
 case, right-justified lines, character and column skips, and graphics
 (column mode, `ESC *b<n>G`) — e.g. `PRPLOT` and `ACCOL`. Bar codes are
-skipped. The last 200 lines are kept; the window shows the last 20.
+skipped. The last 8192 lines are kept; the window shows the last 20.
+**Save printout** saves all of them (a long printout takes a while).
 
 It starts switched off — see [5.4](#54-printer).
 

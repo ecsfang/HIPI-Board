@@ -654,6 +654,11 @@ public:
     // details box is put together from it by BTE, not by drawing the
     // table again. Slot 9, a full layer.
     static constexpr std::uint32_t kCharTableAddr = 1024UL * 600UL * 2UL * 9UL;
+    // The printer's paper (printer_paper.h): 8192 lines of 256 bytes, never
+    // shown -- written and read with writeSdram() / readSdram(). From slot
+    // 10, 2 MB (to 14.3 MB of the 16 MB).
+    static constexpr std::uint32_t kPrinterPaperAddr = 1024UL * 600UL * 2UL * 10UL;
+    static constexpr std::uint32_t kPrinterPaperBytes = 0x200000UL;
 
     // Memory Copy with ROP: DT = rop(S0, S1) -- bteMemoryCopy() and
     // andLayerRegion() (rop: REG[91h] bits 7:4)

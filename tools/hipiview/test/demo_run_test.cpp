@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
     run(10);
     check(!hipi::demo_running(), "HP-IL traffic stops it");
     check(hipi::views_output() == hipi::DisplayOutput::Display, "back to the view it started from");
-    check(plotter->hpgl().segments().empty() && printer->lines().empty(), "the plot and the paper are empty");
+    check(plotter->hpgl().segments().empty() && printer->keptLines() == 0, "the plot and the paper are empty");
     check(plotter->addr() == addrBefore, "the devices' loop addresses put back");
     check(drive->mediaFile().empty(), "the cassette wasn't really changed");
     snapshot("../demo_run_99_after.png");

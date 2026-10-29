@@ -32,8 +32,12 @@ bool writeAll(FIL& f, const void* data, UINT n) {
     return f_write(&f, data, n, &bw) == FR_OK && bw == n;
 }
 
-bool writeBmp(const char* path, const std::deque<CPrinter::Line>& lines) {
-    const int height = static_cast<int>(lines.size()) * kLineDots * kScale + 2 * kMargin;
+// The paper's lines, one at a time from the printer's store (thousands of
+// them don't fit in RAM at once)
+bool writeBmp(const char* path, const CPrinter& printer) {
+    const std::uint32_t first = printer.firstKept();
+    const int count = static_cast<int>(printer.keptLines());
+    const int height = count * kLineDots * kScale + 2 * kMargin;
     FIL f;
     if (f_open(&f, path, FA_WRITE | FA_CREATE_NEW) != FR_OK) return false;
     // Header: file, info (40 bytes), two colours (index 0 white, 1 black)
@@ -52,13 +56,18 @@ bool writeBmp(const char* path, const std::deque<CPrinter::Line>& lines) {
     h[54] = 0xFF; h[55] = 0xFF; h[56] = 0xFF;       // 0: white
                                                     // 1: black (zeros)
     bool ok = writeAll(f, h, sizeof(h));
-    // Rows bottom-up: the last line first
+    // Rows bottom-up: the last line first (gathered, written 4 kB at a time)
     std::vector<std::uint8_t> row(kRowBytes);
+    std::vector<std::uint8_t> out;
+    out.reserve(4096 + kRowBytes);
+    CPrinter::Line l;
+    int have = -1;                                  // the line in `l`
     for (int y = height - 1; y >= 0 && ok; --y) {
         std::fill(row.begin(), row.end(), 0);
         const int py = y - kMargin;
-        if (py >= 0 && py < static_cast<int>(lines.size()) * kLineDots * kScale) {
-            const CPrinter::Line& l = lines[static_cast<std::size_t>(py / (kLineDots * kScale))];
+        if (py >= 0 && py < count * kLineDots * kScale) {
+            const int li = py / (kLineDots * kScale);
+            if (li != have) { printer.readLine(first + static_cast<std::uint32_t>(li), l); have = li; }
             const int dotRow = (py % (kLineDots * kScale)) / kScale;
             if (dotRow < kDotRows) {
                 for (int c = 0; c < CPrinter::kDots; ++c) {
@@ -70,18 +79,22 @@ bool writeBmp(const char* path, const std::deque<CPrinter::Line>& lines) {
                 }
             }
         }
-        ok = writeAll(f, row.data(), kRowBytes);
+        out.insert(out.end(), row.begin(), row.end());
+        if (out.size() >= 4096) { ok = writeAll(f, out.data(), static_cast<UINT>(out.size())); out.clear(); }
     }
+    if (ok && !out.empty()) ok = writeAll(f, out.data(), static_cast<UINT>(out.size()));
     ok = f_close(&f) == FR_OK && ok;
     if (!ok) f_unlink(path);
     return ok;
 }
 
-bool writeTxt(const char* path, const std::deque<CPrinter::Line>& lines) {
+bool writeTxt(const char* path, const CPrinter& printer) {
     FIL f;
     if (f_open(&f, path, FA_WRITE | FA_CREATE_NEW) != FR_OK) return false;
     bool ok = true;
-    for (const CPrinter::Line& l : lines) {
+    CPrinter::Line l;
+    for (std::uint32_t n = printer.firstKept(); n < printer.lineCount() && ok; ++n) {
+        if (!printer.readLine(n, l)) continue;
         std::string s;
         for (char ch : l.text) {
             const auto c = static_cast<unsigned char>(ch);
@@ -158,8 +171,13 @@ bool printout_load(unsigned number, CPrinter& printer, std::string& message) {
     FIL f;
     if (f_open(&f, bmp, FA_READ) != FR_OK) { message = "Can't read " + printout_name(number); return false; }
     const int height = n * kLineDots * kScale + 2 * kMargin;
-    std::deque<CPrinter::Line> lines(static_cast<std::size_t>(n));
+    // Straight onto the paper, a line at a time (the file's rows go from
+    // the last line up -- each line's rows together): a printout of
+    // thousands of lines doesn't fit in RAM. Read wrong: the paper empty.
+    const std::uint32_t first = printer.startPaper(static_cast<std::uint32_t>(n));
     std::vector<std::uint8_t> row(kRowBytes);
+    CPrinter::Line l;
+    int have = -1;                                  // the line in `l`
     bool ok = f_lseek(&f, 62) == FR_OK;
     // Rows bottom-up; one dot row is the first of its 2 pixel rows
     for (int y = height - 1; y >= 0 && ok; --y) {
@@ -168,34 +186,46 @@ bool printout_load(unsigned number, CPrinter& printer, std::string& message) {
         if (!ok || py < 0 || py >= n * kLineDots * kScale || py % kScale != 0) continue;
         const int dotRow = (py % (kLineDots * kScale)) / kScale;
         if (dotRow >= kDotRows) continue;
-        CPrinter::Line& l = lines[static_cast<std::size_t>(py / (kLineDots * kScale))];
+        const int li = py / (kLineDots * kScale);
+        if (li != have) {
+            if (have >= 0) printer.setLine(first + static_cast<std::uint32_t>(have), l);
+            l = CPrinter::Line();
+            have = li;
+        }
         for (int c = 0; c < CPrinter::kDots; ++c) {
             const int x = kMargin + c * kScale;
             if (row[static_cast<std::size_t>(x / 8)] & (0x80 >> (x % 8)))
                 l.dots[static_cast<std::size_t>(c)] = static_cast<std::uint8_t>(l.dots[static_cast<std::size_t>(c)] | (1 << dotRow));
         }
     }
+    if (have >= 0) printer.setLine(first + static_cast<std::uint32_t>(have), l);
     f_close(&f);
-    if (!ok) { message = "Can't read " + printout_name(number); return false; }
-    // The text, if the file is there (for the trace log, and saving again)
+    if (!ok) { printer.clearPaper(); message = "Can't read " + printout_name(number); return false; }
+    // The text, if the file is there (for the trace log, and saving
+    // again): read a piece at a time, each line put to its paper line
     if (f_open(&f, txt, FA_READ) == FR_OK) {
-        std::string all;
+        std::string t;
+        std::uint32_t i = 0;
         char buf[256];
         UINT br = 0;
-        while (f_read(&f, buf, sizeof(buf), &br) == FR_OK && br > 0) all.append(buf, br);
-        f_close(&f);
-        std::size_t at = 0, i = 0;
-        while (at < all.size() && i < lines.size()) {
-            std::size_t end = all.find('\n', at);
-            if (end == std::string::npos) end = all.size();
-            std::string t = all.substr(at, end - at);
+        auto put = [&] {
             if (!t.empty() && t.back() == '\r') t.pop_back();
-            if (t != "[graphics]") lines[i].text = t;
+            if (t != "[graphics]" && printer.readLine(first + i, l)) {
+                l.text = t;
+                printer.setLine(first + i, l);
+            }
             ++i;
-            at = end + 1;
+            t.clear();
+        };
+        while (i < static_cast<std::uint32_t>(n) && f_read(&f, buf, sizeof(buf), &br) == FR_OK && br > 0) {
+            for (UINT k = 0; k < br && i < static_cast<std::uint32_t>(n); ++k) {
+                if (buf[k] == '\n') put();
+                else if (t.size() < CPrinter::kMaxText + 1) t += buf[k];
+            }
         }
+        if (!t.empty() && i < static_cast<std::uint32_t>(n)) put();
+        f_close(&f);
     }
-    printer.loadPaper(std::move(lines));
     message = printout_name(number);
     return true;
 }
@@ -208,8 +238,7 @@ bool printout_delete(unsigned number) {
 }
 
 bool printout_save(const CPrinter& printer, std::string& message) {
-    const std::deque<CPrinter::Line>& lines = printer.lines();
-    if (lines.empty()) { message = "Nothing on the paper"; return false; }
+    if (printer.keptLines() == 0) { message = "Nothing on the paper"; return false; }
     f_mkdir(HIPI_DIR_PRINTOUTS);                    // (FR_EXIST if it's there)
     char bmp[48], txt[48];
     unsigned n = 1;
@@ -218,8 +247,8 @@ bool printout_save(const CPrinter& printer, std::string& message) {
         std::snprintf(txt, sizeof(txt), HIPI_DIR_PRINTOUTS "/printout_%u.txt", n);
         if (!exists(bmp) && !exists(txt)) break;
     }
-    if (!writeBmp(bmp, lines)) { message = "Saving failed (SD card)"; return false; }
-    if (!writeTxt(txt, lines)) { f_unlink(bmp); message = "Saving failed (SD card)"; return false; }
+    if (!writeBmp(bmp, printer)) { message = "Saving failed (SD card)"; return false; }
+    if (!writeTxt(txt, printer)) { f_unlink(bmp); message = "Saving failed (SD card)"; return false; }
     char m[32];
     std::snprintf(m, sizeof(m), "printout_%u", n);
     message = m;
