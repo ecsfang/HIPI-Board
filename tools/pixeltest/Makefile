@@ -20,10 +20,12 @@ SRC := test.cpp $(HIPI)/src/pixels.cpp \
 pixeltest: $(SRC) $(wildcard stubs/*.h stubs/*/*.h) $(HIPI)/include/pixels.h
 	$(CXX) $(CXXFLAGS) $(SRC) -o $@
 
+# (only the verdicts shown -- but the test's own exit status counts: piped
+# into grep alone, a failing test passed as long as grep found a line)
 test: pixeltest
-	ASAN_OPTIONS=alloc_dealloc_mismatch=0 ./pixeltest | grep -a "FAIL\|PASSED"
+	ASAN_OPTIONS=alloc_dealloc_mismatch=0 ./pixeltest > pixeltest.log; r=$$?; grep -a "FAIL\|PASSED" pixeltest.log; exit $$r
 
 clean:
-	rm -f pixeltest
+	rm -f pixeltest pixeltest.log
 
 .PHONY: test clean

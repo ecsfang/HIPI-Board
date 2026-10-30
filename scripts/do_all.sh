@@ -552,14 +552,76 @@ if [ ! -f "$UF2_FILE" ]; then
 
 fi
 
-# Om vi inte flashar Picon, avsluta här.
-if [ "$RUN_TESTS" -eq 1 ]; then
-    echo
-    echo "RUN-TESTS: Bygget är klart och alla tester körs!"
-    for d in hipiview printertest i2ctest pixeltest; do
-        echo "== $d"; make -C tools/$d test || { echo "!! $d FAILED"; break; }
+# ------------------------------------------------------------
+# Kör alla PC-tester (TESTS): en progress-bar, utskrift bara vid fel
+#
+# Varje svits utdata går till /tmp/hipi_test_<svit>.log. Förloppet räknas
+# i steg: varje testprogram som byggs och varje test som körs (make -n
+# talar om hur många det blir). Vid fel: svitens FAIL-rader och slutet
+# av loggen, sedan avbryts skriptet (inget flashas).
+# ------------------------------------------------------------
+
+run_tests() {
+    local suites=(hipiview printertest i2ctest pixeltest)
+    # Ett steg: ett kompilatoranrop eller ett körande test (rader som make skriver ut)
+    local step_re='(^|[[:space:]])(g\+\+|c\+\+|clang\+\+)[[:space:]]|^([A-Z_]+=[^ ]* )*\./'
+    local total=0 done=0 d n line
+    for d in "${suites[@]}"; do
+        n=$(make -C "tools/$d" -n test 2>/dev/null | grep -cE "$step_re")
+        total=$((total + n))
     done
-    exit 0
+    [ "$total" -gt 0 ] || total=1
+
+    bar() {
+        local pct=$(( done * 100 / total )) width=40
+        [ "$pct" -gt 100 ] && pct=100
+        local fill=$(( pct * width / 100 ))
+        printf '\r  Tester [%-*s] %3d%%  %-12s' "$width" "$(printf '%*s' "$fill" '' | tr ' ' '#')" "$pct" "$1"
+    }
+
+    echo
+    echo "=== Tester ==="
+    bar ""
+    for d in "${suites[@]}"; do
+        local log="/tmp/hipi_test_${d}.log"
+        bar "$d"
+        # make:s utskrifter läses rad för rad (för förloppet) och sparas i loggen;
+        # PIPESTATUS[0] är make:s eget resultat
+        make -C "tools/$d" -j"$(nproc)" test 2>&1 | tee "$log" | while IFS= read -r line; do
+            if [[ "$line" =~ $step_re ]]; then
+                done=$((done + 1))
+                bar "$d"
+            fi
+        done
+        local rc=${PIPESTATUS[0]}
+        # (stegen räknades i en subshell: räkna om från loggen)
+        done=$(( done + $(grep -cE "$step_re" "$log") ))
+        if [ "$rc" -ne 0 ] || grep -aqE '^FAIL|[0-9]+ FAILED|FAILED$' "$log"; then
+            echo
+            echo
+            echo "============================================================"
+            echo " FEL: TESTERNA I tools/$d MISSLYCKADES"
+            echo "============================================================"
+            grep -an -E '^FAIL|FAILED|error' "$log" | head -40
+            echo "------------------------------------------------------------"
+            echo "Slutet av loggen ($log):"
+            tail -n 30 "$log"
+            echo
+            echo "Avbryter (inget flashas)."
+            popd > /dev/null
+            exit 1
+        fi
+    done
+    done=$total
+    bar "klart"
+    echo
+    echo
+    echo "ALL TESTS PASSED!"
+}
+
+# Kör alla PC-tester (TESTS): avbryter vid första fel
+if [ "$RUN_TESTS" -eq 1 ]; then
+    run_tests
 fi
 
 # Om vi inte flashar Picon, avsluta här.
