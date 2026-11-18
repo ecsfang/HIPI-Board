@@ -1199,7 +1199,13 @@ chip descriptions in `i2c/` again.
 | BH1750 | `L` light, lux |
 | ADS1115 | `A0`–`A3` voltage (0–4.096 V) |
 | INA219 | `V` bus voltage, `I` current (0.1 Ω shunt) |
-| MPU-6050, ADXL345, LIS3DH | `AX` `AY` `AZ` acceleration g (MPU-6050 also `GX` `GY` `GZ`, `T`) |
+| MPU-6050, MPU-6500, ADXL345, LIS3DH | `AX` `AY` `AZ` acceleration g (MPU-6050 and MPU-6500 also `GX` `GY` `GZ`, `T`) |
+
+The MPU's `T` is the chip's own temperature, not the room's, and it is not an
+accurate thermometer. HIPI knows that the MPU-6500 and the MPU-6050 convert it
+differently; a board sold as an MPU-6050 may carry an MPU-6500 (the I2C list
+shows which one HIPI found). The MPU-9250 and MPU-6886 are read like an MPU-6050 for
+now, so their `T` may be off.
 
 **A temperature**, with a BMP280 (or an AHT20, a TMP102 ...) connected.
 Use `TFI2C`'s address from the device list:

@@ -370,6 +370,20 @@ int main(int argc, char** argv) {
         int setups = 0;
         for (const auto& w : b.writes) if (w.second == std::vector<std::uint8_t>({ 0x6B, 0x00 })) ++setups;
         check(setups == 1, "MPU-6050: setup written once");
+        // The die temperature differs between the two: raw 2744 (0x0AB8) is
+        // 2744/340 + 36.53 = 44.6 C on an MPU-6050, but 2744/333.87 + 21 = 29.2 C
+        // on an MPU-6500 (its data sheet: 333.87 LSB/C, 0 LSB at 21 C)
+        b.regs[0x69][0x41] = 0x0A;
+        b.regs[0x69][0x42] = 0xB8;
+        is("A$69;MT", "44.6");
+        b.regs[0x69][0x75] = 0x70;                      // an MPU-6500 on the same address
+        cmd.reset();
+        is("A$69;MT", "29.2");
+        b.regs[0x69][0x41] = 0xF8;                      // raw -2000: 15.0 C (a negative value)
+        b.regs[0x69][0x42] = 0x30;
+        is("A$69;MT", "15.0");
+        b.regs[0x69][0x75] = 0x68;                      // back to the MPU-6050 for what follows
+        cmd.reset();
         // No chip chosen: the first that has the measurement
         cmd.reset();
         is("MP", "1013.3");

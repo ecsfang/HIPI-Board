@@ -1301,6 +1301,11 @@ as missing when silent. Only register numbers are written, and never on
 `status` and `probe` checks run. Lines that can't be read go to the log,
 and the page's I2C header says what was read. `tools/i2ctest` checks the
 format with `chips.txt` itself and the matching on a made-up bus.
+Chips that share an address and a family but convert differently get one
+`chip` entry each, told apart by `id` (the MPU-6050 and the MPU-6500: the die
+temperature is raw/340 + 36.53 against raw/333.87 + 21, from their data
+sheets; the MPU-9250 and MPU-6886 still use the 6050 entry's formula, not yet
+checked). `tools/i2ctest` reads the same raw value as both.
 
 **TFI2C** (`ili2c.h`/`.cpp`, last on the loop so the others keep their
 addresses) lets the controller use any I2C chip. The device only collects

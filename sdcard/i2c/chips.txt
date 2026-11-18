@@ -129,8 +129,40 @@ chip 0x51 PCF85063A | real-time clock
     read 0x07 4
     format bcd 2/0x1F text=. 0/0x3F text=20 3
 
+# The MPU-6500 has its own entry: its die temperature uses another formula than
+# the MPU-6050's (data sheets: 6050 = raw/340 + 36.53, 6500 = raw/333.87 + 21).
+# Both are the chip's own temperature, not the room's, and it isn't an accurate
+# thermometer (the offset varies from chip to chip).
+chip 0x68-0x69 MPU-6500 | motion sensor
+  id 0x75 0x70
+  setup
+    write 0x6B 0x00                # wake up
+  measure AX | acceleration x
+    read 0x3B 2
+    value s16 scale=0.00006103515625 dec=3 unit=g
+  measure AY | acceleration y
+    read 0x3D 2
+    value s16 scale=0.00006103515625 dec=3 unit=g
+  measure AZ | acceleration z
+    read 0x3F 2
+    value s16 scale=0.00006103515625 dec=3 unit=g
+  measure T,TEMP | temperature (the die's: raw/333.87 + 21)
+    read 0x41 2
+    value s16 scale=0.0029951778 offset=21 dec=1 unit=C
+  measure GX | rotation x
+    read 0x43 2
+    value s16 scale=0.0076335878 dec=1 unit=deg/s
+  measure GY | rotation y
+    read 0x45 2
+    value s16 scale=0.0076335878 dec=1 unit=deg/s
+  measure GZ | rotation z
+    read 0x47 2
+    value s16 scale=0.0076335878 dec=1 unit=deg/s
+
+# MPU-9250 and MPU-6886 are still read with the MPU-6050's temperature formula:
+# not checked against their data sheets (the 6886 is probably raw/326.8 + 25).
 chip 0x68-0x69 MPU-6050 | motion sensor
-  id 0x75 0x68=MPU-6050 0x70=MPU-6500 0x71=MPU-9250 0x19=MPU-6886
+  id 0x75 0x68=MPU-6050 0x71=MPU-9250 0x19=MPU-6886
   setup
     write 0x6B 0x00                # wake up
   measure AX | acceleration x
