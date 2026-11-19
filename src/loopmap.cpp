@@ -29,6 +29,9 @@ struct Node {
     Src src = Src::After;
     bool haveAid = false;
     std::uint8_t aid = 0;
+    // A SAI to it got no answer: it has no accessory ID (an instrument such
+    // as the HP 3468 answers SDI but not SAI). Not the same as "not asked yet".
+    bool noAid = false;
     std::string id;                  // device ID (SDI answer)
     bool haveStatus = false;
     std::uint8_t status = 0;
@@ -255,6 +258,7 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
             ++n.frames;
             if (pending_ == SAI) {
                 n.haveAid = true;
+                n.noAid = false;
                 n.aid = static_cast<std::uint8_t>(byte);
                 pending_ = 0;
                 dirty_ = true;
@@ -271,6 +275,15 @@ void onFrame(IL_CMD_t in, IL_CMD_t out, std::uint64_t t) {
                 if (listeners_ & (1u << a)) ++nodes_[a].frames;
         }
         return;
+    }
+    // A SAI that got no answer: the frame after it isn't data (the same rule
+    // as the analyzer's "NO RESPONSE"). The talker has no accessory ID.
+    if (pending_ == SAI && in != ETO && in != ETE && in != NRD) {
+        if (talker_ >= 1 && talker_ <= kMaxAddr && !nodes_[talker_].haveAid && !nodes_[talker_].noAid) {
+            nodes_[talker_].noAid = true;
+            dirty_ = true;
+        }
+        pending_ = 0;
     }
     if (in >= AAD && in < AAD + 32) {
         const int first = in & 0x1F;
@@ -447,11 +460,13 @@ std::string cardName(int a) {
 }
 
 // A card's second line: what HIPI's device emulates, else the type from
-// the accessory ID ("graphics", "mass storage"...), else "?"
+// the accessory ID ("graphics", "mass storage"...), else that it has none
+// (asked, no answer), else "?" (not asked yet). The compact card is narrower.
 std::string cardType(int a) {
     const Node& n = nodes_[a];
     if (n.src == Src::Hipi && !n.id.empty()) return n.id;
     if (n.haveAid) return aidClass(n.aid);
+    if (n.noAid) return mode_ == CardMode::Full ? "no accessory ID" : "No ID";
     return "?";
 }
 
@@ -483,8 +498,9 @@ void drawCard(const Card& c) {
     text(c.x + 42, c.y + 6, cardName(c.addr).c_str(), 0, kWhite, kCard);
     text(c.x + 42, c.y + 26, cardType(c.addr).c_str(), 0, kYellow, kCard);
     if (mode_ == CardMode::Full) {
-        if (n.haveAid) std::snprintf(b, sizeof(b), "accessory ID 0x%02X", n.aid);
-        else           std::snprintf(b, sizeof(b), "accessory ID ?");
+        if (n.haveAid)     std::snprintf(b, sizeof(b), "accessory ID 0x%02X", n.aid);
+        else if (n.noAid)  std::snprintf(b, sizeof(b), "SAI: no answer");
+        else               std::snprintf(b, sizeof(b), "accessory ID ?");
         text(c.x + 42, c.y + 46, b, 0, kGrey, kCard);
         // (where it is: the card's colour says it too -- the role while it has one)
         if (role != kNone) text(c.x + 42, c.y + 66, roleText(role), 0, roleColor(role), kCard);
@@ -542,8 +558,9 @@ void drawDetails() {
     } else {
         rows[r++] = { "Device ID", n.id.empty() ? "? (not asked yet)" : n.id };
     }
-    if (n.haveAid) std::snprintf(v, sizeof(v), "0x%02X  %s", n.aid, aidClass(n.aid));
-    else           std::snprintf(v, sizeof(v), "? (not asked yet)");
+    if (n.haveAid)      std::snprintf(v, sizeof(v), "0x%02X  %s", n.aid, aidClass(n.aid));
+    else if (n.noAid)   std::snprintf(v, sizeof(v), "none (SAI got no answer)");
+    else                std::snprintf(v, sizeof(v), "? (not asked yet)");
     rows[r++] = { "Accessory ID", v };
     // Status: HIPI's drive tells its cassette; others the last SST answer
     std::string status = n.haveStatus ? std::to_string(n.status) : std::string("?");
@@ -624,8 +641,8 @@ std::string headerText(int devices) {
 std::string cardSignature(int a) {
     const Node& n = nodes_[a];
     char b[32];
-    std::snprintf(b, sizeof(b), "|%d|%d|%02X|%d|", static_cast<int>(n.src), n.haveAid ? 1 : 0, n.aid,
-                  roleOf(a, time_us_64()));
+    std::snprintf(b, sizeof(b), "|%d|%d|%d|%02X|%d|", static_cast<int>(n.src), n.haveAid ? 1 : 0, n.noAid ? 1 : 0,
+                  n.aid, roleOf(a, time_us_64()));
     return cardName(a) + b + n.id;
 }
 

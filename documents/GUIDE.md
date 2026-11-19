@@ -514,6 +514,14 @@ traffic through `test/lmstubs/analyzer.h`). Its plotter is a real
 (`hpgl().errorCode()`),
 so a stand-in `CDevice` of that type would be read as garbage.
 
+**No accessory ID.** `Node::noAid` is set when a SAI is followed by a frame
+that is not data (the analyzer's "NO RESPONSE" rule, in `onFrame()`); an
+answered SAI clears it. The card then says `no accessory ID` (`No ID` in the
+compact mode), the details box `none (SAI got no answer)`; `?` stays for "not
+asked yet". `cardSignature()` includes it. The analyzer shortens an
+auto-address line identical to the last one to `AUTO-ADDRESS (no change)`
+(`State::lastAad`).
+
 **HP-IL signals view.** `src/hpil_diag.cpp` + `src/hpil_diag.pio`, on
 **PIO2** + one DMA channel, only *reading* the input pins (no
 `pio_gpio_init()` -- they stay PIO0's, the receiver isn't touched): while

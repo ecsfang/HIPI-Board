@@ -1462,6 +1462,8 @@ with a red PAUSED banner while recording goes on; touch again to resume.
   as text, anything else as a number of bytes.
 - **Yellow:** events such as auto-addressing, clearing the loop, the cassette
   drive's commands.
+  An auto-addressing that changes nothing is shortened to
+  `AUTO-ADDRESS (no change)`.
 - **Red:** problems: no answer, transmission errors, slow answers (over half
   a second).
 - Devices outside HIPI are shown by address, and by their type once they
@@ -1550,6 +1552,12 @@ HIPI only listens, so the map fills in as the loop is used: the addresses
 come from the controller's auto-addressing, a device's type and ID once the
 controller has asked for them (until then the card shows `?`), and devices that
 sit after HIPI on the loop appear the first time the controller talks to them.
+
+A device that answers the controller's device ID request (SDI) but not its
+accessory ID request (SAI) — an instrument such as the HP 3468 — shows its name
+and `no accessory ID` (`SAI: no answer`); `?` means the question has not been
+asked yet. HIPI never asks by itself, so devices behind PILBOX (and those after
+HIPI) stay at `?` until the controller has asked them.
 
 ---
 

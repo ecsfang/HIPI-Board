@@ -435,6 +435,61 @@ int main() {
     snapshot("loopmap_6_demo.png");
     check(n == 9, "the demo's loop: 9 devices (HIPI's 3, PILBOX's 3, then 3 after)");
 
+    // ── A device that answers SDI but not SAI (an HP 3468): "no accessory ID",
+    // not "?" -- and a SAI that is answered must not set it
+    {
+        auto cardPix = [&](int addr) {
+            hipi::loopmap_drawAll();
+            chip.render(panel.data(), 0.0, false);
+            int cx = 0, cy = 0;
+            hipi::loopmap_cardPoint(addr, cx, cy);
+            std::vector<std::uint32_t> v;
+            for (int y = cy - 40; y < cy + 40; ++y) for (int x = cx - 90; x < cx + 90; ++x) v.push_back(at(x, y));
+            return v;
+        };
+        // Enumerate the loop (HIPI's devices only), then one more device after them
+        auto setup = [&]() {
+            hipi::loopmap_reset();
+            hipi::analyzer_clear();
+            hipiRound(IFC, nullptr);
+            hipiRound(AAU, nullptr);
+            const IL_CMD_t a = static_cast<IL_CMD_t>(hipiRound(AAD + 1, nullptr));
+            const int last = static_cast<int>(a - AAD);        // the extra device's address
+            frame(AAD + last + 1);
+            run(600);
+            return last;
+        };
+        auto sendId = [&](int addr, const char* id) {          // SDI answered by the device
+            frame(TAD + addr);
+            hipi::analyzer_capture(SDI, static_cast<IL_CMD_t>(id[0]));
+            for (int i = 1; id[i] != 0; ++i)
+                hipi::analyzer_capture(static_cast<IL_CMD_t>(id[i - 1]), static_cast<IL_CMD_t>(id[i]));
+            hipi::analyzer_capture(static_cast<IL_CMD_t>(id[std::strlen(id) - 1]), ETO);
+            frame(UNT);
+        };
+        int addr = setup();
+        sendId(addr, "HP3468B");
+        run(600);
+        const std::vector<std::uint32_t> unasked = cardPix(addr);
+        frame(TAD + addr);
+        frame(SAI);
+        frame(UNT);                                         // not data: the SAI got no answer
+        run(600);
+        const std::vector<std::uint32_t> none = cardPix(addr);
+        snapshot("loopmap_9_no_aid.png");
+        check(none != unasked, "SAI unanswered: the card changes (\"no accessory ID\", not \"?\")");
+        addr = setup();
+        sendId(addr, "HP3468B");
+        run(600);
+        frame(TAD + addr);
+        hipi::analyzer_capture(SAI, static_cast<IL_CMD_t>(0x20));
+        hipi::analyzer_capture(static_cast<IL_CMD_t>(0x20), ETO);
+        frame(UNT);
+        run(600);
+        const std::vector<std::uint32_t> got = cardPix(addr);
+        check(got != unasked && got != none, "SAI answered: the card shows the ID, not \"no accessory ID\"");
+    }
+
     std::printf("%s\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

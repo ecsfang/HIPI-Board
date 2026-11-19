@@ -132,6 +132,8 @@ struct State {
     // that aren't HIPI's own devices
     std::uint32_t pcAddrs = 0;
     bool haveAid[32] = {};
+    // The last full AUTO-ADDRESS line, to shorten an identical one
+    std::string lastAad;
 };
 State st_;
 
@@ -513,7 +515,14 @@ void overviewFrame(std::uint64_t t, IL_CMD_t in, IL_CMD_t out, std::uint32_t cou
             s += "   PC (via PILBOX):" + plain;
         }
         emitIdle(t);
-        emit(t, kYellow, s);
+        // The HP-41 re-addresses the loop before almost every transaction;
+        // when nothing changed, a short line keeps the log readable
+        if (s == st_.lastAad) {
+            emit(t, kYellow, "AUTO-ADDRESS (no change)");
+        } else {
+            st_.lastAad = s;
+            emit(t, kYellow, s);
+        }
     } else if (in == SDA || in == SST || in == SAI || in == SDI) {
         emitIdle(t);
         startTx(Tx::DevSend, t);
