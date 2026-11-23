@@ -205,6 +205,10 @@ add_executable(${EXE_TARGET}
     src/i2c_chips.cpp
     src/i2c_command.cpp
     src/ili2c.cpp
+    src/bme680.cpp              # BME680/BME688 compensation (TFI2C "MT"/"MP"/"MH")
+    src/bme280.cpp              # BME280 compensation (TFI2C "MT"/"MP"/"MH")
+    src/bmp180.cpp              # BMP180/BMP085 compensation (TFI2C "MT"/"MP")
+    src/bmp390.cpp              # BMP390/BMP388 compensation (TFI2C "MT"/"MP")
     src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
     src/lif_create.cpp          # File picker -> Create media: an empty LIF image
     src/lif_dir.cpp             # A LIF volume's directory: a file added (from hipiview)

@@ -4,7 +4,13 @@
 #include "i2c_chips.h"
 #include "i2c_command.h"
 #include "vl53l0x.h"
+#include "bmp390.h"
+#include "bmp180.h"
+#include "bme280.h"
+#include "bme680.h"
 #include "ili2c.h"
+#include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <fstream>
 #include <map>
@@ -526,6 +532,310 @@ int main(int argc, char** argv) {
         chip.neverReady = true;
         is("MD", "ERR NOACK");
         check(chip.waited >= 100, "a measurement that never finishes: given up after 100 ms");
+    }
+
+    // ── BMP390: compensated with the chip's own calibration ──────────────
+    {
+        // A made-up BMP390: its NVM data, and the raw values a forced
+        // measurement gives (made so that it is 22.00 C and 1013.25 hPa --
+        // worked out separately, with the datasheet's formulas)
+        struct Bmp390Chip : I2cBus {
+            std::uint8_t id = 0x60;
+            bool present = true, neverReady = false;
+            bool forced = false;
+            int waited = 0;
+            std::uint32_t rawT = 8534164, rawP = 6183188;
+            std::uint8_t calib[21] = { 0x1e, 0x6e, 0x8c, 0x46, 0xe6, 0x00, 0x7d, 0xbc, 0x42, 0x01, 0xf7,
+                                       0xe8, 0x03, 0xb8, 0x0b, 0x07, 0xf8, 0x14, 0x00, 0x0c, 0xfe };
+            bool readRegs(std::uint8_t a, std::uint8_t reg, std::uint8_t* buf, std::size_t n) override {
+                if (!present || a != 0x76) return false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const unsigned r = reg + i;
+                    std::uint8_t v = 0;
+                    if (r == 0x00) v = id;
+                    else if (r == 0x03) v = forced && !neverReady && waited >= 20 ? 0x70 : 0x10;
+                    else if (r >= 0x04 && r <= 0x06) v = static_cast<std::uint8_t>(rawP >> (8 * (r - 0x04)));
+                    else if (r >= 0x07 && r <= 0x09) v = static_cast<std::uint8_t>(rawT >> (8 * (r - 0x07)));
+                    else if (r >= 0x31 && r < 0x31 + 21) v = calib[r - 0x31];
+                    buf[i] = v;
+                }
+                return true;
+            }
+            bool readRaw(std::uint8_t, std::uint8_t*, std::size_t) override { return false; }
+            bool write(std::uint8_t a, const std::uint8_t* b, std::size_t n) override {
+                if (!present || a != 0x76 || n != 2) return false;
+                if (b[0] == 0x1B && (b[1] & 0x30) == 0x10 && (b[1] & 0x03) == 0x03) { forced = true; waited = 0; }
+                if (b[0] == 0x1C) osr = b[1];
+                return true;
+            }
+            std::uint8_t osr = 0;
+            void delayMs(int ms) override { waited += ms; }
+        };
+        Bmp390Chip chip;
+        double t = 0, p = 0;
+        check(bmp390_read(chip, 0x76, t, p), "BMP390: a reading");
+        check(std::fabs(t - 22.0) < 0.001, "... 22.00 C (got " + std::to_string(t) + ")");
+        check(std::fabs(p - 101325.0) < 0.5, "... 1013.25 hPa (got " + std::to_string(p / 100.0) + ")");
+        check(chip.osr == 0x03, "... pressure x8, temperature x1");
+        chip.rawT = 8334164;                             // 200000 counts lower: 18.68 C and 1011.36 hPa
+        chip.forced = false;
+        check(bmp390_read(chip, 0x76, t, p) && std::fabs(t - 18.68104) < 0.001 && std::fabs(p - 101136.05) < 0.5,
+              "a cooler reading: the pressure follows the temperature");
+        chip.id = 0x50;                                  // a BMP388: the same formulas
+        chip.forced = false;
+        check(bmp390_read(chip, 0x76, t, p), "a BMP388 (ID 0x50): the same");
+        chip.id = 0x58;                                  // a BMP280 at the same address
+        check(!bmp390_read(chip, 0x76, t, p), "another chip (ID 0x58): no reading");
+        chip.id = 0x60;
+        chip.forced = false;
+        chip.neverReady = true;
+        check(!bmp390_read(chip, 0x76, t, p) && chip.waited <= 130, "a measurement that never finishes: given up");
+        chip.neverReady = false;
+        chip.present = false;
+        check(!bmp390_read(chip, 0x76, t, p), "not answering: no reading");
+        chip.present = true;
+        chip.forced = false;
+
+        // Identified by the ID, and TFI2C's "MT" / "MP" give the numbers
+        I2cChipList bl;
+        bl.parse(text, "chips.txt");
+        bl.finish(7);
+        I2cCommandEnv env;
+        env.bus = &chip;
+        env.chips = [&]() -> const I2cChipList& { return bl; };
+        env.identifyAll = [&](I2cFound* out, int max, bool found[128]) {
+            for (int a = 0; a < 128; ++a) found[a] = a == 0x76;
+            if (max < 1) return 0;
+            I2cFound f;
+            f.addr = 0x76;
+            bl.identify(chip, 0x76, f, builtins());
+            out[0] = f;
+            return 1;
+        };
+        env.probes = builtins();
+        env.measures = { { "bmp390.T", [](I2cBus& b, std::uint8_t a, double& v) { double x, y; bool ok = bmp390_read(b, a, x, y); v = x; return ok; } },
+                         { "bmp390.P", [](I2cBus& b, std::uint8_t a, double& v) { double x, y; bool ok = bmp390_read(b, a, x, y); v = y / 100.0; return ok; } } };
+        env.hipiOwns = [](std::uint8_t) { return false; };
+        I2cCommander cmd(env);
+        I2cFound f;
+        check(bl.identify(chip, 0x76, f, builtins()) && std::string(f.name) == "BMP390", "0x76: identified as BMP390");
+        chip.id = 0x50;
+        I2cFound f2;
+        check(bl.identify(chip, 0x76, f2, builtins()) && std::string(f2.name) == "BMP388", "... ID 0x50: BMP388");
+        chip.id = 0x60;
+        auto is = [&](const std::string& line, const std::string& want) {
+            const std::string got = cmd.run(line);
+            check(got == want, "\"" + line + "\" -> \"" + got + "\", want \"" + want + "\"");
+        };
+        chip.rawT = 8534164;                             // (back to 22.00 C)
+        chip.forced = false;
+        is("A0x76;MT", "22.00");
+        chip.forced = false;
+        is("MP", "1013.25");
+    }
+
+    // ── BMP180 / BMP085: the datasheet's own worked example ──────────────
+    {
+        const std::uint8_t calib[22] = { 0x01, 0x98, 0xff, 0xb8, 0xc7, 0xd1, 0x7f, 0xe5, 0x7f, 0xf5, 0x5a,
+                                         0x71, 0x18, 0x2e, 0x00, 0x04, 0x80, 0x00, 0xdd, 0xf9, 0x0b, 0x34 };
+        // AC1=408 AC2=-72 AC3=-14383 AC4=32741 AC5=32757 AC6=23153 B1=6190 B2=4 MB=-32768 MC=-8711 MD=2868
+        std::int32_t t = 0, p = 0;
+        bmp180_compensate(calib, 27898, 23843, 0, t, p);
+        check(t == 150 && p == 69964, "BMP180 datasheet example (oss 0): 15.0 C, 69964 Pa (got " + std::to_string(t) +
+                                          ", " + std::to_string(p) + ")");
+
+        // A made-up BMP180 with that calibration; the raw pressure is made so that it is 1013.25 hPa at oss 3
+        struct Bmp180Chip : I2cBus {
+            std::uint8_t id = 0x55;
+            bool present = true;
+            std::uint8_t ctrl = 0;
+            std::uint8_t calib[22];
+            std::int32_t ut = 27898, up = 274643;       // up: after the shift, i.e. what the oss gives
+            bool readRegs(std::uint8_t a, std::uint8_t reg, std::uint8_t* buf, std::size_t n) override {
+                if (!present || a != 0x77) return false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const unsigned r = reg + i;
+                    std::uint8_t v = 0;
+                    if (r == 0xD0) v = id;
+                    else if (r >= 0xAA && r < 0xAA + 22) v = calib[r - 0xAA];
+                    else if (r >= 0xF6 && r <= 0xF8) {
+                        std::int32_t raw = ctrl == 0x2E ? ut << 8 : up << (8 - ((ctrl >> 6) & 3));   // 24 bits
+                        v = static_cast<std::uint8_t>(raw >> (8 * (2 - (r - 0xF6))));
+                    }
+                    buf[i] = v;
+                }
+                return true;
+            }
+            bool readRaw(std::uint8_t, std::uint8_t*, std::size_t) override { return false; }
+            bool write(std::uint8_t a, const std::uint8_t* b, std::size_t n) override {
+                if (!present || a != 0x77 || n != 2) return false;
+                if (b[0] == 0xF4) ctrl = b[1];
+                return true;
+            }
+            void delayMs(int) override {}
+        };
+        Bmp180Chip chip;
+        std::memcpy(chip.calib, calib, 22);
+        double tc = 0, pa = 0;
+        check(bmp180_read(chip, 0x77, tc, pa), "BMP180: a reading");
+        check(std::fabs(tc - 15.0) < 0.001 && std::fabs(pa - 101325.0) < 0.5,
+              "... 15.0 C, 1013.25 hPa (got " + std::to_string(tc) + ", " + std::to_string(pa / 100.0) + ")");
+        check(chip.ctrl == 0xF4, "... the pressure at oss 3");
+        chip.id = 0x58;
+        check(!bmp180_read(chip, 0x77, tc, pa), "another chip (ID 0x58): no reading");
+        chip.id = 0x55;
+        std::memset(chip.calib, 0xFF, 22);
+        check(!bmp180_read(chip, 0x77, tc, pa), "calibration unreadable (0xFFFF): no reading");
+        std::memcpy(chip.calib, calib, 22);
+        chip.present = false;
+        check(!bmp180_read(chip, 0x77, tc, pa), "not answering: no reading");
+        chip.present = true;
+
+        // The chip list takes ID 0x55 as a BMP180 (not through the "bosch" probe), and MT / MP give the numbers
+        I2cChipList bl;
+        bl.parse(text, "chips.txt");
+        bl.finish(7);
+        I2cFound f;
+        check(bl.identify(chip, 0x77, f, builtins()) && std::string(f.name) == "BMP180", "0x77, ID 0x55: identified as BMP180");
+    }
+
+    // ── BME280: Bosch's own temperature/pressure example, and a humidity ──
+    {
+        // The calibration of Bosch's BMP280 example (the BME280 calculates the same) and a made-up humidity one.
+        // Worked out separately, with the datasheet's integer formulas (the humidity also with its float ones):
+        // adc 519888 / 415148 / 30000 gives 25.08 C, 100653.25 Pa, 53.93 %RH
+        std::uint8_t tp[24] = { 0x70, 0x6b, 0x43, 0x67, 0x18, 0xfc, 0x7d, 0x8e, 0x43, 0xd6, 0xd0, 0x0b,
+                                0x27, 0x0b, 0x8c, 0x00, 0xf9, 0xff, 0x8c, 0x3c, 0xf8, 0xc6, 0x70, 0x17 };
+        std::uint8_t h[7] = { 0x6a, 0x01, 0x00, 0x13, 0x2c, 0x03, 0x1e };   // H2=362 H3=0 H4=316 H5=50 H6=30 (H1=75 at 0xA1)
+        double t = 0, p = 0, rh = 0;
+        bme280_compensate(tp, 75, h, 519888, 415148, 30000, t, p, rh);
+        check(std::fabs(t - 25.08) < 0.001 && std::fabs(p - 100653.25) < 0.01 && std::fabs(rh - 53.93) < 0.01,
+              "BME280 compensation: 25.08 C, 100653.25 Pa, 53.93 %RH (got " + std::to_string(t) + ", " +
+                  std::to_string(p) + ", " + std::to_string(rh) + ")");
+        bme280_compensate(tp, 75, h, 519888, 415148, 0, t, p, rh);
+        check(rh == 0.0, "... humidity never below 0");
+
+        struct Bme280Chip : I2cBus {
+            std::uint8_t id = 0x60;
+            bool present = true, measuring = false;
+            int waited = 0;
+            std::uint8_t ctrlHum = 0, ctrlMeas = 0;
+            std::uint8_t tp[24], h1 = 75, h[7];
+            std::uint8_t data[8] = { 0x65, 0x5a, 0xc0, 0x7e, 0xed, 0x00, 0x75, 0x30 };   // the raw values above
+            bool readRegs(std::uint8_t a, std::uint8_t reg, std::uint8_t* buf, std::size_t n) override {
+                if (!present || (a != 0x76 && a != 0x77)) return false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const unsigned r = reg + i;
+                    std::uint8_t v = 0;
+                    if (r == 0xD0) v = id;
+                    else if (r >= 0x88 && r < 0x88 + 24) v = tp[r - 0x88];
+                    else if (r == 0xA1) v = h1;
+                    else if (r >= 0xE1 && r < 0xE1 + 7) v = h[r - 0xE1];
+                    else if (r == 0xF3) v = measuring && waited < 18 ? 0x08 : 0x00;
+                    else if (r >= 0xF7 && r <= 0xFE) v = data[r - 0xF7];
+                    buf[i] = v;
+                }
+                return true;
+            }
+            bool readRaw(std::uint8_t, std::uint8_t*, std::size_t) override { return false; }
+            bool write(std::uint8_t a, const std::uint8_t* b, std::size_t n) override {
+                if (!present || n != 2) return false;
+                if (b[0] == 0xF2) ctrlHum = b[1];
+                if (b[0] == 0xF4) { ctrlMeas = b[1]; measuring = true; waited = 0; }
+                (void)a;
+                return true;
+            }
+            void delayMs(int ms) override { waited += ms; }
+        };
+        Bme280Chip chip;
+        std::memcpy(chip.tp, tp, 24);
+        std::memcpy(chip.h, h, 7);
+        check(bme280_read(chip, 0x76, t, p, rh), "BME280: a reading");
+        check(std::fabs(t - 25.08) < 0.001 && std::fabs(p - 100653.25) < 0.01 && std::fabs(rh - 53.93) < 0.01,
+              "... 25.08 C, 1006.53 hPa, 53.93 %RH (got " + std::to_string(t) + ", " + std::to_string(p / 100.0) + ", " +
+                  std::to_string(rh) + ")");
+        check(chip.ctrlHum == 1 && chip.ctrlMeas == 0x4D, "... humidity x1, temperature x2, pressure x4, forced mode");
+        check(bme280_read(chip, 0x77, t, p, rh), "... also on 0x77");
+        chip.id = 0x58;                                  // a BMP280
+        check(!bme280_read(chip, 0x76, t, p, rh), "another chip (ID 0x58): no reading");
+        chip.id = 0x60;
+        chip.present = false;
+        check(!bme280_read(chip, 0x76, t, p, rh), "not answering: no reading");
+        chip.present = true;
+
+        // Identified by ID 0x60 (not through the "bosch" probe)
+        I2cChipList bl;
+        bl.parse(text, "chips.txt");
+        bl.finish(7);
+        I2cFound f;
+        check(bl.identify(chip, 0x76, f, builtins()) && std::string(f.name) == "BME280", "0x76, ID 0x60: identified as BME280");
+    }
+
+    // ── BME680 / BME688: temperature, pressure, humidity (no gas) ────────
+    {
+        // Made-up but typical calibration; the raw values were worked out so that it is 22.00 C, 1013.25 hPa and 50 %RH
+        // (separately, with the datasheet's float formulas; its integer ones agree within 3 Pa and 0.02 %RH)
+        const std::uint8_t a[23] = { 0x46, 0x67, 0x03, 0x00, 0xab, 0x8f, 0xf4, 0xd6, 0x58, 0x00, 0xc4, 0x1b, 0x42, 0xff, 0x2c, 0x1e, 0x00, 0x00, 0x02, 0xf9, 0x7c, 0xfb, 0x1e };
+        const std::uint8_t b[10] = { 0x3f, 0x79, 0x2e, 0x00, 0x2d, 0x14, 0x78, 0x9c, 0x0d, 0x66 };
+        const std::uint8_t data[10] = { 0x80, 0x00, 0x52, 0xb6, 0x00, 0x77, 0x17, 0x50, 0x54, 0x44 };
+        double t = 0, p = 0, rh = 0;
+        bme680_compensate(a, b, 487797, 338784, 21572, t, p, rh);
+        check(std::fabs(t - 22.0) < 0.01 && std::fabs(p - 101324.9) < 0.5 && std::fabs(rh - 50.0) < 0.05,
+              "BME680 compensation: 22.00 C, 101324.9 Pa, 50.0 %RH (got " + std::to_string(t) + ", " + std::to_string(p) +
+                  ", " + std::to_string(rh) + ")");
+
+        struct Bme680Chip : I2cBus {
+            std::uint8_t id = 0x61;
+            bool present = true, measuring = false;
+            int waited = 0;
+            std::uint8_t ctrlGas = 0xFF, ctrlHum = 0, ctrlMeas = 0;
+            std::uint8_t a[23], b[10], data[10];
+            bool readRegs(std::uint8_t ad, std::uint8_t reg, std::uint8_t* buf, std::size_t n) override {
+                if (!present || (ad != 0x76 && ad != 0x77)) return false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const unsigned r = reg + i;
+                    std::uint8_t v = 0;
+                    if (r == 0xD0) v = id;
+                    else if (r >= 0x8A && r < 0x8A + 23) v = a[r - 0x8A];
+                    else if (r >= 0xE1 && r < 0xE1 + 10) v = b[r - 0xE1];
+                    else if (r == 0x1D) v = !measuring ? 0x00 : waited < 28 ? 0x20 : 0x80;
+                    else if (r >= 0x1E && r <= 0x26) v = data[r - 0x1D];
+                    buf[i] = v;
+                }
+                return true;
+            }
+            bool readRaw(std::uint8_t, std::uint8_t*, std::size_t) override { return false; }
+            bool write(std::uint8_t ad, const std::uint8_t* bb, std::size_t n) override {
+                if (!present || n != 2) return false;
+                if (bb[0] == 0x71) ctrlGas = bb[1];
+                if (bb[0] == 0x72) ctrlHum = bb[1];
+                if (bb[0] == 0x74) { ctrlMeas = bb[1]; measuring = true; waited = 0; }
+                (void)ad;
+                return true;
+            }
+            void delayMs(int ms) override { waited += ms; }
+        };
+        Bme680Chip chip;
+        std::memcpy(chip.a, a, 23);
+        std::memcpy(chip.b, b, 10);
+        std::memcpy(chip.data, data, 10);
+        check(bme680_read(chip, 0x77, t, p, rh), "BME680: a reading");
+        check(std::fabs(t - 22.0) < 0.01 && std::fabs(p - 101324.9) < 0.5 && std::fabs(rh - 50.0) < 0.05,
+              "... 22.00 C, 1013.25 hPa, 50.0 %RH (got " + std::to_string(t) + ", " + std::to_string(p / 100.0) + ", " +
+                  std::to_string(rh) + ")");
+        check(chip.ctrlGas == 0x00 && chip.ctrlHum == 1 && chip.ctrlMeas == 0x4D, "... no gas, humidity x1, temperature x2, pressure x4, forced");
+        chip.id = 0x60;                                  // a BME280
+        check(!bme680_read(chip, 0x77, t, p, rh), "another chip (ID 0x60): no reading");
+        chip.id = 0x61;
+        chip.present = false;
+        check(!bme680_read(chip, 0x77, t, p, rh), "not answering: no reading");
+        chip.present = true;
+
+        I2cChipList bl;
+        bl.parse(text, "chips.txt");
+        bl.finish(7);
+        I2cFound f;
+        check(bl.identify(chip, 0x77, f, builtins()) && std::string(f.name) == "BME680", "0x77, ID 0x61: identified as BME680");
     }
 
     std::printf("%s: %d checks, %d failed\n", failures ? "FAILED" : "PASSED", checks, failures);

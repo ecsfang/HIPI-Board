@@ -7,9 +7,9 @@
 HIPI    := ../..
 CXX     ?= g++
 CXXFLAGS := -std=c++17 -g -O1 -Wall -Wextra -fsanitize=address,undefined -I../printertest/stubs -I$(HIPI)/include
-SRC := test.cpp $(HIPI)/src/i2c_chips.cpp $(HIPI)/src/i2c_command.cpp $(HIPI)/src/ili2c.cpp $(HIPI)/src/device.cpp $(HIPI)/src/vl53l0x.cpp
+SRC := test.cpp $(HIPI)/src/i2c_chips.cpp $(HIPI)/src/i2c_command.cpp $(HIPI)/src/ili2c.cpp $(HIPI)/src/device.cpp $(HIPI)/src/vl53l0x.cpp $(HIPI)/src/bmp390.cpp $(HIPI)/src/bmp180.cpp $(HIPI)/src/bme280.cpp $(HIPI)/src/bme680.cpp
 
-i2ctest: $(SRC) $(HIPI)/include/i2c_chips.h $(HIPI)/include/i2c_ident.h $(HIPI)/include/i2c_command.h $(HIPI)/include/vl53l0x.h
+i2ctest: $(SRC) $(HIPI)/include/i2c_chips.h $(HIPI)/include/i2c_ident.h $(HIPI)/include/i2c_command.h $(HIPI)/include/vl53l0x.h $(HIPI)/include/bmp390.h $(HIPI)/include/bmp180.h $(HIPI)/include/bme280.h $(HIPI)/include/bme680.h
 	$(CXX) $(CXXFLAGS) $(SRC) -o $@
 
 test: i2ctest

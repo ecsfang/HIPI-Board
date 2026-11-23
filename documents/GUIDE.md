@@ -1339,7 +1339,46 @@ address before the first measurement. `I2cChipList::run()` /
 `measure()` do the work; CRC: Sensirion (per word), AHT (all, from 0xFF),
 HTU (all, from 0). (TFI2C replaced the old TFTEMP device: `MT`, `MP`,
 `P<n>` are the same.) `tools/i2ctest` covers the measurements, the
-VL53L0X set-up on a made-up chip, every command and the device on the loop.
+VL53L0X set-up on a made-up chip, the BMP390's compensation (a made-up
+chip, values worked out separately), every command and the device on the loop.
+
+**BMP180 / BMP085** (`src/bmp180.cpp`): the same chip ID 0x55 at 0xD0, address 0x77
+only; it has its own entry, and the `bosch` probe leaves 0x55 alone. `builtin
+bmp180.T` / `bmp180.P` read the 11 calibration words (0xAA..0xBF, a word of 0 or
+0xFFFF is "unreadable"), the raw temperature, and the pressure at oversampling
+3 (about 30 ms in all), and calculate with the integer algorithm of BST-BMP180-DS000
+(figure 4). `tools/i2ctest` runs the datasheet's own example (15.0 C, 69964 Pa).
+The `bosch` probe now names only the BMP280 (0x56..0x58); the others have their
+own entries.
+
+**BME680 / BME688** (`src/bme680.cpp`): ID 0x61, 0x76 or 0x77; `builtin bme680.T` /
+`.P` / `.H`, temperature, pressure and humidity only (no gas: `ctrl_gas_1` is
+written 0, but the sequence still holds a dummy gas slot, so a measurement takes
+about 30 ms). The calibration is 23 bytes from 0x8A and 10 from 0xE1 (H1 and H2
+are 12 bits each, sharing 0xE2); the formulas are the datasheet's float ones
+(BST-BME680-DS001, section 3.3). The datasheet's text does not give the types of
+the calibration words; they are those of Bosch's API (par_t3, p3, p6, p7, h3,
+h4, h5, h7 signed 8 bit; par_p10 and h6 unsigned 8 bit). `tools/i2ctest` uses a
+typical calibration and raw values worked out separately; the datasheet's integer
+formulas agree with the float ones within 3 Pa and 0.02 %RH. The BME688 has the
+same ID and the same T/P/H.
+
+**BME280** (`src/bme280.cpp`): ID 0x60, 0x76 or 0x77, its own entry (the `bosch`
+probe leaves 0x60 alone). `builtin bme280.T` / `.P` / `.H`: one forced-mode
+measurement (temperature x2, pressure x4, humidity x1, at most 18.5 ms), the
+calibration from 0x88..0x9F, 0xA1 and 0xE1..0xE7 (H4 and H5 share a byte, the
+sign comes from the top byte), the datasheet's integer formulas (BST-BME280-DS001,
+section 4.2.3). Temperature and pressure are the same as the BMP280's; the test
+uses Bosch's well-known example (25.08 C, 100653.25 Pa), and a humidity one
+worked out with the integer and the float formulas.
+
+**BMP390 / BMP388** (`src/bmp390.cpp`): found by the ID (`id 0x00 0x60` / `0x50`,
+0x76 or 0x77), measured with `builtin bmp390.T` / `bmp390.P`. Each
+measurement is one forced-mode run (pressure x8, temperature x1, about 20 ms):
+the 21 calibration bytes from 0x31 are read, the 6 data bytes in one burst, and
+the datasheet's floating-point formulas (BST-BMP390-DS002, section 8) give
+degrees and pascals (hPa to TFI2C). It is not read by the Hardware test page
+(that one shows the ID only), and it is not the `bosch` probe's BMP280 driver.
 
 `tools/hipiview`'s `hwtest_view_test` runs the page (with the stand-in
 hardware and a made-up bus), taps its buttons, checks the LEDs and pixels

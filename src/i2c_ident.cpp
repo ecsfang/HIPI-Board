@@ -9,6 +9,10 @@
 #include "ili2c.h"
 #include "bmp280.h"
 #include "vl53l0x.h"
+#include "bme280.h"
+#include "bme680.h"
+#include "bmp180.h"
+#include "bmp390.h"
 #include "rtc_probe.h"        // the clock chips' checks
 #include "touch.h"            // touch_i2c, TOUCH_SDA/SCL: the shared bus
 #include "sd_paths.h"
@@ -75,9 +79,6 @@ I2cVerdict probeBosch(I2cBus& bus, std::uint8_t addr, std::string& name, std::st
     if (!bus.readRegs(addr, 0xD0, &id, 1)) return I2cVerdict::NotIt;
     switch (id) {
         case 0x56: case 0x57: case 0x58: name = "BMP280"; break;
-        case 0x60: name = "BME280"; break;
-        case 0x61: name = "BME680"; break;
-        case 0x55: name = "BMP180"; break;
         default: return I2cVerdict::NotIt;
     }
     char b[40];
@@ -114,6 +115,59 @@ bool measureBoschP(I2cBus&, std::uint8_t addr, double& v) {
     CBmp280* bmp = boschAt(addr);
     if (bmp == nullptr || !bmp->readPressurePa(pa)) return false;
     v = pa / 100.0;                                      // hPa
+    return true;
+}
+
+// The BME280: one forced-mode measurement of all three, compensated with the
+// chip's own calibration (bme280.cpp)
+bool measureBme280(I2cBus& bus, std::uint8_t addr, int what, double& v) {
+    double t = 0, p = 0, h = 0;
+    if (!bme280_read(bus, addr, t, p, h)) return false;
+    v = what == 0 ? t : what == 1 ? p / 100.0 : h;       // deg C, hPa, %RH
+    return true;
+}
+bool measureBme280T(I2cBus& bus, std::uint8_t addr, double& v) { return measureBme280(bus, addr, 0, v); }
+bool measureBme280P(I2cBus& bus, std::uint8_t addr, double& v) { return measureBme280(bus, addr, 1, v); }
+bool measureBme280H(I2cBus& bus, std::uint8_t addr, double& v) { return measureBme280(bus, addr, 2, v); }
+
+// The BME680 / BME688 (no gas): the same kind of measurement (bme680.cpp)
+bool measureBme680(I2cBus& bus, std::uint8_t addr, int what, double& v) {
+    double t = 0, p = 0, h = 0;
+    if (!bme680_read(bus, addr, t, p, h)) return false;
+    v = what == 0 ? t : what == 1 ? p / 100.0 : h;       // deg C, hPa, %RH
+    return true;
+}
+bool measureBme680T(I2cBus& bus, std::uint8_t addr, double& v) { return measureBme680(bus, addr, 0, v); }
+bool measureBme680P(I2cBus& bus, std::uint8_t addr, double& v) { return measureBme680(bus, addr, 1, v); }
+bool measureBme680H(I2cBus& bus, std::uint8_t addr, double& v) { return measureBme680(bus, addr, 2, v); }
+
+// The BMP180 / BMP085: a temperature and a pressure reading, compensated
+// with the chip's own calibration (bmp180.cpp)
+bool measureBmp180T(I2cBus& bus, std::uint8_t addr, double& v) {
+    double t = 0, p = 0;
+    if (!bmp180_read(bus, addr, t, p)) return false;
+    v = t;
+    return true;
+}
+bool measureBmp180P(I2cBus& bus, std::uint8_t addr, double& v) {
+    double t = 0, p = 0;
+    if (!bmp180_read(bus, addr, t, p)) return false;
+    v = p / 100.0;                                       // hPa
+    return true;
+}
+
+// The BMP390 / BMP388: one forced-mode measurement, compensated with the
+// chip's own calibration (bmp390.cpp)
+bool measureBmp390T(I2cBus& bus, std::uint8_t addr, double& v) {
+    double t = 0, p = 0;
+    if (!bmp390_read(bus, addr, t, p)) return false;
+    v = t;
+    return true;
+}
+bool measureBmp390P(I2cBus& bus, std::uint8_t addr, double& v) {
+    double t = 0, p = 0;
+    if (!bmp390_read(bus, addr, t, p)) return false;
+    v = p / 100.0;                                       // hPa
     return true;
 }
 
@@ -217,7 +271,11 @@ I2cCommandEnv i2c_commandEnv() {
     e.chips = [] () -> const I2cChipList& { return chipList(); };
     e.identifyAll = [](I2cFound* out, int max, bool found[128]) { return i2c_identify(out, max, found); };
     e.probes = builtins();
-    e.measures = { { "bosch.T", measureBoschT }, { "bosch.P", measureBoschP }, { "vl53l0x.D", vl53l0x_readMm } };
+    e.measures = { { "bosch.T", measureBoschT }, { "bosch.P", measureBoschP },
+                  { "bme680.T", measureBme680T }, { "bme680.P", measureBme680P }, { "bme680.H", measureBme680H },
+                  { "bme280.T", measureBme280T }, { "bme280.P", measureBme280P }, { "bme280.H", measureBme280H },
+                  { "bmp180.T", measureBmp180T }, { "bmp180.P", measureBmp180P },
+                  { "bmp390.T", measureBmp390T }, { "bmp390.P", measureBmp390P }, { "vl53l0x.D", vl53l0x_readMm } };
     e.hipiOwns = hipiOwns;
     return e;
 }

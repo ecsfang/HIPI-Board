@@ -1191,6 +1191,10 @@ chip descriptions in `i2c/` again.
 | Chip | Measurements |
 |------|--------------|
 | BMP280 (0x76 or 0x77) | `T` temperature °C, `P` pressure hPa |
+| BME680 or BME688 (0x76 or 0x77) | `T` temperature °C, `P` pressure hPa, `H` relative humidity % (about 30 ms); the gas sensor is not read |
+| BME280 (0x76 or 0x77) | `T` temperature °C, `P` pressure hPa, `H` relative humidity % (about 20 ms) |
+| BMP180 or BMP085 (0x77) | `T` temperature °C, `P` pressure hPa (about 30 ms) |
+| BMP390 or BMP388 (0x76 or 0x77) | `T` temperature °C, `P` pressure hPa (each measurement takes about 25 ms) |
 | VL53L0X | `D` distance in mm (8190: nothing in range); HIPI sets the sensor up itself |
 | DS3231 clock | `TIME` 12.3456 (HH.MMSS), `DATE` 2026.1011 (YYYY.MMDD), `DMY` 11.102026 and `MDY` 10.112026 (the TIME module's forms), `T` temperature |
 | PCF85063A clock | `TIME`, `DATE`, `DMY`, `MDY` as the DS3231 (no temperature) |
