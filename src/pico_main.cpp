@@ -151,7 +151,7 @@ void SetPinDriveStrength(uint pin, uint mA) {
 // rather than a fixed boot-time color-cycle demo run directly from here).
 
 hipi::Screen *screen;
-// TFDISPLAY's screen when it emulates the HP 92198 (video80.h, display.h)
+// DISPLAY's screen when it emulates the HP 92198 (video80.h, display.h)
 hipi::Video80* video80Term = nullptr;
 hipi::UiDialog *dialog = nullptr;
 
@@ -498,7 +498,7 @@ int main() {
     }
 #endif
 
-    // TFDISPLAY's HP 92198 screen (its model setting; the device is made
+    // DISPLAY's HP 92198 screen (its model setting; the device is made
     // in hipi_init()) -- in the same text colour, font and width as set
     video80Term = new hipi::Video80(display);
     video80Term->setColor(config.textColor());
@@ -539,7 +539,7 @@ int main() {
     hipi::chartable_init(display);           // System -> Character table
     hipi::hpil_diag_init(display);           // HP-IL signals view (scope, Display -> HP-IL signals)
     hipi::hpil_diag_setBitCells(static_cast<hipi::BitCells>(config.signalCells()));   // saved
-    // TFPIXEL: the number of pixels connected, as the controller last said
+    // PIXEL: the number of pixels connected, as the controller last said
     pixelStrip.setActiveCount(config.pixelCount(), /*notify=*/false);
     pixelStrip.setColorOrder(pixelOrderIndex(config.pixelOrder().c_str()));   // its colour byte order (saved)
     pixels_setFitted(config.pixelsFitted());  // GPIO26: the pixel strip, or LED 5 (saved)
@@ -806,7 +806,7 @@ int main() {
         timed("mirror", [] { hipi::displayMirror_poll(); });   // the display mirrored to a PC viewer (display_mirror.h)
         hipi::crashlog_poll();       // a new stack depth, logged (crashlog.h)
         hipi::clock_poll();          // clock screen saver; "time" command on the USB console
-        pixelStrip.poll();           // TFPIXEL effects (pixels.h)
+        pixelStrip.poll();           // PIXEL effects (pixels.h)
         plotter_led_poll(plotter != nullptr && plotter->hpgl().errorCode() != 0);   // ERROR light on LED 3 (leds.h)
 #if HIPI_ANALYZER
         hipi::analyzer_poll();       // HP-IL analyzer: analyse captured frames, redraw

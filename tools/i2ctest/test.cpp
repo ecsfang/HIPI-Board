@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
     bus.regs[0x5C][0x10] = 0x00;
     expect(find(two, bus, 0x5C), S::Probable, "BH1750", "", "0x5C not mine -> probably BH1750");
 
-    // ── Measurements and TFI2C's commands ───────────────────────────
+    // ── Measurements and I2C's commands ───────────────────────────
     {
         I2cChipList ml;
         ml.parse(text, "chips.txt");
@@ -420,9 +420,9 @@ int main(int argc, char** argv) {
         check(I2cCommander::readOnly("A$76;MT") && !I2cCommander::readOnly("A$44;W,36,0"), "read-only lines");
         (void)ml;
 
-        // ── TFI2C on the loop: OUTA a line, INA the answer ───────────
+        // ── I2C on the loop: OUTA a line, INA the answer ───────────
         int reloads = 0;
-        CHipiI2c dev("TFI2C", env, [&] { ++reloads; });
+        CHipiI2c dev("I2C", env, [&] { ++reloads; });
         dev.setEnabled(true);
         dev.hpil(AAD + 1);
         auto outa = [&](const std::string& line) {
@@ -443,7 +443,7 @@ int main(int argc, char** argv) {
             dev.hpil(UNT);
             return got;
         };
-        check(dev.accessoryId() == 0x52, "TFI2C: accessory ID 0x52");
+        check(dev.accessoryId() == 0x52, "I2C: accessory ID 0x52");
         outa("A$76;MT");
         check(ina() == "21.4\r\n", "OUTA \"A$76;MT\", INA -> 21.4");
         b.raw[0x5C] = { 0x00, 0x60 };                    // (another chip: unchanged answer)
@@ -596,7 +596,7 @@ int main(int argc, char** argv) {
         chip.present = true;
         chip.forced = false;
 
-        // Identified by the ID, and TFI2C's "MT" / "MP" give the numbers
+        // Identified by the ID, and I2C's "MT" / "MP" give the numbers
         I2cChipList bl;
         bl.parse(text, "chips.txt");
         bl.finish(7);

@@ -10,7 +10,7 @@
 //
 // Usage (see pico_main.cpp):
 //
-//   plotter = new CPlotter("TFPLOT");   // (done inside hipi_init())
+//   plotter = new CPlotter("PLOTTER");   // (done inside hipi_init())
 //   hipi::views_init(display, screen, plotter, &plotter->hpgl());
 //
 // The UiDialog "Display" menu calls views_viewDevices()/
@@ -34,7 +34,7 @@ namespace hipi {
 
 // The kinds of view the panel can show (matches ViewKind in hpil.h, plus
 // the Analyzer, which isn't a device's view)
-// (Video80: the Display view while TFDISPLAY emulates the HP 92198)
+// (Video80: the Display view while DISPLAY emulates the HP 92198)
 enum class DisplayOutput { Display, Plotter, Tape, Analyzer, Clock, LoopMap, Signals, CharTable, Printer, Video80, HwTest,
                            MediaMap };
 
@@ -87,7 +87,7 @@ CPrinter* views_printer();
 void views_printerPrint(bool down);
 void views_printerAdvance(bool down);
 
-// TFDISPLAY's HP 92198 screen (video80.h). It draws itself; the view
+// DISPLAY's HP 92198 screen (video80.h). It draws itself; the view
 // only switches it on and off.
 void views_setVideo80(Video80* v);
 Video80* views_video80();
@@ -155,7 +155,7 @@ void views_cycleOutput(bool forward);
 // here), in loop order -- e.g. for the Display menu
 std::vector<CDevice*> views_viewDevices();
 // A view's name: "Display", "Plotter", "Tape" -- plus the device name if
-// several devices have that kind of view ("Tape TFDRIVE2")
+// several devices have that kind of view ("Tape DRIVE2")
 std::string views_viewTitle(CDevice* dev);
 // Shows that device's view
 void views_showDevice(CDevice* dev);

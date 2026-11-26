@@ -1,5 +1,5 @@
 // bme680.h -- the Bosch BME680 (and the BME688, which has the same chip ID
-// and the same temperature, pressure and humidity), for TFI2C's
+// and the same temperature, pressure and humidity), for I2C's
 // "builtin bme680.T" / "bme680.P" / "bme680.H" (sdcard/i2c/chips.txt).
 // The gas sensor is not read.
 //

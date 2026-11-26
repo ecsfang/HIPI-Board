@@ -1,9 +1,9 @@
 // hwtest.h -- System -> Hardware test: a page to try out what's connected.
 //
 //   LEDS    "Fitted" (are they there?), "HP-IL on LED 4" (traffic shown
-//           on LED 4, or it's left free for TFLEDS), a button per
+//           on LED 4, or it's left free for LEDS), a button per
 //           LED 1-5, Chase (a light running 1 -> 5) and Off.
-//   PIXELS  "Fitted", the number connected (1-16, = TFPIXEL's pixel
+//   PIXELS  "Fitted", the number connected (1-16, = PIXEL's pixel
 //           count), the pixels mirrored on the screen, Run (one pixel
 //           running along, a new colour every round), Red / Green / Blue
 //           / White (all of them, to check the strip's colour order) and
@@ -13,7 +13,7 @@
 //           classic i2cdetect grid of all addresses.
 //
 // Until a test of its own starts the page only looks: the LED buttons and
-// the dots show what TFLEDS / TFPIXEL (and HP-IL activity) put on them
+// the dots show what LEDS / PIXEL (and HP-IL activity) put on them
 // (hwio::ledLevel(), hwio::pixelShown()) -- a program tried without LEDs
 // or pixels fitted. An LED button or Chase takes the LEDs over, Run or a
 // colour the pixels (hwio::takeLeds() / takePixels()); Off -- or leaving

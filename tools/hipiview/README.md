@@ -397,7 +397,7 @@ HIPI's (`mirror_clock.cpp`) in simulated time.
 | `test/clock_view_test.cpp`, `test/clockstubs/` | The clock screen saver on the emulated chip: the colon blinks, nothing else changes (part of `make test`; saves `clock_view_*.png`) |
 | `test/pilbox_test.cpp`, `test/pilboxstubs/` | The PILBox (`pilbox.cpp`) against a stand-in PC with a simulated clock: HIPI never waits long for the PC; a frame it doesn't answer within 2 s is dropped and the PILBox goes to TDIS, until the PC sends its mode again (part of `make test`) |
 | `test/printer_view_test.cpp`, `test/pvstubs/` | The Printer view as HIPI draws it, with the real pictures; also the view HIPI starts with (`views_showStartView()`) (part of `make test`; saves `printer_view_*.png`) |
-| `test/video80_view_test.cpp` | TFDISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
+| `test/video80_view_test.cpp` | DISPLAY as an HP 92198, and its view: HP-IL answers, escape sequences, scrolling, the 12×24 font (part of `make test`; saves `video80_*.png`) |
 | `test/display_text_test.cpp` | The display's text log: the filter for both models (escapes, CR/LF, BS, Roman-8 as UTF-8), the ring running over, `writeSdram`/`readSdram` on the emulated chip, bytes from HP-IL through the display device (part of `make test`) |
 | `test/hwtest_view_test.cpp`, `test/hwio_stub.*` | The Hardware test page as HIPI draws it, with stand-in LEDs, pixels and I2C bus (part of `make test`; saves `hwtest_*.png`) |
 | `test/demo_view_test.cpp` | What the demo shows (`demo_content.cpp`): texts, plots, printout (part of `make test`; saves `demo_*.png`) |

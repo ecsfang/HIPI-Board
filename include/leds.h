@@ -95,7 +95,7 @@ class PicoPwm {
 //                     the LED looks lit
 //   kHpilLedMessages  IDY frames ignored: commands, addressing, data --
 //                     a loop that only idles leaves it dark
-//   kHpilLedOff       LED 4 is left to TFLEDS (or whatever else is wired there)
+//   kHpilLedOff       LED 4 is left to LEDS (or whatever else is wired there)
 // held = true while the Hardware test page drives the LEDs itself.
 // LED 1-3 and 5 are never touched by this.
 constexpr int kHpilLedOff = 0;
@@ -109,8 +109,8 @@ void hpil_leds_hold(bool held);     // (LED 3's plotter error too)
 // The plotter's ERROR light on LED 3 (a yellow LED), as the HP 7470A's
 // front panel: lit while the plotter has an HP-GL error (HpglInterpreter::
 // errorCode() != 0), out once it's read (OE) or cleared (IN, the menu).
-// Off: LED 3 is left to TFLEDS. Only a change is written to the LED, so
-// TFLEDS can still use LED 3 in between when no error comes or goes.
+// Off: LED 3 is left to LEDS. Only a change is written to the LED, so
+// LEDS can still use LED 3 in between when no error comes or goes.
 // plotter_led_poll() from the main loop.
 void plotter_led_setOn(bool on);
 bool plotter_led_on();

@@ -1,7 +1,7 @@
 // rtc_test.cpp -- the real-time clock chips on the PC: rtc.cpp (finding
 // the chip, reading and setting the time), rtc_probe.cpp (the Hardware
 // test page's checks) and the built-in chip list's entries (sdcard/i2c/
-// chips.txt: identifying, TFI2C's TIME/DATE measurements), against
+// chips.txt: identifying, I2C's TIME/DATE measurements), against
 // made-up chips on a made-up bus: DS3231, DS1307, PCF85063A -- and a
 // PCF8563, which sits on the PCF85063A's address but isn't one.
 //
@@ -319,7 +319,7 @@ int main() {
                 const bool ok = meas != nullptr && hipi::I2cChipList::measure(bus, 0x51, *meas, -1, out, err, none) &&
                                 out == m.want;
                 char what[64];
-                std::snprintf(what, sizeof(what), "TFI2C M%s -> %s (got %s)", m.m, m.want, out.c_str());
+                std::snprintf(what, sizeof(what), "I2C M%s -> %s (got %s)", m.m, m.want, out.c_str());
                 check(ok, what);
             }
         }

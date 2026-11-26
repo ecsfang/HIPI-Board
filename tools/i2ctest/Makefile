@@ -1,6 +1,6 @@
 # i2ctest -- the I2C chip descriptions on the PC (src/i2c_chips.cpp): the
 # file format, checked with sdcard/i2c/chips.txt itself, and identifying
-# chips on a made-up bus, the measurements, TFI2C's commands and the
+# chips on a made-up bus, the measurements, I2C's commands and the
 # device itself on the loop (printertest's stand-ins for the Pico SDK).
 #
 #   make test

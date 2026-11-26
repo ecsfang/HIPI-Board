@@ -36,14 +36,14 @@ at once:
 
 | HIPI acts as…                 | Original HP device        | Shows up as |
 |-------------------------------|---------------------------|-------------|
-| Video display                 | HP 82163 Video Interface — or the HP 92198 80-column one (a setting) | `TFDISPLAY` |
-| Cassette drive                | HP 82161A Digital Cassette Drive | `TFDRIVE` |
-| Plotter                       | HP 7470A                  | `TFPLOT`    |
-| Any I2C chip: temperature, pressure, distance, clock ... | — | `TFI2C`     |
-| LEDs and colour pixels        | —                         | `TFLEDS`, `TFPIXEL` |
+| Video display                 | HP 82163 Video Interface — or the HP 92198 80-column one (a setting) | `DISPLAY` |
+| Cassette drive                | HP 82161A Digital Cassette Drive | `DRIVE` |
+| Plotter                       | HP 7470A                  | `PLOTTER`    |
+| Any I2C chip: temperature, pressure, distance, clock ... | — | `I2C`     |
+| LEDs and colour pixels        | —                         | `LEDS`, `PIXEL` |
 | Link to a PC (e.g. pyIlPer)   | PILBox                    | `PILBOX`    |
-| Terminal over USB             | —                         | `TFTERM`    |
-| Thermal printer (view)        | HP 82162A Thermal Printer | `TFPRINT`   |
+| Terminal over USB             | —                         | `TERMINAL`    |
+| Thermal printer (view)        | HP 82162A Thermal Printer | `PRINTER`   |
 
 Cassettes are simply files on a micro-SD card, so you never run out of tape.
 
@@ -134,7 +134,7 @@ After a few seconds (or when you touch the screen) HIPI is ready and shows
 the view of the **first device on the loop that is switched on and has a
 view** (display, plotter, cassette drive, printer). The order is the loop
 order in **Settings → Devices → Change order**. Usually that is the display:
-anything the controller prints now appears on the screen. With `TFDISPLAY`
+anything the controller prints now appears on the screen. With `DISPLAY`
 switched off it is the next one, for example the plotter. If no switched-on
 device has a view, HIPI starts with the **Loop map**. The printer counts only
 while it is switched on.
@@ -170,7 +170,7 @@ corner brings them in.
 | Touch | What happens |
 |-------|--------------|
 | **Top-left corner** | Info box: current file, settings, version (not on a page, [4.3](#43-pages)) |
-| **Bottom-left corner** | List of HIPI's HP-IL devices: their addresses, the HP device each one emulates (`TFPLOT` — `HP7470A`; blank for HIPI's own, like `TFI2C`) and accessory IDs, in hex and decimal (`0x52 (82)` — an HP-71 finds a device by it: `DEVADDR("%82")`). The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on a page.) |
+| **Bottom-left corner** | List of HIPI's HP-IL devices: their addresses, the HP device each one emulates (`PLOTTER` — `HP7470A`; blank for HIPI's own, like `I2C`) and accessory IDs, in hex and decimal (`0x52 (82)` — an HP-71 finds a device by it: `DEVADDR("%82")`). The PILBOX line shows the link to a PC program — `COFF`, `COFI` or `CON` when connected, `TDIS` when not — and the PC's devices with their addresses. Touch the box in front of a device to switch it on or off (✕ = on), the same as **Settings → Devices → Enable/disable** (remembered; a drive switches off when it's idle). Swipe up/down to scroll, a device at a time; the **✕** in its title closes it. (Not on a page.) |
 | **Middle of the left edge** | The shortcut: opens the view chosen in **Settings → Shortcut** — the **Loop map** unless you choose another (Analyzer, HP-IL signals, Characters, Hardware test, or Off). Touch the same place again to go back to the view you came from. (Not on a page — the loop map, the analyzer ...: leave those with their **✕**.) |
 | **Swipe left or right** | Switch view. Each device with a view (display, plotter, cassette drive) has its own, in the order the devices are on the loop: swipe left for the next, right for the previous |
 
@@ -290,7 +290,7 @@ own speed — the program is still running somewhere.
 
 ### 5.1 Display
 
-The video display (`TFDISPLAY`): everything the controller prints, like `PRA`, `PRX` or
+The video display (`DISPLAY`): everything the controller prints, like `PRA`, `PRX` or
 program listings. Scroll back with ▲ and ▼.
 
 It is one of two displays — **Emulate** in its menu (OK) or in
@@ -317,7 +317,7 @@ switch the HP-41 off and on (or run `AUTOIO`) after changing **Emulate**.
 
 ### 5.2 Plotter
 
-Shows what the controller draws on the plotter (`TFPLOT`). The drawing keeps growing
+Shows what the controller draws on the plotter (`PLOTTER`). The drawing keeps growing
 while you look at other views. Clear it with **Clear plotter** in its menu (OK).
 
 **Plot view** in its menu (OK) — or **Settings → Screen** — chooses how the drawing is placed on the screen:
@@ -409,7 +409,7 @@ thing.
 
 ### 5.4 Printer
 
-A picture of the HP 82162A thermal printer (`TFPRINT`) — the
+A picture of the HP 82162A thermal printer (`PRINTER`) — the
 cassette drive's companion, the same size and look. Its controls work
 like the real ones.
 
@@ -500,11 +500,25 @@ device selected:
 The last byte is the address itself (1–30) as a character code, not as
 digits — `3 ACCHR`, not `51 ACCHR`. You find the addresses in the device list
 (bottom-left corner), or with `FINDID` (Extended I/O module) in the program.
+`FINDID` looks for the device ID, which HIPI's devices answer like this:
+
+| Device | `FINDID` finds it with |
+|--------|------------------------|
+| `DISPLAY` | `"HP82163A"` (HP 92198 model: `"MC00701A"`) |
+| `DRIVE` | `"HP82161A"` |
+| `PRINTER` | `"HP82162A"` |
+| `PLOTTER` | `"HP7470A"` |
+| `LEDS` | `"HIPILED"` |
+| `PIXEL` | `"HIPIPIX"` |
+| `I2C` | `"HIPII2C"` |
+| `TERMINAL` | `"HIPITRM"` |
+
+`FINDID` compares the first 7 characters, so `"HP82161"` does it too.
 
 It follows what is actually on the loop: whichever HIPI device has that
 address gets its view shown — today the display, the plotter, the
 cassette drive(s) and the printer. If the address belongs to a device without a view
-(e.g. `TFLEDS`), to a device that's switched off, to a device that isn't
+(e.g. `LEDS`), to a device that's switched off, to a device that isn't
 part of HIPI, or to no device at all, **nothing happens** — no error, just a
 warning in the log.
 
@@ -544,7 +558,7 @@ OK in a view — that view's menu
 │   └── Text >       Save as text (120 lines) · Start anew
 ├── PLOTTER          Clear plotter · Screendump · Plot view < Fit > ·
 │                    Paper < White > · Pen < Thin > · Errors > · More >
-├── TAPE TFDRIVE     Select cassette > · Media map > · Rewind · Power < ON > · Screendump · More >
+├── TAPE DRIVE     Select cassette > · Media map > · Rewind · Power < ON > · Screendump · More >
 ├── ANALYZER         Leave view · Clear · Logging > · Mode < Overview > ·
 │                    Time < Relative > · Idle frames < Hidden > · More >
 ├── LOOP MAP         Leave view · Screendump · More >   (a page: ☰ bottom right)
@@ -771,7 +785,7 @@ with its address, then send text with `OUTA` or read with `INA`.
 shows each device's address — use that number with `SELECT`. The examples below
 use the address 3; replace it with the one shown on your screen.
 
-### 8.1 Plotter — `TFPLOT`
+### 8.1 Plotter — `PLOTTER`
 
 An HP 7470A pen plotter; the drawing appears in the Plotter view. It works e.g. with the
 HP-41 plotter software, and you can also send plotter commands (HP-GL) yourself:
@@ -866,7 +880,7 @@ The following is the result from the example on page 13 in the Plotter Module (8
 
 <a href="images/example-plotter-box.png"><img src="images/example-plotter-box.png" alt="Plotter example" width="512"></a>
 
-### 8.2 LEDs — `TFLEDS`
+### 8.2 LEDs — `LEDS`
 
 Controls the LEDs on the HIPI board. A command is the LED number(s) followed by
 what to do; several commands can be separated by spaces.
@@ -876,7 +890,7 @@ only works when no pixels are fitted (**Hardware test → PIXELS → Fitted:
 NO**); with pixels fitted, commands for LED 5 do nothing.
 
 LED 4 (D8) flashes with HP-IL traffic as long as **Hardware test → HP-IL on
-LED 4** is *ON* (the default), so whatever `TFLEDS` does with LED 4 is soon
+LED 4** is *ON* (the default), so whatever `LEDS` does with LED 4 is soon
 overwritten; switch it *OFF* to use LED 4 from the HP-41.
 
 | Send | Means |
@@ -903,7 +917,7 @@ LED 1 now flashes briefly once a second, until you send `1C`.
 ![LEDs on HIPI](images/example-leds.jpg) -->
 > 📷 **Image placeholder:** HIPI with its LEDs lit (`images/example-leds.jpg`)
 
-### 8.3 Colour pixels — `TFPIXEL`
+### 8.3 Colour pixels — `PIXEL`
 
 Controls a strip of colour LEDs (NeoPixels) connected to HIPI. Pixels are chosen
 like the LEDs: a number (`1` is the first pixel), `0` for all, or a range like `3-10`.
@@ -996,11 +1010,11 @@ come out dimmer than 5.
 
 <a href="images/example-pixels.jpg"><img src="images/example-pixels.jpg" alt="A pixel strip lit up by HIPI" width="512"></a>
 
-### 8.4 Terminal — `TFTERM`
+### 8.4 Terminal — `TERMINAL`
 
 Makes a terminal program on your computer act as a display and keyboard on the
 HP-IL loop — made for the HP-71B's `DISPLAY IS` and `KEYBOARD IS`. From the
-HP-41, text sent to `TFTERM` with `OUTA` appears in the terminal program.
+HP-41, text sent to `TERMINAL` with `OUTA` appears in the terminal program.
 
 HIPI shows up on the computer as a few serial ports; the terminal is the
 **third** one (on Linux usually `/dev/ttyACM2`). Open it in any terminal
@@ -1067,7 +1081,7 @@ Only one controller may be on a loop.
 <a href="images/example-pyilper.png"><img src="images/example-pyilper.png" alt="pyILPER" width="512"></a> -->
 > 📷 **Image placeholder:** pyILPER connected to HIPI's PILBox port (`images/example-pyilper.png`)
 
-### 8.6 Printer — `TFPRINT`
+### 8.6 Printer — `PRINTER`
 
 An HP 82162A thermal printer, with its own view ([5.4](#54-printer)). To the
 controller it is the real printer: accessory ID 32 (a printer), its
@@ -1086,7 +1100,7 @@ It starts switched off — see [5.4](#54-printer).
 
 ### 8.7 The display as an HP 92198
 
-With **Emulate** set to **HP 92198** ([5.1](#51-display)), `TFDISPLAY` is
+With **Emulate** set to **HP 92198** ([5.1](#51-display)), `DISPLAY` is
 an HP 92198 80-column video interface (Mountain Computer's MC00701A). To
 the controller it is the real one: accessory ID 50 (a display), device ID
 `MC00701A`, and its status (`$80`, then which modes are on). It is still
@@ -1143,7 +1157,7 @@ first to leave it out.
 11 END
 ```
 
-### 8.8 Any I2C chip — `TFI2C`
+### 8.8 Any I2C chip — `I2C`
 
 Talks to the chips on HIPI's I2C connector for your program: read and
 write their registers yourself, or ask for a **measurement** — what to send,
@@ -1212,11 +1226,11 @@ shows which one HIPI found). The MPU-9250 and MPU-6886 are read like an MPU-6050
 now, so their `T` may be off.
 
 **A temperature**, with a BMP280 (or an AHT20, a TMP102 ...) connected.
-Use `TFI2C`'s address from the device list:
+Use `I2C`'s address from the device list:
 
 ```
 01 LBL "TEMP"
-02 8              TFI2C's address
+02 8              I2C's address
 03 SELECT
 04 "ABMP280,MT"   choose the sensor, measure T
 05 OUTA
@@ -1455,11 +1469,11 @@ with a red PAUSED banner while recording goes on; touch again to resume.
 **Overview** (the default) shows one line per event:
 
 ```
-00:04:05.016  CTRL -> TFDISPLAY(1)   "HELLO WORLD" (13 bytes, CR LF)   26.0 ms
-00:04:05.090  CTRL <- TFDRIVE(2)   status 23 NEW TAPE   2.0 ms
+00:04:05.016  CTRL -> DISPLAY(1)   "HELLO WORLD" (13 bytes, CR LF)   26.0 ms
+00:04:05.090  CTRL <- DRIVE(2)   status 23 NEW TAPE   2.0 ms
 00:04:05.102  NO RESPONSE: SST to addr 3
-00:04:05.118  TFDRIVE(2)   SEEK track 0 record 5
-00:04:05.830  CTRL <- TFDRIVE(2)   READ 512 bytes (2 records)   41.0 ms
+00:04:05.118  DRIVE(2)   SEEK track 0 record 5
+00:04:05.830  CTRL <- DRIVE(2)   READ 512 bytes (2 records)   41.0 ms
 ```
 
 - **White and cyan:** data sent to and from devices, summarised. Text is shown
@@ -1608,18 +1622,18 @@ device list here (the page's buttons are there).
 
 **It shows what your program does.** When the page opens it only
 *looks*: the LED buttons light up and the row of circles shows the
-colours as `TFLEDS` and `TFPIXEL` drive them — set by the HP-41, blinking,
+colours as `LEDS` and `PIXEL` drive them — set by the HP-41, blinking,
 fading, an effect running, HP-IL traffic on LED 4. So a program can be
 tried out even without LEDs or pixels fitted (**Fitted** must be *YES*,
 and **Count** says how many pixels: `0N8` from the HP-41 shows 8). The
 line beside **Off** and the line under the pixel buttons say *Shows what
-TFLEDS sends* / *Shows what TFPIXEL sends*.
+LEDS sends* / *Shows what PIXEL sends*.
 
 **A test of its own takes over.** Touching an LED button or **Chase**
 takes the LEDs over, **Run** or a colour the pixels: what the HP-41 had
 set on them is switched off (a running effect stops), and the page drives
 them itself. **Off** ends the test — all off — and the page shows
-`TFLEDS` / `TFPIXEL` again; leaving the page does the same.
+`LEDS` / `PIXEL` again; leaving the page does the same.
 
 <a href="images/view-hwtest.png"><img src="images/view-hwtest.png" alt="Hardware test" width="512"></a>
 
@@ -1633,7 +1647,7 @@ them itself. **Off** ends the test — all off — and the page shows
     (the HP-71B all the time, an HP-41 too); those are ignored.
   - *ALL*: every frame, IDY included. With such a controller on, LED 4
     looks lit all the time.
-  - *OFF*: LED 4 is free, for `TFLEDS` or whatever else you wire to that pin.
+  - *OFF*: LED 4 is free, for `LEDS` or whatever else you wire to that pin.
 
   LED 1–3 and 5 are never used for HP-IL activity.
 - **Plotter error on LED 3** — *ON* (the default): LED 3 is the plotter's
@@ -1641,11 +1655,11 @@ them itself. **Off** ends the test — all off — and the page shows
   It lights when the plotter finds an HP-GL error and goes out when the
   error is read (`OE`), cleared (`IN`) or cleared in the Plotter menu
   (**Errors → Clear error**), just like the ERROR light in the Plotter view.
-  *OFF*: LED 3 is free for `TFLEDS`. Remembered. (With *ON*, `TFLEDS` can
+  *OFF*: LED 3 is free for `LEDS`. Remembered. (With *ON*, `LEDS` can
   still use LED 3; only an error coming or going switches it.)
 - **1** – **5** switch each LED on and off. **Chase** runs a light from 1
   to 5 over and over; **Off** switches them all off and goes back to
-  showing `TFLEDS`. LED 5 shares its pin
+  showing `LEDS`. LED 5 shares its pin
   with the pixels: while **PIXELS → Fitted** is *YES* its button is greyed
   out and the chase stops at LED 4.
 
@@ -1660,8 +1674,8 @@ them itself. **Off** ends the test — all off — and the page shows
   the ones on the HIPI board take RGB, classic WS2812B take GRB, some
   WS2811 strings BRG. Touch **Red**, then try the orders until the pixels
   really are red; then check with **Green** and **Blue**. Remembered
-  (`pixel_order`), and used for `TFPIXEL` too.
-- The row of circles shows what is sent to the pixels — by `TFPIXEL`, or
+  (`pixel_order`), and used for `PIXEL` too.
+- The row of circles shows what is sent to the pixels — by `PIXEL`, or
   by the page's own test (the first 16). **Pixel 1 is on the right**, as
   the pixels sit on the board (from right to left).
 - **Run** — one pixel at a time runs along the strip, quickly, in a new
@@ -1669,7 +1683,7 @@ them itself. **Off** ends the test — all off — and the page shows
   you still see it.
 - **Red**, **Green**, **Blue**, **White** — all of them in that colour.
   If a colour comes out wrong, choose another **Order**.
-- **Off** — all off, and back to showing `TFPIXEL`.
+- **Off** — all off, and back to showing `PIXEL`.
 
 **I2C**
 
@@ -1815,7 +1829,7 @@ value.
 
 | Setting | Values | Default | What it is |
 |---------|--------|---------|------------|
-| `media.<drive>` | a file name | — | The cassette in a drive: a LIF file in the `lif/` folder, e.g. `media.TFDRIVE=GAMES.DAT`. One line per drive. Empty = no cassette. (`filename=` from older versions still works for `TFDRIVE`.) |
+| `media.<drive>` | a file name | — | The cassette in a drive: a LIF file in the `lif/` folder, e.g. `media.DRIVE=GAMES.DAT`. One line per drive. Empty = no cassette. (`filename=` from older versions still works for `DRIVE`. Before v1.7.4 the device names began with `TF`, as `TFDRIVE`; a `CONFIG.TXT` from then is read with the old names taken as the new, and saved with the new ones.) |
 | `drive_standby` | `0` / `1` | `0` | The cassette drive's power switch at start: `0` = ON, `1` = STANDBY. OFF is the drive in `disabled_devices`. (**Settings → Devices → Drive at start** sets both.) |
 
 **Screen**
@@ -1824,7 +1838,7 @@ value.
 |---------|--------|---------|------------|
 | `textcolor` | `0`–`65535` | `65535` | Text colour of the display view, as an RGB565 number. The menu's colours: `65535` white, `65504` yellow, `2016` green, `2047` cyan, `63488` red — any other RGB565 value works too. |
 | `fontsize` | `0`–`3` | `0` | Text size of the display view (**Settings → Screen → Font size**). |
-| `display_model` | `82163` / `92198` | `82163` | Which display `TFDISPLAY` is (**Settings → Screen → Emulate**). |
+| `display_model` | `82163` / `92198` | `82163` | Which display `DISPLAY` is (**Settings → Screen → Emulate**). |
 | `v80_font` | `large` / `small` | `large` | As an HP 92198: the 12 × 24 or the 8 × 16 font (**Font size**). |
 | `v80_columns` | `80` / `40` | `80` | As an HP 92198: 80 × 24 or 40 × 20 at the start and after a reset (**Columns**). |
 | `columns` | `0`, `1`–`100` | `0` | Characters per line; `0` = as many as fit. (The menu offers 25, 32 — the HP 82163's own — 33, 50 and 100.) |
@@ -1833,14 +1847,14 @@ value.
 | `plot_paper` | `white` / `black` | `white` | Plotter paper: `white` = dark pens on white, `black` = inverted, light pens on black. |
 | `shortcut` | `loopmap` / `analyzer` / `signals` / `chartable` / `hwtest` / `off` | `loopmap` | The view a touch in the middle of the screen's left edge opens (**Settings → Shortcut**). |
 | `signal_cells` | `bands` / `lines` / `none` | `bands` | HP-IL signals view: how the bits are marked — shaded bands behind every other bit, thin lines between them, or nothing. |
-| `plotter_led` | `plotter` / `off` | `plotter` | The plotter's ERROR light on LED 3 (**Hardware test → Plotter error on LED 3**). `off` leaves LED 3 to `TFLEDS`. |
-| `hpil_leds` | `messages` / `all` / `off` | `messages` | HP-IL traffic on LED 4 (**Hardware test → HP-IL on LED 4**): `messages` ignores IDY (idle) frames, `all` shows every frame, `off` leaves LED 4 to `TFLEDS`. The old values `1` (= `all`) and `0` (= `off`) are still read. |
+| `plotter_led` | `plotter` / `off` | `plotter` | The plotter's ERROR light on LED 3 (**Hardware test → Plotter error on LED 3**). `off` leaves LED 3 to `LEDS`. |
+| `hpil_leds` | `messages` / `all` / `off` | `messages` | HP-IL traffic on LED 4 (**Hardware test → HP-IL on LED 4**): `messages` ignores IDY (idle) frames, `all` shows every frame, `off` leaves LED 4 to `LEDS`. The old values `1` (= `all`) and `0` (= `off`) are still read. |
 | `leds_fitted` | `0` / `1` | `1` | **Hardware test**: the LEDs are fitted. (Only the test page uses it, for now.) |
 | `pixels_fitted` | `0` / `1` | `1` | **Hardware test**: colour pixels are connected. GPIO26 drives the pixels with `1`, LED 5 with `0`. |
-| `pixel_count` | `1`–`32` | `5` | `TFPIXEL`: how many colour pixels are connected — set by the HP-41 with `0N<n>` (see [8.3](#83-colour-pixels--tfpixel)). |
+| `pixel_count` | `1`–`32` | `5` | `PIXEL`: how many colour pixels are connected — set by the HP-41 with `0N<n>` (see [8.3](#83-colour-pixels--tfpixel)). |
 | `pixel_order` | `RGB` `GRB` `BRG` `RBG` `GBR` `BGR` | `RGB` | The order the colour pixels take their colours in (**Hardware test → Order**). |
-| `printer_mode` | `man` / `trace` / `norm` | `man` | `TFPRINT`: the MODE switch in the Printer view. |
-| `printer_intensity` | `0`–`4` | `2` | `TFPRINT`: the INTENSITY switch, `0` = LIGHT … `4` = DARK. |
+| `printer_mode` | `man` / `trace` / `norm` | `man` | `PRINTER`: the MODE switch in the Printer view. |
+| `printer_intensity` | `0`–`4` | `2` | `PRINTER`: the INTENSITY switch, `0` = LIGHT … `4` = DARK. |
 | `display_mirror` | `off` / `view` / `control` | `off` | Send the screen to **hipiview** on a PC; `control`: the PC's mouse and keys work HIPI too (**Settings → Screen → Mirror to PC**). See [Recording the screen on a PC](#recording-the-screen-on-a-pc). |
 
 **Screen saver** (see [4.3](#43-screen-saver-and-clock))
@@ -1863,8 +1877,8 @@ value.
 | `con_loop` | `cable` / `internal` | `cable` | PILBox CON mode: the loop through the HP-IL cable, or closed inside HIPI (**Settings → PC link → CON loop**). |
 | `known_devices` | device names, comma-separated | (written by HIPI) | The devices this file has met. A device that's new in an update gets its first state when it's added here (the printer: switched off). Leave it as it is. |
 
-The device names: `TFDISPLAY`, `TFDRIVE`, `TFLEDS`, `TFPIXEL`,
-`PILBOX`, `TFPLOT`, `TFTERM`, `TFPRINT`, `TFI2C` — in capitals, and no spaces in the lists.
+The device names: `DISPLAY`, `DRIVE`, `LEDS`, `PIXEL`,
+`PILBOX`, `PLOTTER`, `TERMINAL`, `PRINTER`, `I2C` — in capitals, and no spaces in the lists.
 
 **Logging and screen dumps**
 
@@ -1885,7 +1899,7 @@ and PILBOX first on the loop:
 
 ```
 # My HIPI
-media.TFDRIVE=GAMES.DAT
+media.DRIVE=GAMES.DAT
 drive_standby=0
 textcolor=2016
 fontsize=1
@@ -1898,8 +1912,8 @@ clock_fallback=4
 clock_style=1
 clock_us=1
 clock_12h=1
-disabled_devices=TFLEDS,TFTERM
-device_order=PILBOX,TFDISPLAY,TFDRIVE,TFPIXEL,TFPLOT,TFLEDS,TFTERM
+disabled_devices=LEDS,TERMINAL
+device_order=PILBOX,DISPLAY,DRIVE,PIXEL,PLOTTER,LEDS,TERMINAL
 con_loop=cable
 trace=0
 debug=0
@@ -1934,11 +1948,11 @@ card files, they are in the SD card zip of that download.
 
 | Problem | Try this |
 |---------|----------|
-| HP-41 can't find the drive or the cassette | Is a cassette chosen (not *No media*)? Is `TFDRIVE` ON in **Devices**, and the switch in the Tape view not OFF? |
-| Nothing shows on the screen | Is `TFDISPLAY` ON in **Devices**? Is the Display view chosen (swipe)? HIPI starts with the first device switched on that has a view, which is not always the display |
+| HP-41 can't find the drive or the cassette | Is a cassette chosen (not *No media*)? Is `DRIVE` ON in **Devices**, and the switch in the Tape view not OFF? |
+| Nothing shows on the screen | Is `DISPLAY` ON in **Devices**? Is the Display view chosen (swipe)? HIPI starts with the first device switched on that has a view, which is not always the display |
 | Tape view is missing | The tape pictures are missing from the `resources` folder — copy the files from the SD card zip |
 | Printer view is missing | `hp82162a.bmp` and `prtparts.bmp` are missing from the `resources` folder — copy them from the SD card zip |
-| The HP-41 prints on the printer instead of the display | That's what it does with a printer on the loop — switch `TFPRINT` off (Printer view or **Devices**) |
+| The HP-41 prints on the printer instead of the display | That's what it does with a printer on the loop — switch `PRINTER` off (Printer view or **Devices**) |
 | The HP-41 doesn't print on the display after changing **Emulate** | Switch the HP-41 off and on (or `AUTOIO`): it finds the display again when it sets up the loop |
 | The printer is on, but nothing prints | Switch the HP-41 off and on (or `AUTOIO`): the printer gets its address when the loop is set up |
 | Files copied from the PC don't show | Eject the drive on the computer first |

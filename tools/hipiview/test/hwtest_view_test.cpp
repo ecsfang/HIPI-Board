@@ -149,8 +149,8 @@ int main(int argc, char** argv) {
     d.begin();
     makeChipFont();
     hipi::Screen screen(&d, 0x07E0, 1, 200, 1024);
-    plotter = new CPlotter("TFPLOT");
-    printer = new CPrinter("TFPRINT");
+    plotter = new CPlotter("PLOTTER");
+    printer = new CPrinter("PRINTER");
     devices = { plotter, printer };
     hipi::views_setPrinter(printer);
     hipi::views_init(&d, &screen, plotter, &plotter->hpgl());
@@ -175,24 +175,24 @@ int main(int argc, char** argv) {
     run(2000);                                              // the name box goes away
     snapshot("tools/hipiview/hwtest_1_page.png");
 
-    // ── Watching: what TFLEDS / TFPIXEL put on them shows on the page ──
+    // ── Watching: what LEDS / PIXEL put on them shows on the page ──
     {
-        hwstub::led[2] = true;                              // as TFLEDS "3O"
-        hwstub::pixelCount = 8;                             // as TFPIXEL "0N8" ...
+        hwstub::led[2] = true;                              // as LEDS "3O"
+        hwstub::pixelCount = 8;                             // as PIXEL "0N8" ...
         const hwstub::Rgb cols[8] = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 },
                                       { 0, 0, 0 }, { 255, 255, 255 }, { 40, 0, 0 }, { 255, 0, 255 } };
         for (int i = 0; i < 8; ++i) hwstub::pixels[static_cast<std::size_t>(i)] = cols[i];
         run(100);
         chip.render(panel.data(), 0.0);
         check(yellowAt(ledButton(2).x - 20, ledButton(2).y - 10) && !yellowAt(ledButton(1).x - 20, ledButton(1).y - 10),
-              "TFLEDS lights LED 3: its button lit on the page");
+              "LEDS lights LED 3: its button lit on the page");
         auto dot = [](int i) { return at(544 + (15 - i) * 29, 154); };   // (pixel 1 on the right)
         auto isRed = [](std::uint32_t c) { return ((c >> 16) & 0xFF) > 150 && ((c >> 8) & 0xFF) < 80 && (c & 0xFF) < 80; };
         auto isBlue = [](std::uint32_t c) { return ((c >> 16) & 0xFF) < 80 && (c & 0xFF) > 150; };
-        check(isRed(dot(0)) && isBlue(dot(2)), "TFPIXEL's colours on the dots (pixel 1 red, pixel 3 blue)");
+        check(isRed(dot(0)) && isBlue(dot(2)), "PIXEL's colours on the dots (pixel 1 red, pixel 3 blue)");
         check(((dot(6) >> 16) & 0xFF) > 40 && ((dot(6) >> 16) & 0xFF) < ((dot(0) >> 16) & 0xFF) - 60 && (dot(6) & 0xFFFF) < 0x1010,
               "... a dim one shown dimmer");
-        check((dot(7) & 0xFFFFFF) != 0 && (dot(8) & 0xFFFFFF) == 0, "... 8 of them (TFPIXEL's count), the 9th unlit");
+        check((dot(7) & 0xFFFFFF) != 0 && (dot(8) & 0xFFFFFF) == 0, "... 8 of them (PIXEL's count), the 9th unlit");
         snapshot("tools/hipiview/hwtest_4_watching.png");
         check(!hwstub::ledsTaken && !hwstub::pixelsTaken, "... and the page took nothing over");
         hwstub::led[2] = false;
@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
         for (auto& p : hwstub::pixels) p = hwstub::Rgb{ 0, 0, 0 };
         run(100);
         chip.render(panel.data(), 0.0);
-        check(!yellowAt(ledButton(2).x - 20, ledButton(2).y - 10) && (dot(0) & 0xFFFFFF) == 0, "TFLEDS / TFPIXEL off: off on the page too");
+        check(!yellowAt(ledButton(2).x - 20, ledButton(2).y - 10) && (dot(0) & 0xFFFFFF) == 0, "LEDS / PIXEL off: off on the page too");
     }
 
     // ── LEDs ─────────────────────────────────────────────────────────

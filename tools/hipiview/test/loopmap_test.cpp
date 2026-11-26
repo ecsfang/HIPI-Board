@@ -8,9 +8,9 @@
 //   loopmap_1_listener.png   the HP-41 sends to the printer (LAD 02)
 //   loopmap_2_talker.png     the HP-41 asks the display who it is (TAD 01, SAI)
 //   loopmap_3_both.png       the plotter is talker and listener at once
-//   loopmap_4_details.png    TFPLOT's details box, with GO TO PLOTTER VIEW
+//   loopmap_4_details.png    PLOTTER's details box, with GO TO PLOTTER VIEW
 //   loopmap_5_no_view.png    a device after HIPI: no view of its own
-//   loopmap_5b_error.png     TFPLOT's details box with an HP-GL error
+//   loopmap_5b_error.png     PLOTTER's details box with an HP-GL error
 //
 //   make loopmap_test && ./loopmap_test   (in tools/hipiview)
 #include "LT7683.hpp"
@@ -159,10 +159,10 @@ int main() {
     hipi::LT7683 d(t, SCREEN_MAX_X, SCREEN_MAX_Y);
     d.begin();
     makeChipFont();
-    Dev disp("TFDISPLAY", 0x30, DISPLAY, 1), prt("TFPRINT", 0x20, PRINTER, 2);
+    Dev disp("DISPLAY", 0x30, DISPLAY, 1), prt("PRINTER", 0x20, PRINTER, 2);
     // The plotter is a real CPlotter: loopmap.cpp asks it for its error
     // (static_cast<CPlotter*>), so a stand-in CDevice would be read as one
-    CPlotter plot("TFPLOT");
+    CPlotter plot("PLOTTER");
     plot.addr(3);
     devices = { &disp, &prt, &plot };
     hipi::loopmap_init(&d);
@@ -270,14 +270,14 @@ int main() {
     }
 
     // ── The details box: a tap on a card ────────────────────────────────
-    // (three devices: TFPLOT's card at the bottom, about x 380..566)
+    // (three devices: PLOTTER's card at the bottom, about x 380..566)
     hipi::loopmap_drawAll();
     {
         int x = 0, y = 0;
         check(hipi::loopmap_cardPoint(static_cast<int>(plot.addr()), x, y) && x >= 380 && x < 566 && y > 450 &&
-              !hipi::loopmap_cardPoint(29, x, y), "loopmap_cardPoint(): the middle of TFPLOT's card; none for 29");
+              !hipi::loopmap_cardPoint(29, x, y), "loopmap_cardPoint(): the middle of PLOTTER's card; none for 29");
     }
-    check(hipi::loopmap_tap(470, 510) && hipi::loopmap_detailsOpen(), "a tap on TFPLOT's card: its details box");
+    check(hipi::loopmap_tap(470, 510) && hipi::loopmap_detailsOpen(), "a tap on PLOTTER's card: its details box");
     snapshot("loopmap_4_details.png");
     chip.render(panel.data(), 0.0, false);
     // The yellow GO TO PLOTTER VIEW button at the box's lower right
@@ -301,7 +301,7 @@ int main() {
             for (int y = 280; y < 310; ++y) for (int x = 380; x < 760; ++x) row.push_back(at(x, y));
             return row;
         };
-        check(plot.hpgl().errorCode() == 0, "TFPLOT: no error yet");
+        check(plot.hpgl().errorCode() == 0, "PLOTTER: no error yet");
         hipi::loopmap_drawAll();
         hipi::loopmap_tap(470, 510);
         const std::vector<std::uint32_t> before = statusRow();

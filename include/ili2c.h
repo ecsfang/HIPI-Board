@@ -1,7 +1,7 @@
 #ifndef __ILI2C_H__
 #define __ILI2C_H__
 
-// CHipiI2c -- TFI2C: the I2C bus for the controller. Instead of a driver
+// CHipiI2c -- I2C: the I2C bus for the controller. Instead of a driver
 // per chip, the controller reads and writes the chips'
 // registers itself, or asks for a measurement described in i2c/*.txt on
 // the SD card (sdcard/i2c/chips.txt) -- "MT" gives e.g. 23.4. The commands
@@ -23,6 +23,8 @@
 
 class CHipiI2c : public CDevice {
 public:
+    // SDI: HIPI's own ID, 7 characters (the HP-41's FINDID compares 7)
+    const char* deviceId() override { return "HIPII2C\r\n"; }
     CHipiI2c(const char* name, hipi::I2cCommandEnv env, std::function<void()> reload, IL_ADDR_t sai = 0x52,
              IL_ADDR_t aau = 31)
         : CDevice(name, sai, aau, NONE), commander_(std::move(env)), reload_(std::move(reload)) {}
@@ -46,7 +48,7 @@ private:
 };
 
 namespace hipi {
-// TFI2C's bus, chip descriptions and built-in checks (i2c_ident.cpp)
+// I2C's bus, chip descriptions and built-in checks (i2c_ident.cpp)
 I2cCommandEnv i2c_commandEnv();
 }
 

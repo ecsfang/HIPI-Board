@@ -1,4 +1,4 @@
-// vl53l0x.h -- the VL53L0X time-of-flight distance sensor, for TFI2C's
+// vl53l0x.h -- the VL53L0X time-of-flight distance sensor, for I2C's
 // "builtin vl53l0x.D" (sdcard/i2c/chips.txt): HIPI does ST's whole set-up
 // in the background (reference SPADs, tuning, timing, calibration), so the
 // HP-41 only asks for a distance ("MD").

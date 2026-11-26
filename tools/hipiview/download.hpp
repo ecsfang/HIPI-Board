@@ -138,7 +138,7 @@ public:
         // (an HP-41 name may hold what a PC's file name can't: '/', ':' ...)
         for (char& c : name)
             if (std::string("<>:\"/\\|?*").find(c) != std::string::npos) c = '_';
-        drive = from_.empty() ? drive_ : from_ + " in " + drive_;   // ("tape1.dat in TFDRIVE" for one file)
+        drive = from_.empty() ? drive_ : from_ + " in " + drive_;   // ("tape1.dat in DRIVE" for one file)
         data.swap(data_);
         data_.clear();
         step_ = Step::Idle;

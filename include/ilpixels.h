@@ -10,6 +10,8 @@
 // the actual pixel/protocol logic lives there.
 class CHipiPixel : public CDevice {
 public:
+    // SDI: HIPI's own ID, 7 characters (the HP-41's FINDID compares 7)
+    const char* deviceId() override { return "HIPIPIX\r\n"; }
     CHipiPixel(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau=31) : CDevice(name, _sai, _aau, PIXEL) {
     }
     void doListener(IL_CMD_t cmd, IL_CMD_t *rtn);

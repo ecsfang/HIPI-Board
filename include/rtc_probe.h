@@ -1,6 +1,6 @@
 // rtc_probe.h -- the clock chips' checks for the I2C chip list ("probe
 // clock", "probe pcf85063" in i2c/chips.txt): the Hardware test page and
-// TFI2C's "I". Only reads; the chip drivers themselves are in rtc.h.
+// I2C's "I". Only reads; the chip drivers themselves are in rtc.h.
 #pragma once
 #include "i2c_chips.h"
 #include <cstdint>

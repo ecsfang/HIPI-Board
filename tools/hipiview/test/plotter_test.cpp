@@ -38,7 +38,7 @@ int main() {
     {
         // From an HP-41 drawing a space shuttle (a nose cone arc): CR LF
         // in the middle of a coordinate
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         send(p, "IN;SP1;PU;PA2187,1648;PD;"
                 "PA2227,1622,2270,1599,2314,1581,2360,1566,2407,1556,2455,1550,2503,1548,2551,1550,2599,1557,26\r\n"
                 "46,1569,2692,1584,2736,1604;\r\nPU;");
@@ -49,7 +49,7 @@ int main() {
     }
     {
         // CR / LF between commands, between the letters, after a separator
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         send(p, "IN;SP1;\r\nP\r\nU;PA1000,1000;PD;PA1100,\r\n1200;\nPA1300\r\n,1400;PU;");
         check(has(p, 1000, 1000, 1100, 1200) && has(p, 1100, 1200, 1300, 1400) && p.hpgl().segments().size() == 2,
               "CR / LF anywhere else outside a label: ignored too");
@@ -58,7 +58,7 @@ int main() {
         // The manual's BOX (8.1): OUTA ends every text with CR LF; the
         // last command ("PU") has nothing after it -- carried out once the
         // HP-41 has been quiet a moment (idle())
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         send(p, "IN SP1 PU1000 1000\r\nPD4000 1000 4000 4000\r\nPD1000 4000 1000 1000\r\nPU\r\n");
         check(p.hpgl().segments().size() == 4, "BOX: the square, four sides");
         check(p.hpgl().penDown(), "... PU at the end of the text: not yet (it might go on)");
@@ -77,7 +77,7 @@ int main() {
     }
     {
         // In a label CR and LF are what they are: a new line
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         send(p, "IN;SP1;PA1000,1000;LBAB\r\nCD\x03;");
         int minY = 32767, maxY = -32768;
         for (const PlotSegment& s : p.hpgl().segments()) { minY = std::min<int>(minY, std::min(s.y0, s.y1)); maxY = std::max<int>(maxY, std::max(s.y0, s.y1)); }
@@ -308,7 +308,7 @@ int main() {
     {
         // Errors as the manual has them (OE's numbers), the E-mask (IM),
         // the ERROR light (errorCode()) and HIPI's error log
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         auto oe = [&](const std::string& hpgl) {
             send(p, "IN;" + hpgl + ";OE;");
             const std::string t = p.outputText();
@@ -363,7 +363,7 @@ int main() {
     }
     {
         // HP-IL: SDI "HP7470A" CR LF; SST the OS byte (bit 3 not cleared), then ETO
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         p.setEnabled(true);
         p.hpil(AAU);
         p.hpil(AAD + 1);
@@ -392,7 +392,7 @@ int main() {
     {
         // IW beyond the paper: lines still cut at the paper's edge (the
         // hard-clip limits) -- they used to be drawn off it
-        CPlotter p("TFPLOT");
+        CPlotter p("PLOTTER");
         send(p, "IN;IW-5000,-5000,20000,20000;SP1;PA10000,1000;PD;PA12000,1000;PU;PA1000,500;PD;PA1000,-500;PU;");
         check(p.hpgl().segments().size() == 2 && has(p, 10000, 1000, 10300, 1000) && has(p, 1000, 500, 1000, 0),
               "IW beyond the paper: cut at the paper's edge");

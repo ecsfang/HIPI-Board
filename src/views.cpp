@@ -41,7 +41,7 @@ namespace {
 // with no display device) -- swiping steps through the devices from here
 CDevice* viewDevice_ = nullptr;
 // The display's HP 92198 screen (video80.h) -- it draws itself. The
-// Display view is it (output Video80) while TFDISPLAY emulates the 92198,
+// Display view is it (output Video80) while DISPLAY emulates the 92198,
 // else Screen (output Display).
 Video80* video80_ = nullptr;
 bool displayV80_ = false;

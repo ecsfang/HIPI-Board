@@ -1,7 +1,7 @@
 #ifndef __PRINTER_H__
 #define __PRINTER_H__
 
-// CPrinter -- an HP 82162A thermal printer on the HP-IL loop (TFPRINT),
+// CPrinter -- an HP 82162A thermal printer on the HP-IL loop (PRINTER),
 // with its own view on the panel: a picture of the printer with working
 // controls (views.cpp, Printer view).
 //
@@ -86,6 +86,8 @@ public:
     }
 
     ViewKind viewKind() const override { return ViewKind::Printer; }
+    // SDI: as the real HP 82162A printer
+    const char* deviceId() override { return "HP82162A\r\n"; }
 
     // Adds the Service Request bit to passing frames while SR is set
     IL_CMD_t hpil(IL_CMD_t cmd) override;

@@ -259,7 +259,7 @@ static const I2cChipList& chipList() {
     return list_;
 }
 
-// HIPI's own chips (the touch panel): TFI2C may not write there
+// HIPI's own chips (the touch panel): I2C may not write there
 static bool hipiOwns(std::uint8_t addr) {
     if (addr == 0x38) return true;                       // FT5316
     return chipList().expectedAt(addr) != nullptr;

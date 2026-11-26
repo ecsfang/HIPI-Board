@@ -1,4 +1,4 @@
-// video80_view_test.cpp -- TFDISPLAY as an HP 92198 / MC00701A, as HIPI
+// video80_view_test.cpp -- DISPLAY as an HP 92198 / MC00701A, as HIPI
 // runs it: the real Video80 screen (src/video80.cpp), the display device
 // (src/display.cpp, its model setting) and the LT7683 driver against the
 // emulated chip.
@@ -147,7 +147,7 @@ int main() {
     term->setColor(0x07E0);
     screen = new hipi::Screen(&d, 0x07E0, 1, 200, 1024);
     screen->suspend();
-    dev = new CDisplay("TFDISPLAY");
+    dev = new CDisplay("DISPLAY");
     dev->setVideo80(term);
     dev->setEnabled(true);
 

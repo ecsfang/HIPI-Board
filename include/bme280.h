@@ -1,5 +1,5 @@
 // bme280.h -- the Bosch BME280 (temperature, pressure and humidity), for
-// TFI2C's "builtin bme280.T" / "bme280.P" / "bme280.H" (sdcard/i2c/chips.txt).
+// I2C's "builtin bme280.T" / "bme280.P" / "bme280.H" (sdcard/i2c/chips.txt).
 //
 // The raw readings are turned into degrees, pascals and per cent with the
 // chip's own calibration (registers 0x88..0x9F, 0xA1 and 0xE1..0xE7), using

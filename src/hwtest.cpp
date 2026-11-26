@@ -65,7 +65,7 @@ constexpr std::uint8_t kLevel = 96;      // pixel brightness (of 255): bright en
 bool active_ = false;                    // the page is open
 bool dirty_ = false;                     // something wasn't drawn: draw it all
 // Until a test of its own starts, the page shows what's on the LEDs and
-// pixels -- whoever drives them (TFLEDS, TFPIXEL, HP-IL activity): a
+// pixels -- whoever drives them (LEDS, PIXEL, HP-IL activity): a
 // program can be tried without them fitted. A test takes that section over.
 bool ledsTest_ = false, pixTest_ = false;
 bool ledSeen_[5] = {};                   // watching: lit now (hwio::ledLevel())
@@ -328,8 +328,8 @@ void drawDots(bool all) {
 const char* hintText() {
     if (!pixTest_) {
         if (!hwio::pixelsFitted()) return "";
-        return hwio::pixelCount() > kMaxPixels ? "Shows what TFPIXEL sends (the first 16)"
-                                               : "Shows what TFPIXEL sends";
+        return hwio::pixelCount() > kMaxPixels ? "Shows what PIXEL sends (the first 16)"
+                                               : "Shows what PIXEL sends";
     }
     switch (solid_) {
         case Solid::Red:   return "Not red? Choose another order above";
@@ -344,8 +344,8 @@ const char* hintText() {
 void drawLedStatus() {
     const int x = L.leds.x + 16;
     const std::size_t n = static_cast<std::size_t>((L.leds.w - 32) / 8);
-    const char* t = !hwio::ledsFitted() ? "" : ledsTest_ ? "Test -- Off: back to TFLEDS, HP-IL and the plotter"
-                                                         : "Shows what TFLEDS, HP-IL and the plotter send";
+    const char* t = !hwio::ledsFitted() ? "" : ledsTest_ ? "Test -- Off: back to LEDS, HP-IL and the plotter"
+                                                         : "Shows what LEDS, HP-IL and the plotter send";
     text(x, L.ledRow2 + L.ledH + 10, pad(t, n).c_str(), 0, kGrey, kBlack);
 }
 
@@ -636,13 +636,13 @@ void hwtest_poll() {
         sendPixels();
         part([] { drawDots(false); });
     }
-    // Watching: TFLEDS / TFPIXEL (or HP-IL activity) on them
+    // Watching: LEDS / PIXEL (or HP-IL activity) on them
     if (time_reached(nextWatch_)) {
         nextWatch_ = make_timeout_time_ms(kWatchMs);
         if (!ledsTest_ && watchLeds()) part([] { drawButtons(isLed); });
         if (!pixTest_) {
             watchPixels();
-            if (hwio::pixelCount() != drawnCount_)          // (TFPIXEL's "0N8")
+            if (hwio::pixelCount() != drawnCount_)          // (PIXEL's "0N8")
                 part([] { drawCount(); drawButton(*find(Id::Minus)); drawButton(*find(Id::Plus)); drawHint(); });
             part([] { drawDots(false); });
         }
@@ -710,7 +710,7 @@ bool hwtest_tap(int x, int y) {
             part([] { drawButtons(inLeds); drawLedStatus(); });
             break;
         case Id::LedOff:
-            endLedTest();                         // (back to showing TFLEDS)
+            endLedTest();                         // (back to showing LEDS)
             watchLeds();
             part([] { drawButtons(inLeds); drawLedStatus(); });
             break;
@@ -762,7 +762,7 @@ bool hwtest_tap(int x, int y) {
             break;
         }
         case Id::PixOff:
-            endPixTest();                         // (back to showing TFPIXEL)
+            endPixTest();                         // (back to showing PIXEL)
             watchPixels();
             part([] { drawButtons(inPixels); drawDots(false); drawHint(); });
             break;

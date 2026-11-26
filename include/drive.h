@@ -109,6 +109,8 @@ class CDrive : public CDevice {
     }
 public:
     ViewKind viewKind() const override { return ViewKind::Tape; }
+    // SDI: as the real HP 82161A drive
+    const char* deviceId() override { return "HP82161A\r\n"; }
     IL_CMD_t hpil(IL_CMD_t cmd) override;
     DrivePower powerMode() const { return powerMode_; }
     DrivePower lastOnMode() const { return lastOnMode_; }

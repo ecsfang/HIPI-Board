@@ -17,7 +17,7 @@
 #include "drive.h"        // CDrive -- deferred switch-off in the Devices menu
 #include "printer.h"      // CPrinter -- the Printer view's menu
 #include "video80.h"      // the display's HP 92198 mode (80-column screen)
-#include "display.h"      // TFDISPLAY -- Settings -> Screen -> Emulate
+#include "display.h"      // DISPLAY -- Settings -> Screen -> Emulate
 #include "chartable.h"    // Character table: the strip's buttons in a character's box
 #include "screendump.h"   // Display -> Screendump
 #include "display_text.h" // Display -> Text
@@ -1536,7 +1536,7 @@ private:
         return 0;
     }
     int traceIndex() const { return bExtTrace ? 2 : (bTrace ? 1 : 0); }
-    // TFDISPLAY emulates the HP 92198 (else the HP 82163)
+    // DISPLAY emulates the HP 92198 (else the HP 82163)
     static Video80* displayV80() {
         return videoDisplay != nullptr && videoDisplay->isVideo80() ? videoDisplay->video80() : nullptr;
     }
@@ -1544,7 +1544,7 @@ private:
         if (Video80* v = displayV80()) { v->put(27); v->put('E'); }
         else screen_.clear();
     }
-    // Which display TFDISPLAY is: HP 82163 or HP 92198
+    // Which display DISPLAY is: HP 82163 or HP 92198
     Item emulateItem() {
         return value("Emulate", [] { return std::string(displayV80() ? "HP 92198" : "HP 82163"); },
                      [this] {

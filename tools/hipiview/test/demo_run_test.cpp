@@ -179,10 +179,10 @@ int main(int argc, char** argv) {
     makeChipFont();
     screen = new hipi::Screen(&d, 0x07E0, 1, 200, 1024);
     video80Term = new hipi::Video80(&d);
-    plotter = new CPlotter("TFPLOT");
-    printer = new CPrinter("TFPRINT");
+    plotter = new CPlotter("PLOTTER");
+    printer = new CPrinter("PRINTER");
     CDrive* drive = new CDrive();
-    videoDisplay = new CDisplay("TFDISPLAY");
+    videoDisplay = new CDisplay("DISPLAY");
     videoDisplay->setVideo80(video80Term);
     videoDisplay->setEnabled(true);
     drive->setEnabled(true);

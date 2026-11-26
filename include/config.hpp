@@ -178,11 +178,49 @@ public:
     // ----- Accessors (each setter persists immediately) -----
 
     // Selected LIF (.dat) file of each cassette drive, by device name.
-    // An old CONFIG.TXT's single "filename=" is used for TFDRIVE.
+    // An old CONFIG.TXT's single "filename=" is used for DRIVE.
+    // Device names before v1.7.4 began with "TF" (TFDRIVE, TFPRINT...), and a
+    // test build had "HIPI" (HIPIDRIVE...). They are DRIVE, PRINTER... now. A
+    // CONFIG.TXT written by an older version is read with the old names taken
+    // as the new ones, and saved with the new ones.
+    static std::string currentDeviceName(const std::string& n) {
+        struct Map { const char* old; const char* now; };
+        static const Map kMap[] = {
+            { "DRIVE", "DRIVE" },     { "DISPLAY", "DISPLAY" }, { "LEDS", "LEDS" },
+            { "PIXEL", "PIXEL" },     { "PLOT", "PLOTTER" },    { "PRINT", "PRINTER" },
+            { "TERM", "TERMINAL" },   { "I2C", "I2C" } };
+        for (const char* prefix : { "TF", "HIPI" }) {
+            const std::string pre = prefix;
+            if (n.compare(0, pre.size(), pre) != 0) continue;
+            const std::string rest = n.substr(pre.size());
+            for (const Map& m : kMap) {
+                const std::string old = m.old;
+                if (rest.compare(0, old.size(), old) != 0) continue;
+                const std::string tail = rest.substr(old.size());      // "", or a number: DRIVE2
+                bool digits = true;
+                for (char c : tail) digits = digits && std::isdigit(static_cast<unsigned char>(c));
+                if (digits) return std::string(m.now) + tail;
+            }
+        }
+        return n;
+    }
+    // The same for a comma-separated list of device names
+    static std::string currentDeviceNames(const std::string& csv) {
+        std::string out;
+        std::size_t start = 0;
+        while (start <= csv.size()) {
+            std::size_t comma = csv.find(',', start);
+            if (comma == std::string::npos) comma = csv.size();
+            if (start > 0) out += ',';
+            out += currentDeviceName(csv.substr(start, comma - start));
+            start = comma + 1;
+        }
+        return out;
+    }
     std::string driveMedia(const std::string& device) const {
         const auto it = driveMedia_.find(device);
         if (it != driveMedia_.end()) return it->second;
-        return device == "TFDRIVE" ? legacyFilename_ : std::string();
+        return device == "DRIVE" ? legacyFilename_ : std::string();
     }
     void setDriveMedia(const std::string& device, const std::string& f) {
         driveMedia_[device] = f;
@@ -201,7 +239,7 @@ public:
     std::uint8_t fontSize() const { return fontSize_; }
     void setFontSize(std::uint8_t s) { fontSize_ = s; save(); }
 
-    // TFDISPLAY's model: 0 = HP 82163 (Screen), 1 = HP 92198 / MC00701A
+    // DISPLAY's model: 0 = HP 82163 (Screen), 1 = HP 92198 / MC00701A
     // 80-column interface (Video80) -- Settings -> Screen -> Emulate
     std::uint8_t displayModel() const { return displayModel_; }
     void setDisplayModel(std::uint8_t m) { displayModel_ = m; save(); }
@@ -213,12 +251,12 @@ public:
     void setV80Forty(bool f) { v80Forty_ = f; save(); }
 
     // Hardware test page: HP-IL activity on LED 4 -- 0 off (it's free for
-    // TFLEDS), 1 all frames, 2 messages (IDY ignored; leds.h) -- and
+    // LEDS), 1 all frames, 2 messages (IDY ignored; leds.h) -- and
     // whether the LEDs / pixels are fitted (for now only used by the test
     // page)
     int hpilLeds() const { return hpilLeds_; }
     void setHpilLeds(int mode) { hpilLeds_ = static_cast<std::uint8_t>(mode); save(); }
-    // ... and the plotter's ERROR light on LED 3 (else it's free for TFLEDS)
+    // ... and the plotter's ERROR light on LED 3 (else it's free for LEDS)
     bool plotterLed() const { return plotterLed_; }
     void setPlotterLed(bool on) { plotterLed_ = on; save(); }
     bool ledsFitted() const { return ledsFitted_; }
@@ -226,7 +264,7 @@ public:
     bool pixelsFitted() const { return pixelsFitted_; }
     void setPixelsFitted(bool f) { pixelsFitted_ = f; save(); }
 
-    // TFDRIVE's OFF-STANDBY-ON switch: Off is stored as a disabled device
+    // DRIVE's OFF-STANDBY-ON switch: Off is stored as a disabled device
     // (disabled_devices); this flag tells Standby from On
     bool driveStandby() const { return driveStandby_; }
     const std::string& deviceOrder() const { return deviceOrder_; }
@@ -275,7 +313,7 @@ public:
     static constexpr std::uint8_t kShortcutCount = 6;
     std::uint8_t shortcut() const { return shortcut_; }
     void setShortcut(std::uint8_t v) { shortcut_ = v; save(); }
-    // TFPIXEL: how many colour pixels are connected (told by the
+    // PIXEL: how many colour pixels are connected (told by the
     // controller, "0N<n>" -- see pixels.h)
     std::uint8_t pixelCount() const { return pixelCount_; }
     void setPixelCount(std::uint8_t n) { if (n == pixelCount_) return; pixelCount_ = n; save(); }
@@ -283,7 +321,7 @@ public:
     // "GBR" or "BGR" (pixels.h: kPixelOrders) -- Hardware test page
     const std::string& pixelOrder() const { return pixelOrder_; }
     void setPixelOrder(const std::string& o) { if (o == pixelOrder_) return; pixelOrder_ = o; save(); }
-    // TFPRINT's MODE switch (0 MAN, 1 TRACE, 2 NORM) and INTENSITY
+    // PRINTER's MODE switch (0 MAN, 1 TRACE, 2 NORM) and INTENSITY
     // switch (0 LIGHT .. 4 DARK) -- see printer.h
     std::uint8_t printerMode() const { return printerMode_; }
     void setPrinterMode(std::uint8_t m) { if (m > 2 || m == printerMode_) return; printerMode_ = m; save(); }
@@ -362,7 +400,7 @@ public:
 private:
     // Wraps in commas so a substring search can't false-positive on a
     // name that's merely a substring of another (e.g. "LED" inside
-    // "TFLEDS") -- ",TFLEDS," only matches the exact token ",TFLEDS,".
+    // "LEDS") -- ",LEDS," only matches the exact token ",LEDS,".
     static std::string wrapCsv(const std::string& s) { return "," + s + ","; }
 
     std::size_t findDeviceToken(const std::string& name) const {
@@ -391,7 +429,7 @@ private:
                 for (char* e = value + std::strlen(value); e > value && (e[-1] == ' ' || e[-1] == '\t'); --e) e[-1] = 0;
                 const char* key = line;
                 if (std::strncmp(key, "media.", 6) == 0) {
-                    driveMedia_[key + 6] = value;
+                    driveMedia_[currentDeviceName(key + 6)] = value;
                 } else if (std::strcmp(key, "filename") == 0) {
                     legacyFilename_ = value;      // pre-multi-drive CONFIG.TXT
                 } else if (std::strcmp(key, "textcolor") == 0) {
@@ -473,9 +511,9 @@ private:
                 } else if (std::strcmp(key, "clock_fallback") == 0) {
                     clockFallback_ = static_cast<std::uint8_t>(std::atoi(value));
                 } else if (std::strcmp(key, "disabled_devices") == 0) {
-                    disabledDevices_ = value;
+                    disabledDevices_ = currentDeviceNames(value);
                 } else if (std::strcmp(key, "device_order") == 0) {
-                    deviceOrder_ = value;
+                    deviceOrder_ = currentDeviceNames(value);
                 }
             }
             line = std::strtok(nullptr, "\r\n");
@@ -520,9 +558,9 @@ private:
     std::uint8_t  displayMirror_ = 0;      // display_mirror=off|view|control (USB CDC3, tools/hipiview)
     std::uint8_t  signalCells_ = 0;        // signal_cells=bands|lines|none
     std::uint8_t  shortcut_ = 0;           // shortcut=loopmap (kShortcutNames)
-    std::uint8_t  pixelCount_ = 5;         // pixel_count=1..32 (TFPIXEL)
+    std::uint8_t  pixelCount_ = 5;         // pixel_count=1..32 (PIXEL)
     std::string   pixelOrder_ = "RGB";     // pixel_order=RGB|GRB|BRG|RBG|GBR|BGR (the HIPI board's strip: RGB)
-    std::uint8_t  printerMode_ = 0;        // printer_mode=man|trace|norm (TFPRINT)
+    std::uint8_t  printerMode_ = 0;        // printer_mode=man|trace|norm (PRINTER)
     std::uint8_t  printerIntensity_ = 2;   // printer_intensity=0..4
     std::string   knownDevices_ = "";      // known_devices=<names> (see isKnownDevice())
     std::uint8_t  clockFallback_ = 3;  // SaverRain

@@ -1,5 +1,5 @@
 // bmp180.h -- the Bosch BMP180 (and its predecessor BMP085, which is
-// calculated the same way), for TFI2C's "builtin bmp180.T" / "bmp180.P"
+// calculated the same way), for I2C's "builtin bmp180.T" / "bmp180.P"
 // (sdcard/i2c/chips.txt).
 //
 // The raw readings are turned into degrees and pascals with 11 calibration

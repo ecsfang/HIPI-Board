@@ -5,7 +5,7 @@
 enum class DrivePower { Off, Standby, On };
 class CDrive : public CDevice {
 public:
-    CDrive() : CDevice("TFDRIVE", 0x10, 2, DRIVE) {}
+    CDrive() : CDevice("DRIVE", 0x10, 2, DRIVE) {}
     void clear() override {}
     const std::string& mediaFile() const { return file_; }
     void setStubFile(const std::string& f) { file_ = f; }

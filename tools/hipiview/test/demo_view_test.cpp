@@ -136,8 +136,8 @@ int main(int argc, char** argv) {
     d.begin();
     makeChipFont();
     hipi::Screen screen(&d, 0x07E0, 1, 200, 1024);
-    plotter = new CPlotter("TFPLOT");
-    printer = new CPrinter("TFPRINT");
+    plotter = new CPlotter("PLOTTER");
+    printer = new CPrinter("PRINTER");
     devices = { plotter, printer };
     hipi::views_setPrinter(printer);
     hipi::views_init(&d, &screen, plotter, &plotter->hpgl());

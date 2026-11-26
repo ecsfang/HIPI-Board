@@ -1,4 +1,4 @@
-// bmp390.h -- the Bosch BMP390 (and BMP388) pressure sensor, for TFI2C's
+// bmp390.h -- the Bosch BMP390 (and BMP388) pressure sensor, for I2C's
 // "builtin bmp390.T" / "builtin bmp390.P" (sdcard/i2c/chips.txt).
 //
 // The chip's raw readings are turned into degrees and pascals with 21 bytes

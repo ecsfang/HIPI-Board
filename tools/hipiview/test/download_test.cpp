@@ -32,7 +32,7 @@ std::uint64_t nowMs = 1000;
 
 // The drive: what HIPI's would do (src/pico_main.cpp's DriveForDownload)
 struct FakeDrive : hipi::DownloadDrive {
-    std::string nm = "TFDRIVE", media = "GAMES.DAT";
+    std::string nm = "DRIVE", media = "GAMES.DAT";
     std::vector<std::uint8_t> file;
     bool isQuiet = true;
     std::uint32_t writes = 0;
@@ -142,7 +142,7 @@ int main() {
         std::string name, drv;
         check(l.got(d, name, drv), "M: the cassette arrived");
         check(d == l.drive->file, "... the same bytes (64 kB + 300: the last block cut to the file's size)");
-        check(name == "GAMES.DAT" && drv == "TFDRIVE", "... its name and drive");
+        check(name == "GAMES.DAT" && drv == "DRIVE", "... its name and drive");
         check(l.viewer.askedHere(), "... asked for here");
         check(l.viewer.step() == Downloader::Step::Idle, "... taken: idle again");
         check(!l.hipiSide.busy(), "HIPI's side: idle again");
@@ -191,7 +191,7 @@ int main() {
         l.viewer.ask(l.t);
         l.run(3);
         check(l.viewer.step() == Downloader::Step::Asking && l.drive->reads == 0, "drive busy: nothing read meanwhile");
-        check(l.viewer.status().find("waiting for TFDRIVE") != std::string::npos, "... the viewer is told it waits");
+        check(l.viewer.status().find("waiting for DRIVE") != std::string::npos, "... the viewer is told it waits");
         l.drive->isQuiet = true;
         l.run(10);
         std::vector<std::uint8_t> d;
@@ -376,7 +376,7 @@ int main() {
         std::vector<std::uint8_t> d;
         std::string name, drv;
         check(l.got(d, name, drv), "... arrives");
-        check(name == "SECOND.raw" && drv == "TAPE1.DAT in TFDRIVE", "... as SECOND.raw, from TAPE1.DAT in TFDRIVE");
+        check(name == "SECOND.raw" && drv == "TAPE1.DAT in DRIVE", "... as SECOND.raw, from TAPE1.DAT in DRIVE");
         check(d == want, "... 389 bytes: the program and its checksum, as lifget -r gives it");
         check(!l.hipiSide.busy(), "... HIPI's side idle again");
         // Not a program: NAME.lif, its directory entry first -- as lifget writes it

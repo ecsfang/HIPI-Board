@@ -1,4 +1,4 @@
-# printertest -- TFPRINT (HP 82162A, src/printer.cpp) on the PC: its HP-IL
+# printertest -- PRINTER (HP 82162A, src/printer.cpp) on the PC: its HP-IL
 # answers (status bytes, service request, identification) and the text it
 # takes, with HIPI's real device code. The clock is stood in (stubs/).
 #

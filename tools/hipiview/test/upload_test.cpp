@@ -32,7 +32,7 @@ std::uint64_t nowMs = 1000;
 
 // The drive: what HIPI's would do (src/pico_main.cpp's DriveForUpload)
 struct FakeDrive : hipi::UploadDrive {
-    std::string nm = "TFDRIVE", media;
+    std::string nm = "DRIVE", media;
     bool isQuiet = true, ejected = false;
     int opens = 0, inserts = 0;
     std::string name() const override { return nm; }
@@ -125,7 +125,7 @@ struct Link {
         hipi::UploadEnv e;
         e.drive = [this]() -> std::shared_ptr<hipi::UploadDrive> { return tapeShown ? drive : nullptr; };
         e.notNow = [this] { return notNow; };
-        e.inOtherDrive = [this](const std::string& f) { return f == "INDRIVE2.DAT" ? std::string("TFDRIVE2") : other; };
+        e.inOtherDrive = [this](const std::string& f) { return f == "INDRIVE2.DAT" ? std::string("DRIVE2") : other; };
         e.nowMs = [] { return nowMs; };
         return e;
     }
@@ -195,8 +195,8 @@ int main() {
         k.runUntilSettled(3);
         check(k.viewer.step() == Uploader::Step::Confirm, "HIPI answers: the question for the user");
         std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
-        check(k.viewer.question().find("TFDRIVE is empty") != std::string::npos && k.viewer.yesText() == "Put in",
-              "... \"Put NEW.DAT into TFDRIVE? TFDRIVE is empty.\" [Put in]");
+        check(k.viewer.question().find("DRIVE is empty") != std::string::npos && k.viewer.yesText() == "Put in",
+              "... \"Put NEW.DAT into DRIVE? DRIVE is empty.\" [Put in]");
         check(!std::filesystem::exists("lif/NEW.DAT") && !std::filesystem::exists(hipi::UploadReceiver::kTempFile),
               "... nothing written before the answer");
         k.viewer.answer(true, k.t);
@@ -206,7 +206,7 @@ int main() {
         check(k.viewer.step() == Uploader::Step::Done, "sent: done");
         check(readFile("lif/NEW.DAT") == vol, "lif/NEW.DAT is the file, byte for byte");
         check(k.drive->media == "NEW.DAT" && k.drive->opens == 1 && k.drive->inserts == 1 && !k.drive->ejected,
-              "TFDRIVE opened (as OPEN), NEW.DAT put in, the lid closed");
+              "DRIVE opened (as OPEN), NEW.DAT put in, the lid closed");
         check(!std::filesystem::exists(hipi::UploadReceiver::kTempFile), "the temporary file is gone");
     }
 
@@ -220,14 +220,14 @@ int main() {
         k.viewer.startWith("SPACE.LIF", vol, k.t, why);
         k.runUntilSettled(3);
         std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
-        check(k.viewer.question().find("Replace GAMES.DAT in TFDRIVE with SPACE.LIF") != std::string::npos &&
-              k.viewer.yesText() == "Replace", "a cassette in: \"Replace GAMES.DAT in TFDRIVE with SPACE.LIF?\"");
+        check(k.viewer.question().find("Replace GAMES.DAT in DRIVE with SPACE.LIF") != std::string::npos &&
+              k.viewer.yesText() == "Replace", "a cassette in: \"Replace GAMES.DAT in DRIVE with SPACE.LIF?\"");
         k.viewer.answer(true, k.t);
         for (int i = 0; i < 300 && k.viewer.busy(); ++i) k.step();     // 3 s: the drive still busy
         std::printf("     %s\n", k.viewer.status().c_str());
         check(k.viewer.busy() && k.drive->media == "GAMES.DAT" && k.drive->opens == 0,
               "the drive busy: HIPI waits, the old cassette stays in (an HP-IL command is never cut)");
-        check(k.viewer.status().find("waiting for TFDRIVE") != std::string::npos, "... and says so");
+        check(k.viewer.status().find("waiting for DRIVE") != std::string::npos, "... and says so");
         k.drive->isQuiet = true;
         k.runUntilSettled(5);
         check(k.viewer.step() == Uploader::Step::Done && k.drive->media == "SPACE.LIF" && readFile("lif/SPACE.LIF") == vol,
@@ -359,22 +359,22 @@ int main() {
         k.runUntilSettled(3);
         std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
         check(k.viewer.step() == Uploader::Step::Confirm &&
-              k.viewer.question() == "Add VECTOP (HP-41 program, vectop.raw) to T1.DAT in TFDRIVE?" &&
-              k.viewer.yesText() == "Add", "\"Add VECTOP (HP-41 program, vectop.raw) to T1.DAT in TFDRIVE?\" [Add]");
+              k.viewer.question() == "Add VECTOP (HP-41 program, vectop.raw) to T1.DAT in DRIVE?" &&
+              k.viewer.yesText() == "Add", "\"Add VECTOP (HP-41 program, vectop.raw) to T1.DAT in DRIVE?\" [Add]");
         k.viewer.answer(true, k.t);
         k.runUntilSettled(10);
         std::printf("     %s\n", k.viewer.status().c_str());
         hipi::LifDir d = dirOf("T1.DAT");
         const hipi::LifDirEntry* e = d.find("VECTOP");
-        check(k.viewer.step() == Uploader::Step::Done && k.viewer.status() == "VECTOP is on T1.DAT in TFDRIVE now",
-              "done: \"VECTOP is on T1.DAT in TFDRIVE now\"");
+        check(k.viewer.step() == Uploader::Step::Done && k.viewer.status() == "VECTOP is on T1.DAT in DRIVE now",
+              "done: \"VECTOP is on T1.DAT in DRIVE now\"");
         check(e != nullptr && e->type == 0xE080 && e->blocks == 2 && e->start == 2 + 8 && d.files.size() == 1,
               "T1.DAT: VECTOP in its directory, PGM41, 2 blocks, right after the directory");
         check(e != nullptr && blocksOf("T1.DAT", *e) == std::vector<std::uint8_t>(ref.bytes.begin() + 32, ref.bytes.end()),
               "... its blocks are the program, byte for byte");
         check(d.firstFree == 1 && d.freeIsEnd, "... the end mark one on");
         check(k.drive->opens == 1 && k.drive->inserts == 1 && k.drive->media == "T1.DAT",
-              "TFDRIVE: the cassette out and in again (as OPEN), still T1.DAT");
+              "DRIVE: the cassette out and in again (as OPEN), still T1.DAT");
         check(!std::filesystem::exists(hipi::UploadReceiver::kTempFile), "the temporary file is gone");
 
         // Again: there already -- Skip leaves it
@@ -385,7 +385,7 @@ int main() {
         k2.viewer.startWith("VECTOP.RAW", raw2, k2.t, why);
         k2.runUntilSettled(3);
         std::printf("     \"%s\" [%s] [%s]\n", k2.viewer.question().c_str(), k2.viewer.noText().c_str(), k2.viewer.yesText().c_str());
-        check(k2.viewer.question().find("T1.DAT in TFDRIVE has a file VECTOP already") != std::string::npos &&
+        check(k2.viewer.question().find("T1.DAT in DRIVE has a file VECTOP already") != std::string::npos &&
               k2.viewer.yesText() == "Replace" && k2.viewer.noText() == "Skip", "there already: \"... Replace it?\" [Skip] [Replace]");
         k2.viewer.answer(false, k2.t);
         k2.runUntilSettled(2);
@@ -438,8 +438,8 @@ int main() {
         check(k.viewer.startWith("41CV-AL.lif", lif, k.t, why), "41CV-AL.lif (an ALL41, its entry first) dropped");
         k.runUntilSettled(3);
         std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
-        check(k.viewer.question() == "Add 41CV-AL (HP-41 write all, 41CV-AL.lif) to T2.DAT in TFDRIVE?",
-              "\"Add 41CV-AL (HP-41 write all, 41CV-AL.lif) to T2.DAT in TFDRIVE?\"");
+        check(k.viewer.question() == "Add 41CV-AL (HP-41 write all, 41CV-AL.lif) to T2.DAT in DRIVE?",
+              "\"Add 41CV-AL (HP-41 write all, 41CV-AL.lif) to T2.DAT in DRIVE?\"");
         k.viewer.answer(true, k.t);
         k.runUntilSettled(10);
         const hipi::LifDir d = dirOf("T2.DAT");
@@ -459,14 +459,14 @@ int main() {
         k.viewer.startWith("vectop.raw", raw, k.t, why);
         k.runUntilSettled(3);
         std::printf("     \"%s\" [%s]\n", k.viewer.question().c_str(), k.viewer.yesText().c_str());
-        check(k.viewer.question().find("TFDRIVE is empty") != std::string::npos &&
+        check(k.viewer.question().find("DRIVE is empty") != std::string::npos &&
               k.viewer.question().find("a new cassette, CASS01.DAT") != std::string::npos,
               "the drive empty: \"... on a new cassette, CASS01.DAT?\"");
         k.viewer.answer(true, k.t);
         k.runUntilSettled(10);
         const hipi::LifDir d = dirOf("CASS01.DAT");
         check(k.viewer.step() == Uploader::Step::Done && k.drive->media == "CASS01.DAT" && d.mediumBlocks == 512 &&
-              d.dirBlocks == 8 && d.find("VECTOP") != nullptr, "CASS01.DAT made (512 blocks, 64 entries), VECTOP on it, in TFDRIVE");
+              d.dirBlocks == 8 && d.find("VECTOP") != nullptr, "CASS01.DAT made (512 blocks, 64 entries), VECTOP on it, in DRIVE");
     }
     // ── A short image (it ends after its last file): the header's size counts
     {

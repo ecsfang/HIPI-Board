@@ -107,7 +107,7 @@
 //         says it's ready, OD outputs it (x,y,pen), DC stops waiting
 //
 // A command that isn't implemented is ignored (error 1) and logged once
-// (since the last IN), trace or not: "* TFPLOT: HP-GL 'ZZ' not supported --
+// (since the last IN), trace or not: "* PLOTTER: HP-GL 'ZZ' not supported --
 // ignored".
 //
 
@@ -136,7 +136,7 @@ inline constexpr HpglModel kHp7470A = { "7470A", 40, "0,1,0,0,1,0,0,0", 10300, 7
 
 class HpglInterpreter {
 public:
-    // name: for the log ("TFPLOT"); model: OI/OF/OO and the paper
+    // name: for the log ("PLOTTER"); model: OI/OF/OO and the paper
     explicit HpglInterpreter(const char* name, const HpglModel& model = kHp7470A);
 
     const HpglModel& model() const { return model_; }

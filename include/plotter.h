@@ -1,7 +1,7 @@
 #ifndef __PLOTTER_H__
 #define __PLOTTER_H__
 
-// CPlotter -- TFPLOT, an HP 7470A graphics plotter on HP-IL. Only the
+// CPlotter -- PLOTTER, an HP 7470A graphics plotter on HP-IL. Only the
 // HP-IL side is here: the device's identity (AID 0x60, default address 5,
 // SDI "HP7470A" CR LF), the bytes it's sent as listener go to the HP-GL
 // interpreter (hpgl.h), and what that answers (OA, OS, OE ...) goes back

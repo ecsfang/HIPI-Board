@@ -205,11 +205,11 @@ add_executable(${EXE_TARGET}
     src/i2c_chips.cpp
     src/i2c_command.cpp
     src/ili2c.cpp
-    src/bme680.cpp              # BME680/BME688 compensation (TFI2C "MT"/"MP"/"MH")
-    src/bme280.cpp              # BME280 compensation (TFI2C "MT"/"MP"/"MH")
-    src/bmp180.cpp              # BMP180/BMP085 compensation (TFI2C "MT"/"MP")
-    src/bmp390.cpp              # BMP390/BMP388 compensation (TFI2C "MT"/"MP")
-    src/vl53l0x.cpp             # VL53L0X set-up and measurement (TFI2C "MD")
+    src/bme680.cpp              # BME680/BME688 compensation (I2C "MT"/"MP"/"MH")
+    src/bme280.cpp              # BME280 compensation (I2C "MT"/"MP"/"MH")
+    src/bmp180.cpp              # BMP180/BMP085 compensation (I2C "MT"/"MP")
+    src/bmp390.cpp              # BMP390/BMP388 compensation (I2C "MT"/"MP")
+    src/vl53l0x.cpp             # VL53L0X set-up and measurement (I2C "MD")
     src/lif_create.cpp          # File picker -> Create media: an empty LIF image
     src/lif_dir.cpp             # A LIF volume's directory: a file added (from hipiview)
     src/media_create_ui.cpp     # ... its dialogs (CREATE MEDIA, MEDIA NAME)
@@ -241,7 +241,7 @@ add_executable(${EXE_TARGET}
     src/backlight.cpp
     src/clock.cpp
     src/rtc.cpp
-    src/rtc_probe.cpp           # the clock chips' checks (Hardware test, TFI2C "I")
+    src/rtc_probe.cpp           # the clock chips' checks (Hardware test, I2C "I")
     src/glyph_font.cpp
     src/clock_font_big.cpp      # generated, see scripts/ttf_to_glyphs.py
     src/clock_font_small.cpp    # generated, see scripts/ttf_to_glyphs.py

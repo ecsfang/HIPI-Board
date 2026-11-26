@@ -348,10 +348,10 @@ std::string hpglLoop() {
     // Boxes on the loop: the controller and HIPI's devices
     struct Dev { double a; const char* name; const char* model; int pen; } devs[] = {
         { kPi, "HP-41CX", "controller", 1 },
-        { kPi * 0.62, "TFDISPLAY", "HP 82163", 2 },
-        { kPi * 0.38, "TFDRIVE", "HP 82161A", 2 },
-        { kPi * 0.0, "TFPLOT", "HP 7470A", 4 },
-        { -kPi * 0.38, "TFPRINT", "HP 82162A", 4 },
+        { kPi * 0.62, "DISPLAY", "HP 82163", 2 },
+        { kPi * 0.38, "DRIVE", "HP 82161A", 2 },
+        { kPi * 0.0, "PLOTTER", "HP 7470A", 4 },
+        { -kPi * 0.38, "PRINTER", "HP 82162A", 4 },
         { -kPi * 0.62, "PILBOX", "PC link", 5 },
     };
     for (const Dev& d : devs) {

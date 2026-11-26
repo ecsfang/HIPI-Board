@@ -18,7 +18,7 @@
 //     panel 7                              only on this panel
 //     setup                                done once before the first measurement
 //       write 0x6B 0x00
-//     measure T,TEMP | temperature         a measurement TFI2C can make ("MT")
+//     measure T,TEMP | temperature         a measurement I2C can make ("MT")
 //       write 0xAC 0x33 0x00               bytes to the chip (the first is often a register)
 //       wait 80                            milliseconds
 //       read 7 crc=aht                     n bytes; "read <reg> <n>": from a register
@@ -46,7 +46,7 @@ struct I2cBus {
     virtual bool readRegs(std::uint8_t addr, std::uint8_t reg, std::uint8_t* buf, std::size_t n) = 0;
     // n bytes, no register
     virtual bool readRaw(std::uint8_t addr, std::uint8_t* buf, std::size_t n) = 0;
-    // n bytes to the chip (TFI2C and measurements only -- identifying never writes)
+    // n bytes to the chip (I2C and measurements only -- identifying never writes)
     virtual bool write(std::uint8_t addr, const std::uint8_t* buf, std::size_t n) = 0;
     virtual void delayMs(int ms) = 0;
 };

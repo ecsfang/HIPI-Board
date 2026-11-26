@@ -36,8 +36,8 @@ CDisplay* videoDisplay = nullptr;  // Same pattern -- needed for pico_main.cpp's
                                      // own periodic fifoSize() diagnostic (see
                                      // display.h's own comment on fifoSize()).
 CPlotter* plotter = nullptr;    // Global: the views, menus and LEDs reach its HP-GL (plotter.h)
-CPrinter* printer = nullptr;    // TFPRINT, shown in the Printer view
-extern hipi::Video80* video80Term;   // TFDISPLAY's HP 92198 screen (pico_main.cpp)
+CPrinter* printer = nullptr;    // PRINTER, shown in the Printer view
+extern hipi::Video80* video80Term;   // DISPLAY's HP 92198 screen (pico_main.cpp)
 CBmp280* bmp280Sensor = nullptr;  // Constructed in hipi_init() rather than as
                                     // a file-scope global (like pixelStrip in
                                     // pixels.cpp) -- its constructor needs
@@ -95,7 +95,7 @@ void logBoth(const char* fmt, ...) {
 uint8_t hpilDevices = 0;
 
 // Add devices to the HP-IL loop here
-static CDrive* driveDev = nullptr;   // TFDRIVE, for its power switch
+static CDrive* driveDev = nullptr;   // DRIVE, for its power switch
 
 // Exactly one device -- the last in the loop -- has last() set
 static void markLastDevice() {
@@ -151,7 +151,7 @@ static int pilboxFirstAddr = -1;
 void hipi_init()
 {
     // The video display: HP 82163 or HP 92198, as set (display.h)
-    videoDisplay = new CDisplay("TFDISPLAY");
+    videoDisplay = new CDisplay("DISPLAY");
     videoDisplay->setVideo80(video80Term);
     videoDisplay->setModel(static_cast<DisplayModel>(config.displayModel()));
     devices.push_back(videoDisplay);
@@ -159,7 +159,7 @@ void hipi_init()
         // Each drive has its own cassette file, saved per device name
         // (media.<name>=... in CONFIG.TXT). More drives can be added the
         // same way, with their own names.
-        CDrive* drive = new CDrive("TFDRIVE", config.driveMedia("TFDRIVE"));
+        CDrive* drive = new CDrive("DRIVE", config.driveMedia("DRIVE"));
         drive->setMediaChangedCallback([](CDrive* d) {
             config.setDriveMedia(d->name(), d->mediaFile());
             if (d == hipi::views_drive())
@@ -172,38 +172,38 @@ void hipi_init()
         // while open)
         dialog->setTargetDrive(drive);
     }
-    devices.push_back(new CHipiLed("TFLEDS", 0xEE));
-    // 0xED -- adjacent to TFLEDS's own 0xEE, both being "indicator"-class
+    devices.push_back(new CHipiLed("LEDS", 0xEE));
+    // 0xED -- adjacent to LEDS's own 0xEE, both being "indicator"-class
     // accessories; no formal Accessory ID table entry exists for a NeoPixel
     // strip specifically, so this just needs to be distinct from every
     // other device's own SAI, which it is.
-    devices.push_back(new CHipiPixel("TFPIXEL", 0xED));
+    devices.push_back(new CHipiPixel("PIXEL", 0xED));
 
-    // The BMP280 on 0x76 (TFI2C's "MT"/"MP", the Hardware test page):
+    // The BMP280 on 0x76 (I2C's "MT"/"MP", the Hardware test page):
     // its driver, with the factory calibration read once. Not there is
-    // fine -- TFI2C then answers ERR, the test page doesn't list it.
+    // fine -- I2C then answers ERR, the test page doesn't list it.
     bmp280Sensor = new CBmp280(touch_i2c);
     if (!bmp280Sensor->begin(TOUCH_SDA, TOUCH_SCL)) {
-        LOGF("\r\n * No BMP280 on 0x76 (TFI2C finds it when it's connected)");
+        LOGF("\r\n * No BMP280 on 0x76 (I2C finds it when it's connected)");
     }
     pilbox = new CPilBox("PILBOX");
     devices.push_back(pilbox);
-    plotter = new CPlotter("TFPLOT");
+    plotter = new CPlotter("PLOTTER");
     devices.push_back(plotter);
     // SAI 0x3E matches pyILPER's cls_pilterminal exactly (a real, working
     // reference implementation) -- see terminal.h's constructor comment
     // for why that, rather than the formal Accessory ID table's 0x4E
     // "general interface" suggestion we used before.
-    devices.push_back(new CTerminal("TFTERM", 0x4E));
+    devices.push_back(new CTerminal("TERMINAL", 0x4E));
     // HP 82162A thermal printer (printer.h), its switches as saved
-    printer = new CPrinter("TFPRINT");
+    printer = new CPrinter("PRINTER");
     printer->setMode(static_cast<PrinterMode>(config.printerMode()));
     printer->setIntensity(config.printerIntensity());
     devices.push_back(printer);
     hipi::views_setPrinter(printer);
-    // TFI2C: any I2C chip, from the controller (ili2c.h) -- last, so the
+    // I2C: any I2C chip, from the controller (ili2c.h) -- last, so the
     // devices before it keep their addresses
-    devices.push_back(new CHipiI2c("TFI2C", hipi::i2c_commandEnv(), [] { hipi::i2c_loadChips(); }));
+    devices.push_back(new CHipiI2c("I2C", hipi::i2c_commandEnv(), [] { hipi::i2c_loadChips(); }));
 
     // A device this CONFIG.TXT hasn't seen (new in this version) gets its
     // first state now. The printer starts switched OFF: with a printer on
@@ -230,7 +230,7 @@ void hipi_init()
     for (CDevice* dev : devices) {
         dev->setEnabled(config.isDeviceEnabled(dev->name()));
     }
-    // TFDRIVE's OFF-STANDBY-ON switch: Off = disabled above, the config's
+    // DRIVE's OFF-STANDBY-ON switch: Off = disabled above, the config's
     // drive_standby flag tells Standby from On
     if (driveDev != nullptr) {
         const DrivePower onMode = config.driveStandby() ? DrivePower::Standby : DrivePower::On;

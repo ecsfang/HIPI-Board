@@ -77,12 +77,12 @@ int main() {
     d.begin();
     {
         // Without a store: 200 lines in RAM, as before
-        CPrinter p("TFPRINT");
+        CPrinter p("PRINTER");
         for (int i = 0; i < 300; ++i) print(p, "LINE " + std::to_string(i));
         check(p.paperCapacity() == 200 && p.keptLines() == 200 && p.firstKept() == 100 && text(p, 100) == "LINE 100",
               "no store: the last 200 lines kept in RAM");
     }
-    CPrinter p("TFPRINT");
+    CPrinter p("PRINTER");
     hipi::printerPaper_init(&d, &p);
     check(p.paperCapacity() == 8192 && p.keptLines() == 0, "in SDRAM: room for 8192 lines");
     // 9000 lines: the last 8192 kept, the first ones gone

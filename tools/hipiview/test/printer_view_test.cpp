@@ -128,8 +128,8 @@ int main(int argc, char** argv) {
     }
     hipi::Screen screen(&d, 0x07E0, 1, 200, 1024);
 
-    plotter = new CPlotter("TFPLOT");
-    printer = new CPrinter("TFPRINT");
+    plotter = new CPlotter("PLOTTER");
+    printer = new CPrinter("PRINTER");
     printer->setEnabled(true);
     printer->hpil(AAD + 1);
     devices = { plotter, printer };
@@ -623,28 +623,28 @@ int main(int argc, char** argv) {
     check(textCursor() == cur, "... and is still there after the box has gone");
 
     // The view HIPI starts with: the first device on the loop that is
-    // switched on and has a view -- not TFDISPLAY if it's switched off
+    // switched on and has a view -- not DISPLAY if it's switched off
     {
         struct ViewDev : CDevice {
             ViewKind k;
             ViewDev(const char* n, ViewKind kind) : CDevice(n, 0, 0, DISPLAY), k(kind) {}
             ViewKind viewKind() const override { return k; }
             void clear() override {}
-        } disp("TFDISPLAY", ViewKind::Display), leds("TFLEDS", ViewKind::None);
+        } disp("DISPLAY", ViewKind::Display), leds("LEDS", ViewKind::None);
         const std::vector<CDevice*> saved = devices;
         const bool printerOn = printer->enabled(), plotterOn = plotter->enabled();
         devices = { &leds, &disp, plotter, printer };
         disp.setEnabled(true); plotter->setEnabled(true); printer->setEnabled(true);
         hipi::views_showStartView();
         check(hipi::views_output() == hipi::DisplayOutput::Display && hipi::views_viewDevice() == &disp,
-              "start view: TFDISPLAY, the first device with a view (TFLEDS has none)");
+              "start view: DISPLAY, the first device with a view (LEDS has none)");
         disp.setEnabled(false);
         hipi::views_showStartView();
         check(hipi::views_output() == hipi::DisplayOutput::Plotter && hipi::views_viewDevice() == plotter,
-              "start view, TFDISPLAY switched off: the next one, TFPLOT");
+              "start view, DISPLAY switched off: the next one, PLOTTER");
         devices = { &leds, &disp, printer, plotter };
         hipi::views_showStartView();
-        check(hipi::views_viewDevice() == printer, "... in loop order: TFPRINT before TFPLOT");
+        check(hipi::views_viewDevice() == printer, "... in loop order: PRINTER before PLOTTER");
         plotter->setEnabled(false); printer->setEnabled(false);
         hipi::views_showStartView();
         check(hipi::views_output() == hipi::DisplayOutput::LoopMap,

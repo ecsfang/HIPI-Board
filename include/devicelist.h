@@ -28,8 +28,8 @@ constexpr int kCloseW = 44;                      // the close button in the titl
 void drawFrame(DisplayDriver* d);
 // The rows from `offset` on (and the more-above / more-below arrows)
 void drawRows(DisplayDriver* d, const std::vector<DeviceInfo>& list, int offset);
-// A row's text: "addr  5  TFPLOT     HP7470A   0x60 (96)" -- what it
-// emulates (DeviceInfo::sdiName, blank for HIPI's own: TFI2C), the
+// A row's text: "addr  5  PLOTTER     HP7470A   0x60 (96)" -- what it
+// emulates (DeviceInfo::sdiName, blank for HIPI's own: I2C), the
 // accessory ID in hex and decimal (the HP-71's DEVADDR("%82") takes the
 // decimal one)
 std::string rowText(const DeviceInfo& info);

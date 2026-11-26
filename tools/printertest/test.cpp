@@ -1,4 +1,4 @@
-// printertest -- TFPRINT (src/printer.cpp) against the frames an HP-41
+// printertest -- PRINTER (src/printer.cpp) against the frames an HP-41
 // sends it. The loop is just the printer: what it returns is what the
 // controller gets back. See the Makefile.
 #include "printer.h"
@@ -66,7 +66,7 @@ static void checkLine(const CPrinter& p, const std::string& want, const char* wh
 }
 
 int main() {
-    CPrinter p("TFPRINT");
+    CPrinter p("PRINTER");
 
     // ── Addressing and identification ────────────────────────────────
     checkEq(send(p, AAU), AAU, "AAU passes");
@@ -77,6 +77,16 @@ int main() {
     checkEq(aid, 0x20, "accessory ID: printer");
     checkEq(send(p, aid), ETO, "SAI ends with ETO");
     send(p, UNT);
+
+    // SDI: the real printer's ID, then CR LF and ETO
+    {
+        send(p, TAD + 1);
+        std::string id;
+        IL_CMD_t f = send(p, SDI);
+        for (int i = 0; i < 20 && f != ETO; ++i) { id += static_cast<char>(f & 0xFF); f = send(p, f); }
+        send(p, UNT);
+        check(id == "HP82162A\r\n", "SDI: \"HP82162A\" CR LF");
+    }
 
     // ── Status ───────────────────────────────────────────────────────
     std::uint16_t st = readStatus(p);

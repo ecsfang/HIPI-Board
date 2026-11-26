@@ -1006,7 +1006,7 @@ void boardui_handleTap(std::uint16_t x, std::uint16_t y) {
         }
     } else if (!dialog_->isOpen() &&
                views_tapeHitTest(x, y) == TapeHotspot::Power) {
-        // Tape view: power switch -> TFDRIVE's OFF/STANDBY/ON, saved like
+        // Tape view: power switch -> DRIVE's OFF/STANDBY/ON, saved like
         // the Devices menu does. The switch and POWER LED follow on the
         // next views_poll().
         // The switch picture moves at once; switching OFF itself waits

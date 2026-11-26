@@ -11,7 +11,7 @@ namespace hwstub {
 struct Rgb { std::uint8_t r, g, b; };
 
 // The page took them over (a test of its own) -- else it only looks;
-// led[] and pixels[] are then what TFLEDS / TFPIXEL would have set
+// led[] and pixels[] are then what LEDS / PIXEL would have set
 extern bool ledsTaken, pixelsTaken;
 extern bool led[5];
 extern std::vector<Rgb> pixels;     // as last shown

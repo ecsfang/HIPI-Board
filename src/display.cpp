@@ -22,7 +22,7 @@ void CDisplay::setModel(DisplayModel m)
 
 const char* CDisplay::deviceId()
 {
-    return isVideo80() ? "MC00701A\r\n" : CDevice::deviceId();
+    return isVideo80() ? "MC00701A\r\n" : "HP82163A\r\n";
 }
 
 void CDisplay::clear(void)

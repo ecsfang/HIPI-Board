@@ -122,7 +122,7 @@ bool CDevice::base(IL_CMD_t cmd, IL_CMD_t *rtn)
 
 const char* deviceModel(CDevice* d) {
     switch (d->type()) {
-        case DISPLAY: return d->accessoryId() == 0x32 ? "MC00701A" : "HP82163";   // (its model setting)
+        case DISPLAY: return d->accessoryId() == 0x32 ? "MC00701A" : "HP82163A";   // (its model setting)
         case DRIVE:   return "HP82161A";
         case PLOTTER: return "HP7470A";
         case PRINTER: return "HP82162A";

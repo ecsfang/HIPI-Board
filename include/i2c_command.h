@@ -1,4 +1,4 @@
-// i2c_command.h -- TFI2C's commands (ili2c.h): a line from the controller
+// i2c_command.h -- I2C's commands (ili2c.h): a line from the controller
 // in, the answer out. No hardware here (I2cBus), so it can be tested on
 // the PC (tools/i2ctest).
 //

@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     struct SimDrive : hipi::UploadDrive {
         std::string media = "OLD.DAT";
         std::vector<std::string> calls;
-        std::string name() const override { return "TFDRIVE"; }
+        std::string name() const override { return "DRIVE"; }
         std::string mediaFile() const override { return media; }
         bool quiet() const override { return true; }
         void open() override { calls.push_back("open " + media); }
@@ -312,7 +312,7 @@ int main(int argc, char** argv) {
     // download: the drive whose cassette goes to the PC (its file: `tape`)
     struct SimDownDrive : hipi::DownloadDrive {
         const std::vector<std::uint8_t>* file = nullptr;
-        std::string name() const override { return "TFDRIVE"; }
+        std::string name() const override { return "DRIVE"; }
         std::string mediaFile() const override { return "SIMTAPE.DAT"; }
         bool quiet() const override { return true; }
         std::uint32_t changes() const override { return 0; }

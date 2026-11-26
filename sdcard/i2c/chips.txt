@@ -1,11 +1,11 @@
-# I2C chips HIPI knows -- for System -> Hardware test and for TFI2C.
+# I2C chips HIPI knows -- for System -> Hardware test and for I2C.
 #
 # This list is built into the firmware (a new firmware brings new chips).
 # On the SD card it's i2c/chips.txt.example: a reference, not read. Your
 # own chips go in other .txt files in i2c/ (one for all, or one per chip,
 # e.g. i2c/mcp9808.txt); HIPI reads those first, so a chip described there
 # wins over the built-in one. The Hardware test page reads them again each
-# time it opens, TFI2C at a device clear (CLRDEV / DCL) -- no new firmware
+# time it opens, I2C at a device clear (CLRDEV / DCL) -- no new firmware
 # needed. (An old i2c/chips.txt on the card is not read either.)
 #
 # ── A chip ─────────────────────────────────────────────────────────────────
@@ -50,9 +50,9 @@
 # read from -- and never on 0x20-0x27, where a PCF8574 would take it as its
 # output levels (there only "status" checks are tried). '#' starts a comment.
 #
-# ── Measurements (TFI2C) ───────────────────────────────────────────────────
+# ── Measurements (I2C) ───────────────────────────────────────────────────
 #
-# What TFI2C's "M" command can measure on the chip ("MT" -> 23.4):
+# What I2C's "M" command can measure on the chip ("MT" -> 23.4):
 #
 #   setup            Steps done once, before the first measurement (e.g. to
 #                    wake the chip up); then write / wait lines
@@ -91,7 +91,7 @@
 #                             is done by HIPI)
 #     range <lowest> <highest> (optional) else the answer is ERR RANGE
 #
-# The unit is only for reading this file: TFI2C answers the bare number.
+# The unit is only for reading this file: I2C answers the bare number.
 
 # ── On the board ───────────────────────────────────────────────────────────
 chip 0x38 FT5316 | touch panel

@@ -72,7 +72,7 @@ HIPI-Board/
 ### 1.2.1 The PicoLED library (NeoPixels)
 
 [PicoLED](https://github.com/ForsakenNGS/PicoLED) drives the WS2812 colour
-LEDs ("NeoPixels") behind the `TFPIXEL` device. It is used through one file
+LEDs ("NeoPixels") behind the `PIXEL` device. It is used through one file
 only, `include/pixels.h` / `src/pixels.cpp` (`CPixelStrip`), and built as part
 of the firmware -- there is nothing to install separately.
 
@@ -116,7 +116,7 @@ it, run CMake again from an empty `build/` folder.
 Because the strip is a global object, a wrong PIO block makes the firmware
 stop before `main()` -- the Pico then seems not to start at all.
 
-**Effects.** `TFPIXEL`'s effects (`E` commands, see the User Manual § 8.4)
+**Effects.** `PIXEL`'s effects (`E` commands, see the User Manual § 8.4)
 are PicoLED's own effect classes -- `Comet`, `Marquee`, `Stars`, `Bounce`,
 `Particles` (fire), `Fade` -- plus a rainbow written in `src/pixels.cpp`.
 Each runs on a `slice()` of the strip (a `VirtualStrip` over just its
@@ -372,7 +372,7 @@ debug=0
 fontsize=0
 brightness=255
 columns=0
-disabled_devices=TFPIXEL,TFTERM
+disabled_devices=PIXEL,TERMINAL
 ```
 
 `disabled_devices` lists devices switched off in the **Devices** menu.
@@ -882,7 +882,7 @@ Main menu
   type, size -- in registers for HP-41 files, as the HP-41's DIR shows it
   -- allocated blocks, and S/P for secure/private). Scroll with ▲/▼
   (Shift for a page at a time); **OK** opens the file, **X** returns to
-  the file list. After confirmation the drive (`TFDRIVE`) switches to the
+  the file list. After confirmation the drive (`DRIVE`) switches to the
   new image and the name is saved to `CONFIG.TXT`.
 - **Trace** — controls logging on the USB debug port:
   - *Off* — no frame log.
@@ -907,7 +907,7 @@ Main menu
 
 ### 6.2 Settings
 
-- **Emulate** — which display `TFDISPLAY` is: HP 82163 or HP 92198 (80
+- **Emulate** — which display `DISPLAY` is: HP 82163 or HP 92198 (80
   columns). Font size and Columns show the chosen one's settings.
 - **Textcolor / Font size / Brightness** — apply immediately and are saved.
   Brightness previews as you move; **X** restores the previous level.
@@ -925,7 +925,7 @@ unplugged. The setting is saved per device name.
 ### 6.4 Display
 
 Chooses which output fills the screen: the HP82163-style text display, the
-HP7470A-style plotter canvas (`TFPLOT`), or the Tape view.
+HP7470A-style plotter canvas (`PLOTTER`), or the Tape view.
 Display and Plotter keep receiving data in the background regardless of
 which is shown.
 
@@ -977,7 +977,7 @@ HP-IL isn't serviced, and isn't possible while **Connect to PC** is active.
 A screen dump can also be requested from the HP-41 with the project's own
 escape sequence `ESC # D` (screen only) or `ESC # M` (with menus, button
 strip and message boxes -- exactly what's on the screen, mostly for
-documentation). Send it to `TFDISPLAY`, e.g.:
+documentation). Send it to `DISPLAY`, e.g.:
 
 ```
 27 ACCHR  35 ACCHR  77 ACCHR       ; ESC # M
@@ -985,7 +985,7 @@ documentation). Send it to `TFDISPLAY`, e.g.:
 
 The dump is taken right after, from the main loop.
 
-**The display's text.** Every byte `TFDISPLAY` takes from the loop goes
+**The display's text.** Every byte `DISPLAY` takes from the loop goes
 to the screen (`Screen` or `Video80`) and also, from `CDisplay::idle()`,
 through a filter into a text log (`include/display_text.h`,
 `src/display_text.cpp`): plain text, one line per line, with the escape
@@ -1027,11 +1027,11 @@ can't go back to the one before it, because that device has been switched
 off: leaving the loop map, the analyzer, the hardware test, the media map,
 the signals view, the character table or the clock. It is also used when a
 swipe finds no device with a view. Before, HIPI always started on the
-Display view, and fell back to it, even with `TFDISPLAY` switched off.
+Display view, and fell back to it, even with `DISPLAY` switched off.
 Tests: `printer_view_test`.
 
 **Choosing the view from the HP-41.** `ESC # V <addr>` (sent to
-`TFDISPLAY`; `<addr>` is one byte, the HP-IL address 1..30) shows the view
+`DISPLAY`; `<addr>` is one byte, the HP-IL address 1..30) shows the view
 of the HIPI device that currently has that address -- looked up in the
 live device list at the time, so it follows auto-addressing, the device
 order and the enabled/disabled state. If no enabled HIPI device has that
@@ -1057,7 +1057,7 @@ straight to the cassette file picker. Choosing a file, or pressing **X**,
 returns to the Tape view. When a `.dat` or `.lif` file is selected, a cassette with
 the file name on its label is seen through the lid window; while the file
 picker is open (from the Tape view or from **Config**) the lid is shown
-open with the drive empty. The **POWER** LED is lit while `TFDRIVE` is
+open with the drive empty. The **POWER** LED is lit while `DRIVE` is
 enabled (**Devices** menu), and **BUSY** follows the owner's manual: it is
 lit while the drive executes an operation (reading, writing, seeking,
 formatting, rewinding) or is addressed as talker or listener. The
@@ -1069,7 +1069,7 @@ cassette, then the frame) the panel showed the bare drive pins as black
 squares now and then (`demo_run_test` checks it, with the emulator's
 `onBteCopy`). The power
 switch works like the real OFF-STANDBY-ON switch: each tap moves it one
-step (OFF -> STANDBY -> ON -> STANDBY -> OFF). OFF disables `TFDRIVE`
+step (OFF -> STANDBY -> ON -> STANDBY -> OFF). OFF disables `DRIVE`
 (once it's idle); ON keeps it powered; in STANDBY the HP-41 can power it
 down with Loop Power Down (POWER light off) and it wakes up again on the
 next HP-IL activity. The position is saved in `CONFIG.TXT`.
@@ -1081,7 +1081,7 @@ tape it was (2 s just after the start, 6 s halfway, 10 s at the end): BUSY is
 lit, the reels spin backwards, and the HP-41 gets the drive's Busy status
 until it's done.
 
-**Printer view.** `TFPRINT` (`printer.h`/`.cpp`) is an HP 82162A thermal
+**Printer view.** `PRINTER` (`printer.h`/`.cpp`) is an HP 82162A thermal
 printer, and its view a picture of one: `hp82162a.bmp`, made to match
 `hp82161a.bmp` in size, place and colour (the real devices are the same
 size and stack). It's loaded once at boot into its own layer
@@ -1098,7 +1098,7 @@ copies only what changed. Both pictures are made from a photo by
 `kPrt*` in `views.cpp` must match.
 
 Touches (`views_printerHitTest()`, handled in `boardui.cpp`): the
-power switch toggles `TFPRINT` on and off (like **Devices**), MODE and
+power switch toggles `PRINTER` on and off (like **Devices**), MODE and
 INTENSITY jump to the position touched (or one step for LIGHT/DARK), PRINT
 and PAPER ADVANCE are held while the finger is down
 (`boardui_handleRelease()` lets go) and shown pressed for at least 150 ms.
@@ -1170,7 +1170,7 @@ feeds a line every 220 ms.
 `printer.cpp`, BMP loader and LT7683 driver against the emulated chip
 with the real pictures, checks the paper and saves `printer_view_*.png`.
 
-**The display's two models.** `TFDISPLAY` (`CDisplay`, `display.h`/
+**The display's two models.** `DISPLAY` (`CDisplay`, `display.h`/
 `.cpp`) is one device that emulates either display -- **Emulate** in
 Settings → Screen and in the Display view's menu, `display_model` in
 CONFIG.TXT, `CDisplay::setModel()`:
@@ -1208,7 +1208,7 @@ own font and columns settings (`fontsize`/`columns` for the 82163,
   codes shown in cyan as `@`–`_`), ESC [ / ] (80×24 / 40×20, clears), ESC
   / and = (NTSC/PAL, only the status bit), ESC e/E, ESC h, ESC j/k, ESC z
   (always passes) and ESC > / <. HIPI's own `ESC #` / `ESC ~` commands
-  (screen dumps, choosing the view) work as on `TFDISPLAY`.
+  (screen dumps, choosing the view) work as on `DISPLAY`.
 - ASCII set: 128–255 are the same characters in inverse video. Roman-8:
   bytes kept as they are, drawn as the nearest ISO 8859-1 character
   (`kRoman8[]`), the solid block as an inverse space.
@@ -1253,10 +1253,10 @@ every 40 ms `hwio::ledLevel()` (`CLedDriver::getCurrentPct()`, so blinking
 and fading show) and `hwio::pixelShown()` (`CPixelStrip::bufferColor()`:
 the strip's buffer, effects' frames included) are drawn on the LED buttons
 and the dots (the dots at the level sent, lifted a little so dim ones
-show); TFPIXEL changing the count redraws it. A test of its own takes a
+show); PIXEL changing the count redraws it. A test of its own takes a
 section over: `hwio::takeLeds()` holds the HP-IL activity LED
 (`hpil_leds_hold()`) and switches the LEDs off, `hwio::takePixels()`
-stops `TFPIXEL`'s effects and clears the strip; **Off** and leaving the
+stops `PIXEL`'s effects and clears the strip; **Off** and leaving the
 page call `releaseLeds()` / `releasePixels()` (off, given back) for what
 was taken. `hwio::begin()` / `end()` (both at once) are the demo's.
 `CPixelStrip::show()` waits, if need be, until the last frame is out and
@@ -1265,7 +1265,7 @@ the last `show()`): PicoLED returns once the last word is in the PIO's
 FIFO, and a frame sent straight after was taken as more bits of the first
 -- the page's first colour, right after `takePixels()`'s clear, stayed
 dark. The
-pixel count is `pixelStrip.setActiveCount()` -- TFPIXEL's saved
+pixel count is `pixelStrip.setActiveCount()` -- PIXEL's saved
 `pixel_count`. HP-IL activity (`hpil_led_activity(idle)`, leds.cpp, called from
 `hipi_loop()` / `conLoop()` for every frame with `IS_IDLE()`) flashes
 LED 4 (D8, `HPIL_ACT_LED`) for 30 ms per frame (restarted at most every
@@ -1279,7 +1279,7 @@ with `all` (`kHpilLedAll`, every frame) the LED looked lit permanently;
 (`plotter_led=plotter|off`): `plotter_led_poll()` in the main loop lights
 it while `plotter->hpgl().errorCode() != 0`. It writes the LED only when that
 changes (and once after the setting is switched on, or the Hardware test
-page gives the LEDs back -- `hpil_leds_hold()` holds it too), so `TFLEDS`
+page gives the LEDs back -- `hpil_leds_hold()` holds it too), so `LEDS`
 can still use LED 3 otherwise.
 
 The I2C list is `i2c_identify()` (`i2c_ident.h`/`.cpp`): every address
@@ -1315,7 +1315,7 @@ temperature is raw/340 + 36.53 against raw/333.87 + 21, from their data
 sheets; the MPU-9250 and MPU-6886 still use the 6050 entry's formula, not yet
 checked). `tools/i2ctest` reads the same raw value as both.
 
-**TFI2C** (`ili2c.h`/`.cpp`, last on the loop so the others keep their
+**I2C** (`ili2c.h`/`.cpp`, last on the loop so the others keep their
 addresses) lets the controller use any I2C chip. The device only collects
 a line (ended by CR/LF or UNL) and sends the answer (then CR LF, ETO); the
 commands are `I2cCommander` (`i2c_command.h`/`.cpp`, no hardware):
@@ -1337,7 +1337,7 @@ bcd` (with `text=` pieces: the DS3231's `TIME` as HH.MMSS) or `builtin`
 calibration maths; `vl53l0x.D` -- ST's long set-up, `src/vl53l0x.cpp`); `setup` steps run once per
 address before the first measurement. `I2cChipList::run()` /
 `measure()` do the work; CRC: Sensirion (per word), AHT (all, from 0xFF),
-HTU (all, from 0). (TFI2C replaced the old TFTEMP device: `MT`, `MP`,
+HTU (all, from 0). (I2C replaced the old TFTEMP device: `MT`, `MP`,
 `P<n>` are the same.) `tools/i2ctest` covers the measurements, the
 VL53L0X set-up on a made-up chip, the BMP390's compensation (a made-up
 chip, values worked out separately), every command and the device on the loop.
@@ -1377,7 +1377,7 @@ worked out with the integer and the float formulas.
 measurement is one forced-mode run (pressure x8, temperature x1, about 20 ms):
 the 21 calibration bytes from 0x31 are read, the 6 data bytes in one burst, and
 the datasheet's floating-point formulas (BST-BMP390-DS002, section 8) give
-degrees and pascals (hPa to TFI2C). It is not read by the Hardware test page
+degrees and pascals (hPa to I2C). It is not read by the Hardware test page
 (that one shows the ID only), and it is not the `bosch` probe's BMP280 driver.
 
 `tools/hipiview`'s `hwtest_view_test` runs the page (with the stand-in
@@ -1488,7 +1488,7 @@ With USB connected, the board enumerates as a composite device:
 |-----------|-------------------|---------|
 | CDC 0     | `/dev/ttyACM0`    | Debug console / trace log |
 | CDC 1     | `/dev/ttyACM1`    | PILBox link to a PC emulator (e.g. pyILPER) |
-| CDC 2     | `/dev/ttyACM2`    | `TFTERM` terminal bridge (e.g. HP-71B `DISPLAY IS`/`KEYBOARD IS`) |
+| CDC 2     | `/dev/ttyACM2`    | `TERMINAL` terminal bridge (e.g. HP-71B `DISPLAY IS`/`KEYBOARD IS`) |
 | MSC       | USB drive         | SD card, only while **Connect to PC** is active |
 | CDC 3     | `/dev/ttyACM3`    | Display mirror for `tools/hipiview` |
 
@@ -1770,17 +1770,30 @@ register level, so new drawing code needs nothing extra to be mirrored.
 The devices are chained in this order, which is also their order in the
 HP-IL loop (see `hipi_init()` in `src/hipi.cpp`):
 
-| Name        | Class        | SAI  | Function |
-|-------------|--------------|------|----------|
-| `TFDISPLAY` | `CDisplay`   | 0x3E / 0x32 | HP82163 video display, or HP 92198 / MC00701A 80 columns (setting) |
-| `TFDRIVE`   | `CDrive`     | 0x10 | HP82161 cassette drive, backed by a `.dat` / `.lif` on SD |
-| `TFLEDS`    | `CHipiLed`   | 0xEE | LED control (syntax in `README.md`) |
-| `TFPIXEL`   | `CHipiPixel` | 0xED | Pixel/LED strip control |
-| `TFI2C`     | `CHipiI2c`   | 0x52 | Any I2C chip: registers, or measurements from `i2c/*.txt` (last on the loop) |
-| `PILBOX`    | `CPilBox`    | —    | Forwards the loop to a PC over CDC 1 |
-| `TFPLOT`    | `CPlotter`   | 0x60 | HP7470A-compatible plotter (HP-GL subset) |
-| `TFTERM`    | `CTerminal`  | 0x4E | Terminal bridge over CDC 2 |
-| `TFPRINT`   | `CPrinter`   | 0x20 | HP 82162A thermal printer (starts off) |
+| Name        | Class        | SAI  | SDI answer (CR LF after it) | Function |
+|-------------|--------------|------|------------------|----------|
+| `DISPLAY` | `CDisplay`   | 0x3E / 0x32 | `HP82163A` / `MC00701A` | HP82163 video display, or HP 92198 / MC00701A 80 columns (setting) |
+| `DRIVE`   | `CDrive`     | 0x10 | `HP82161A` | HP82161 cassette drive, backed by a `.dat` / `.lif` on SD |
+| `LEDS`    | `CHipiLed`   | 0xEE | `HIPILED` | LED control (syntax in `README.md`) |
+| `PIXEL`   | `CHipiPixel` | 0xED | `HIPIPIX` | Pixel/LED strip control |
+| `I2C`     | `CHipiI2c`   | 0x52 | `HIPII2C` | Any I2C chip: registers, or measurements from `i2c/*.txt` (last on the loop) |
+| `PILBOX`    | `CPilBox`    | —    | (none) | Forwards the loop to a PC over CDC 1 |
+| `PLOTTER`    | `CPlotter`   | 0x60 | `HP7470A` | HP7470A-compatible plotter (HP-GL subset) |
+| `TERMINAL`    | `CTerminal`  | 0x4E | `HIPITRM` | Terminal bridge over CDC 2 |
+| `PRINTER`   | `CPrinter`   | 0x20 | `HP82162A` | HP 82162A thermal printer (starts off) |
+
+**The SDI answer** is the device ID: ASCII characters, then CR LF (HP-IL
+specification, "Send Device ID"). A device that emulates an HP device sends
+that device's ID, so `FINDID "HP82161"` finds the drive; HIPI's own devices
+send an ID that begins with `HIPI`. It is not the device's name: the name is
+a label (device list, loop map, `CONFIG.TXT`), the ID is what a program on
+the HP-41 looks for. `FINDID` compares the first 7 characters of the ID only,
+and a search string shorter than 7 characters is not reliable (the
+HP-82160A module's `AOUT1` leaves what was in register M in the unused bytes),
+so every ID is at least 7 characters, and different in the first 7.
+`CDevice::deviceId()` is the answer (the name + CR LF unless a class
+overrides it, as every class here does). Two devices with the same ID, such
+as two drives, are told apart by their address.
 
 Devices *after* `PILBOX` in the chain come after any virtual devices running
 on the PC.
@@ -1845,9 +1858,12 @@ the plotter does).
 CDevice(const char* name, IL_ADDR_t sai, IL_ADDR_t aau, IL_Type_e type);
 ```
 
-- **name** — max 15 characters. Used as the SDI response (what `FINDID`
-  and the device list see), in the Devices menu, and as the key in
-  `disabled_devices`. Must be unique.
+- **name** — max 15 characters. Shown in the device list, the loop map and
+  the Devices menu, and the key in `CONFIG.TXT` (`disabled_devices`,
+  `media.<name>`). Must be unique. It is also the default SDI answer; a
+  device overrides `deviceId()` with its own ID, at least 7 characters (the
+  HP-41's `FINDID` compares 7) and ending with `"\r\n"`: the HP ID of the
+  device it emulates, or `HIPI...` for a device of HIPI's own.
 - **sai** — Accessory ID, returned for SAI. Pick one from the HP-IL
   specification (Appendix C.4, "Classes and Types Defined"), e.g. `0x5x`
   instrumentation, `0x6x` graphics/plotters.
@@ -1871,7 +1887,7 @@ CDevice(const char* name, IL_ADDR_t sai, IL_ADDR_t aau, IL_Type_e type);
    ```cpp
    #include "ilmydev.h"
    ...
-   devices.push_back(new CMyDevice("TFMYDEV", 0x52));
+   devices.push_back(new CMyDevice("MYDEV", 0x52));
    ```
    The position in `devices` is the position in the loop. Put local
    devices **before** `PILBOX` unless they need to come after the PC.
@@ -1973,7 +1989,7 @@ the line with `MODULE`.
 
 ### 9.5 Example: an I2C sensor
 
-An I2C sensor doesn't need an HP-IL device of its own: `TFI2C` reaches
+An I2C sensor doesn't need an HP-IL device of its own: `I2C` reaches
 every chip on the bus, and what a measurement is lives in the chip files
 (`i2c/*.txt` on the SD card, see *Hardware test page* and the top of
 `sdcard/i2c/chips.txt`). In order of preference:
@@ -2023,9 +2039,9 @@ with the touch controller. `touchInit()` initialises the bus and
 driver's `initBus()` doesn't initialise it again. Use **System → Hardware
 test** (its I2C list, or **Scan I2C**) to see the chip's address first.
 
-### 9.6 Example: a device with graphical output (like `TFPLOT`)
+### 9.6 Example: a device with graphical output (like `PLOTTER`)
 
-`TFPLOT` shows how to split a device that draws on the screen. It is
+`PLOTTER` shows how to split a device that draws on the screen. It is
 three parts, so a part can be replaced or reused on its own (another
 plotter -- an HP 7475A, another interface -- is a new device class with
 an `HpglInterpreter` of its own; the interpreter and the view stay):

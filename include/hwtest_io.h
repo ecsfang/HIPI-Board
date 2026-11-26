@@ -12,7 +12,7 @@ namespace hwio {
 
 // The page only looks at the LEDs and pixels until one of its own tests
 // starts: then it takes them over -- the LEDs (HP-IL activity held,
-// TFLEDS' state dropped, all off) or the pixels (TFPIXEL's effects
+// LEDS' state dropped, all off) or the pixels (PIXEL's effects
 // stopped, all off) -- and gives them back (off, HP-IL activity back)
 // when the test ends or the page closes.
 void takeLeds();
@@ -23,7 +23,7 @@ void releasePixels();
 inline void begin() { takeLeds(); takePixels(); }
 inline void end() { releaseLeds(); releasePixels(); }
 
-// What's on them now, whoever drives them (TFLEDS, TFPIXEL, HP-IL
+// What's on them now, whoever drives them (LEDS, PIXEL, HP-IL
 // activity, the page): an LED's level 0..100 % (blinking and fading as
 // it goes), a pixel's colour as the strip is sent it (effects included)
 float ledLevel(int index);                       // index 0..4 = LED 1..5
@@ -33,7 +33,7 @@ void setLed(int index, bool on);                 // index 0..4 = LED 1..5
 void setPixel(int index, std::uint8_t r, std::uint8_t g, std::uint8_t b);
 void showPixels();                               // sends what setPixel() set
 
-// The number of pixels connected (TFPIXEL's pixel_count, saved)
+// The number of pixels connected (PIXEL's pixel_count, saved)
 int pixelCount();
 void setPixelCount(int n);
 

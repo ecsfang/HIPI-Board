@@ -1,4 +1,4 @@
-// pixeltest -- TFPIXEL on the PC (see Makefile): pixel count, effects and
+// pixeltest -- PIXEL on the PC (see Makefile): pixel count, effects and
 // the current limit, with the real PicoLED library; PIO and clock stood in
 #include "pixels.h"
 #include "leds.h"

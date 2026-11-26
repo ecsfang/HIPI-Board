@@ -260,10 +260,19 @@ void throughTheDevice(hipi::LT7683& d) {
     auto* term = new hipi::Video80(&d);
     screen = new hipi::Screen(&d, 0x07E0, 1, 200, 1024);
     screen->suspend();
-    auto* dev = new CDisplay("TFDISPLAY");
+    auto* dev = new CDisplay("DISPLAY");
     dev->setVideo80(term);
     dev->setEnabled(true);
     auto send = [&](IL_CMD_t f) { return dev->hpil(f); };
+    {   // SDI as the HP 82163 (the default model): the ID, CR LF, ETO
+        send(AAD + 1);
+        send(TAD + 1);
+        std::string id;
+        IL_CMD_t f = send(SDI);
+        for (int i = 0; i < 20 && f != ETO; ++i) { id += static_cast<char>(f & 0xFF); f = send(f); }
+        send(UNT);
+        check(id == "HP82163A\r\n", "SDI: HP 82163 model answers \"HP82163A\" CR LF");
+    }
     auto out = [&](const std::string& s) {
         send(LAD + 1);
         for (unsigned char c : s) send(c);

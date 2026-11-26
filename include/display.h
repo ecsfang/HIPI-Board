@@ -7,7 +7,7 @@
 
 namespace hipi { class Video80; }
 
-// TFDISPLAY -- the video display. It emulates one of two (Settings ->
+// DISPLAY -- the video display. It emulates one of two (Settings ->
 // Screen -> Emulate, config display_model):
 //   HP 82163 Video Interface: accessory ID 0x3E, text through Screen
 //     (Screen.hpp) -- 32 x 16 with HIPI's font size / columns settings.

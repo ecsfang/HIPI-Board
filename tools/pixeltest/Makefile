@@ -1,4 +1,4 @@
-# pixeltest -- TFPIXEL's pixel count, effects and current limit, on the PC:
+# pixeltest -- PIXEL's pixel count, effects and current limit, on the PC:
 # HIPI's real src/pixels.cpp with the real PicoLED library; the PIO and the
 # clock are stood in (stubs/), and what goes out to the strip is checked.
 #

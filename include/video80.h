@@ -1,7 +1,7 @@
 #pragma once
 // video80.h -- the HP 92198 / Mountain Computer MC00701A HP-IL 80-Column
 // Video Interface: its screen memory, cursor and escape sequences, and
-// its view on the panel. TFDISPLAY (display.h) feeds it when it emulates
+// its view on the panel. DISPLAY (display.h) feeds it when it emulates
 // the HP 92198 (the display model setting); otherwise Screen is used.
 //
 // The model, after the owner's manual (Appendix A, C):

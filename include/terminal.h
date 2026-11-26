@@ -59,6 +59,8 @@
 
 class CTerminal : public CDevice {
 public:
+    // SDI: HIPI's own ID, 7 characters (the HP-41's FINDID compares 7)
+    const char* deviceId() override { return "HIPITRM\r\n"; }
     // AID 0x4E ("general interface", class 4x) per the formal Accessory
     // ID table. pyILPER's cls_pilterminal actually uses 0x3E ("general
     // display", class 3x) -- we matched that briefly, but it collided

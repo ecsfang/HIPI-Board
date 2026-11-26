@@ -47,7 +47,7 @@ namespace hipi {
 class UploadDrive {
 public:
     virtual ~UploadDrive() = default;
-    virtual std::string name() const = 0;               // "TFDRIVE"
+    virtual std::string name() const = 0;               // "DRIVE"
     virtual std::string mediaFile() const = 0;          // its cassette (in lif/), "" = none
     virtual bool quiet() const = 0;                     // no file access, no HP-IL message going on
     virtual void open() = 0;                            // the cassette out, as with OPEN (the lid opens)

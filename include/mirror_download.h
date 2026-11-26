@@ -27,7 +27,7 @@ namespace hipi {
 class DownloadDrive {
 public:
     virtual ~DownloadDrive() = default;
-    virtual std::string name() const = 0;               // "TFDRIVE"
+    virtual std::string name() const = 0;               // "DRIVE"
     virtual std::string mediaFile() const = 0;          // its cassette (in lif/), "" = none
     virtual bool quiet() const = 0;                     // no file access, no HP-IL message going on
     virtual std::uint32_t changes() const = 0;          // grows with every block written

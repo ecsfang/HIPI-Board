@@ -1,6 +1,7 @@
 #ifndef __HPIL_H__
 #define __HPIL_H__
 
+#include <string>
 #include "usb_serial.h"
 
 #define RESET           "\x1b[0m"
@@ -131,6 +132,7 @@ protected:
     IL_Status_e     m_status;
     IL_ADDR_t       m_addr;
     const char      *m_devName;
+    std::string     m_idText;            // default SDI answer: the name + CR LF
     bool            m_sai;
     bool            m_nrdStop = false;   // NRD seen while sending SAI/SDI: end with ETO
     IL_ADDR_t       m_nSai;
@@ -142,6 +144,7 @@ protected:
 public:
     CDevice(const char *name, IL_ADDR_t _sai, IL_ADDR_t _aau, IL_Type_e type = NONE) {
         m_devName = name;
+        m_idText = std::string(name) + "\r\n";
         m_status = STAT_IDLE;
         m_addr = 31;
         m_sai = false;
@@ -187,9 +190,12 @@ public:
         if (cmd == AAU || inAddrRange(cmd, AAD)) addr(31);
     }
     const char *name() { return m_devName; }
-    // What the device answers to SDI (Send Device ID): its name, unless
-    // it emulates a device with its own ID string (e.g. "MC00701A\r\n")
-    virtual const char *deviceId() { return m_devName; }
+    // What the device answers to SDI (Send Device ID): ASCII characters
+    // followed by CR LF. A device that emulates an HP device sends that
+    // device's ID (e.g. "HP82161A\r\n"), HIPI's own devices their own (7
+    // characters, "HIPII2C\r\n": the most the HP-41's FINDID compares).
+    // The default is the name + CR LF.
+    virtual const char *deviceId() { return m_idText.c_str(); }
     void type(IL_Type_e type) { m_type = type; }
     IL_Type_e type(void) { return m_type; }
 
@@ -205,8 +211,8 @@ public:
 };
 
 // The HP device a HIPI device emulates, as its ID reads ("HP7470A",
-// "MC00701A" for TFDISPLAY as the HP 92198) -- "" for HIPI's own devices
-// (TFI2C, TFLEDS ...). For the device list and the loop map.
+// "MC00701A" for DISPLAY as the HP 92198) -- "" for HIPI's own devices
+// (I2C, LEDS ...). For the device list and the loop map.
 const char* deviceModel(CDevice* d);
 
 #endif//__HPIL_H__
